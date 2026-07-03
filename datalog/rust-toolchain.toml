@@ -1,0 +1,4 @@
+[toolchain]
+# Pin the stable channel for reproducible builds. Edition 2024 requires Rust 1.85+.
+channel = "stable"
+components = ["rustfmt", "clippy"]
