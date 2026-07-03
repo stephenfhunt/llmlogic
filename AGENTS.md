@@ -8,6 +8,12 @@ Guidance for AI agents working in the `llmlogic` repository.
 better reasoning. It is a multi-project repo: each project lives in its own
 top-level directory and is self-contained (its own build system, tests, and docs).
 
+**Start here each session:** read [`docs/worklog.md`](docs/worklog.md) — the most
+recent entry's *Next up* tells you where the last session left off. End your session
+by adding a new worklog entry (Done / Decided / Next up). Raw session transcripts are
+auto-saved by Claude Code under `~/.claude/projects/<repo-slug>/*.jsonl` — don't
+commit transcripts into the repo.
+
 Current projects:
 - **`datalog/`** — a Datalog engine in Rust, targeted at LLM/agent use, with
   convenient import of fact tables from external sources. This is the first project.
