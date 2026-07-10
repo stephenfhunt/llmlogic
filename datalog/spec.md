@@ -555,6 +555,11 @@ literal; partial selection (omitted fields bind to fresh anonymous variables);
   precedence. — §8.
 - **Provenance query syntax:** `?why <fact>` is provisional across CLI and API; also
   decide proof-tree JSON encoding. (§16.6) — §11/§14.
+- **Provenance as facts:** the Datalog-in/Datalog-out closure property suggests
+  `?why` output should also have a fact-shaped form (e.g. derivation edges as
+  ground facts), so provenance can itself be piped back in and queried with
+  Datalog — not just rendered as a tree or JSON. Design alongside §11; exercise
+  with a §16 example. — §11/§14.
 - **`-q` details:** synthesized answer-predicate naming for bare-body queries;
   multiple `-q` flags; stdin/`-` conventions; output ordering rule; `--format
   json` scope; the agent skill definition documenting the CLI surface. — §14.
