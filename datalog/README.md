@@ -17,7 +17,9 @@ self-contained within the `datalog/` directory.
    facts, add rules, query, and inspect derivations without parsing text.
 
 The language is being designed spec-first. See [`spec.md`](spec.md) for the living
-specification, the design process, and the decisions log.
+specification, the design process, and the decisions log, and
+[`references.md`](references.md) for the annotated bibliography (classic Datalog
+papers and notable implementations, grouped by topic) that guides the design.
 
 ## Status
 

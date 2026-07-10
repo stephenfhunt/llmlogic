@@ -16,6 +16,69 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-10 — References & implementation roadmap
+
+**Done**
+- Added `datalog/references.md`: annotated bibliography of the Datalog literature,
+  grouped by topic (surveys, evaluation, negation, aggregation, provenance,
+  implementations, language design, LLM+logic), each group cross-referenced to the
+  spec section it informs. Linked from `spec.md`, `README.md`, and `AGENTS.md`.
+- Recorded the implementation roadmap and testing conventions (AGENTS.md; decisions
+  in spec §17).
+
+**Decided**
+- Papers are cited by title/authors/venue/year (stable, searchable); URLs only
+  where long-lived. Consult the relevant group before drafting/implementing a spec
+  section.
+- **Implementation proceeds bottom-up, evaluation-first**: AST design → core
+  evaluator (facts/rules/recursion, provenance hooks from the start) → stratified
+  negation → builtins + type inference → lexer/parser → CLI/agent API. Rationale:
+  the risky, novel design lives in the engine; the evaluator's natural interface is
+  the AST, so semantics are unit-testable without a parser. (spec §17)
+- **The AST is a designed contract; the engine core is positional-only** — named
+  arguments and partial selection desugar to positional form during front-end
+  lowering, using the predicate schema. (spec §17)
+- **Test pyramid grows outward with the pipeline**: engine unit tests over
+  hand-constructed ASTs (verbose construction is fine — agents write the tests; no
+  macro-DSL infrastructure) → parser golden tests (text → AST, structured errors) →
+  integration (text → results) → system tests running the binary over program
+  files. The spec §16 worked examples are the canonical corpus at every level.
+
+**Next up**
+- **Implementation can begin**: design `src/ast.rs` against spec §3–§5, then the
+  core evaluator (semi-naive facts/rules/recursion) with example 16.1 as the first
+  engine test. Draft spec §6/§15 alongside (start from references.md groups 1–2).
+- Then §7 negation, §8 builtins (open `=` question), aggregate-syntax revisit (§9).
+- Later: §11/§14 (provenance surface, query-result / JSON shapes).
+
+## 2026-07-03 — Core surface syntax ratified
+
+**Done**
+- Drafted spec §3 (lexical structure), §4 (data model & types), §5 (EBNF grammar),
+  §13 (imports). Updated §16 examples to the ratified syntax, rewrote 16.5 to the
+  new `import` form, added 16.7 (named arguments & partial selection). Recorded
+  eight new decisions in §17 and pruned the resolved open questions.
+
+**Decided** (details + rationale in `datalog/spec.md` §17)
+- Strict Prolog casing: lowercase relations/symbols/fields, Capitalized variables.
+- Named arguments alongside positional (`rel(field: X)`, `:` delimiter); a literal
+  is all-positional or all-named; partial selection on named literals; requires
+  known field names (import header or `declare`).
+- **Static typing with full inference** — no annotations required; type errors
+  flagged before evaluation (not dynamic typing).
+- Optional `declare` statement (keyword, not `.decl`) for field naming and asserted
+  signatures.
+- Import syntax: `import "<path>" as <relation>.` with inferred schema + optional
+  explicit override; CSV first.
+- Flat terms in v1; single- or double-quoted strings; symbols ≠ strings.
+
+**Next up**
+- §6–§8: declarative semantics, stratified negation, arithmetic/comparison builtins
+  (including the open `=` question and int/float division details).
+- Revisit aggregate syntax — `count { Var : Goal }` collides with the named-arg `:`
+  (§9).
+- Then §11/§14: provenance query form and query-result / JSON shapes.
+
 ## 2026-07-03 — Bootstrap
 
 **Done**

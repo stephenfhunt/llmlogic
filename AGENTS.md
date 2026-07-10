@@ -50,6 +50,10 @@ The starter is warning-free and rustfmt-clean; keep it that way.
   mirroring the intended architecture. Most are stubs pending the spec.
 - `tests/` — integration tests.
 - `spec.md` — see below.
+- `references.md` — annotated bibliography of the Datalog literature, grouped by
+  topic and mapped to spec sections. Consult the relevant group before designing or
+  implementing a feature (evaluation, negation, aggregation, provenance all have
+  well-established solutions in these papers).
 
 ## Working style: spec-driven
 
@@ -66,6 +70,32 @@ implementing a language feature:
 Design pillars for `datalog` (they drive decisions): provenance/explainability,
 LLM-friendly syntax + structured/actionable errors, and a programmatic (JSON) agent
 API.
+
+## Implementation roadmap & testing (`datalog/`)
+
+Implementation proceeds **bottom-up, evaluation-first** (decided 2026-07-10;
+rationale in spec §17):
+
+1. **AST** (`src/ast.rs`) designed against spec §3–§5. The AST is a designed
+   contract, not a parser byproduct. The engine core is **positional-only**: named
+   arguments and partial selection are resolved to positional form during front-end
+   lowering, using the predicate schema.
+2. **Core evaluator** — facts, rules, recursion (semi-naive), with provenance hooks
+   from the start (validates spec §6/§11/§15).
+3. **Stratified negation** (§7), then **builtins + type inference** (§8/§4).
+4. **Lexer + parser** (§3–§5), wired to the engine.
+5. **CLI/REPL + agent API** (§14), full system tests.
+
+The test pyramid grows outward with the pipeline:
+- Engine unit tests over **hand-constructed ASTs**. Verbose AST construction in
+  tests is acceptable — do not build macro DSLs or builder frameworks for
+  ergonomics.
+- Parser tests: source text → expected AST, plus golden tests for structured errors.
+- Integration tests: source text → query results through the full pipeline.
+- System tests: run the binary on program files and assert on output.
+- The spec **§16 worked examples are the canonical test corpus** at every level:
+  encoded as AST fixtures first, reused as source-text fixtures once the parser
+  exists.
 
 ## Conventions
 - Match the style of surrounding code; keep modules documented with `//!` headers.
