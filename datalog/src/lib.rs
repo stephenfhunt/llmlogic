@@ -11,7 +11,8 @@
 //! ## Design pillars
 //! 1. Provenance / explainability — explain *why* a fact was derived.
 //! 2. LLM-friendly syntax + structured, actionable errors.
-//! 3. A programmatic (JSON-in/JSON-out) agent API.
+//! 3. An agent-native CLI: Datalog in, Datalog out (results are facts, so output
+//!    composes as input), with JSON at the machine-readable edges.
 
 pub mod api;
 pub mod ast;

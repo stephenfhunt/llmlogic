@@ -1,9 +1,12 @@
 //! Programmatic / agent API.
 //!
-//! Placeholder for the JSON-in/JSON-out interface (`spec.md` §14) that lets an
-//! agent load facts, add rules, run queries, fetch provenance, and receive
-//! structured errors — all without parsing human-facing text. This is a primary
-//! interface (co-designed with the CLI), so it is a first-class module.
+//! Placeholder for the agent-facing surface (`spec.md` §14). The primary usage is
+//! skill-based: an agent drives the CLI, with **Datalog as the interchange format
+//! in both directions** — query results are emitted as ground facts (canonical
+//! syntax, deterministically ordered), so output is valid input and runs compose
+//! over pipes. This module covers the machine-readable edges of that surface:
+//! canonical fact printing, and the JSON encodings of structured errors (§12) and
+//! provenance trees (§11).
 //!
-//! Serialization crate (likely `serde`/`serde_json`) is deferred until the request
-//! and response shapes are specified — see `spec.md` §17.
+//! Serialization crate (likely `serde`/`serde_json`) is deferred until the shapes
+//! are specified — see `spec.md` §17.

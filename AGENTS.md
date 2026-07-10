@@ -68,8 +68,9 @@ implementing a language feature:
    feed findings back into the spec before marking a section *Stable*.
 
 Design pillars for `datalog` (they drive decisions): provenance/explainability,
-LLM-friendly syntax + structured/actionable errors, and a programmatic (JSON) agent
-API.
+LLM-friendly syntax + structured/actionable errors, and an agent-native CLI —
+Datalog in, Datalog out (results are facts; output composes as input), with JSON
+at the machine-readable edges (errors, provenance).
 
 ## Implementation roadmap & testing (`datalog/`)
 

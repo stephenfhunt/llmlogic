@@ -47,7 +47,9 @@ tables from external sources. Three pillars drive every design decision:
 1. **Provenance / explainability** — the engine can explain *why* a fact was derived.
 2. **LLM-friendly syntax + structured errors** — a familiar, unambiguous surface
    syntax models generate reliably, with errors that are structured and actionable.
-3. **Programmatic / agent API** — a JSON-in/JSON-out interface for agents.
+3. **Agent-native interface** — an agent drives the executable directly
+   (skill-based, CLI-first); Datalog is the interchange format in both directions,
+   with JSON at the machine-readable edges (errors, provenance). See §14.
 
 *To fill in: concrete goals, non-goals, target users, success criteria.*
 
@@ -279,16 +281,53 @@ import "data/parents.csv" as parent.
 - Named-argument access works on imported relations immediately, using the header
   (or explicit) field names.
 - Paths are resolved relative to the directory of the program source file.
-- **Formats:** CSV is specified first. TSV/JSON/JSONL, SQLite, Parquet/Arrow, and
-  Postgres are planned; priority order is an open question (§17). The engine-side
-  abstraction is the `FactSource` trait (`src/sources.rs`).
+- **Formats:** CSV is specified first. TSV/JSON/JSONL, SQLite, DuckDB, Parquet/
+  Arrow, and Postgres are planned; priority order is an open question (§17) —
+  DuckDB is a strong early candidate since it also provides CSV/Parquet readers.
+  The engine-side abstraction is the `FactSource` trait (`src/sources.rs`).
 
 ## 14. Programmatic / agent API
 
-*Status: TBD*
+*Status: Draft*
 
-*To fill in: the JSON-in/JSON-out surface — load facts, add rules, run queries,
-fetch provenance, retrieve structured errors — co-designed with the CLI.*
+The primary usage pattern is **skill-based**: an agent drives the `datalog`
+executable directly (CLI-first; no server required — a server/MCP layer can wrap
+the same surface later). The interchange format in both directions is **Datalog
+itself**:
+
+- **Input** — program files and/or stdin: imports, declarations, facts, rules,
+  queries.
+- **Output** — query results are emitted as **ground facts in canonical Datalog
+  syntax**, one per line, deterministically ordered (sorted). Output is therefore
+  valid input: runs compose over pipes, and an agent can materialize an
+  intermediate result to a fact file and query it again later (the closure
+  property that makes jq effective for agents).
+
+One-shot queries via a command-line flag — the jq analog:
+
+```sh
+# bare-atom query: sugar for appending `?- ...` to the loaded program
+datalog family.dl -q 'ancestor("alice", X)'
+
+# rule query: define-and-select in one flag; emits the head predicate's facts
+datalog family.dl -q 'grandparent(X, Z) :- parent(X, Y), parent(Y, Z)'
+
+# composition over pipes ("-" reads stdin)
+datalog people.dl -q 'adult(N) :- person(name: N, age: A), A >= 18.' \
+  | datalog - -q 'answer(N) :- adult(N), N != "bob".'
+```
+
+The motivating workflow is **token economy**: an agent issues precise, narrow
+queries over large fact bases and reads back only the derived facts, instead of
+loading raw data into context — the piecemeal analysis pattern agents already use
+jq for over JSON, made Datalog-native.
+
+JSON serves the machine-readable edges rather than the data path: structured
+errors (§12) and provenance trees (§11), likely via `--format json` and/or stderr.
+
+*Open (§17):* exact `-q` semantics (bare atom vs rule set; the synthesized answer
+predicate for bare-body queries), output ordering rule, stdin/`-` conventions,
+`--format json` scope, and the agent skill definition that documents this surface.
 
 ## 15. Evaluation strategy (non-normative)
 
@@ -480,11 +519,33 @@ literal; partial selection (omitted fields bind to fresh anonymous variables);
   positional form during front-end lowering, using the predicate schema (import
   header or `declare`); omitted fields become fresh anonymous variables at lowering
   time. Named arguments are purely surface syntax; the evaluator never sees them.
+- **2026-07-10** — **Set semantics.** Relations are sets of facts: duplicates
+  collapse everywhere, including at import time. Rationale: the classical Datalog
+  model — fixpoint termination and semi-naive evaluation fall out naturally, and a
+  fact derived multiple ways is *one* fact with multiple derivations, matching the
+  §11 provenance model. Database imports lose nothing when tables have keys;
+  keyless projections deduplicate, and the idiom for multiplicity-sensitive queries
+  is to import the key column. Aggregates operate over distinct tuples (§9 will
+  specify the details).
+- **2026-07-10** — **CLI-first, skill-driven agent usage.** The primary agent
+  interface is the executable, documented for agents via a skill definition; no
+  server or MCP layer required for v1 (either can wrap the same CLI surface later).
+- **2026-07-10** — **Datalog-in / Datalog-out.** Query results are emitted as
+  ground facts in canonical Datalog syntax, one per line, deterministically
+  ordered. Output is valid input (closure), enabling jq-style piecemeal pipelines
+  and the token-economy workflow: agents issue narrow queries over large fact
+  bases and read back only derived facts. This reframes pillar 3 — the agent API
+  speaks Datalog on the data path; JSON is reserved for the machine-readable edges
+  (structured errors §12, provenance trees §11).
+- **2026-07-10** — **One-shot query flag** (`-q`, jq analog) accepting a bare atom
+  (sugar for `?- …`) or a rule (define-and-select: emit the head predicate's
+  facts). Exact semantics — synthesized answer predicate for bare-body queries,
+  multiple `-q` flags, stdin conventions — still open.
 
 ### Open questions
 
-- **Data sources beyond CSV** (TSV/JSON/JSONL, SQLite, Parquet/Arrow, Postgres):
-  priority order and per-backend declaration details. — §13.
+- **Data sources beyond CSV** (TSV/JSON/JSONL, SQLite, DuckDB, Parquet/Arrow,
+  Postgres): priority order and per-backend declaration details. — §13.
 - **Aggregation vs recursion:** how far to go on recursive aggregation semantics. — §9.
 - **`=` semantics:** unification, assignment, or an equality builtin? (raised by §16.3) — §8.
 - **Aggregate expression syntax:** `count { Var : Goal }` is provisional — and `:`
@@ -494,7 +555,8 @@ literal; partial selection (omitted fields bind to fresh anonymous variables);
   precedence. — §8.
 - **Provenance query syntax:** `?why <fact>` is provisional across CLI and API; also
   decide proof-tree JSON encoding. (§16.6) — §11/§14.
-- **Query result shape:** how query answers are returned (variable bindings vs
-  tuples; CLI text vs API JSON). — §14.
+- **`-q` details:** synthesized answer-predicate naming for bare-body queries;
+  multiple `-q` flags; stdin/`-` conventions; output ordering rule; `--format
+  json` scope; the agent skill definition documenting the CLI surface. — §14.
 - **Dependency choices:** lexer/parser approach, `serde` for the API, source
   backends — decide as the relevant sections stabilize.

@@ -43,6 +43,19 @@ raw transcripts (Claude Code auto-saves those under
   macro-DSL infrastructure) → parser golden tests (text → AST, structured errors) →
   integration (text → results) → system tests running the binary over program
   files. The spec §16 worked examples are the canonical corpus at every level.
+- **Set semantics**: relations are sets; duplicates collapse, including at import.
+  Multiplicity-sensitive queries import the key column. (spec §17)
+- **Licensing deferred** — leaning restrictive (AGPL) or no OSS license for now to
+  preserve control/options. Removed the guessed `license`/`repository` metadata
+  from `Cargo.toml`; set both before any publish. DuckDB added to the candidate
+  import backends (§13/§17).
+- **Agent interface: CLI-first, skill-driven, Datalog-in/Datalog-out** (spec §14
+  now Draft; pillar 3 rewritten everywhere). Query results emit as ground facts,
+  deterministically ordered — output is valid input, so runs compose over pipes
+  (the jq pattern, Datalog-native). One-shot `-q` flag takes a bare atom or a
+  define-and-select rule. Motivation: token economy — agents issue narrow queries
+  over large fact bases instead of loading raw data into context. JSON reserved
+  for errors (§12) and provenance (§11).
 
 **Next up**
 - **Implementation can begin**: design `src/ast.rs` against spec §3–§5, then the
