@@ -129,22 +129,28 @@ variants:
 
 Requires: the semi-naive evaluator, the **naive reference evaluator**
 (ratified §17 2026-07-19 as a *permanent* test-cfg oracle in `src/engine/`),
-and generators `arb_edb(shape)` / `arb_program_with_edb()`.
+and generators `arb_parent_edges()` (the `arb_edb` shape) /
+`arb_program_with_edb()`. Evaluator properties run on tighter generator
+bounds than lowering properties (`testgen::eval_bounds`) — fixpoint cost
+grows much faster than lowering cost — and B3–B6 mutate the lowered
+`ir::Program` directly via the `testgen::with_*` mutators. Where a mutation
+can change predicate interning order (B4's added statements), outputs are
+compared keyed by predicate *name*, not `PredId`.
 
-- [ ] **B1** Differential oracle: `naive(p) == seminaive(p)` as `Fact` sets.
+- [x] **B1** Differential oracle: `naive(p) == seminaive(p)` as `Fact` sets.
   The anchor property — catches delta-bookkeeping bugs directly.
-- [ ] **B2** Fixpoint idempotence: re-running with `facts ∪ output` derives
+- [x] **B2** Fixpoint idempotence: re-running with `facts ∪ output` derives
   nothing new.
-- [ ] **B3** Set semantics: duplicating any subset of input facts leaves
+- [x] **B3** Set semantics: duplicating any subset of input facts leaves
   output unchanged.
-- [ ] **B4** Monotonicity for positive programs (the queryFuzz relation):
-  `output(p) ⊆ output(p + fact)` and `⊆ output(p + rule)`.
-- [ ] **B5** Body-reorder invariance: permuting a rule's body leaves output
+- [x] **B4** Monotonicity for positive programs (the queryFuzz relation):
+  `output(p) ⊆ output(p + fact)` and `⊆ output(p + fact + rule)`.
+- [x] **B5** Body-reorder invariance: permuting a rule's body leaves output
   unchanged. (Safety is occurrence-based, so permutations of a safe rule stay
   safe; revisit when §8 mode/binding rules for arithmetic land.)
-- [ ] **B6** Rule-order invariance within a stratum.
-- [ ] **B7** Independent oracle for a fixed shape: random `parent` edge sets
-  into the §16.1 ancestor program vs. a hand-rolled BFS transitive closure
+- [x] **B6** Rule-order invariance within a stratum.
+- [x] **B7** Independent oracle for a fixed shape: random `parent` edge sets
+  into the §16.1 ancestor program vs. a hand-rolled DFS transitive closure
   (independent of *both* evaluators).
 
 ### Phase C — negation + type inference (roadmap step 3) — generalizes §16.2, §16.3
@@ -171,12 +177,19 @@ and generators `arb_edb(shape)` / `arb_program_with_edb()`.
   text.
 - [ ] **D4** Lexer/parser never panic on arbitrary byte strings.
 
-### Phase E — provenance (§11, built with the evaluator; surfaced at step 5) — generalizes §16.6
+### Phase E — provenance (§11) — generalizes §16.6
 
-- [ ] **E1** Every derived fact has at least one derivation.
-- [ ] **E2** Every proof-tree leaf is a base (EDB/imported) fact.
-- [ ] **E3** Replay: each derivation node's rule instance applied to its child
-  facts rederives exactly the fact.
-- [ ] **E4** A base fact's provenance is a leaf.
+E1–E4 were pulled forward to roadmap step 2 (decided 2026-07-19, spec §17):
+provenance recording lands inside the evaluator's fixpoint, so its properties
+are tested the session it is written. E3's replay deliberately reuses the
+naive oracle's matcher, keeping the check independent of the semi-naive join
+loop that recorded the derivation. Only E5 waits on the step-5 surface design.
+
+- [x] **E1** Every derived fact has at least one derivation.
+- [x] **E2** Every fact has a proof tree, and every proof-tree leaf is a base
+  (EDB/imported) fact.
+- [x] **E3** Replay: each derivation node's rule instance applied to its child
+  facts rederives exactly the fact (and every premise holds in the model).
+- [x] **E4** A base fact's provenance is a leaf.
 - [ ] **E5** Once provenance-as-facts is designed (§17 open question),
   provenance output itself satisfies D1 closure.

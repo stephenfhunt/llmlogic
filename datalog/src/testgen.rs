@@ -84,19 +84,27 @@ fn arb_head_arg_spec() -> impl Strategy<Value = HeadArgSpec> {
 type BodyAtomSpec = (u8, Vec<ArgSpec>);
 type RuleSpec = (Vec<BodyAtomSpec>, u8, Vec<HeadArgSpec>);
 type FactSpec = (u8, Vec<Constant>);
+type ProgramSpec = (Vec<u32>, Vec<FactSpec>, Vec<RuleSpec>);
 
-/// A safe-by-construction positional program: consistent arities, ground
-/// facts, and every head variable drawn from the rule's own body variables.
-///
-/// Bounded small: 2–4 predicates of arity 1–3, up to 8 facts and 5 rules.
-pub(crate) fn arb_safe_program() -> impl Strategy<Value = Program> {
-    let arities = proptest::collection::vec(1u32..=MAX_ARITY as u32, 2..=4);
+/// Size bounds for [`arb_program_spec`]. Spec argument vectors are always
+/// generated at [`MAX_ARITY`] length and truncated to the predicate's arity
+/// during building, so `max_arity` only needs to stay ≤ `MAX_ARITY`.
+struct SpecBounds {
+    predicates: std::ops::RangeInclusive<usize>,
+    max_arity: u32,
+    facts: std::ops::RangeInclusive<usize>,
+    rules: std::ops::RangeInclusive<usize>,
+    body_len: std::ops::RangeInclusive<usize>,
+}
+
+fn arb_program_spec(bounds: SpecBounds) -> impl Strategy<Value = ProgramSpec> {
+    let arities = proptest::collection::vec(1u32..=bounds.max_arity, bounds.predicates);
     let facts = proptest::collection::vec(
         (
             any::<u8>(),
             proptest::collection::vec(arb_constant(), MAX_ARITY),
         ),
-        0..=8,
+        bounds.facts,
     );
     let rules = proptest::collection::vec(
         (
@@ -105,14 +113,179 @@ pub(crate) fn arb_safe_program() -> impl Strategy<Value = Program> {
                     any::<u8>(),
                     proptest::collection::vec(arb_arg_spec(), MAX_ARITY),
                 ),
-                1..=3,
+                bounds.body_len,
             ),
             any::<u8>(),
             proptest::collection::vec(arb_head_arg_spec(), MAX_ARITY),
         ),
-        0..=5,
+        bounds.rules,
     );
-    (arities, facts, rules).prop_map(build_program)
+    (arities, facts, rules)
+}
+
+/// Bounds used for lowering-focused properties (Phase A).
+fn lowering_bounds() -> SpecBounds {
+    SpecBounds {
+        predicates: 2..=4,
+        max_arity: MAX_ARITY as u32,
+        facts: 0..=8,
+        rules: 0..=5,
+        body_len: 1..=3,
+    }
+}
+
+/// Tighter bounds for evaluation-focused properties (Phases B/E): evaluation
+/// cost grows much faster than lowering cost (joins, fixpoints), so keep
+/// arities and bodies small while staying collision-rich.
+fn eval_bounds() -> SpecBounds {
+    SpecBounds {
+        predicates: 2..=3,
+        max_arity: 2,
+        facts: 0..=6,
+        rules: 0..=4,
+        body_len: 1..=2,
+    }
+}
+
+/// A safe-by-construction positional program: consistent arities, ground
+/// facts, and every head variable drawn from the rule's own body variables.
+///
+/// Bounded small: 2–4 predicates of arity 1–3, up to 8 facts and 5 rules.
+pub(crate) fn arb_safe_program() -> impl Strategy<Value = Program> {
+    arb_program_spec(lowering_bounds()).prop_map(build_program)
+}
+
+/// A lowered, evaluation-ready program with its EDB (testing.md Phases B/E):
+/// [`arb_program_spec`] under [`eval_bounds`], built and lowered. Lowering is
+/// total on safe-by-construction programs (property A11), so the `expect`
+/// never fires.
+pub(crate) fn arb_program_with_edb() -> impl Strategy<Value = ir::Program> {
+    arb_program_spec(eval_bounds())
+        .prop_map(build_program)
+        .prop_map(|ast| crate::lower::lower(&ast).expect("safe-by-construction programs lower"))
+}
+
+/// A pair `(base, extended)` of safe programs over the same predicate
+/// universe where `extended` is `base` plus one extra fact and one extra rule
+/// (testing.md B4 monotonicity). Compare outputs by predicate *name*: the
+/// extra statements can change predicate first-appearance order, so `PredId`s
+/// need not line up between the two.
+pub(crate) fn arb_extension_pair() -> impl Strategy<Value = (Program, Program)> {
+    let extras = (
+        (
+            any::<u8>(),
+            proptest::collection::vec(arb_constant(), MAX_ARITY),
+        ),
+        (
+            proptest::collection::vec(
+                (
+                    any::<u8>(),
+                    proptest::collection::vec(arb_arg_spec(), MAX_ARITY),
+                ),
+                1..=2,
+            ),
+            any::<u8>(),
+            proptest::collection::vec(arb_head_arg_spec(), MAX_ARITY),
+        ),
+    );
+    (arb_program_spec(eval_bounds()), extras).prop_map(
+        |((arities, facts, rules), (extra_fact, extra_rule))| {
+            let base = build_program((arities.clone(), facts.clone(), rules.clone()));
+            let mut facts = facts;
+            let mut rules = rules;
+            facts.push(extra_fact);
+            rules.push(extra_rule);
+            let extended = build_program((arities, facts, rules));
+            (base, extended)
+        },
+    )
+}
+
+/// Random edge sets over a small node pool — the `arb_edb` shape for the
+/// §16.1 ancestor program (testing.md B7).
+pub(crate) fn arb_parent_edges() -> impl Strategy<Value = Vec<(String, String)>> {
+    proptest::collection::vec((0u8..6, 0u8..6), 0..=15).prop_map(|pairs| {
+        pairs
+            .into_iter()
+            .map(|(a, b)| (format!("n{a}"), format!("n{b}")))
+            .collect()
+    })
+}
+
+// --- IR-level metamorphic mutators (testing.md B3–B6) ---
+//
+// Plain functions over `ir::Program`, selector-driven so strategies stay on
+// index vectors (shrinking-friendly). Each preserves the IR contract (arity
+// consistency, safety, strata coverage), so the mutant is always evaluable.
+
+/// B3: appends duplicates of existing facts (selectors index modulo the fact
+/// count). No-op on fact-free programs.
+pub(crate) fn with_duplicated_facts(mut program: ir::Program, selectors: &[u8]) -> ir::Program {
+    if !program.facts.is_empty() {
+        for &sel in selectors {
+            let fact = program.facts[sel as usize % program.facts.len()].clone();
+            program.facts.push(fact);
+        }
+    }
+    program
+}
+
+/// B4: appends one extra ground fact for an existing predicate, at its
+/// declared arity. No-op on predicate-free programs. `values` must supply at
+/// least [`MAX_ARITY`] values.
+pub(crate) fn with_extra_fact(
+    mut program: ir::Program,
+    pred_sel: u8,
+    values: Vec<ir::Value>,
+) -> ir::Program {
+    if !program.predicates.is_empty() {
+        let pred = ir::PredId(pred_sel as u32 % program.predicates.len() as u32);
+        let arity = program.pred_info(pred).arity as usize;
+        program.facts.push(ir::Fact {
+            pred,
+            tuple: ir::Tuple(values.into_iter().take(arity).collect()),
+        });
+    }
+    program
+}
+
+/// B5: swaps two body literals of one rule (selectors modulo the respective
+/// lengths). Variable slots are rule-scoped, so the swap needs no renaming;
+/// safety is occurrence-based, so the rule stays safe.
+pub(crate) fn with_swapped_body(
+    mut program: ir::Program,
+    rule_sel: u8,
+    i: u8,
+    j: u8,
+) -> ir::Program {
+    if !program.rules.is_empty() {
+        let rule_idx = rule_sel as usize % program.rules.len();
+        let rule = &mut program.rules[rule_idx];
+        let len = rule.body.len();
+        if len > 1 {
+            rule.body.swap(i as usize % len, j as usize % len);
+        }
+    }
+    program
+}
+
+/// B6: swaps two rule ids within one stratum, changing rule application order
+/// but not membership.
+pub(crate) fn with_swapped_stratum_rules(
+    mut program: ir::Program,
+    stratum_sel: u8,
+    i: u8,
+    j: u8,
+) -> ir::Program {
+    if !program.strata.is_empty() {
+        let stratum_idx = stratum_sel as usize % program.strata.len();
+        let stratum = &mut program.strata[stratum_idx];
+        let len = stratum.len();
+        if len > 1 {
+            stratum.swap(i as usize % len, j as usize % len);
+        }
+    }
+    program
 }
 
 fn build_program((arities, facts, rules): (Vec<u32>, Vec<FactSpec>, Vec<RuleSpec>)) -> Program {

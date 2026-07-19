@@ -209,10 +209,27 @@ Notes:
 
 ## 6. Declarative semantics
 
-*Status: TBD*
+*Status: Draft (positive programs; extension to negation/aggregation arrives with §7/§9)*
 
-*To fill in: Herbrand base, least/minimal model, and how stratification defines the
-meaning of programs with negation and aggregation.*
+A program's meaning is its **least model** (references.md group 1):
+
+- The **Herbrand universe** is the finite set of constants appearing in the
+  program (facts, rule constants, and later imported values); the **Herbrand
+  base** is the set of all ground atoms formable from the program's predicates
+  over it.
+- The **immediate-consequence operator** `T_P` maps a fact set `I` to the
+  program's facts plus every ground rule head whose body atoms all hold in
+  `I`.
+- For positive programs `T_P` is monotone over a finite lattice, so it has a
+  least fixpoint, reached in finitely many steps — the **least Herbrand
+  model**. That model is what evaluation computes (§15) and what queries are
+  answered against, as projections.
+- **Set semantics** throughout (§17): the model is a set of facts; a fact
+  derivable several ways is one fact with several derivations (§11).
+
+*Still to fill in: how stratification extends this to negation (the perfect
+model, §7) and to aggregation (§9); semantics of comparison/arithmetic
+literals (§8).*
 
 ## 7. Negation
 
@@ -249,11 +266,28 @@ structured semantic errors reported before evaluation.
 
 ## 11. Provenance / explainability
 
-*Status: TBD*
+*Status: Draft (data model; the query surface and JSON encoding remain TBD)*
 
-*To fill in: the derivation/proof-tree model, what a derivation records (rule
-instance + premises), how base (source) facts anchor the leaves, and how provenance
-is requested and returned. Designed alongside the evaluator (§15).*
+The data model (`src/provenance.rs`, recorded by the engine during the §15
+fixpoint):
+
+- A **derivation** is a ground rule instance: a rule identity plus the premise
+  facts, aligned index-for-index with the rule's body literals (the IR's
+  stable `RuleId`/`BodyIdx` coordinates, §17).
+- The engine records **all derivations of every derived fact**, deduplicated
+  by rule instance (§17): one fact, many proofs. Base facts have no
+  derivation; they are anchored by the program text (or, later, the import)
+  that asserted them.
+- A **proof tree** is one finite proof of one fact: derived nodes carry the
+  fact, its rule, and child proofs for each premise; **leaves are always base
+  facts**. Extraction picks, per fact, a derivation whose premises all first
+  appeared strictly earlier in the fixpoint (§17 first-round stamping), so
+  proofs stay finite even when facts support each other cyclically.
+- Names for rendering recover from the IR's retained tables: predicate names,
+  per-rule variable names, and spans.
+
+*Still open (§17): the `?why` query form across CLI and API, the proof-tree
+JSON encoding, and the provenance-as-facts closure question.*
 
 ## 12. Error model
 
@@ -337,10 +371,33 @@ predicate for bare-body queries), output ordering rule, stdin/`-` conventions,
 
 ## 15. Evaluation strategy (non-normative)
 
-*Status: TBD*
+*Status: Draft (positive programs; negation joins the loop at roadmap step 3)*
 
-*To fill in: stratified, semi-naive bottom-up evaluation; how provenance is captured
-during the fixpoint; magic-sets as a future optimization.*
+`eval` (`src/engine/`) computes the least model (§6) bottom-up:
+
+- **Load**: program facts enter per-predicate *set* storage (duplicates
+  collapse, §17). Relations are sorted sets, so iteration — and hence §14's
+  canonical output order — is deterministic by construction.
+- **Stratified fixpoint**: the IR's strata are evaluated in order, each to
+  fixpoint before the next (a single stratum until §7 lands).
+- **Semi-naive iteration** (references.md group 2): each stratum begins with a
+  naive seed pass over the full relations; each later round joins, per rule
+  and per body position *i*, the previous round's **delta** at *i*, the full
+  relations before *i*, and the pre-delta relations after *i* — so every new
+  rule instance is enumerated exactly once. The stratum stops when a round
+  adds no new facts.
+- **Provenance is captured inside the loop**: every successful body match
+  records a derivation (rule + premise facts, §11), deduplicated by rule
+  instance, and every fact is stamped with the round it first appeared in
+  (§17: what makes finite proof extraction possible). Recording *all*
+  derivations is a constraint on the delta discipline — the reason provenance
+  is designed into the fixpoint rather than retrofitted.
+- **Queries** run the same join machinery over the finished model and project
+  their named variables; rows are deduplicated and canonically sorted.
+- A **naive reference evaluator** (test-only, permanent, §17) recomputes the
+  fixpoint by brute force as the differential oracle (testing.md B1).
+- **Magic sets** remain a future optimization. Join order and indexing are
+  evaluator-internal and free to change — the IR never encodes them.
 
 ## 16. Worked examples
 
@@ -616,6 +673,27 @@ literal; partial selection (omitted fields bind to fresh anonymous variables);
   pattern lowering uses for negation and named arguments). §8 semantics —
   including the open question of whether `=` is unification, assignment, or an
   equality builtin — are decided before comparisons evaluate.
+- **2026-07-19** — **First-round stamping for finite proof extraction.** The
+  `Model` stamps every fact with the fixpoint round it first appeared in
+  (base facts: round 0; the counter is monotone across strata). Proof-tree
+  extraction picks, per fact, the `Ord`-least recorded derivation whose
+  premises all carry strictly smaller rounds — the derivation that first
+  produced the fact always qualifies, and the strictly-decreasing bound makes
+  proofs finite. Rationale: all-derivations storage admits cyclic
+  justifications (`a` via `b` and `b` via `a`); a well-founded selection rule
+  is required for `?why` to terminate, and the round stamp is one `u32` per
+  fact captured for free inside the fixpoint.
+- **2026-07-19** — **The naive oracle is facts-only.** It computes the least
+  model's fact set (its ~70 obviously-correct lines are the point) and does
+  not record provenance; provenance correctness is instead checked by replay —
+  every recorded derivation's rule instance is re-matched against its premises
+  with the oracle's own matcher (testing.md E3). Rejected: a second
+  provenance-recording evaluator (doubles the surface that must be
+  "obviously correct" without strengthening the differential).
+- **2026-07-19** — **Phase E properties E1–E4 pulled forward to step 2**
+  (testing.md): provenance recording lands with the evaluator, so its
+  properties are tested the session it is written. Only E5
+  (provenance-as-facts closure) waits on the §11/§14 surface design.
 
 ### Open questions
 

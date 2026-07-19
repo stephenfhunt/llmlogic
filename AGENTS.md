@@ -83,8 +83,14 @@ rationale in spec §17):
    **positional-only** and index-resolved — named arguments and partial selection
    are resolved to positional form during front-end lowering, using the predicate
    schema. The evaluator consumes `ir::Program` only.
-2. **Core evaluator** — facts, rules, recursion (semi-naive), with provenance hooks
-   from the start (validates spec §6/§11/§15).
+2. **Core evaluator** (`src/engine/`, `src/provenance.rs`) — done 2026-07-19.
+   `eval(&ir::Program) -> Result<Model, Error>`: stratified semi-naive fixpoint
+   recording **all derivations per fact** (deduped by rule instance) plus
+   first-round stamps for finite proof extraction (`ProofTree::explain`);
+   queries answered as projections (`Model::answer`). The naive reference
+   evaluator (`src/engine/naive.rs`, test-only, permanent) is the differential
+   oracle; testing.md Phase B (B1–B7) and Phase E (E1–E4, pulled forward) are
+   green. Spec §6/§15 and the §11 data model are Draft.
 3. **Stratified negation** (§7), then **builtins + type inference** (§8/§4).
 4. **Lexer + parser** (§3–§5), wired to the engine.
 5. **CLI/REPL + agent API** (§14), full system tests.

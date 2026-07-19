@@ -16,6 +16,54 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-19 — Core evaluator: semi-naive fixpoint, provenance, Phase B/E
+
+**Done**
+- Implemented roadmap step 2, the core evaluator, to the ratified §17 contract.
+  `src/engine/mod.rs`: `Model` (per-predicate `BTreeSet` storage — canonical
+  §14 order for free; all-derivations map; base-fact set; per-fact first-round
+  stamps), `eval()` (structured not-yet-supported errors for imports /
+  comparisons / negation, strata-coverage check, then a per-stratum semi-naive
+  fixpoint: naive seed pass + Full/Delta/Old views per body position), and
+  `Model::answer()` query projection (deduped, canonically sorted).
+- `src/provenance.rs`: `Derivation` (rule + premises, `BodyIdx`-aligned) and
+  `ProofTree` with `explain()` — picks the `Ord`-least well-founded derivation
+  per fact, so proofs are finite even over cyclic support.
+- `src/engine/naive.rs`: the permanent naive oracle (~70 lines, facts-only,
+  shares nothing with the semi-naive join loop).
+- Testing: `testgen.rs` gained eval-bounds generators (`arb_program_with_edb`,
+  `arb_parent_edges`, `arb_extension_pair`) and IR-level metamorphic mutators;
+  properties B1–B7 and E1–E4 implemented and green, plus example-based engine
+  tests (§16.1 end-to-end incl. its query, a diamond program asserting two
+  recorded derivations for one fact, structured-error and edge cases) and
+  proof-tree tests. 50 tests, clippy/fmt clean.
+- Spec: §6 (least-model semantics) and §15 (evaluation strategy) drafted; §11
+  data-model half drafted (query surface still TBD); four new §17 decisions.
+  testing.md Phase B/E updated; AGENTS.md roadmap step 2 marked done.
+
+**Decided** (details in `spec.md` §17, 2026-07-19)
+- **First-round stamping**: every fact carries the fixpoint round it first
+  appeared in; proof extraction requires strictly-decreasing rounds, which
+  guarantees finite proofs under all-derivations storage.
+- **Naive oracle is facts-only**; provenance correctness is checked by replay
+  (E3) with the oracle's own matcher, not by a second recording evaluator.
+- **Phase E properties E1–E4 pulled forward to step 2** (E5 still waits on the
+  provenance surface design).
+- Evaluator properties run on tighter generator bounds than lowering
+  properties (`testgen::eval_bounds`); B4's cross-program comparisons are
+  keyed by predicate name since interning order can differ.
+
+**Next up**
+- **Named-argument lowering** (pass 2 of `lower()`, uses the predicate schema)
+  — the last not-yet-implemented lowering path.
+- **§7 stratified negation** (roadmap step 3): real stratification in
+  lowering, `NegAtom` joins in the engine's per-stratum loop (the loop shape
+  is already there), Phase C properties (C1–C3).
+- **§8 builtins** (comparisons/arithmetic incl. the open `=` question), then
+  type inference (§4, C4–C5).
+- Provenance *surface* (`?why` form, JSON encoding, provenance-as-facts, E5)
+  stays parked until step 5.
+
 ## 2026-07-19 — AST/IR contract, lowering pass, property-based test layer
 
 **Done**
