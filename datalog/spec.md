@@ -694,6 +694,26 @@ literal; partial selection (omitted fields bind to fresh anonymous variables);
   (testing.md): provenance recording lands with the evaluator, so its
   properties are tested the session it is written. Only E5
   (provenance-as-facts closure) waits on the §11/§14 surface design.
+- **2026-07-19** — **Negated premises in derivations: a `Premise` enum,
+  `BodyIdx`-aligned** (pre-decision for the §7 negation session).
+  `Derivation.premises` becomes one entry per body literal:
+  `Premise::Fact(fact)` for positive matches, `Premise::Absent(pattern)` for
+  negated literals, where the pattern is the negated atom instantiated with
+  the rule's bindings (wildcard-fresh variables left open). Keeps the
+  premise↔body alignment invariant and lets proof trees explain negation
+  ("holds because no `parent(_, "alice")` fact exists") — the explainability
+  pillar. Replay (testing.md E3) checks `Absent` entries as non-matches
+  against the model. (Considered positive-premises-only; rejected — loses
+  alignment and silently drops *why* the negation held.)
+- **2026-07-19** — **Wildcards inside negated atoms are existential under the
+  negation** (pre-decision for §7/§10): `not parent(_, X)` means "no `parent`
+  fact whose second column is `X`". The §10 safety rule reads: every *named*
+  variable in a negated atom must occur in a positive body atom;
+  wildcard-fresh variables in negated atoms are scoped under the negation
+  (never exported). This is the standard NAF reading and keeps §16.2 as
+  written. Lowering's wildcard elimination must therefore tag (or scope)
+  fresh variables introduced under negation rather than treating them as
+  ordinary rule variables.
 
 ### Open questions
 

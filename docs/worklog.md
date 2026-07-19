@@ -53,12 +53,20 @@ raw transcripts (Claude Code auto-saves those under
   properties (`testgen::eval_bounds`); B4's cross-program comparisons are
   keyed by predicate name since interning order can differ.
 
-**Next up**
-- **Named-argument lowering** (pass 2 of `lower()`, uses the predicate schema)
-  — the last not-yet-implemented lowering path.
-- **§7 stratified negation** (roadmap step 3): real stratification in
-  lowering, `NegAtom` joins in the engine's per-stratum loop (the loop shape
-  is already there), Phase C properties (C1–C3).
+**Next up** (scope ratified end-of-session: named-args first, then negation)
+- **Named-argument lowering** (pass 2 of `lower()`) — the last
+  not-yet-implemented lowering path. Unblocked: the AST already carries
+  `declare`/`Args::Named`, and lowering already collects declare/import
+  schemas into its registry; implement resolution + the §16.7 fixture
+  end-to-end (A-property generators gain named-arg forms).
+- **§7 stratified negation** (roadmap step 3): draft §7 (references.md group
+  3), real stratification in lowering (dependency graph, reject negative
+  cycles with a structured error), `NegAtom` evaluation in the engine's
+  per-stratum loop (the loop shape is already there), Phase C properties
+  (C1–C3). Two pre-decisions recorded in spec §17 (2026-07-19): derivations
+  record negated premises as a `BodyIdx`-aligned `Premise::Fact |
+  Premise::Absent(pattern)` enum, and wildcards inside negated atoms are
+  existential under the negation (safety constrains only *named* variables).
 - **§8 builtins** (comparisons/arithmetic incl. the open `=` question), then
   type inference (§4, C4–C5).
 - Provenance *surface* (`?why` form, JSON encoding, provenance-as-facts, E5)
