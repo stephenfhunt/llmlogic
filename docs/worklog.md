@@ -52,13 +52,23 @@ raw transcripts (Claude Code auto-saves those under
   `proptest-regressions/` when they appear.
 - **Naive reference evaluator ratified as a permanent differential oracle**
   (`naive(p) == seminaive(p)`, testing.md B1) — to be written with the evaluator.
+- Handoff pre-decisions for the evaluator session (details in spec §17):
+  **evaluator API** is `eval(&ir::Program) -> Result<Model, Error>` — `Model`
+  holds all derived facts per predicate (set storage), queries answered as
+  projections over it; **provenance records all derivations per fact**,
+  deduped by rule instance (not first-witness-only); **comparison literals are
+  a structured not-yet-supported error** in step 2 (§8 incl. the `=` question
+  stays open). Also: imports at eval time error until sources land;
+  `ir::Program.facts` duplicates collapse at engine load.
 
 **Next up**
 - **Core evaluator** (roadmap step 2) over `ir::Program`: semi-naive
-  facts/rules/recursion with provenance hooks; `ir::fixtures::example_16_1` is
-  the first engine test; write the naive oracle alongside and implement
-  testing.md Phase B properties (B1–B7, incl. `arb_edb` generators). Draft spec
-  §6/§15 alongside (references.md groups 1–2).
+  facts/rules/recursion implementing the ratified contract —
+  `eval(&ir::Program) -> Result<Model, Error>`, all-derivations provenance in
+  the fixpoint, query answering by projection. `ir::fixtures::example_16_1` is
+  the first engine test (assert its query's expected answers); write the naive
+  oracle alongside and implement testing.md Phase B properties (B1–B7, incl.
+  `arb_edb` generators). Draft spec §6/§15 alongside (references.md groups 1–2).
 - Provenance types (`Derivation`/`ProofTree`) against `ir::RuleId`/`BodyIdx`.
 - Then: named-argument lowering (pass 2 of `lower()`), §7 negation with real
   stratification, §8 builtins (open `=` question).

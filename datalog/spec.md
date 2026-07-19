@@ -595,6 +595,27 @@ literal; partial selection (omitted fields bind to fresh anonymous variables);
 - **2026-07-19** — **Engine unit tests hand-construct the IR; lowering tests
   hand-construct the AST.** ("Hand-constructed ASTs" in earlier decisions
   predates the AST/IR split and covers both.)
+- **2026-07-19** — **Evaluator API shape** (roadmap step 2 contract):
+  `eval(&ir::Program) -> Result<Model, Error>` where `Model` holds every
+  derived fact per predicate in set storage; queries are answered as
+  projections over the `Model` using each query's `var_names` (so §16.1 runs
+  end-to-end including its query, and §14's canonical sorted output later
+  reads straight off the `Model`). `ir::Program.facts` may contain duplicates —
+  they collapse when loaded into relation storage (set semantics). A program
+  with imports is a structured evaluation error until fact sources (§13) land.
+- **2026-07-19** — **Provenance recording: all derivations per fact**,
+  deduplicated by rule instance (`RuleId` + premise facts). Matches the
+  ratified "one fact, multiple derivations" model (§11) and the
+  semiring/circuit literature (references.md group 5); `?why` can later show
+  alternative proofs. This constrains the semi-naive delta loop's bookkeeping
+  from day one — which is exactly why provenance is designed in early rather
+  than retrofitted. (Considered first-witness-only recording; rejected as a
+  retrofit trap inside the fixpoint loop.)
+- **2026-07-19** — **Step-2 comparison policy**: the core evaluator reports
+  comparison literals as a structured "not yet supported" error (the same
+  pattern lowering uses for negation and named arguments). §8 semantics —
+  including the open question of whether `=` is unification, assignment, or an
+  equality builtin — are decided before comparisons evaluate.
 
 ### Open questions
 
