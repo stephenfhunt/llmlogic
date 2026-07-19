@@ -153,3 +153,22 @@ expect this section to grow and churn.*
 - **Rajasekharan, Zeng, Padalkar, Gupta — “Reliable Natural Language Understanding
   with Large Language Models and Answer Set Programming”**, ICLP 2023. LLM +
   ASP division of labor; relevant to how much semantics we expose to the model.
+
+## 9. Testing & fuzzing
+
+*Informs: `testing.md` — the property-based testing strategy and its catalog.*
+
+- **Mansur, Christakis, Wüstholz — “Metamorphic Testing of Datalog Engines”**,
+  ESEC/FSE 2021. queryFuzz: metamorphic relations (adding facts/rules to
+  positive programs never removes derived facts; equivalence-preserving
+  transforms leave output unchanged) found real bugs in Soufflé, μZ, and DDlog.
+  The direct precedent for our Phase B metamorphic properties.
+- **Claessen, Hughes — “QuickCheck: A Lightweight Tool for Random Testing of
+  Haskell Programs”**, ICFP 2000. The original property-based-testing paper;
+  we use its descendant **proptest** (integrated shrinking) as the crate's
+  test harness.
+- **Yang, Chen, Eide, Regehr — “Finding and Understanding Bugs in C
+  Compilers”**, PLDI 2011. Csmith: the generator-design playbook we follow —
+  valid-by-construction generation (no rejection sampling), small-biased
+  sizes, and value pools chosen so generated programs exercise interesting
+  paths (for us: collision-rich constants so joins join).

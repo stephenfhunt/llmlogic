@@ -94,7 +94,8 @@ Candidate principles to ratify:
 
 ## 4. Data model & types
 
-*Status: Draft*
+*Status: Draft — validated by the AST/IR prototype (`src/ast.rs`, `src/ir.rs`),
+2026-07-19*
 
 ### Values and terms
 
@@ -156,7 +157,7 @@ adult(N) :- person(name: N, age: A), A >= 18.
 
 ## 5. Syntax
 
-*Status: Draft*
+*Status: Draft — validated by the AST/IR prototype (`src/ast.rs`), 2026-07-19*
 
 A program is a sequence of statements, each terminated by `.`:
 
@@ -236,10 +237,15 @@ and interaction with recursion and stratification.*
 
 ## 10. Recursion & safety
 
-*Status: TBD*
+*Status: Draft (range restriction only; the rest TBD)*
 
-*To fill in: range-restriction/safety rules that guarantee finite, well-defined
-results; termination guarantees; treatment of recursion through negation/aggregation.*
+**Range restriction** (enforced by front-end lowering, `src/lower.rs`): every
+variable in a rule head, in a negated atom, or occurring only in comparisons
+must also occur in a positive body atom; facts must be ground. Violations are
+structured semantic errors reported before evaluation.
+
+*Still to fill in: termination guarantees; safety/mode conditions for arithmetic
+(§8); treatment of recursion through negation/aggregation.*
 
 ## 11. Provenance / explainability
 
@@ -541,6 +547,54 @@ literal; partial selection (omitted fields bind to fresh anonymous variables);
   (sugar for `?- …`) or a rule (define-and-select: emit the head predicate's
   facts). Exact semantics — synthesized answer predicate for bare-body queries,
   multiple `-q` flags, stdin conventions — still open.
+- **2026-07-19** — **Surface AST / core IR split.** The parser's output
+  (`src/ast.rs`) and the evaluator's input (`src/ir.rs`) are two distinct plain
+  Rust type hierarchies connected by a lowering pass (`src/lower.rs`): schema &
+  predicate collection (interning, arity checks) → named→positional resolution →
+  wildcard elimination + variable numbering → safety/range restriction (§10) →
+  stratification. The surface tree mirrors the grammar (spans, named args,
+  wildcards) for source-accurate errors; the IR is positional and
+  index-resolved. Rejected: a single shared tree with phase-parameterization
+  (Trees That Grow — poor track record even in GHC) or optional filled-in-later
+  fields (unchecked invariants). Precedent: Soufflé AST→RAM, rustc AST→HIR,
+  Flix's chain of plain ASTs; Datalog evaluation is inherently a lowering
+  pipeline. Type inference is a separate pass *after* lowering (the IR retains
+  spans for its errors), not part of it.
+- **2026-07-19** — **Variable representation**: per-rule numbered slots
+  (`ir::Var(u32)`) plus a `var_names: Vec<Option<String>>` side table (`None` =
+  lowering-generated fresh variable). The evaluator gets array-indexed bindings;
+  provenance and errors recover original names. Body literal order is preserved
+  through lowering — `RuleId` and body indices are the stable coordinates
+  derivations reference (§11).
+- **2026-07-19** — **Float totality**: `ir::F64` rejects NaN at construction and
+  normalizes `-0.0` to `+0.0`; ordering is `total_cmp`, which under those two
+  invariants agrees exactly with `==`, and hashing is bit-based. NaN-producing
+  arithmetic (e.g. `0.0 / 0.0`) becomes a structured runtime error (ties into
+  the open §8 division question). Rationale: set semantics and §14's
+  deterministic sorted output require total `Eq`/`Ord`/`Hash` on values, and
+  NaN facts (`X != X`) are toxic in a logic database.
+- **2026-07-19** — **Canonical value ordering** is `Value`'s derived `Ord`:
+  symbol < string < int < float < bool, then within-type — the §14 deterministic
+  output order.
+- **2026-07-19** — **Spans are `u32` byte offsets** (half-open) on every AST
+  node; the IR keeps clause- and literal-level spans for post-lowering errors.
+  **Symbol interning deferred**: `Value::Symbol(String)` in v1; `Value` is the
+  single choke point, so an interner is a later drop-in if profiling justifies.
+- **2026-07-19** — **Property-based testing adopted; `proptest` is the first
+  dev-dependency.** Strategy and property catalog live in `testing.md`
+  (single source of truth; AGENTS.md points there). Dev-dependencies don't
+  affect the shipped library's zero-dependency posture but remain §17-tracked.
+  Distinction ratified: test *generators* (`src/testgen.rs`, `cfg(test)`) are
+  coverage machinery and allowed; ergonomic macro DSLs/builders for
+  hand-written tests remain disallowed.
+- **2026-07-19** — **Naive reference evaluator ratified as a permanent
+  differential-testing oracle**: a deliberately simple naive evaluator is
+  written alongside the semi-naive engine and kept under test cfg forever;
+  `naive(p) == seminaive(p)` over generated programs is the anchor property
+  (testing.md B1; precedent: queryFuzz, references.md group 9).
+- **2026-07-19** — **Engine unit tests hand-construct the IR; lowering tests
+  hand-construct the AST.** ("Hand-constructed ASTs" in earlier decisions
+  predates the AST/IR split and covers both.)
 
 ### Open questions
 

@@ -14,7 +14,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 ///
 /// TODO(spec §12): flesh out variants with source spans, machine-readable codes,
 /// and suggested fixes suitable for agent consumption.
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Error {
     /// A lexical error (bad token, unterminated literal, …).

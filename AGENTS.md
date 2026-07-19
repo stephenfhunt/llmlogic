@@ -77,10 +77,12 @@ at the machine-readable edges (errors, provenance).
 Implementation proceeds **bottom-up, evaluation-first** (decided 2026-07-10;
 rationale in spec §17):
 
-1. **AST** (`src/ast.rs`) designed against spec §3–§5. The AST is a designed
-   contract, not a parser byproduct. The engine core is **positional-only**: named
-   arguments and partial selection are resolved to positional form during front-end
-   lowering, using the predicate schema.
+1. **AST + IR** (`src/ast.rs`, `src/ir.rs`, `src/lower.rs`) designed against spec
+   §3–§5 — done 2026-07-19. Two distinct plain type hierarchies (spec §17): the
+   surface AST mirrors the grammar (spans, named args, wildcards); the core IR is
+   **positional-only** and index-resolved — named arguments and partial selection
+   are resolved to positional form during front-end lowering, using the predicate
+   schema. The evaluator consumes `ir::Program` only.
 2. **Core evaluator** — facts, rules, recursion (semi-naive), with provenance hooks
    from the start (validates spec §6/§11/§15).
 3. **Stratified negation** (§7), then **builtins + type inference** (§8/§4).
@@ -88,9 +90,13 @@ rationale in spec §17):
 5. **CLI/REPL + agent API** (§14), full system tests.
 
 The test pyramid grows outward with the pipeline:
-- Engine unit tests over **hand-constructed ASTs**. Verbose AST construction in
-  tests is acceptable — do not build macro DSLs or builder frameworks for
-  ergonomics.
+- Engine unit tests over **hand-constructed IR** (`ir::Program`); lowering tests
+  over **hand-constructed ASTs**. Verbose construction in tests is acceptable —
+  do not build macro DSLs or builder frameworks for ergonomics.
+- **Property-based tests** (proptest): generated programs checked against
+  metamorphic relations and reference oracles. Strategy, generator policy, and
+  the phased property catalog live in **`datalog/testing.md`** — consult it and
+  implement the relevant phase's properties as each layer lands.
 - Parser tests: source text → expected AST, plus golden tests for structured errors.
 - Integration tests: source text → query results through the full pipeline.
 - System tests: run the binary on program files and assert on output.

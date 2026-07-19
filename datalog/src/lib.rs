@@ -18,10 +18,15 @@ pub mod api;
 pub mod ast;
 pub mod engine;
 pub mod error;
+pub mod ir;
 pub mod lexer;
+pub mod lower;
 pub mod parser;
 pub mod provenance;
 pub mod sources;
+
+#[cfg(test)]
+pub(crate) mod testgen;
 
 pub use error::{Error, Result};
 

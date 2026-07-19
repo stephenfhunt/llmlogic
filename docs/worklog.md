@@ -16,6 +16,53 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-19 — AST/IR contract, lowering pass, property-based test layer
+
+**Done**
+- Implemented roadmap step 1: `src/ast.rs` (surface AST — span-carrying, mirrors
+  the §5 grammar exactly; `Args` enum makes positional/named mixing
+  unrepresentable), `src/ir.rs` (core IR — positional, interned `PredId`s,
+  per-rule `Var` slots + `var_names` side table, `F64` float totality,
+  non-optional `strata`; provenance coordinate guarantees in the module header),
+  and `src/lower.rs` (minimal lowering: interning + arity checks, wildcard
+  elimination + variable numbering, safety/range restriction, trivial
+  single-stratum stratify; named-arg resolution stubbed as a structured
+  not-yet-implemented error). Spec §16.1 is encoded as matching AST and IR
+  fixtures; the contract test `lower(ast_16_1) == ir_16_1` passes end-to-end.
+- Added the property-based test layer: `proptest` dev-dependency,
+  `src/testgen.rs` (safe-by-construction program generator built body-first,
+  single-defect injection), and Phase A properties A1–A12 (F64/Value laws,
+  lowering totality/determinism/density/safety-both-directions). All green:
+  25 tests.
+- New `datalog/testing.md` — single source of truth for the test strategy with
+  the full phased property catalog (A done; B–E specified with checkboxes).
+  `references.md` group 9 (queryFuzz, QuickCheck, Csmith). AGENTS.md roadmap
+  and test-pyramid updated; spec §10 gains the range-restriction draft; §4/§5
+  marked prototype-validated.
+
+**Decided** (details in `spec.md` §17, 2026-07-19 entries)
+- **Surface AST / core IR split**: two plain Rust type hierarchies + a lowering
+  pass, per compiler literature and Datalog-engine precedent (Soufflé AST→RAM,
+  rustc AST→HIR); no phase-parameterized trees, no filled-in-later fields.
+- Variable slots + name side table; float totality (no NaN, `-0.0` normalized,
+  `total_cmp`); canonical value order symbol < string < int < float < bool;
+  u32 byte-offset spans; symbol interning deferred.
+- **PBT adopted**; proptest is the first dev-dependency; generators are coverage
+  machinery, distinct from the still-banned ergonomic test DSLs; commit
+  `proptest-regressions/` when they appear.
+- **Naive reference evaluator ratified as a permanent differential oracle**
+  (`naive(p) == seminaive(p)`, testing.md B1) — to be written with the evaluator.
+
+**Next up**
+- **Core evaluator** (roadmap step 2) over `ir::Program`: semi-naive
+  facts/rules/recursion with provenance hooks; `ir::fixtures::example_16_1` is
+  the first engine test; write the naive oracle alongside and implement
+  testing.md Phase B properties (B1–B7, incl. `arb_edb` generators). Draft spec
+  §6/§15 alongside (references.md groups 1–2).
+- Provenance types (`Derivation`/`ProofTree`) against `ir::RuleId`/`BodyIdx`.
+- Then: named-argument lowering (pass 2 of `lower()`), §7 negation with real
+  stratification, §8 builtins (open `=` question).
+
 ## 2026-07-10 — References & implementation roadmap
 
 **Done**
