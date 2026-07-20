@@ -228,16 +228,68 @@ A program's meaning is its **least model** (references.md group 1):
 - **Set semantics** throughout (§17): the model is a set of facts; a fact
   derivable several ways is one fact with several derivations (§11).
 
-*Still to fill in: how stratification extends this to negation (the perfect
-model, §7) and to aggregation (§9); semantics of comparison/arithmetic
-literals (§8).*
+Stratified negation extends this to the **perfect model** — a least fixpoint
+per stratum, lower strata frozen — in §7.
+
+*Still to fill in: extension to aggregation (§9); semantics of
+comparison/arithmetic literals (§8).*
 
 ## 7. Negation
 
-*Status: TBD*
+*Status: Draft (semantics ratified; lands with roadmap step 4)*
 
-*To fill in: stratified negation-as-failure; stratification algorithm; safety
-conditions on negated literals.*
+Negation is **stratified negation-as-failure**. The semantics of record is the
+**perfect model** of Apt/Blair/Walker (references.md group 3); the
+definitional treatment of stratification, safety, and stratified evaluation is
+Abiteboul/Hull/Vianu ch. 15 and Ullman's *Principles* (groups 1–2).
+
+**Reading.** `not atom(…)` may appear as a body literal (`not` applies to
+atoms only, §5). The literal holds when *no* fact of the negated predicate
+matches the atom, where constants and positively-bound variables match
+positionally and wildcard slots are **existential under the negation** (§17
+2026-07-19): `not parent(_, X)` holds when no `parent` fact has `X` in its
+second column. Negated literals bind nothing.
+
+**Safety.** Every *named* variable in a negated atom must occur in a positive
+body atom of the same clause; wildcard-fresh variables under negation are
+scoped to the negated literal and never exported (§10, §17 2026-07-19).
+
+**Stratification.** The **predicate dependency graph** has an edge `q → p`
+for every rule with head predicate `p` and a body literal over `q`, marked
+**negative** when that literal is negated. A program is **stratifiable** iff
+no cycle contains a negative edge. Lowering computes a stratum number per
+predicate by relaxation (Ullman): start every predicate at 0, then repeat to
+fixpoint: `stratum(p) = max(stratum(p), stratum(q))` over positive edges and
+`max(stratum(p), stratum(q) + 1)` over negative edges. A number exceeding the
+predicate count witnesses recursion through negation, reported as a
+structured error (§12) naming a concrete cycle. Rules inherit their head
+predicate's stratum; within a stratum, rules keep source order. Programs
+without negation form a single stratum.
+
+**Semantics.** Evaluation runs stratum by stratum (§15), each to its least
+fixpoint, treating lower strata as fixed input — a negated predicate's
+relation is **complete and frozen** before any rule reads it negatively,
+which is what makes negation-as-failure well-defined. The result is the
+perfect model. By the **independence theorem** (Apt/Blair/Walker; AHV ch. 15)
+every valid stratification yields the same model, so the particular numbering
+above is an implementation detail, not a semantic commitment.
+
+**Queries** may contain negated literals under the same safety rule; they run
+over the finished model, where every relation is complete.
+
+**Provenance** (§11): the derivation premise for a negated literal is the
+**absence pattern** — the atom instantiated with the rule's bindings,
+wildcard slots left open: `root("alice")` holds *because no `parent(_,
+"alice")` fact exists*. This is a proof-tree-level why-not record, chosen
+deliberately over extending §11's semiring story: provenance semirings cover
+positive programs only, and the principled negation extensions
+(dual-indeterminate and absorptive polynomials, references.md group 5) are
+not adopted in v1.
+
+**Out of scope**: well-founded and stable-model semantics (references.md
+group 3). Stratified programs are the predictable subset for agent-generated
+code; an unstratifiable program is a structured error, never a different
+semantics.
 
 ## 8. Arithmetic & comparison builtins
 
@@ -258,12 +310,16 @@ and interaction with recursion and stratification.*
 *Status: Draft (range restriction only; the rest TBD)*
 
 **Range restriction** (enforced by front-end lowering, `src/lower.rs`): every
-variable in a rule head, in a negated atom, or occurring only in comparisons
-must also occur in a positive body atom; facts must be ground. Violations are
-structured semantic errors reported before evaluation.
+variable in a rule head, every *named* variable in a negated atom, and every
+variable occurring only in comparisons must also occur in a positive body
+atom; facts must be ground. Wildcard-fresh variables in negated atoms are
+exempt — they are existential under the negation and never exported (§7).
+Violations are structured semantic errors reported before evaluation.
+
+Recursion through negation is rejected by stratification (§7).
 
 *Still to fill in: termination guarantees; safety/mode conditions for arithmetic
-(§8); treatment of recursion through negation/aggregation.*
+(§8); treatment of recursion through aggregation (§9).*
 
 ## 11. Provenance / explainability
 
@@ -272,18 +328,22 @@ structured semantic errors reported before evaluation.
 The data model (`src/provenance.rs`, recorded by the engine during the §15
 fixpoint):
 
-- A **derivation** is a ground rule instance: a rule identity plus the premise
-  facts, aligned index-for-index with the rule's body literals (the IR's
-  stable `RuleId`/`BodyIdx` coordinates, §17).
+- A **derivation** is a ground rule instance: a rule identity plus one
+  premise per body literal, aligned index-for-index (the IR's stable
+  `RuleId`/`BodyIdx` coordinates, §17) — the matched **fact** for a positive
+  literal, the **absence pattern** for a negated one (§7): the negated atom
+  under the rule's bindings, wildcard slots left open.
 - The engine records **all derivations of every derived fact**, deduplicated
   by rule instance (§17): one fact, many proofs. Base facts have no
   derivation; they are anchored by the program text (or, later, the import)
   that asserted them.
 - A **proof tree** is one finite proof of one fact: derived nodes carry the
-  fact, its rule, and child proofs for each premise; **leaves are always base
-  facts**. Extraction picks, per fact, a derivation whose premises all first
-  appeared strictly earlier in the fixpoint (§17 first-round stamping), so
-  proofs stay finite even when facts support each other cyclically.
+  fact, its rule, and child proofs for each premise; **leaves are base facts
+  or absence patterns** (an absence terminates a branch — "no such fact
+  exists" needs no sub-proof). Extraction picks, per fact, a derivation whose
+  fact premises all first appeared strictly earlier in the fixpoint (§17
+  first-round stamping; absence premises always qualify), so proofs stay
+  finite even when facts support each other cyclically.
 - Names for rendering recover from the IR's retained tables: predicate names,
   per-rule variable names, field names (when the predicate has a schema), and
   spans. A fact over a relation with known field names can therefore be
@@ -376,7 +436,7 @@ predicate for bare-body queries), output ordering rule, stdin/`-` conventions,
 
 ## 15. Evaluation strategy (non-normative)
 
-*Status: Draft (positive programs; negation joins the loop at roadmap step 3)*
+*Status: Draft (positive programs; negation joins the loop at roadmap step 4)*
 
 `eval` (`src/engine/`) computes the least model (§6) bottom-up:
 
@@ -443,10 +503,11 @@ parent("bob", "carol").
 root(X) :- person(X), not parent(_, X).
 % expected: root("alice")
 ```
-*Raised:* `not` keyword and wildcard `_` (ratified, §3/§5). *Still open (§7):* the
-safety rule that every variable in a negated literal (and the head) must be bound
-by a positive body literal; how stratification is computed and reported when
-violated.
+*Raised:* `not` keyword and wildcard `_` (ratified, §3/§5); the safety rule and
+how stratification is computed and reported (ratified, §7/§10 — *named*
+variables in negated atoms must be positively bound, wildcards are existential
+under the negation, and stratification is predicate-level numbering with a
+structured cycle error).
 
 ### 16.3 Arithmetic & comparison builtins
 
@@ -781,6 +842,55 @@ structured error.
   bug: the previous zip-against-surface-terms formulation would have silently
   dropped named facts, producing neither a fact nor an error, the moment named
   heads began lowering successfully.
+- **2026-07-20** — **Stratification is Ullman relaxation numbering with
+  concrete-cycle reporting** (§7 session). Lowering numbers predicates by
+  relaxation over the dependency graph (positive edge: `max(s(p), s(q))`;
+  negative edge: `max(s(p), s(q)+1)`); exceeding the predicate count witnesses
+  recursion through negation, and the structured error names a concrete cycle
+  recovered by walking back from a negative edge. Rule strata are head-predicate
+  strata, bucketed in `RuleId` order — source order within each stratum, and
+  all rules defining one predicate share a stratum (what freezes a negated
+  relation before its readers run). On the error path lowering falls back to
+  the single-stratum shape so the IR stays well-formed (the `attach_field_names`
+  precedent). Chosen over Tarjan SCC: the relaxation is ~25 dependency-free
+  lines and directly yields the level function §7 and testing.md C1 talk about;
+  by the independence theorem the choice carries no semantic weight.
+- **2026-07-20** — **No wildcard tagging needed for negation safety** (amends
+  the 2026-07-19 "must tag (or scope) fresh variables" note). The §10 check
+  narrows to slots with a *name*: `VarScope::fresh()` never enters the name
+  map, so a fresh slot occurs at exactly one term position in the whole rule —
+  a `None`-named slot inside a negated atom was necessarily created there, and
+  `var_names[slot].is_some()` coincides exactly with "named". No new lowering
+  mechanism; the argument is recorded at the check site.
+- **2026-07-20** — **`AbsentPattern` is `PredId` plus `Vec<Option<Value>>`**:
+  `Some` for constants and positively-bound variables, `None` for
+  wildcard-fresh slots (existential under the negation). `Premise` and
+  `AbsentPattern` carry the full `Eq`/`Hash`/`Ord` derives — `Derivation`
+  remains a dedup key. Proof trees terminate at `Absent` leaves; the
+  first-round guard applies only to fact premises (absences carry no round
+  and always qualify).
+- **2026-07-20** — **Negation evaluates as an anti-join filter, scheduled
+  after the positives** — evaluator-internal ordering only; IR body order is
+  untouched and premises are recorded at their true `BodyIdx`. Negated
+  positions bind nothing, never take a delta view, and always read the full
+  (frozen, lower-stratum) relation with a dedicated pattern-vs-tuple scan —
+  deliberately not the positive matcher, which binds. The engine also
+  validates the negation contract statically (named negated vars positively
+  bound; negated predicates defined only in strictly lower strata), the same
+  malformed-IR posture as the strata-coverage check.
+- **2026-07-20** — **The naive oracle iterates strata** (extends, without
+  contradicting, the facts-only decision): per-stratum naive fixpoint with
+  negation checked against the growing fact set — sound because valid strata
+  freeze negated extents, the same invariant expressed independently of the
+  semi-naive engine. This makes B1 the perfect-model differential; a second
+  full evaluator for C2 stays rejected for the same reason as before.
+- **2026-07-20** — **Negation provenance is a proof-tree-level why-not
+  record, not a semiring construction.** Provenance semirings (references.md
+  group 5) cover positive programs; the principled extensions — Grädel–Tannen
+  dual-indeterminate polynomials, Dannert–Grädel–Naaf–Tannen absorptive
+  polynomials for fixed-point logic — are catalogued in group 5 and
+  deliberately not adopted in v1. `Premise::Absent` records the instantiated
+  pattern; that is what the explainability pillar needs (§7, §11).
 
 ### Open questions
 

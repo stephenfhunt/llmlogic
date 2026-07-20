@@ -176,7 +176,7 @@ compared keyed by predicate *name*, not `PredId`.
   into the §16.1 ancestor program vs. a hand-rolled DFS transitive closure
   (independent of *both* evaluators).
 
-### Phase C — negation + type inference (roadmap step 3) — generalizes §16.2, §16.3
+### Phase C — negation + type inference (roadmap step 4) — generalizes §16.2, §16.3
 
 - [ ] **C1** Stratification correctness: every negated dependency sits in a
   strictly lower stratum; generated negative-cycle programs are rejected.
@@ -189,7 +189,7 @@ compared keyed by predicate *name*, not `PredId`.
 - [ ] **C5** Typed-generator completeness: well-typed-by-construction programs
   are always accepted by inference.
 
-### Phase D — lexer + parser (roadmap step 4) — generalizes all §16 source texts
+### Phase D — lexer + parser (roadmap step 5) — generalizes all §16 source texts
 
 - [ ] **D1** **The §14 closure property**: pretty-print any IR fact set in
   canonical output form → parse → lower → identical `Fact` set.
@@ -206,7 +206,7 @@ E1–E4 were pulled forward to roadmap step 2 (decided 2026-07-19, spec §17):
 provenance recording lands inside the evaluator's fixpoint, so its properties
 are tested the session it is written. E3's replay deliberately reuses the
 naive oracle's matcher, keeping the check independent of the semi-naive join
-loop that recorded the derivation. Only E5 waits on the step-5 surface design.
+loop that recorded the derivation. Only E5 waits on the step-6 surface design.
 
 - [x] **E1** Every derived fact has at least one derivation.
 - [x] **E2** Every fact has a proof tree, and every proof-tree leaf is a base

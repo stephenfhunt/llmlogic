@@ -93,6 +93,16 @@ relying on it deeply.
 - **Köhler, Ludäscher, Smaragdakis — “Declarative Datalog Debugging for Mere
   Mortals”**, Datalog 2.0, 2012. Practical derivation-based debugging UX — close
   to our “explain to an LLM why this fact holds” goal.
+- **Grädel, Tannen — “Semiring Provenance for First-Order Model Checking”**,
+  arXiv:1712.01980, 2017. Extends semiring provenance past the positive
+  fragment via dual-indeterminate polynomials — what a principled semiring
+  account of negation provenance requires. We deliberately do *not* adopt it
+  for v1: §7 negation records instantiated absence patterns
+  (`Premise::Absent`) at the proof-tree level instead (§17, 2026-07-20).
+- **Dannert, Grädel, Naaf, Tannen — “Semiring Provenance for Fixed-Point
+  Logic”**, CSL 2021. Absorptive polynomials for fixed-point logic — the
+  closest principled treatment to Datalog with negation; same v1 stance as
+  above.
 
 ## 6. Notable implementations
 
