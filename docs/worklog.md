@@ -16,6 +16,53 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-20 (audit session) — FO-algebra coverage audit; the query gap
+
+**Done**
+- Audited the property catalog and generators against the first-order algebra
+  after the negation milestone. Core verdict: selection, projection, join,
+  product, union, difference, recursion, and set semantics all had generated
+  + oracle coverage. One systematic hole: **queries** — the generator never
+  emitted them, `Model::answer` had exactly one call site, and query negation
+  (claimed "free" in the negation session) had zero tests. Four unpinned
+  edges: head wildcards, three-strata chains, empty-negated-relations,
+  first-round well-foundedness (comment-only).
+- **B8 — query/rule equivalence** (the centerpiece): `Model::answer(q)` must
+  equal the relation of a synthesized rule projecting `q`'s named variables,
+  run in a fresh final stratum. The generator now emits queries from the same
+  `build_body` machinery as rule bodies (factored out; queries binding no
+  named variable are skipped), `positionalize` rewrites query bodies (A13
+  covers named query atoms), and a coverage guard pins queries + negated
+  queries as generator outputs.
+- Hand tests for every audited edge: negated query over §16.2 (first direct
+  `Model::answer`-with-negation test), empty negated relation (trivially
+  true), double negation across three strata (`c = d∖(d∖a) = a` within the
+  domain), head wildcard unsafety, negated-query lowering shape, the `query`
+  safety-context string (first assertion ever), three-strata lowering chain.
+- **E1 extended**: every derived fact must have a *well-founded* derivation
+  (fact premises strictly earlier; absences exempt) — the invariant
+  `explain` selects by, now pinned directly.
+- testing.md: B8 catalog entry, E1 update, generator-section bullets for
+  negation/query generation, a **First-order algebra coverage map** table so
+  the next audit starts from this frame, and the proptest-regressions policy
+  clarified (commit genuine-failure seeds; delete mutation-check seeds).
+- 88 tests, fmt/clippy clean.
+
+**Decided**
+- Deliberate non-gaps left open: §8 comparisons/arithmetic, C4/C5 type
+  inference, D1–D4 parser, E5 — all roadmap-tracked, not oversights.
+- Mutation checks: reversing `Model::answer`'s projection order fails **B8
+  alone** (the query-only defect nothing else sees — proof the property earns
+  its keep); dropping negated literals from evaluation order fails the
+  negated-query hand test plus eleven others (B8 is blind to symmetric
+  breakage — why the hand test exists); stamping derived facts round 0 fails
+  E1's new assertion directly.
+
+**Next up**
+- Unchanged from the negation session: **§8 builtins**, then type inference
+  (§4, C4–C5). The B8 synthesized-rule pattern also gives §8 a ready-made
+  equivalence check for comparison-bearing queries when they land.
+
 ## 2026-07-20 (later session) — §7 stratified negation (roadmap step 4)
 
 **Done** — four commits, tree green after each.

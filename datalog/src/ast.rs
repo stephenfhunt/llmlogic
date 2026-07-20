@@ -379,6 +379,16 @@ pub(crate) mod fixtures {
         }
     }
 
+    pub(crate) fn query(body: Vec<Literal>) -> Statement {
+        Statement {
+            kind: StatementKind::Query(Query {
+                body,
+                span: Span::DUMMY,
+            }),
+            span: Span::DUMMY,
+        }
+    }
+
     /// Spec §16.1 — ancestry: three facts, a non-recursive rule, a recursive
     /// rule, and a query, exactly as the parser will produce them.
     pub(crate) fn example_16_1() -> Program {

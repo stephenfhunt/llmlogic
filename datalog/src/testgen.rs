@@ -28,7 +28,7 @@ use proptest::prelude::*;
 
 use crate::ast::fixtures::{
     declare, fact, field_decl, named_arg, named_atom, negated_literal, positional_atom,
-    positive_literal, rule, var_term, wildcard_term,
+    positive_literal, query, rule, var_term, wildcard_term,
 };
 use crate::ast::{Constant, Program, Span, Statement, Term, TermKind};
 use crate::ir;
@@ -107,6 +107,8 @@ fn arb_head_arg_spec() -> impl Strategy<Value = HeadArgSpec> {
 type BodyAtomSpec = (u8, bool, bool, Vec<ArgSpec>);
 /// A rule: body atoms, head predicate selector, named-head flag, head args.
 type RuleSpec = (Vec<BodyAtomSpec>, u8, bool, Vec<HeadArgSpec>);
+/// A query: just a body (`?- …`), built exactly like a rule body.
+type QuerySpec = Vec<BodyAtomSpec>;
 type FactSpec = (u8, Vec<Constant>);
 /// One predicate: arity, whether it gets a `declare` naming its fields (only
 /// such predicates can be used with named arguments, §4), and its *level*
@@ -117,7 +119,7 @@ type FactSpec = (u8, Vec<Constant>);
 /// are coarse (three of them) so positive recursion within a level stays
 /// common.
 type PredSpec = (u32, bool, u8);
-type ProgramSpec = (Vec<PredSpec>, Vec<FactSpec>, Vec<RuleSpec>);
+type ProgramSpec = (Vec<PredSpec>, Vec<FactSpec>, Vec<RuleSpec>, Vec<QuerySpec>);
 
 /// Size bounds for [`arb_program_spec`]. Spec argument vectors are always
 /// generated at [`MAX_ARITY`] length and truncated to the predicate's arity
@@ -128,6 +130,7 @@ struct SpecBounds {
     facts: std::ops::RangeInclusive<usize>,
     rules: std::ops::RangeInclusive<usize>,
     body_len: std::ops::RangeInclusive<usize>,
+    queries: std::ops::RangeInclusive<usize>,
 }
 
 fn arb_program_spec(bounds: SpecBounds) -> impl Strategy<Value = ProgramSpec> {
@@ -148,14 +151,18 @@ fn arb_program_spec(bounds: SpecBounds) -> impl Strategy<Value = ProgramSpec> {
     );
     let rules = proptest::collection::vec(
         (
-            proptest::collection::vec(arb_body_atom_spec(), bounds.body_len),
+            proptest::collection::vec(arb_body_atom_spec(), bounds.body_len.clone()),
             any::<u8>(),
             proptest::bool::weighted(0.4),
             proptest::collection::vec(arb_head_arg_spec(), MAX_ARITY),
         ),
         bounds.rules,
     );
-    (arities, facts, rules)
+    let queries = proptest::collection::vec(
+        proptest::collection::vec(arb_body_atom_spec(), bounds.body_len),
+        bounds.queries,
+    );
+    (arities, facts, rules, queries)
 }
 
 fn arb_body_atom_spec() -> impl Strategy<Value = BodyAtomSpec> {
@@ -175,6 +182,7 @@ fn lowering_bounds() -> SpecBounds {
         facts: 0..=8,
         rules: 0..=5,
         body_len: 1..=3,
+        queries: 0..=2,
     }
 }
 
@@ -188,6 +196,7 @@ fn eval_bounds() -> SpecBounds {
         facts: 0..=6,
         rules: 0..=4,
         body_len: 1..=2,
+        queries: 0..=2,
     }
 }
 
@@ -227,10 +236,10 @@ pub(crate) fn arb_program_with_edb() -> impl Strategy<Value = ir::Program> {
 pub(crate) fn arb_extension_pair() -> impl Strategy<Value = (Program, Program)> {
     let extras = (any::<u8>(), arb_constant());
     (arb_program_spec(eval_bounds()), extras).prop_map(
-        |((arities, facts, rules), (join_sel, constant))| {
+        |((arities, facts, rules, queries), (join_sel, constant))| {
             let join_index = join_sel as usize % arities.len();
             let join_arity = arities[join_index].0 as usize;
-            let base = build_program((arities, facts, rules));
+            let base = build_program((arities, facts, rules, queries));
             let mut extended = base.clone();
             extended.statements.push(fact(
                 "ext_seed",
@@ -380,7 +389,133 @@ pub(crate) fn with_swapped_stratum_rules(
     program
 }
 
-fn build_program((arities, facts, rules): ProgramSpec) -> Program {
+/// Builds one body from its atom specs: positive atoms first in source order
+/// (collecting the positively-bound variable pool), then negated atoms whose
+/// named variables draw only from that pool — §10 safety by construction;
+/// everything else under a negation is a wildcard (existential, §7) or a
+/// constant. `positive_pool` / `negative_pool` are the predicate indices
+/// selectors remap into; a negated spec falls back to positive when
+/// `negative_pool` is empty. Returns the literals and the positively-bound
+/// variable pool (what heads may draw from).
+fn build_body(
+    body_specs: Vec<BodyAtomSpec>,
+    positive_pool: &[usize],
+    negative_pool: &[usize],
+    arities: &[PredSpec],
+) -> (Vec<crate::ast::Literal>, Vec<u8>) {
+    let pred_name = |index: usize| format!("p{index}");
+    let pred_arity = |index: usize| arities[index].0 as usize;
+    let has_schema = |index: usize| arities[index].1;
+
+    let mut body = Vec::new();
+    let mut body_vars: Vec<u8> = Vec::new();
+    let mut negated_specs: Vec<(usize, bool, Vec<ArgSpec>)> = Vec::new();
+    for (sel, named, negated, arg_specs) in body_specs {
+        if negated && !negative_pool.is_empty() {
+            let index = negative_pool[sel as usize % negative_pool.len()];
+            negated_specs.push((index, named, arg_specs));
+            continue;
+        }
+        let index = positive_pool[sel as usize % positive_pool.len()];
+        let arity = pred_arity(index);
+        let named = named && has_schema(index);
+        let specs: Vec<ArgSpec> = arg_specs.into_iter().take(arity).collect();
+
+        // Partial selection keeps at least one field: `p()` is not
+        // grammatical (§5, `named` needs one or more pairs).
+        let keep = |position: usize, spec: &ArgSpec| {
+            !named || spec.selected || specs.iter().all(|s| !s.selected) && position == 0
+        };
+
+        let mut terms = Vec::new();
+        for (position, spec) in specs.iter().enumerate() {
+            if !keep(position, spec) {
+                continue;
+            }
+            let term = match spec.var {
+                Some(v) => {
+                    if !body_vars.contains(&v) {
+                        body_vars.push(v);
+                    }
+                    var_term(&format!("V{v}"))
+                }
+                None => Term {
+                    kind: TermKind::Constant(spec.constant.clone()),
+                    span: Span::DUMMY,
+                },
+            };
+            terms.push((position, term));
+        }
+
+        let atom = if named {
+            named_atom(
+                &pred_name(index),
+                terms
+                    .into_iter()
+                    .map(|(position, term)| named_arg(&field_name(position), term))
+                    .collect(),
+            )
+        } else {
+            positional_atom(
+                &pred_name(index),
+                terms.into_iter().map(|(_, term)| term).collect(),
+            )
+        };
+        body.push(positive_literal(atom));
+    }
+
+    // Negated atoms after the positives in source order (B5's IR-level body
+    // swaps supply the other orderings). Named form still partially selects,
+    // so omitted fields exercise the wildcard-under-negation lowering path
+    // too.
+    for (index, named, arg_specs) in negated_specs {
+        let arity = pred_arity(index);
+        let named = named && has_schema(index);
+        let specs: Vec<ArgSpec> = arg_specs.into_iter().take(arity).collect();
+        let keep = |position: usize, spec: &ArgSpec| {
+            !named || spec.selected || specs.iter().all(|s| !s.selected) && position == 0
+        };
+
+        let mut terms = Vec::new();
+        for (position, spec) in specs.iter().enumerate() {
+            if !keep(position, spec) {
+                continue;
+            }
+            let term = match spec.var {
+                Some(v) if (named || spec.selected) && !body_vars.is_empty() => {
+                    let bound = body_vars[v as usize % body_vars.len()];
+                    var_term(&format!("V{bound}"))
+                }
+                Some(_) => wildcard_term(),
+                None => Term {
+                    kind: TermKind::Constant(spec.constant.clone()),
+                    span: Span::DUMMY,
+                },
+            };
+            terms.push((position, term));
+        }
+
+        let atom = if named {
+            named_atom(
+                &pred_name(index),
+                terms
+                    .into_iter()
+                    .map(|(position, term)| named_arg(&field_name(position), term))
+                    .collect(),
+            )
+        } else {
+            positional_atom(
+                &pred_name(index),
+                terms.into_iter().map(|(_, term)| term).collect(),
+            )
+        };
+        body.push(negated_literal(atom));
+    }
+
+    (body, body_vars)
+}
+
+fn build_program((arities, facts, rules, queries): ProgramSpec) -> Program {
     let pred_name = |index: usize| format!("p{index}");
     let pred_arity = |index: usize| arities[index].0 as usize;
     // Only `declare`d predicates may be used with named arguments (§4).
@@ -429,117 +564,7 @@ fn build_program((arities, facts, rules): ProgramSpec) -> Program {
             .filter(|&i| level(i) < level(head_index))
             .collect();
 
-        let mut body = Vec::new();
-        // Body variables in first-occurrence order, deduplicated. Only
-        // *retained* arguments of *positive* atoms count: partially selected
-        // named atoms do not bind omitted fields, and negated atoms bind
-        // nothing — collecting here is what keeps head variables (and named
-        // variables under negation) safe by construction.
-        let mut body_vars: Vec<u8> = Vec::new();
-        let mut negated_specs: Vec<(usize, bool, Vec<ArgSpec>)> = Vec::new();
-        for (sel, named, negated, arg_specs) in body_specs {
-            if negated && !negative_pool.is_empty() {
-                let index = negative_pool[sel as usize % negative_pool.len()];
-                negated_specs.push((index, named, arg_specs));
-                continue;
-            }
-            let index = positive_pool[sel as usize % positive_pool.len()];
-            let arity = pred_arity(index);
-            let named = named && has_schema(index);
-            let specs: Vec<ArgSpec> = arg_specs.into_iter().take(arity).collect();
-
-            // Partial selection keeps at least one field: `p()` is not
-            // grammatical (§5, `named` needs one or more pairs).
-            let keep = |position: usize, spec: &ArgSpec| {
-                !named || spec.selected || specs.iter().all(|s| !s.selected) && position == 0
-            };
-
-            let mut terms = Vec::new();
-            for (position, spec) in specs.iter().enumerate() {
-                if !keep(position, spec) {
-                    continue;
-                }
-                let term = match spec.var {
-                    Some(v) => {
-                        if !body_vars.contains(&v) {
-                            body_vars.push(v);
-                        }
-                        var_term(&format!("V{v}"))
-                    }
-                    None => Term {
-                        kind: TermKind::Constant(spec.constant.clone()),
-                        span: Span::DUMMY,
-                    },
-                };
-                terms.push((position, term));
-            }
-
-            let atom = if named {
-                named_atom(
-                    &pred_name(index),
-                    terms
-                        .into_iter()
-                        .map(|(position, term)| named_arg(&field_name(position), term))
-                        .collect(),
-                )
-            } else {
-                positional_atom(
-                    &pred_name(index),
-                    terms.into_iter().map(|(_, term)| term).collect(),
-                )
-            };
-            body.push(positive_literal(atom));
-        }
-
-        // Negated atoms after the positives in source order (B5's IR-level
-        // body swaps supply the other orderings). Named variables draw only
-        // from the positively-bound `body_vars` — §10 safety by construction;
-        // everything else is a wildcard (existential under the negation, §7)
-        // or a constant. Named form still partially selects, so omitted
-        // fields exercise the wildcard-under-negation lowering path too.
-        for (index, named, arg_specs) in negated_specs {
-            let arity = pred_arity(index);
-            let named = named && has_schema(index);
-            let specs: Vec<ArgSpec> = arg_specs.into_iter().take(arity).collect();
-            let keep = |position: usize, spec: &ArgSpec| {
-                !named || spec.selected || specs.iter().all(|s| !s.selected) && position == 0
-            };
-
-            let mut terms = Vec::new();
-            for (position, spec) in specs.iter().enumerate() {
-                if !keep(position, spec) {
-                    continue;
-                }
-                let term = match spec.var {
-                    Some(v) if (named || spec.selected) && !body_vars.is_empty() => {
-                        let bound = body_vars[v as usize % body_vars.len()];
-                        var_term(&format!("V{bound}"))
-                    }
-                    Some(_) => wildcard_term(),
-                    None => Term {
-                        kind: TermKind::Constant(spec.constant.clone()),
-                        span: Span::DUMMY,
-                    },
-                };
-                terms.push((position, term));
-            }
-
-            let atom = if named {
-                named_atom(
-                    &pred_name(index),
-                    terms
-                        .into_iter()
-                        .map(|(position, term)| named_arg(&field_name(position), term))
-                        .collect(),
-                )
-            } else {
-                positional_atom(
-                    &pred_name(index),
-                    terms.into_iter().map(|(_, term)| term).collect(),
-                )
-            };
-            body.push(negated_literal(atom));
-        }
+        let (body, body_vars) = build_body(body_specs, &positive_pool, &negative_pool, &arities);
 
         // A named head must supply every field (§4), so head arguments are
         // built at full arity either way.
@@ -570,6 +595,20 @@ fn build_program((arities, facts, rules): ProgramSpec) -> Program {
             positional_atom(&pred_name(head_index), head_terms)
         };
         statements.push(rule(head, body));
+    }
+
+    // Queries run over the finished model, where every relation is complete
+    // (§7) — so both pools cover every predicate; no level discipline needed.
+    // A query binding no named variable is skipped (the negation-fallback
+    // pattern): B8's query≡rule equivalence projects named variables, and the
+    // nullary corner isn't worth generating.
+    let all_preds: Vec<usize> = (0..arities.len()).collect();
+    for body_specs in queries {
+        let (body, body_vars) = build_body(body_specs, &all_preds, &all_preds, &arities);
+        if body_vars.is_empty() {
+            continue;
+        }
+        statements.push(query(body));
     }
 
     Program { statements }
@@ -623,6 +662,21 @@ pub(crate) fn positionalize(program: &Program) -> Program {
         positional_atom(&atom.predicate.name, args)
     };
 
+    let rewrite_body = |body: &[crate::ast::Literal]| -> Vec<crate::ast::Literal> {
+        body.iter()
+            .map(|literal| match &literal.kind {
+                LiteralKind::Atom { negated, atom } => crate::ast::Literal {
+                    kind: LiteralKind::Atom {
+                        negated: *negated,
+                        atom: rewrite_atom(atom),
+                    },
+                    span: literal.span,
+                },
+                LiteralKind::Comparison(_) => literal.clone(),
+            })
+            .collect()
+    };
+
     let statements = program
         .statements
         .iter()
@@ -630,21 +684,15 @@ pub(crate) fn positionalize(program: &Program) -> Program {
             StatementKind::Clause(clause) => Statement {
                 kind: StatementKind::Clause(Clause {
                     head: rewrite_atom(&clause.head),
-                    body: clause
-                        .body
-                        .iter()
-                        .map(|literal| match &literal.kind {
-                            LiteralKind::Atom { negated, atom } => crate::ast::Literal {
-                                kind: LiteralKind::Atom {
-                                    negated: *negated,
-                                    atom: rewrite_atom(atom),
-                                },
-                                span: literal.span,
-                            },
-                            LiteralKind::Comparison(_) => literal.clone(),
-                        })
-                        .collect(),
+                    body: rewrite_body(&clause.body),
                     span: clause.span,
+                }),
+                span: statement.span,
+            },
+            StatementKind::Query(query) => Statement {
+                kind: StatementKind::Query(crate::ast::Query {
+                    body: rewrite_body(&query.body),
+                    span: query.span,
                 }),
                 span: statement.span,
             },
@@ -917,6 +965,38 @@ mod tests {
         assert!(
             multi_strata > 0,
             "generator never produced a multi-stratum program"
+        );
+    }
+
+    /// Coverage guard for the query paths: sampling must produce queries and
+    /// queries containing a negated literal — otherwise B8 (query≡rule) could
+    /// pass vacuously, and query negation would fall back to hand tests only.
+    #[test]
+    fn generator_emits_queries() {
+        let mut runner = TestRunner::deterministic();
+        let strategy = arb_safe_program();
+        let (mut queries, mut negated_queries) = (0, 0);
+        for _ in 0..200 {
+            let program = strategy
+                .new_tree(&mut runner)
+                .expect("strategy produces a value")
+                .current();
+            for statement in &program.statements {
+                if let StatementKind::Query(q) = &statement.kind {
+                    queries += 1;
+                    if q.body
+                        .iter()
+                        .any(|l| matches!(l.kind, LiteralKind::Atom { negated: true, .. }))
+                    {
+                        negated_queries += 1;
+                    }
+                }
+            }
+        }
+        assert!(queries > 0, "generator never produced a query");
+        assert!(
+            negated_queries > 0,
+            "generator never produced a negated query"
         );
     }
 }

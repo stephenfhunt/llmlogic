@@ -962,6 +962,133 @@ mod tests {
         );
     }
 
+    /// A wildcard in a rule head is a fresh slot with no positive binder —
+    /// unsafe, reported with the `_` fallback name.
+    #[test]
+    fn wildcard_in_a_rule_head_is_unsafe() {
+        // p(_) :- q(X).
+        let program = ast::Program {
+            statements: vec![ast_fix::rule(
+                ast_fix::positional_atom("p", vec![ast_fix::wildcard_term()]),
+                vec![ast_fix::positive_literal(ast_fix::positional_atom(
+                    "q",
+                    vec![ast_fix::var_term("X")],
+                ))],
+            )],
+        };
+        let errors = lower(&program).expect_err("head wildcard is unsafe");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.to_string().contains("head variable `_`")),
+            "unexpected errors: {errors:?}"
+        );
+    }
+
+    /// A query with a negated literal lowers like a rule body: the `NegAtom`
+    /// survives and the wildcard becomes a fresh `None`-named slot.
+    #[test]
+    fn a_negated_query_lowers_to_a_negatom_body() {
+        // ?- person(X), not parent(_, X).
+        let program = ast::Program {
+            statements: vec![ast_fix::query(vec![
+                ast_fix::positive_literal(ast_fix::positional_atom(
+                    "person",
+                    vec![ast_fix::var_term("X")],
+                )),
+                ast_fix::negated_literal(ast_fix::positional_atom(
+                    "parent",
+                    vec![ast_fix::wildcard_term(), ast_fix::var_term("X")],
+                )),
+            ])],
+        };
+        let lowered = lower(&program).expect("negated query lowers");
+        assert_eq!(
+            lowered.queries,
+            vec![ir::Query {
+                body: vec![
+                    ir::BodyLiteral {
+                        kind: ir::BodyLiteralKind::Atom(ir::Atom {
+                            pred: ir::PredId(0),
+                            args: vec![ir::Term::Var(ir::Var(0))],
+                        }),
+                        span: Span::DUMMY,
+                    },
+                    ir::BodyLiteral {
+                        kind: ir::BodyLiteralKind::NegAtom(ir::Atom {
+                            pred: ir::PredId(1),
+                            args: vec![ir::Term::Var(ir::Var(1)), ir::Term::Var(ir::Var(0))],
+                        }),
+                        span: Span::DUMMY,
+                    },
+                ],
+                var_names: vec![Some("X".to_string()), None],
+                span: Span::DUMMY,
+            }]
+        );
+    }
+
+    /// The §10 safety rule applies to query bodies with the `query` context
+    /// in the message — the negated-atom named-variable check included.
+    #[test]
+    fn named_var_only_in_a_negated_query_atom_is_unsafe() {
+        // ?- q(X), not r(Y).
+        let program = ast::Program {
+            statements: vec![ast_fix::query(vec![
+                ast_fix::positive_literal(ast_fix::positional_atom(
+                    "q",
+                    vec![ast_fix::var_term("X")],
+                )),
+                ast_fix::negated_literal(ast_fix::positional_atom(
+                    "r",
+                    vec![ast_fix::var_term("Y")],
+                )),
+            ])],
+        };
+        let errors = lower(&program).expect_err("Y is unsafe in the query");
+        assert!(
+            errors.iter().any(|e| {
+                let msg = e.to_string();
+                msg.contains("query") && msg.contains("`Y`")
+            }),
+            "unexpected errors: {errors:?}"
+        );
+    }
+
+    /// A chain of two negations forces three strata.
+    #[test]
+    fn a_negation_chain_yields_three_strata() {
+        // a(X) :- d(X).    b(X) :- d(X), not a(X).    c(X) :- d(X), not b(X).
+        let unary_rule = |head: &str, body: Vec<ast::Literal>| {
+            ast_fix::rule(
+                ast_fix::positional_atom(head, vec![ast_fix::var_term("X")]),
+                body,
+            )
+        };
+        let positive = |pred: &str| {
+            ast_fix::positive_literal(ast_fix::positional_atom(pred, vec![ast_fix::var_term("X")]))
+        };
+        let negative = |pred: &str| {
+            ast_fix::negated_literal(ast_fix::positional_atom(pred, vec![ast_fix::var_term("X")]))
+        };
+        let program = ast::Program {
+            statements: vec![
+                unary_rule("a", vec![positive("d")]),
+                unary_rule("b", vec![positive("d"), negative("a")]),
+                unary_rule("c", vec![positive("d"), negative("b")]),
+            ],
+        };
+        let lowered = lower(&program).expect("stratifiable");
+        assert_eq!(
+            lowered.strata,
+            vec![
+                vec![ir::RuleId(0)],
+                vec![ir::RuleId(1)],
+                vec![ir::RuleId(2)],
+            ]
+        );
+    }
+
     /// Negation over an IDB predicate forces a second stratum; rules keep
     /// source order within each stratum.
     #[test]

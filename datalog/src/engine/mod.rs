@@ -964,6 +964,127 @@ mod tests {
         );
     }
 
+    /// A query with a negated literal answers over the finished model:
+    /// `?- person(X), not parent(_, X).` on §16.2 — the first direct test of
+    /// query negation (the rule-side path is the 16.2 end-to-end test).
+    #[test]
+    fn a_negated_query_answers_over_the_finished_model() {
+        let mut program = crate::ir::fixtures::example_16_2();
+        let person = PredId(0);
+        let parent = PredId(1);
+        program.queries.push(Query {
+            body: vec![
+                BodyLiteral {
+                    kind: BodyLiteralKind::Atom(Atom {
+                        pred: person,
+                        args: vec![Term::Var(Var(0))],
+                    }),
+                    span: Span::DUMMY,
+                },
+                BodyLiteral {
+                    kind: BodyLiteralKind::NegAtom(Atom {
+                        pred: parent,
+                        args: vec![Term::Var(Var(1)), Term::Var(Var(0))],
+                    }),
+                    span: Span::DUMMY,
+                },
+            ],
+            var_names: vec![Some("X".to_string()), None],
+            span: Span::DUMMY,
+        });
+        let model = eval(&program).unwrap();
+        assert_eq!(
+            model.answer(&program.queries[0]).unwrap(),
+            vec![vec![string_value("alice")]]
+        );
+    }
+
+    /// Negation over an empty relation holds trivially: with no `parent`
+    /// facts at all, every person is a root.
+    #[test]
+    fn negation_over_an_empty_relation_holds_trivially() {
+        let mut program = crate::ir::fixtures::example_16_2();
+        let parent = PredId(1);
+        let root = PredId(2);
+        program.facts.retain(|fact| fact.pred != parent);
+        let model = eval(&program).unwrap();
+        let expected: BTreeSet<Tuple> = ["alice", "bob", "carol"]
+            .map(|name| Tuple(vec![string_value(name)]))
+            .into();
+        assert_eq!(model.relation(root), &expected);
+        assert_eq!(
+            naive::naive_eval(&program),
+            model.facts().collect::<BTreeSet<Fact>>()
+        );
+    }
+
+    /// Double negation across three strata: `b = d ∖ a`, `c = d ∖ b`, so `c`
+    /// restores `a` within the domain `d` — and the strata chain
+    /// a-rule < b-rule < c-rule is the first three-stratum evaluation test.
+    #[test]
+    fn double_negation_restores_within_the_domain() {
+        // seed("x"). d("x"). d("y"). d("z").
+        // a(X) :- seed(X).
+        // b(X) :- d(X), not a(X).
+        // c(X) :- d(X), not b(X).
+        let mut program = Program::default();
+        let seed = program.intern_pred("seed", 1);
+        let d = program.intern_pred("d", 1);
+        let a = program.intern_pred("a", 1);
+        let b = program.intern_pred("b", 1);
+        let c = program.intern_pred("c", 1);
+        program.facts.push(Fact {
+            pred: seed,
+            tuple: Tuple(vec![string_value("x")]),
+        });
+        for name in ["x", "y", "z"] {
+            program.facts.push(Fact {
+                pred: d,
+                tuple: Tuple(vec![string_value(name)]),
+            });
+        }
+        let unary_rule = |head: PredId, body: Vec<BodyLiteral>| Rule {
+            head: Atom {
+                pred: head,
+                args: vec![Term::Var(Var(0))],
+            },
+            body,
+            var_names: vec![Some("X".to_string())],
+            span: Span::DUMMY,
+        };
+        let positive = |pred: PredId| BodyLiteral {
+            kind: BodyLiteralKind::Atom(Atom {
+                pred,
+                args: vec![Term::Var(Var(0))],
+            }),
+            span: Span::DUMMY,
+        };
+        let negative = |pred: PredId| BodyLiteral {
+            kind: BodyLiteralKind::NegAtom(Atom {
+                pred,
+                args: vec![Term::Var(Var(0))],
+            }),
+            span: Span::DUMMY,
+        };
+        program.rules.push(unary_rule(a, vec![positive(seed)]));
+        program
+            .rules
+            .push(unary_rule(b, vec![positive(d), negative(a)]));
+        program
+            .rules
+            .push(unary_rule(c, vec![positive(d), negative(b)]));
+        program.strata = vec![vec![RuleId(0)], vec![RuleId(1)], vec![RuleId(2)]];
+
+        let model = eval(&program).unwrap();
+        let expected_b: BTreeSet<Tuple> = ["y", "z"].map(|n| Tuple(vec![string_value(n)])).into();
+        assert_eq!(model.relation(b), &expected_b);
+        assert_eq!(model.relation(c), model.relation(a));
+        assert_eq!(
+            naive::naive_eval(&program),
+            model.facts().collect::<BTreeSet<Fact>>()
+        );
+    }
+
     /// The engine defends the negation contract on hand-built IR: a *named*
     /// variable in a negated atom with no positive binder is malformed
     /// (well-lowered IR is protected by §10 safety).
@@ -1364,6 +1485,57 @@ mod tests {
                 prop_assert_eq!(model.relation(ancestor), &expected);
             }
 
+            /// B8 — query/rule equivalence: a query answers exactly what a
+            /// rule with the query's body and a head projecting its named
+            /// variables derives. The synthesized rule runs in a fresh final
+            /// stratum, which is sound because everything a query reads —
+            /// negated or not — is defined in earlier strata (§7: queries run
+            /// over the finished model). Under the Phase-C generator this
+            /// covers negated query bodies.
+            #[test]
+            fn b8_queries_equal_synthesized_rules(program in arb_program_with_edb()) {
+                let model = eval(&program).unwrap();
+                for query in &program.queries {
+                    let named_slots: Vec<u32> = query
+                        .var_names
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, name)| name.is_some())
+                        .map(|(slot, _)| slot as u32)
+                        .collect();
+                    // The generator skips queries binding no named variable.
+                    prop_assert!(!named_slots.is_empty());
+
+                    let mut variant = program.clone();
+                    variant.queries.clear();
+                    let q_ans = variant.intern_pred("q_ans", named_slots.len() as u32);
+                    let rule_id = RuleId(variant.rules.len() as u32);
+                    variant.rules.push(Rule {
+                        head: Atom {
+                            pred: q_ans,
+                            args: named_slots
+                                .iter()
+                                .map(|&slot| Term::Var(crate::ir::Var(slot)))
+                                .collect(),
+                        },
+                        body: query.body.clone(),
+                        var_names: query.var_names.clone(),
+                        span: query.span,
+                    });
+                    variant.strata.push(vec![rule_id]);
+
+                    let variant_model = eval(&variant).unwrap();
+                    let answers: BTreeSet<Vec<Value>> =
+                        model.answer(query).unwrap().into_iter().collect();
+                    let derived: BTreeSet<Vec<Value>> = variant_model
+                        .relation(q_ans)
+                        .iter()
+                        .map(|tuple| tuple.0.clone())
+                        .collect();
+                    prop_assert_eq!(answers, derived);
+                }
+            }
+
             /// C2 — independent perfect-model oracle on the §16.2 shape:
             /// random person/parent EDBs through `root(X) :- person(X),
             /// not parent(_, X).` equal a hand-rolled set difference that
@@ -1402,17 +1574,36 @@ mod tests {
                 prop_assert_eq!(model.relation(root), &expected);
             }
 
-            /// E1 — every derived fact has at least one derivation.
+            /// E1 — every derived fact has at least one derivation, and at
+            /// least one of them is *well-founded*: every fact premise first
+            /// appeared in a strictly earlier round than the fact itself
+            /// (absence premises exempt — they carry no round). This is the
+            /// invariant `ProofTree::explain` selects by, stated directly
+            /// rather than transitively via E2, and it pins first-round
+            /// stamping's monotonicity across strata.
             #[test]
             fn e1_derived_facts_have_derivations(program in arb_program_with_edb()) {
                 let model = eval(&program).unwrap();
                 for fact in model.facts() {
-                    if !model.is_base(&fact) {
-                        prop_assert!(
-                            model.derivations_of(&fact).next().is_some(),
-                            "derived fact {:?} has no derivation", fact
-                        );
+                    if model.is_base(&fact) {
+                        continue;
                     }
+                    prop_assert!(
+                        model.derivations_of(&fact).next().is_some(),
+                        "derived fact {:?} has no derivation", fact
+                    );
+                    let round = model.first_round(&fact).expect("held facts are stamped");
+                    prop_assert!(
+                        model.derivations_of(&fact).any(|derivation| {
+                            derivation.premises.iter().all(|premise| match premise {
+                                Premise::Fact(f) => model
+                                    .first_round(f)
+                                    .is_some_and(|r| r < round),
+                                Premise::Absent(_) => true,
+                            })
+                        }),
+                        "no well-founded derivation for {:?}", fact
+                    );
                 }
             }
 
