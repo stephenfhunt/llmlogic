@@ -492,10 +492,12 @@ mod tests {
                 PredicateInfo {
                     name: "edge".to_string(),
                     arity: 2,
+                    fields: None,
                 },
                 PredicateInfo {
                     name: "path".to_string(),
                     arity: 2,
+                    fields: None,
                 },
             ],
             facts: vec![

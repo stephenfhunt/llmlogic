@@ -10,7 +10,10 @@
 //! (source-order rule index, never renumbered) and premise order aligned with
 //! [`crate::ir::BodyIdx`] (body literal order, never reordered). Original
 //! predicate and variable names for rendering recover via
-//! [`crate::ir::PredicateInfo::name`] and [`crate::ir::Rule::var_names`].
+//! [`crate::ir::PredicateInfo::name`] and [`crate::ir::Rule::var_names`];
+//! [`crate::ir::PredicateInfo::fields`] additionally allows rendering a fact
+//! over a wide relation in named form — `employee(name: "alice", title:
+//! "manager")` rather than eight positional columns (§17, 2026-07-20).
 
 use crate::engine::Model;
 use crate::ir::{Fact, RuleId};

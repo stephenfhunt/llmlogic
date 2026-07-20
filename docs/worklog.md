@@ -70,6 +70,28 @@ raw transcripts (Claude Code auto-saves those under
   done, which is why the gap went unnoticed. Named-arg lowering is now its own
   step 3 and the later steps are renumbered.
 
+**Follow-up the same session — field names retained in the IR**
+- Design review of the above asked whether desugaring named args to positional
+  is still right. Answer: the desugar is right, but it had been bundled with a
+  second decision — *discarding* the field names — that was not.
+- `ir::PredicateInfo` gains `fields: Option<Vec<String>>` (invariant:
+  `Some(f)` implies `f.len() == arity`), populated by a new
+  `Lowerer::attach_field_names` step after pass 1. Atoms stay positional;
+  evaluation is untouched. The §16.7 IR fixture now carries `employee`'s eight
+  import-schema names and `person`'s two declared ones, so the existing
+  `lower(ast) == ir` contract test asserts it. 67 tests.
+- Rationale: type inference (§4, the *next* roadmap step after negation) runs
+  over the IR and must name the conflicting column; provenance (§11) should
+  render wide relations in named form; §14 output likewise. The IR already
+  retains predicate names, `var_names`, and spans purely for rendering — field
+  names are the same category, so this follows precedent rather than weakening
+  the surface/core split.
+- Guard tested where it is actually observable: `lower()` returns `Err` on an
+  arity clash and never yields the table, so that test drives
+  `collect_predicates` + `attach_field_names` directly and confirms a
+  mismatched schema is not attached. Mutation-checked — removing the guard
+  fails the test.
+
 **Next up**
 - **§7 stratified negation** (now roadmap step 4). Pre-decisions already in spec
   §17 (2026-07-19): derivations record premises as a `BodyIdx`-aligned

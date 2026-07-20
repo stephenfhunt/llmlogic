@@ -33,8 +33,12 @@
 //!
 //! Delta/semi-naive rule rewrites, adornment/magic-sets annotations, join
 //! plans, indexes and relation storage, and EDB/IDB classification (derivable:
-//! a predicate is intensional iff it heads a rule). Field names are consumed by
-//! lowering; the schema registry is `lower`-internal.
+//! a predicate is intensional iff it heads a rule).
+//!
+//! Field *names* are retained on [`PredicateInfo`] (§17, 2026-07-20) even
+//! though named arguments themselves are gone: they carry no evaluation
+//! meaning, but type inference and provenance rendering both need to name
+//! columns, and those passes run over the IR with no access to the AST.
 
 use std::hash::{Hash, Hasher};
 
@@ -60,11 +64,23 @@ pub struct Var(pub u32);
 /// literal matched this premise".
 pub type BodyIdx = usize;
 
-/// Name and arity of an interned predicate.
+/// Name, arity, and (when known) field names of an interned predicate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PredicateInfo {
     pub name: String,
     pub arity: u32,
+    /// Field names in positional order, from a `declare` or an explicit import
+    /// schema; `None` when the predicate has no schema. A schema is known in
+    /// full or not at all — the surface syntax cannot name only some fields.
+    ///
+    /// Invariant: `Some(fields)` implies `fields.len() == arity as usize`.
+    ///
+    /// Retained for the same reason as [`PredicateInfo::name`] and
+    /// [`Rule::var_names`]: rendering and error messages. Named arguments are
+    /// still fully resolved by lowering — these names give type inference (§4)
+    /// a way to say *which column* conflicts, and let proof trees (§11) print
+    /// `employee(name: "alice", …)` instead of eight positional columns.
+    pub fields: Option<Vec<String>>,
 }
 
 /// A never-NaN `f64` with total `Eq`/`Ord`/`Hash`.
@@ -261,6 +277,9 @@ impl Program {
         self.predicates.push(PredicateInfo {
             name: name.to_string(),
             arity,
+            // Only lowering knows about schemas; callers that have field names
+            // set them afterwards.
+            fields: None,
         });
         PredId((self.predicates.len() - 1) as u32)
     }
@@ -302,10 +321,12 @@ pub(crate) mod fixtures {
                 PredicateInfo {
                     name: "parent".to_string(),
                     arity: 2,
+                    fields: None,
                 },
                 PredicateInfo {
                     name: "ancestor".to_string(),
                     arity: 2,
+                    fields: None,
                 },
             ],
             facts: vec![
@@ -395,21 +416,42 @@ pub(crate) mod fixtures {
         let adult = PredId(3);
         Program {
             predicates: vec![
+                // Field names survive lowering: `employee` from the explicit
+                // import schema, `person` from its `declare`. The two rule
+                // heads were never declared, so they carry none.
                 PredicateInfo {
                     name: "employee".to_string(),
                     arity: 8,
+                    fields: Some(
+                        [
+                            "id",
+                            "name",
+                            "age",
+                            "dept",
+                            "title",
+                            "salary",
+                            "city",
+                            "start_date",
+                        ]
+                        .iter()
+                        .map(|f| f.to_string())
+                        .collect(),
+                    ),
                 },
                 PredicateInfo {
                     name: "manager_name".to_string(),
                     arity: 1,
+                    fields: None,
                 },
                 PredicateInfo {
                     name: "person".to_string(),
                     arity: 2,
+                    fields: Some(vec!["name".to_string(), "age".to_string()]),
                 },
                 PredicateInfo {
                     name: "adult".to_string(),
                     arity: 1,
+                    fields: None,
                 },
             ],
             facts: vec![Fact {

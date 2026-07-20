@@ -285,7 +285,11 @@ fixpoint):
   appeared strictly earlier in the fixpoint (§17 first-round stamping), so
   proofs stay finite even when facts support each other cyclically.
 - Names for rendering recover from the IR's retained tables: predicate names,
-  per-rule variable names, and spans.
+  per-rule variable names, field names (when the predicate has a schema), and
+  spans. A fact over a relation with known field names can therefore be
+  rendered in named form — `employee(name: "alice", title: "manager")` — which
+  matters for wide imported tables, where the positional rendering is mostly
+  noise.
 
 *Still open (§17): the `?why` query form across CLI and API, the proof-tree
 JSON encoding, and the provenance-as-facts closure question.*
@@ -731,16 +735,38 @@ structured error.
   fresh anonymous slot exactly as a positional `_` would. Consequence: the
   evaluator, provenance, and every later pass are entirely unaware that named
   arguments exist, which is what makes §4's convenience free.
-- **2026-07-20** — **The field-name registry is `lower`-internal and
-  program-wide.** `Lowerer.schemas` maps predicate name → field names,
-  populated in pass 1 from `declare` statements and *explicit* import schemas.
-  Because pass 1 walks the whole program before any clause is lowered, a
-  `declare` may appear after the rule that uses the named form — declaration
-  order does not matter. Field names never enter the IR
-  (`ir::PredicateInfo` stays `{ name, arity }`). Two conflict rules: a
+- **2026-07-20** — **Schema collection is program-wide.** `Lowerer.schemas` maps
+  predicate name → field names, populated in pass 1 from `declare` statements
+  and *explicit* import schemas. Because pass 1 walks the whole program before
+  any clause is lowered, a `declare` may appear after the rule that uses the
+  named form — declaration order does not matter. Two conflict rules: a
   duplicate field name within one schema is an error, and a predicate given
   two different schemas (e.g. a `declare` and an import schema that disagree)
   is an error naming both origins; identical repeats are accepted.
+- **2026-07-20 (amended same day)** — **Field names are retained on
+  `ir::PredicateInfo`** as `fields: Option<Vec<String>>`, with the invariant
+  that `Some(f)` implies `f.len() == arity`. Populated from the pass-1 registry
+  after interning; `None` for predicates with no schema, and deliberately not
+  attached when a schema disagrees with the interned arity (an arity clash is
+  already reported, and the IR stays self-consistent on the error path).
+
+  *This amends the same day's original decision that field names were purely
+  `lower`-internal.* That was two decisions bundled as one. The first —
+  named literals desugar to positional form, and the evaluator never sees named
+  arguments — **stands**, and is now backed by property A13 (the two forms lower
+  to identical IR) and by composing cleanly with negation: omitted fields become
+  fresh slots through the same path as wildcards, so the wildcards-are-
+  existential rule covers partial selection under negation for free. The second
+  — *discarding* the names — was wrong. Three consumers need them and all run
+  over the IR with no access to the AST: **type inference** (§4, a separate pass
+  after lowering) must name the conflicting *column*; **provenance** (§11) should
+  render a wide relation in named form rather than as eight positional columns;
+  and §14's canonical output has the same need. The objection that field names
+  are surface syntax does not survive scrutiny — the IR already retains
+  `PredicateInfo::name`, `Rule::var_names`, and spans purely for rendering and
+  errors, none of which affect evaluation. Field names are that same category,
+  so retaining them follows existing precedent rather than weakening the
+  surface/core split. Atoms remain positional; nothing about evaluation changes.
 - **2026-07-20** — **Named access requires a *known* schema, and a schema-less
   import has none until §13 lands.** `import "f.csv" as employee.` infers its
   field names from the CSV header at load time, which lowering cannot see, so

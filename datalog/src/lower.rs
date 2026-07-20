@@ -46,6 +46,7 @@ use crate::ir;
 pub fn lower(program: &ast::Program) -> Result<ir::Program, Vec<Error>> {
     let mut lowerer = Lowerer::default();
     lowerer.collect_predicates(program);
+    lowerer.attach_field_names();
     let mut out = ir::Program {
         predicates: lowerer.predicates.clone(),
         ..ir::Program::default()
@@ -216,6 +217,26 @@ impl Lowerer {
         }
     }
 
+    /// Copies collected schemas onto the interned predicate table, so field
+    /// names survive lowering (§17, 2026-07-20). Named arguments are still
+    /// fully resolved — these names exist for type inference and provenance
+    /// rendering, which run over the IR with no access to the AST.
+    ///
+    /// Only attaches when the schema length matches the interned arity: a
+    /// mismatch means an arity clash was already reported, and leaving the
+    /// entry `None` keeps `PredicateInfo`'s invariant intact on the error path.
+    fn attach_field_names(&mut self) {
+        for (name, schema) in &self.schemas {
+            let Some(&id) = self.by_name.get(name) else {
+                continue;
+            };
+            let info = &mut self.predicates[id.0 as usize];
+            if schema.fields.len() == info.arity as usize {
+                info.fields = Some(schema.fields.clone());
+            }
+        }
+    }
+
     /// Records the field names of `name`, reporting duplicates within the
     /// schema and conflicts with a schema already recorded for the predicate.
     fn collect_schema(&mut self, name: &str, fields: &[ast::FieldDecl], origin: SchemaOrigin) {
@@ -271,6 +292,8 @@ impl Lowerer {
         self.predicates.push(ir::PredicateInfo {
             name: name.to_string(),
             arity,
+            // Filled in by `attach_field_names` once pass 1 completes.
+            fields: None,
         });
         self.by_name.insert(name.to_string(), id);
         id
@@ -918,6 +941,117 @@ mod tests {
             ],
         };
         lower(&program).expect("declaration order does not matter");
+    }
+
+    /// Field names survive lowering onto the interned table (§17, 2026-07-20),
+    /// so type inference and provenance can name columns without the AST.
+    #[test]
+    fn field_names_reach_the_ir() {
+        let lowered = lower(&ast_fix::example_16_7()).expect("16.7 lowers cleanly");
+
+        let employee = lowered
+            .predicates
+            .iter()
+            .find(|p| p.name == "employee")
+            .expect("employee is interned");
+        assert_eq!(
+            employee.fields.as_deref(),
+            Some(
+                [
+                    "id",
+                    "name",
+                    "age",
+                    "dept",
+                    "title",
+                    "salary",
+                    "city",
+                    "start_date"
+                ]
+                .map(String::from)
+                .as_slice()
+            )
+        );
+
+        // Never declared, so no field names — and the `None` case must stay
+        // representable rather than degrading into empty names.
+        let manager_name = lowered
+            .predicates
+            .iter()
+            .find(|p| p.name == "manager_name")
+            .expect("manager_name is interned");
+        assert_eq!(manager_name.fields, None);
+
+        // The invariant every consumer relies on.
+        for info in &lowered.predicates {
+            if let Some(fields) = &info.fields {
+                assert_eq!(fields.len(), info.arity as usize, "for `{}`", info.name);
+            }
+        }
+    }
+
+    /// Schemas are collected program-wide, so a late `declare` still lands in
+    /// the IR — the same visibility rule as `declare_may_follow_its_use`, now
+    /// observable downstream.
+    #[test]
+    fn a_late_declare_still_reaches_the_ir() {
+        let program = ast::Program {
+            statements: vec![
+                ast_fix::fact(
+                    "person",
+                    vec![ast_fix::string_term("alice"), ast_fix::int_term(30)],
+                ),
+                declare_person(),
+            ],
+        };
+        let lowered = lower(&program).expect("lowers");
+        assert_eq!(
+            lowered.predicates[0].fields.as_deref(),
+            Some(["name".to_string(), "age".to_string()].as_slice())
+        );
+    }
+
+    /// When a schema disagrees with the interned arity the clash is reported
+    /// and *no* schema is attached, so `PredicateInfo`'s length invariant holds
+    /// even on the error path.
+    ///
+    /// `lower()` returns `Err` here and never yields the table, so this drives
+    /// the two passes directly — the only place the guard is observable.
+    #[test]
+    fn a_schema_conflicting_with_arity_is_not_attached() {
+        // Use site first (arity 3), then a two-field declare.
+        let program = ast::Program {
+            statements: vec![
+                ast_fix::fact(
+                    "person",
+                    vec![
+                        ast_fix::string_term("alice"),
+                        ast_fix::int_term(30),
+                        ast_fix::string_term("eng"),
+                    ],
+                ),
+                declare_person(),
+            ],
+        };
+
+        let mut lowerer = Lowerer::default();
+        lowerer.collect_predicates(&program);
+        lowerer.attach_field_names();
+
+        let person = &lowerer.predicates[0];
+        assert_eq!(person.name, "person");
+        assert_eq!(person.arity, 3, "arity comes from the first use site");
+        assert_eq!(
+            person.fields, None,
+            "a two-field schema must not attach to an arity-3 predicate"
+        );
+        assert!(
+            lowerer
+                .errors
+                .iter()
+                .any(|e| e.to_string().contains("arity")),
+            "unexpected errors: {:?}",
+            lowerer.errors
+        );
     }
 
     #[test]
