@@ -16,13 +16,54 @@
 //! "manager")` rather than eight positional columns (§17, 2026-07-20).
 
 use crate::engine::Model;
-use crate::ir::{Fact, RuleId};
+use crate::ir::{Fact, PredId, RuleId, Tuple, Value};
+
+/// A ground-but-for-wildcards pattern whose *absence* satisfied a negated
+/// body literal (§7): the negated atom under the rule's bindings, with `None`
+/// for wildcard-fresh slots (existential under the negation).
+///
+/// `root("alice")` holds *because no `parent(_, "alice")` fact exists* — the
+/// pattern is what makes that sentence renderable (the explainability
+/// pillar). Deliberately a proof-tree-level why-not record, not a semiring
+/// construction (§17, 2026-07-20).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct AbsentPattern {
+    pub pred: PredId,
+    /// One entry per column: `Some` closes the slot to that value, `None`
+    /// leaves it open (matches anything).
+    pub args: Vec<Option<Value>>,
+}
+
+impl AbsentPattern {
+    /// Does `tuple` fall under the pattern? A match *refutes* the absence:
+    /// the engine's anti-join prunes on it, and replay (testing.md E3)
+    /// asserts no model tuple satisfies it.
+    pub fn matches(&self, tuple: &Tuple) -> bool {
+        self.args.len() == tuple.0.len()
+            && self
+                .args
+                .iter()
+                .zip(&tuple.0)
+                .all(|(pattern, value)| pattern.as_ref().is_none_or(|expected| expected == value))
+    }
+}
+
+/// One premise of a derivation, aligned with its body literal
+/// ([`crate::ir::BodyIdx`]).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum Premise {
+    /// The fact that matched a positive literal.
+    Fact(Fact),
+    /// The pattern no fact matched, satisfying a negated literal.
+    Absent(AbsentPattern),
+}
 
 /// One way a fact was derived: a ground rule instance.
 ///
-/// `premises[i]` is the fact that matched body literal `i` of rule `rule`
-/// ([`crate::ir::BodyIdx`] alignment), so the instance can be replayed against
-/// the rule to revalidate the derivation (testing.md E3).
+/// `premises[i]` answers body literal `i` of rule `rule`
+/// ([`crate::ir::BodyIdx`] alignment) — the matched fact for a positive
+/// literal, the unmatched pattern for a negated one — so the instance can be
+/// replayed against the rule to revalidate the derivation (testing.md E3).
 ///
 /// Equality/ordering is by rule + premises — the deduplication key for "all
 /// derivations per fact" storage (spec §17): the same instance rediscovered in
@@ -30,16 +71,18 @@ use crate::ir::{Fact, RuleId};
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Derivation {
     pub rule: RuleId,
-    pub premises: Vec<Fact>,
+    pub premises: Vec<Premise>,
 }
 
 /// A finite proof of one fact: recursive derivations bottoming out at base
-/// (EDB/imported) facts.
+/// (EDB/imported) facts and absence patterns.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProofTree {
-    /// A base fact — asserted in the program (or, later, imported). Leaves are
-    /// always base facts (testing.md E2/E4).
+    /// A base fact — asserted in the program (or, later, imported).
     Leaf(Fact),
+    /// A satisfied negation: no fact matches the pattern (§7). Terminates its
+    /// branch — an absence needs no sub-proof.
+    Absent(AbsentPattern),
     /// A derived fact with one supporting rule instance; `children[i]` proves
     /// the instance's `premises[i]`.
     Derived {
@@ -55,11 +98,13 @@ impl ProofTree {
     ///
     /// A fact that is base *and* derivable explains as a [`ProofTree::Leaf`].
     /// For derived facts, the chosen derivation is the [`Ord`]-least one whose
-    /// premises all first appeared in a strictly earlier fixpoint round than
-    /// the fact itself (spec §17: `first_round` stamping). At least one
-    /// recorded derivation always qualifies — the one that first produced the
-    /// fact — and the strictly-decreasing round bound makes the recursion (and
-    /// so the proof) finite even when facts support each other cyclically.
+    /// fact premises all first appeared in a strictly earlier fixpoint round
+    /// than the fact itself (spec §17: `first_round` stamping); absence
+    /// premises always qualify — they carry no round and recurse into
+    /// nothing, so they cannot found a cycle. At least one recorded
+    /// derivation always qualifies — the one that first produced the fact —
+    /// and the strictly-decreasing round bound makes the recursion (and so
+    /// the proof) finite even when facts support each other cyclically.
     pub fn explain(model: &Model, fact: &Fact) -> Option<ProofTree> {
         if !model.contains(fact) {
             return None;
@@ -69,14 +114,18 @@ impl ProofTree {
         }
         let round = model.first_round(fact)?;
         let derivation = model.derivations_of(fact).find(|d| {
-            d.premises
-                .iter()
-                .all(|p| model.first_round(p).is_some_and(|r| r < round))
+            d.premises.iter().all(|premise| match premise {
+                Premise::Fact(f) => model.first_round(f).is_some_and(|r| r < round),
+                Premise::Absent(_) => true,
+            })
         })?;
         let children = derivation
             .premises
             .iter()
-            .map(|premise| ProofTree::explain(model, premise))
+            .map(|premise| match premise {
+                Premise::Fact(f) => ProofTree::explain(model, f),
+                Premise::Absent(pattern) => Some(ProofTree::Absent(pattern.clone())),
+            })
             .collect::<Option<Vec<ProofTree>>>()?;
         Some(ProofTree::Derived {
             fact: fact.clone(),
@@ -85,11 +134,15 @@ impl ProofTree {
         })
     }
 
-    /// The fact this tree proves.
-    pub fn fact(&self) -> &Fact {
+    /// The fact this tree proves — `None` for an [`ProofTree::Absent`] node,
+    /// which proves the absence of anything matching its pattern rather than
+    /// a fact. (The root of an [`ProofTree::explain`] result is never
+    /// `Absent`.)
+    pub fn fact(&self) -> Option<&Fact> {
         match self {
-            ProofTree::Leaf(fact) => fact,
-            ProofTree::Derived { fact, .. } => fact,
+            ProofTree::Leaf(fact) => Some(fact),
+            ProofTree::Derived { fact, .. } => Some(fact),
+            ProofTree::Absent(_) => None,
         }
     }
 }

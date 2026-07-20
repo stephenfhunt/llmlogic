@@ -13,17 +13,24 @@
 //!   collapse on load), and queries are answered as projections over the
 //!   `Model` via each query's `var_names` ([`Model::answer`]).
 //! - The fixpoint records **all derivations per fact**, deduplicated by rule
-//!   instance ([`crate::provenance::Derivation`]: `RuleId` + premise facts) —
+//!   instance ([`crate::provenance::Derivation`]: `RuleId` + premises) —
 //!   not just a first witness. Each fact is also stamped with the round it
 //!   first appeared in ([`Model::first_round`]), which is what makes finite
 //!   proof extraction possible ([`crate::provenance::ProofTree::explain`]).
 //! - Structured not-yet-supported errors for: comparison literals (§8 open,
-//!   incl. `=` semantics), negated atoms (already rejected in lowering), and
-//!   programs with imports (until `crate::sources` lands).
+//!   incl. `=` semantics) and programs with imports (until `crate::sources`
+//!   lands).
 //!
-//! Still ahead here: stratified negation (roadmap step 3) makes the per-stratum
-//! loop meaningful; builtins (§8) extend the join loop; magic sets are a future
-//! optimization.
+//! Stratified negation (§7, §17 2026-07-20): a negated atom is an anti-join
+//! *filter* — it binds nothing, always reads the full relation (its predicate's
+//! strata are strictly lower, so the relation is complete and frozen; validated
+//! here as an IR contract), and is scheduled after the body's positive atoms
+//! (evaluator-internal ordering; premises land at their true `BodyIdx`). The
+//! satisfied absence is recorded as a [`crate::provenance::Premise::Absent`]
+//! pattern.
+//!
+//! Still ahead here: builtins (§8) extend the join loop; magic sets are a
+//! future optimization.
 
 #[cfg(test)]
 pub(crate) mod naive;
@@ -36,7 +43,7 @@ use crate::ir::{
     Atom, BodyLiteral, BodyLiteralKind, Fact, PredId, Program, Query, Rule, RuleId, Term, Tuple,
     Value,
 };
-use crate::provenance::Derivation;
+use crate::provenance::{AbsentPattern, Derivation, Premise};
 
 /// The result of evaluation: every predicate's full extent, plus provenance.
 ///
@@ -107,7 +114,7 @@ impl Model {
     /// distinct binding of the query's named variables (`var_names` entries
     /// that are `Some`, in slot order), sorted in canonical order.
     pub fn answer(&self, query: &Query) -> Result<Vec<Vec<Value>>> {
-        validate_body(&query.body)?;
+        validate_body(&query.body, &query.var_names)?;
         let views = vec![AtomView::Full; query.body.len()];
         let cx = JoinCx {
             model: self,
@@ -179,10 +186,10 @@ fn validate(program: &Program) -> Result<()> {
         )));
     }
     for rule in &program.rules {
-        validate_body(&rule.body)?;
+        validate_body(&rule.body, &rule.var_names)?;
     }
     for query in &program.queries {
-        validate_body(&query.body)?;
+        validate_body(&query.body, &query.var_names)?;
     }
     let mut seen = vec![false; program.rules.len()];
     for &rule_id in program.strata.iter().flatten() {
@@ -202,19 +209,60 @@ fn validate(program: &Program) -> Result<()> {
             "malformed IR: strata do not cover rule {missing}"
         )));
     }
+
+    // The negation contract (§7): every rule defining a negated predicate
+    // sits in a strictly lower stratum, so the negated relation is complete
+    // and frozen when read. Well-lowered IR satisfies this by construction;
+    // hand-built IR that violates it would be silently mis-evaluated.
+    // (Queries are exempt — they run over the finished model.)
+    let mut defining_stratum: Vec<Option<usize>> = vec![None; program.predicates.len()];
+    for (level, stratum) in program.strata.iter().enumerate() {
+        for &rule_id in stratum {
+            let head = program.rules[rule_id.0 as usize].head.pred;
+            let entry = &mut defining_stratum[head.0 as usize];
+            *entry = Some(entry.map_or(level, |existing| existing.max(level)));
+        }
+    }
+    for (level, stratum) in program.strata.iter().enumerate() {
+        for &rule_id in stratum {
+            for literal in &program.rules[rule_id.0 as usize].body {
+                if let BodyLiteralKind::NegAtom(atom) = &literal.kind
+                    && defining_stratum[atom.pred.0 as usize].is_some_and(|def| def >= level)
+                {
+                    return Err(Error::Semantic(format!(
+                        "malformed IR: rule {} negates `{}`, which is not defined in a \
+                         strictly lower stratum",
+                        rule_id.0,
+                        program.pred_info(atom.pred).name
+                    )));
+                }
+            }
+        }
+    }
     Ok(())
 }
 
-/// Structured not-yet-supported errors for body forms beyond positive atoms
-/// (spec §17, 2026-07-19 step-2 policy).
-fn validate_body(body: &[BodyLiteral]) -> Result<()> {
+/// Rejects body forms evaluation cannot handle: comparison literals (§8 open;
+/// spec §17 2026-07-19 step-2 policy), and negated atoms whose *named*
+/// variables are not bound by a positive atom of the same body. Well-lowered
+/// IR satisfies the latter via §10 safety; hand-built IR that violates it
+/// would otherwise silently evaluate the named variable as a wildcard.
+fn validate_body(body: &[BodyLiteral], var_names: &[Option<String>]) -> Result<()> {
     for literal in body {
         match &literal.kind {
             BodyLiteralKind::Atom(_) => {}
-            BodyLiteralKind::NegAtom(_) => {
-                return Err(Error::Semantic(
-                    "negation not yet supported in evaluation".to_string(),
-                ));
+            BodyLiteralKind::NegAtom(atom) => {
+                for arg in &atom.args {
+                    if let Term::Var(var) = arg
+                        && let Some(Some(name)) = var_names.get(var.0 as usize)
+                        && !positively_bound(body, *var)
+                    {
+                        return Err(Error::Semantic(format!(
+                            "malformed IR: named variable `{name}` in negated atom is not \
+                             bound by a positive body atom"
+                        )));
+                    }
+                }
             }
             BodyLiteralKind::Compare { .. } => {
                 return Err(Error::Semantic(
@@ -224,6 +272,14 @@ fn validate_body(body: &[BodyLiteral]) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Does `var` occur in a positive atom of `body`?
+fn positively_bound(body: &[BodyLiteral], var: crate::ir::Var) -> bool {
+    body.iter().any(|literal| {
+        matches!(&literal.kind, BodyLiteralKind::Atom(atom)
+            if atom.args.iter().any(|arg| matches!(arg, Term::Var(v) if *v == var)))
+    })
 }
 
 /// Runs one stratum to fixpoint, semi-naively. Returns the updated round
@@ -264,6 +320,12 @@ fn eval_stratum(program: &Program, stratum: &[RuleId], model: &mut Model, mut ro
         for &rule_id in stratum {
             let rule = &program.rules[rule_id.0 as usize];
             for delta_pos in 0..rule.body.len() {
+                // Only positive positions take a delta view: a negated
+                // predicate's relation is a frozen lower stratum and gains no
+                // tuples mid-stratum, so there is no delta to join on.
+                if !matches!(rule.body[delta_pos].kind, BodyLiteralKind::Atom(_)) {
+                    continue;
+                }
                 let views: Vec<AtomView> = (0..rule.body.len())
                     .map(|i| match i.cmp(&delta_pos) {
                         std::cmp::Ordering::Less => AtomView::Full,
@@ -332,62 +394,127 @@ fn collect_rule_matches(
             },
             Derivation {
                 rule: rule_id,
-                premises: premises.to_vec(),
+                premises: premises
+                    .iter()
+                    .map(|premise| {
+                        premise
+                            .clone()
+                            .expect("complete match: every body literal contributed a premise")
+                    })
+                    .collect(),
             },
         ));
     });
 }
 
-/// A complete-match callback: receives the full bindings and the premise
-/// facts (in body order — the `BodyIdx` alignment provenance relies on).
-type OnMatch<'a> = dyn FnMut(&[Option<Value>], &[Fact]) + 'a;
+/// A complete-match callback: receives the full bindings and one premise per
+/// body literal, at its true index (the `BodyIdx` alignment provenance relies
+/// on). Every entry is `Some` at match time; the `Option` is backtracking
+/// state.
+type OnMatch<'a> = dyn FnMut(&[Option<Value>], &[Option<Premise>]) + 'a;
 
-/// Left-to-right nested-loop join over the body's positive atoms. Calls
-/// `on_match` once per match of the whole body.
+/// Nested-loop join over the body: positive atoms first in source order, then
+/// negated atoms as anti-join filters (§17 2026-07-20 — §10 safety guarantees
+/// every named variable under negation is bound once the positives have
+/// matched, and body-before-binder orderings would otherwise misread a named
+/// variable as a wildcard). Evaluation order is evaluator-internal; premises
+/// are recorded at their true body index, so `BodyIdx` alignment is
+/// untouched. Calls `on_match` once per match of the whole body.
 fn enumerate_matches(cx: &JoinCx<'_>, num_vars: usize, on_match: &mut OnMatch<'_>) {
+    let mut order: Vec<usize> = Vec::with_capacity(cx.body.len());
+    for (idx, literal) in cx.body.iter().enumerate() {
+        if matches!(literal.kind, BodyLiteralKind::Atom(_)) {
+            order.push(idx);
+        }
+    }
+    for (idx, literal) in cx.body.iter().enumerate() {
+        if matches!(literal.kind, BodyLiteralKind::NegAtom(_)) {
+            order.push(idx);
+        }
+    }
+    // Comparisons are rejected by validation and never reach the join loop,
+    // so `order` covers the whole body.
     let mut bindings: Vec<Option<Value>> = vec![None; num_vars];
-    let mut premises: Vec<Fact> = Vec::with_capacity(cx.body.len());
-    enumerate_from(cx, 0, &mut bindings, &mut premises, on_match);
+    let mut premises: Vec<Option<Premise>> = vec![None; cx.body.len()];
+    enumerate_from(cx, &order, 0, &mut bindings, &mut premises, on_match);
 }
 
 fn enumerate_from(
     cx: &JoinCx<'_>,
-    idx: usize,
+    order: &[usize],
+    depth: usize,
     bindings: &mut [Option<Value>],
-    premises: &mut Vec<Fact>,
+    premises: &mut [Option<Premise>],
     on_match: &mut OnMatch<'_>,
 ) {
-    if idx == cx.body.len() {
+    if depth == order.len() {
         on_match(bindings, premises);
         return;
     }
-    let BodyLiteralKind::Atom(atom) = &cx.body[idx].kind else {
-        unreachable!("validated: only positive atoms reach the join loop");
-    };
-    let full = cx.model.relation(atom.pred);
-    let atom_delta = cx.delta.get(&atom.pred);
-    let candidates: Box<dyn Iterator<Item = &Tuple>> = match cx.views[idx] {
-        AtomView::Full => Box::new(full.iter()),
-        AtomView::Delta => match atom_delta {
-            Some(delta) => Box::new(delta.iter()),
-            None => return,
-        },
-        AtomView::Old => Box::new(
-            full.iter()
-                .filter(move |tuple| atom_delta.is_none_or(|delta| !delta.contains(*tuple))),
-        ),
-    };
-    for tuple in candidates {
-        if let Some(bound) = try_match(atom, tuple, bindings) {
-            premises.push(Fact {
-                pred: atom.pred,
-                tuple: tuple.clone(),
-            });
-            enumerate_from(cx, idx + 1, bindings, premises, on_match);
-            premises.pop();
-            for slot in bound {
-                bindings[slot] = None;
+    let idx = order[depth];
+    match &cx.body[idx].kind {
+        BodyLiteralKind::Atom(atom) => {
+            let full = cx.model.relation(atom.pred);
+            let atom_delta = cx.delta.get(&atom.pred);
+            let candidates: Box<dyn Iterator<Item = &Tuple>> =
+                match cx.views[idx] {
+                    AtomView::Full => Box::new(full.iter()),
+                    AtomView::Delta => match atom_delta {
+                        Some(delta) => Box::new(delta.iter()),
+                        None => return,
+                    },
+                    AtomView::Old => Box::new(full.iter().filter(move |tuple| {
+                        atom_delta.is_none_or(|delta| !delta.contains(*tuple))
+                    })),
+                };
+            for tuple in candidates {
+                if let Some(bound) = try_match(atom, tuple, bindings) {
+                    premises[idx] = Some(Premise::Fact(Fact {
+                        pred: atom.pred,
+                        tuple: tuple.clone(),
+                    }));
+                    enumerate_from(cx, order, depth + 1, bindings, premises, on_match);
+                    premises[idx] = None;
+                    for slot in bound {
+                        bindings[slot] = None;
+                    }
+                }
             }
+        }
+        BodyLiteralKind::NegAtom(atom) => {
+            // Instantiate the absence pattern: constants and bound variables
+            // close a slot; an unbound slot is wildcard-fresh (validated)
+            // and stays open — existential under the negation (§7).
+            let pattern = AbsentPattern {
+                pred: atom.pred,
+                args: atom
+                    .args
+                    .iter()
+                    .map(|term| match term {
+                        Term::Const(value) => Some(value.clone()),
+                        Term::Var(var) => bindings[var.0 as usize].clone(),
+                    })
+                    .collect(),
+            };
+            // Always the full relation, never a delta view: the negated
+            // predicate's strata are strictly lower (validated), so its
+            // relation is complete and frozen here. A match refutes the
+            // negation; no match records the absence and moves on. Negated
+            // atoms bind nothing.
+            if cx
+                .model
+                .relation(atom.pred)
+                .iter()
+                .any(|tuple| pattern.matches(tuple))
+            {
+                return;
+            }
+            premises[idx] = Some(Premise::Absent(pattern));
+            enumerate_from(cx, order, depth + 1, bindings, premises, on_match);
+            premises[idx] = None;
+        }
+        BodyLiteralKind::Compare { .. } => {
+            unreachable!("validated: comparison literals are rejected before evaluation")
         }
     }
 }
@@ -570,11 +697,17 @@ mod tests {
             vec![
                 Derivation {
                     rule: RuleId(1),
-                    premises: vec![fact2(edge, "a", "b"), fact2(path, "b", "d")],
+                    premises: vec![
+                        Premise::Fact(fact2(edge, "a", "b")),
+                        Premise::Fact(fact2(path, "b", "d")),
+                    ],
                 },
                 Derivation {
                     rule: RuleId(1),
-                    premises: vec![fact2(edge, "a", "c"), fact2(path, "c", "d")],
+                    premises: vec![
+                        Premise::Fact(fact2(edge, "a", "c")),
+                        Premise::Fact(fact2(path, "c", "d")),
+                    ],
                 },
             ]
         );
@@ -588,7 +721,7 @@ mod tests {
             single,
             vec![Derivation {
                 rule: RuleId(0),
-                premises: vec![fact2(edge, "a", "b")],
+                premises: vec![Premise::Fact(fact2(edge, "a", "b"))],
             }]
         );
     }
@@ -645,13 +778,202 @@ mod tests {
         );
     }
 
+    /// Spec §16.2 end-to-end: the model, the exact recorded derivation with
+    /// its absence pattern, and the proof tree terminating at an `Absent`
+    /// leaf. "alice" is the only person no `parent(_, x)` fact points at.
     #[test]
-    fn negated_atoms_are_a_structured_error() {
-        // q(X) :- p(X), not p(X).  (lowering rejects this earlier; the engine
-        // defends its own contract.)
+    fn example_16_2_evaluates_with_absence_provenance() {
+        let program = crate::ir::fixtures::example_16_2();
+        let person = PredId(0);
+        let parent = PredId(1);
+        let root = PredId(2);
+        let model = eval(&program).unwrap();
+
+        let alice = Fact {
+            pred: root,
+            tuple: Tuple(vec![string_value("alice")]),
+        };
+        let expected: BTreeSet<Tuple> = [Tuple(vec![string_value("alice")])].into();
+        assert_eq!(model.relation(root), &expected);
+
+        // The derivation records the matched person fact and the pattern
+        // whose absence satisfied `not parent(_, X)`: wildcard slot open,
+        // `X` closed to "alice".
+        let absent = AbsentPattern {
+            pred: parent,
+            args: vec![None, Some(string_value("alice"))],
+        };
+        let derivations: Vec<Derivation> = model.derivations_of(&alice).cloned().collect();
+        assert_eq!(
+            derivations,
+            vec![Derivation {
+                rule: RuleId(0),
+                premises: vec![
+                    Premise::Fact(Fact {
+                        pred: person,
+                        tuple: Tuple(vec![string_value("alice")]),
+                    }),
+                    Premise::Absent(absent.clone()),
+                ],
+            }]
+        );
+
+        use crate::provenance::ProofTree;
+        assert_eq!(
+            ProofTree::explain(&model, &alice),
+            Some(ProofTree::Derived {
+                fact: alice,
+                rule: RuleId(0),
+                children: vec![
+                    ProofTree::Leaf(Fact {
+                        pred: person,
+                        tuple: Tuple(vec![string_value("alice")]),
+                    }),
+                    ProofTree::Absent(absent),
+                ],
+            })
+        );
+
+        // Hand-run differential until the generator emits negation (C3):
+        // the per-stratum naive oracle agrees.
+        assert_eq!(
+            naive::naive_eval(&program),
+            model.facts().collect::<BTreeSet<Fact>>()
+        );
+    }
+
+    /// Negation over a *recursive* IDB predicate: `path` closes in stratum 0,
+    /// then `no_path` reads its frozen extent in stratum 1. Also exercises
+    /// negation-before-binder scheduling: the negated literal sits first in
+    /// the body, so left-to-right evaluation would misread it.
+    #[test]
+    fn negation_over_recursive_idb_uses_the_frozen_extent() {
+        // node("a"). node("b"). node("c"). edge("a", "b"). edge("b", "c").
+        // path(X, Y) :- edge(X, Y).
+        // path(X, Y) :- edge(X, Z), path(Z, Y).
+        // no_path(X, Y) :- not path(X, Y), node(X), node(Y).
+        let mut program = Program::default();
+        let node = program.intern_pred("node", 1);
+        let edge = program.intern_pred("edge", 2);
+        let path = program.intern_pred("path", 2);
+        let no_path = program.intern_pred("no_path", 2);
+        for name in ["a", "b", "c"] {
+            program.facts.push(Fact {
+                pred: node,
+                tuple: Tuple(vec![string_value(name)]),
+            });
+        }
+        program.facts.push(fact2(edge, "a", "b"));
+        program.facts.push(fact2(edge, "b", "c"));
+        program.rules.push(Rule {
+            head: Atom {
+                pred: path,
+                args: vec![Term::Var(Var(0)), Term::Var(Var(1))],
+            },
+            body: vec![BodyLiteral {
+                kind: BodyLiteralKind::Atom(Atom {
+                    pred: edge,
+                    args: vec![Term::Var(Var(0)), Term::Var(Var(1))],
+                }),
+                span: Span::DUMMY,
+            }],
+            var_names: vec![Some("X".to_string()), Some("Y".to_string())],
+            span: Span::DUMMY,
+        });
+        program.rules.push(Rule {
+            head: Atom {
+                pred: path,
+                args: vec![Term::Var(Var(0)), Term::Var(Var(1))],
+            },
+            body: vec![
+                BodyLiteral {
+                    kind: BodyLiteralKind::Atom(Atom {
+                        pred: edge,
+                        args: vec![Term::Var(Var(0)), Term::Var(Var(2))],
+                    }),
+                    span: Span::DUMMY,
+                },
+                BodyLiteral {
+                    kind: BodyLiteralKind::Atom(Atom {
+                        pred: path,
+                        args: vec![Term::Var(Var(2)), Term::Var(Var(1))],
+                    }),
+                    span: Span::DUMMY,
+                },
+            ],
+            var_names: vec![
+                Some("X".to_string()),
+                Some("Y".to_string()),
+                Some("Z".to_string()),
+            ],
+            span: Span::DUMMY,
+        });
+        program.rules.push(Rule {
+            head: Atom {
+                pred: no_path,
+                args: vec![Term::Var(Var(0)), Term::Var(Var(1))],
+            },
+            body: vec![
+                BodyLiteral {
+                    kind: BodyLiteralKind::NegAtom(Atom {
+                        pred: path,
+                        args: vec![Term::Var(Var(0)), Term::Var(Var(1))],
+                    }),
+                    span: Span::DUMMY,
+                },
+                BodyLiteral {
+                    kind: BodyLiteralKind::Atom(Atom {
+                        pred: node,
+                        args: vec![Term::Var(Var(0))],
+                    }),
+                    span: Span::DUMMY,
+                },
+                BodyLiteral {
+                    kind: BodyLiteralKind::Atom(Atom {
+                        pred: node,
+                        args: vec![Term::Var(Var(1))],
+                    }),
+                    span: Span::DUMMY,
+                },
+            ],
+            var_names: vec![Some("X".to_string()), Some("Y".to_string())],
+            span: Span::DUMMY,
+        });
+        program.strata = vec![vec![RuleId(0), RuleId(1)], vec![RuleId(2)]];
+
+        let model = eval(&program).unwrap();
+        // path = {(a,b), (b,c), (a,c)}; no_path = 9 pairs minus those 3.
+        assert_eq!(model.relation(path).len(), 3);
+        let expected: BTreeSet<Tuple> = [
+            ("a", "a"),
+            ("b", "a"),
+            ("b", "b"),
+            ("c", "a"),
+            ("c", "b"),
+            ("c", "c"),
+        ]
+        .into_iter()
+        .map(|(x, y)| Tuple(vec![string_value(x), string_value(y)]))
+        .collect();
+        assert_eq!(model.relation(no_path), &expected);
+
+        // Hand-run differential until the generator emits negation (C3).
+        assert_eq!(
+            naive::naive_eval(&program),
+            model.facts().collect::<BTreeSet<Fact>>()
+        );
+    }
+
+    /// The engine defends the negation contract on hand-built IR: a *named*
+    /// variable in a negated atom with no positive binder is malformed
+    /// (well-lowered IR is protected by §10 safety).
+    #[test]
+    fn unbound_named_var_in_negated_atom_is_malformed_ir() {
+        // q(X) :- p(X), not r(Y).   (Y named, never positively bound)
         let mut program = Program::default();
         let p = program.intern_pred("p", 1);
         let q = program.intern_pred("q", 1);
+        let r = program.intern_pred("r", 1);
         program.rules.push(Rule {
             head: Atom {
                 pred: q,
@@ -667,6 +989,64 @@ mod tests {
                 },
                 BodyLiteral {
                     kind: BodyLiteralKind::NegAtom(Atom {
+                        pred: r,
+                        args: vec![Term::Var(Var(1))],
+                    }),
+                    span: Span::DUMMY,
+                },
+            ],
+            var_names: vec![Some("X".to_string()), Some("Y".to_string())],
+            span: Span::DUMMY,
+        });
+        program.strata = vec![vec![RuleId(0)]];
+        let err = eval(&program).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("malformed IR: named variable `Y` in negated atom"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// The other half of the contract: the negated predicate's defining rules
+    /// must sit in a strictly lower stratum, or the "complete and frozen"
+    /// invariant the anti-join relies on does not hold.
+    #[test]
+    fn negation_within_its_own_stratum_is_malformed_ir() {
+        // p(X) :- q(X).    r(X) :- q(X), not p(X).   — both in one stratum.
+        let mut program = Program::default();
+        let q = program.intern_pred("q", 1);
+        let p = program.intern_pred("p", 1);
+        let r = program.intern_pred("r", 1);
+        program.rules.push(Rule {
+            head: Atom {
+                pred: p,
+                args: vec![Term::Var(Var(0))],
+            },
+            body: vec![BodyLiteral {
+                kind: BodyLiteralKind::Atom(Atom {
+                    pred: q,
+                    args: vec![Term::Var(Var(0))],
+                }),
+                span: Span::DUMMY,
+            }],
+            var_names: vec![Some("X".to_string())],
+            span: Span::DUMMY,
+        });
+        program.rules.push(Rule {
+            head: Atom {
+                pred: r,
+                args: vec![Term::Var(Var(0))],
+            },
+            body: vec![
+                BodyLiteral {
+                    kind: BodyLiteralKind::Atom(Atom {
+                        pred: q,
+                        args: vec![Term::Var(Var(0))],
+                    }),
+                    span: Span::DUMMY,
+                },
+                BodyLiteral {
+                    kind: BodyLiteralKind::NegAtom(Atom {
                         pred: p,
                         args: vec![Term::Var(Var(0))],
                     }),
@@ -676,9 +1056,13 @@ mod tests {
             var_names: vec![Some("X".to_string())],
             span: Span::DUMMY,
         });
-        program.strata = vec![vec![RuleId(0)]];
+        program.strata = vec![vec![RuleId(0), RuleId(1)]];
         let err = eval(&program).unwrap_err();
-        assert!(err.to_string().contains("negation not yet supported"));
+        assert!(
+            err.to_string()
+                .contains("negates `p`, which is not defined in a strictly lower stratum"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
@@ -772,6 +1156,13 @@ mod tests {
         /// Reapplies a derivation's rule instance to its premises (testing.md
         /// E3), using the naive oracle's matching — independent of the
         /// semi-naive join loop that recorded it.
+        ///
+        /// Two passes, mirroring evaluation order: fact premises build the
+        /// environment first, then each `Absent` premise is re-derived from
+        /// its literal under that environment and must equal the recorded
+        /// pattern (the negated literal's own kind must match too). The
+        /// caller separately checks `Absent` patterns as non-matches against
+        /// the model.
         fn replay(program: &Program, derivation: &Derivation) -> Option<Fact> {
             let rule = program.rules.get(derivation.rule.0 as usize)?;
             if derivation.premises.len() != rule.body.len() {
@@ -779,13 +1170,36 @@ mod tests {
             }
             let mut env = HashMap::new();
             for (literal, premise) in rule.body.iter().zip(&derivation.premises) {
-                let BodyLiteralKind::Atom(atom) = &literal.kind else {
-                    return None;
+                let (BodyLiteralKind::Atom(atom), Premise::Fact(fact)) = (&literal.kind, premise)
+                else {
+                    continue;
                 };
-                if atom.pred != premise.pred {
+                if atom.pred != fact.pred {
                     return None;
                 }
-                env = match_atom(atom, &premise.tuple, &env)?;
+                env = match_atom(atom, &fact.tuple, &env)?;
+            }
+            for (literal, premise) in rule.body.iter().zip(&derivation.premises) {
+                match (&literal.kind, premise) {
+                    (BodyLiteralKind::Atom(_), Premise::Fact(_)) => {}
+                    (BodyLiteralKind::NegAtom(atom), Premise::Absent(pattern)) => {
+                        if atom.pred != pattern.pred {
+                            return None;
+                        }
+                        let expected: Vec<Option<Value>> = atom
+                            .args
+                            .iter()
+                            .map(|term| match term {
+                                Term::Const(value) => Some(value.clone()),
+                                Term::Var(var) => env.get(var).cloned(),
+                            })
+                            .collect();
+                        if expected != pattern.args {
+                            return None;
+                        }
+                    }
+                    _ => return None, // premise kind does not match its literal
+                }
             }
             Some(Fact {
                 pred: rule.head.pred,
@@ -800,6 +1214,17 @@ mod tests {
             match tree {
                 ProofTree::Leaf(fact) => {
                     prop_assert!(model.is_base(fact), "non-base leaf {fact:?}");
+                }
+                ProofTree::Absent(pattern) => {
+                    // An absence leaf must actually be absent: no tuple of
+                    // the predicate falls under the pattern.
+                    prop_assert!(
+                        !model
+                            .relation(pattern.pred)
+                            .iter()
+                            .any(|tuple| pattern.matches(tuple)),
+                        "absence leaf {pattern:?} is refuted by the model"
+                    );
                 }
                 ProofTree::Derived { children, .. } => {
                     for child in children {
@@ -965,14 +1390,28 @@ mod tests {
             }
 
             /// E3 — replaying any recorded derivation rederives exactly the
-            /// fact, and its premises all hold.
+            /// fact; fact premises all hold and absence premises are genuine
+            /// non-matches against the model (checked with this test's own
+            /// scan, independent of the engine's matcher).
             #[test]
             fn e3_derivations_replay(program in arb_program_with_edb()) {
                 let model = eval(&program).unwrap();
                 for fact in model.facts() {
                     for derivation in model.derivations_of(&fact) {
                         for premise in &derivation.premises {
-                            prop_assert!(model.contains(premise));
+                            match premise {
+                                Premise::Fact(f) => prop_assert!(model.contains(f)),
+                                Premise::Absent(pattern) => {
+                                    let refuted = model
+                                        .relation(pattern.pred)
+                                        .iter()
+                                        .any(|tuple| pattern.matches(tuple));
+                                    prop_assert!(
+                                        !refuted,
+                                        "absence premise {pattern:?} is refuted"
+                                    );
+                                }
+                            }
                         }
                         let replayed = replay(&program, derivation);
                         prop_assert_eq!(replayed.as_ref(), Some(&fact));
