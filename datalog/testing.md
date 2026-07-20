@@ -78,6 +78,15 @@ Design rules (Csmith lessons):
 - **Defect injection is single and self-contained**: `inject_defect` appends
   exactly one defective statement over fresh `defect_*` predicates, so the
   expected error is unambiguous regardless of the surrounding program.
+- **Both argument forms are generated.** Roughly half the predicates get a
+  `declare` naming their fields (`f0`, `f1`, …), and atoms over those may be
+  written with named arguments — partially selected in bodies, fully supplied
+  in heads (§4). Safety by construction is preserved by collecting a rule's
+  body variables *after* partial selection: an omitted field binds nothing, so
+  head variables are still drawn only from variables the body actually binds.
+- **Generator coverage is itself guarded.** `testgen::tests` asserts that
+  sampling produces both argument forms and at least one partial selection —
+  without it, A13 could pass vacuously if named generation silently regressed.
 
 **Policy — generators vs. the no-DSL rule.** The no-macro-DSL/no-builder rule
 (AGENTS.md) is about ergonomic sugar for hand-written tests; generators are
@@ -124,6 +133,15 @@ variants:
   clash) always yields the matching `Err`.
 - [x] **A12** Facts and rules split correctly; strata is a single stratum in
   source order (until negation lands).
+- [x] **A13** Named arguments are invisible to the IR: rewriting every named
+  literal into the positional literal it denotes — each field at its schema
+  position, omitted fields as `_` — lowers to structurally equal IR
+  (`testgen::positionalize`). This is the defining invariant of named-argument
+  lowering; A6–A12 additionally cover the named path because the generator
+  emits both forms.
+
+Named-argument defects injected by A11: unknown field, partial selection in a
+head, and named arguments on a predicate with no schema.
 
 ### Phase B — core evaluator (roadmap step 2) — generalizes §16.1, §16.3
 

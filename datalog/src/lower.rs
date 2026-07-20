@@ -12,10 +12,13 @@
 //!    atom; intern [`ir::PredId`]s in first-appearance order; report arity
 //!    conflicts. (Mixed positional/named needs no check: [`ast::Args`] makes
 //!    it unrepresentable.)
-//! 2. **Named → positional** — not yet implemented; any named-argument atom
-//!    reports a structured semantic error. When implemented (using the schema
-//!    from `declare`/imports), omitted fields become fresh anonymous
-//!    variables and heads must supply all fields (§4).
+//! 2. **Named → positional** — named arguments are resolved against the field
+//!    schema collected in pass 1 from `declare` statements and explicit import
+//!    schemas. Argument order within the literal is irrelevant (position comes
+//!    from the schema); omitted fields become fresh anonymous variables
+//!    (partial selection), and a head written in named form must supply every
+//!    field (§4). A named literal and the positional literal it denotes lower
+//!    to identical IR — named arguments are surface syntax only.
 //! 3. **Wildcard elimination + variable numbering** — per-clause scope; named
 //!    variables get dense slots in first-occurrence order, each `_` becomes a
 //!    fresh slot; `var_names` records `Some(name)` / `None` accordingly.
@@ -79,12 +82,51 @@ pub fn lower(program: &ast::Program) -> Result<ir::Program, Vec<Error>> {
     }
 }
 
-/// Lowering state: the interning tables and accumulated errors.
+/// Lowering state: the interning tables, the field-name registry, and
+/// accumulated errors.
 #[derive(Default)]
 struct Lowerer {
     predicates: Vec<ir::PredicateInfo>,
     by_name: HashMap<String, ir::PredId>,
+    /// Field names per predicate, from `declare` statements and explicit import
+    /// schemas — what makes named-argument access possible (§4). Collected over
+    /// the whole program in pass 1, so a `declare` may appear *after* the rule
+    /// that uses the named form.
+    schemas: HashMap<String, FieldSchema>,
     errors: Vec<Error>,
+}
+
+/// A predicate's field names, positionally ordered.
+struct FieldSchema {
+    /// Position → field name.
+    fields: Vec<String>,
+    /// Field name → position.
+    by_field: HashMap<String, usize>,
+    origin: SchemaOrigin,
+}
+
+/// Where a schema came from, so conflicts can name both sources.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SchemaOrigin {
+    Declare,
+    Import,
+}
+
+impl SchemaOrigin {
+    fn label(self) -> &'static str {
+        match self {
+            SchemaOrigin::Declare => "`declare`",
+            SchemaOrigin::Import => "the import schema",
+        }
+    }
+}
+
+/// Whether an atom occupies a clause head or a body position — heads written in
+/// named form must supply every field (§4), bodies may partially select.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AtomPos {
+    Head,
+    Body,
 }
 
 /// Per-clause variable numbering state.
@@ -122,14 +164,22 @@ impl Lowerer {
                 ast::StatementKind::Import(import) => {
                     // Without an explicit schema the arity comes from the
                     // source at load time; use sites will establish it below.
+                    // Field names likewise — so named access to a schema-less
+                    // import is an error until fact sources (§13) land.
                     if let Some(schema) = &import.schema {
                         self.intern_checked(&import.relation.name, schema.len() as u32);
+                        self.collect_schema(&import.relation.name, schema, SchemaOrigin::Import);
                     }
                 }
                 ast::StatementKind::Declare(declaration) => {
                     self.intern_checked(
                         &declaration.relation.name,
                         declaration.fields.len() as u32,
+                    );
+                    self.collect_schema(
+                        &declaration.relation.name,
+                        &declaration.fields,
+                        SchemaOrigin::Declare,
                     );
                 }
                 ast::StatementKind::Clause(clause) => {
@@ -166,6 +216,45 @@ impl Lowerer {
         }
     }
 
+    /// Records the field names of `name`, reporting duplicates within the
+    /// schema and conflicts with a schema already recorded for the predicate.
+    fn collect_schema(&mut self, name: &str, fields: &[ast::FieldDecl], origin: SchemaOrigin) {
+        let mut positions = Vec::with_capacity(fields.len());
+        let mut by_field = HashMap::with_capacity(fields.len());
+        for (position, field) in fields.iter().enumerate() {
+            positions.push(field.name.name.clone());
+            if by_field.insert(field.name.name.clone(), position).is_some() {
+                self.errors.push(Error::Semantic(format!(
+                    "duplicate field `{}` in the schema for `{name}`",
+                    field.name.name
+                )));
+            }
+        }
+
+        if let Some(existing) = self.schemas.get(name) {
+            if existing.fields != positions {
+                let conflict = format!(
+                    "conflicting schemas for `{name}`: {} gives ({}), {} gives ({})",
+                    existing.origin.label(),
+                    existing.fields.join(", "),
+                    origin.label(),
+                    positions.join(", ")
+                );
+                self.errors.push(Error::Semantic(conflict));
+            }
+            return;
+        }
+
+        self.schemas.insert(
+            name.to_string(),
+            FieldSchema {
+                fields: positions,
+                by_field,
+                origin,
+            },
+        );
+    }
+
     /// Interns `name` at `arity`, reporting a semantic error if the predicate
     /// was already interned at a different arity.
     fn intern_checked(&mut self, name: &str, arity: u32) -> ir::PredId {
@@ -200,27 +289,31 @@ impl Lowerer {
 
     fn lower_clause(&mut self, clause: &ast::Clause, out: &mut ir::Program) {
         let mut scope = VarScope::default();
-        let Some(head) = self.lower_atom(&clause.head, &mut scope) else {
+        let Some(head) = self.lower_atom(&clause.head, &mut scope, AtomPos::Head) else {
             return;
         };
 
         if clause.body.is_empty() {
-            // A fact must be ground (§10).
+            // A fact must be ground (§10). Checked against the *lowered* head
+            // so the named and positional paths behave identically; only the
+            // wording of the error distinguishes them.
             let mut values = Vec::with_capacity(head.args.len());
-            for (arg, term) in head.args.iter().zip(positional_terms(&clause.head)) {
+            let mut ground = true;
+            for (position, arg) in head.args.iter().enumerate() {
                 match arg {
                     ir::Term::Const(value) => values.push(value.clone()),
                     ir::Term::Var(var) => {
+                        ground = false;
                         let name = scope.names[var.0 as usize].as_deref().unwrap_or("_");
+                        let place = self.describe_arg(&clause.head, position);
                         self.errors.push(Error::Semantic(format!(
-                            "fact `{}` is not ground: variable `{name}` in argument {}",
+                            "fact `{}` is not ground: variable `{name}` in {place}",
                             clause.head.predicate.name,
-                            index_of(term, &clause.head) + 1,
                         )));
                     }
                 }
             }
-            if values.len() == head.args.len() {
+            if ground {
                 out.facts.push(ir::Fact {
                     pred: head.pred,
                     tuple: ir::Tuple(values),
@@ -257,7 +350,7 @@ impl Lowerer {
         for literal in body {
             match &literal.kind {
                 ast::LiteralKind::Atom { negated, atom } => {
-                    let Some(lowered_atom) = self.lower_atom(atom, scope) else {
+                    let Some(lowered_atom) = self.lower_atom(atom, scope, AtomPos::Body) else {
                         continue;
                     };
                     let kind = if *negated {
@@ -289,9 +382,14 @@ impl Lowerer {
         lowered
     }
 
-    /// Lowers an atom, or reports an error and returns `None` (named args are
-    /// pass 2, not yet implemented).
-    fn lower_atom(&mut self, atom: &ast::Atom, scope: &mut VarScope) -> Option<ir::Atom> {
+    /// Lowers an atom to positional form, or reports an error and returns
+    /// `None`.
+    fn lower_atom(
+        &mut self,
+        atom: &ast::Atom,
+        scope: &mut VarScope,
+        pos: AtomPos,
+    ) -> Option<ir::Atom> {
         match &atom.args {
             ast::Args::Positional(terms) => {
                 let pred = self.pred_id(&atom.predicate.name);
@@ -301,14 +399,100 @@ impl Lowerer {
                     .collect();
                 Some(ir::Atom { pred, args })
             }
-            ast::Args::Named(_) => {
-                self.errors.push(Error::Semantic(format!(
-                    "named-argument lowering not yet implemented: `{}`",
-                    atom.predicate.name
+            ast::Args::Named(named) => self.lower_named_atom(atom, named, scope, pos),
+        }
+    }
+
+    /// Pass 2: resolves a named-argument atom against its field schema (§4).
+    ///
+    /// The result is indistinguishable from lowering the equivalent positional
+    /// atom: fields land at their schema positions regardless of the order they
+    /// were written in, and omitted fields become fresh anonymous variables.
+    fn lower_named_atom(
+        &mut self,
+        atom: &ast::Atom,
+        named: &[ast::NamedArg],
+        scope: &mut VarScope,
+        pos: AtomPos,
+    ) -> Option<ir::Atom> {
+        let predicate = &atom.predicate.name;
+        let Some(schema) = self.schemas.get(predicate) else {
+            self.errors.push(Error::Semantic(format!(
+                "named arguments require known field names for `{predicate}`: add a \
+                 `declare {predicate}(...)` or an explicit import schema"
+            )));
+            return None;
+        };
+
+        // Position -> the index in `named` that supplied it.
+        let mut assigned: Vec<Option<usize>> = vec![None; schema.fields.len()];
+        let mut reported = Vec::new();
+        for (index, arg) in named.iter().enumerate() {
+            let Some(&position) = schema.by_field.get(&arg.field.name) else {
+                reported.push(Error::Semantic(format!(
+                    "unknown field `{}` for predicate `{predicate}`; known fields: {}",
+                    arg.field.name,
+                    schema.fields.join(", ")
                 )));
-                None
+                continue;
+            };
+            if assigned[position].is_some() {
+                reported.push(Error::Semantic(format!(
+                    "field `{}` is given twice in one `{predicate}` literal",
+                    arg.field.name
+                )));
+                continue;
+            }
+            assigned[position] = Some(index);
+        }
+
+        // §4: a head cannot leave columns unbound, so the named form must
+        // supply every field there. Bodies may partially select.
+        if pos == AtomPos::Head {
+            let missing: Vec<&str> = assigned
+                .iter()
+                .enumerate()
+                .filter(|(_, supplied)| supplied.is_none())
+                .map(|(position, _)| schema.fields[position].as_str())
+                .collect();
+            if !missing.is_empty() {
+                reported.push(Error::Semantic(format!(
+                    "head `{predicate}` uses named arguments and must supply every field; \
+                     missing: {}",
+                    missing.join(", ")
+                )));
             }
         }
+
+        let failed = !reported.is_empty();
+        self.errors.extend(reported);
+        if failed {
+            return None;
+        }
+
+        let pred = self.pred_id(predicate);
+        let args = assigned
+            .into_iter()
+            .map(|supplied| match supplied {
+                Some(index) => self.lower_term(&named[index].value, scope),
+                // Partial selection: an omitted field binds a fresh anonymous
+                // variable, exactly as a positional `_` would.
+                None => ir::Term::Var(scope.fresh()),
+            })
+            .collect();
+        Some(ir::Atom { pred, args })
+    }
+
+    /// Names an argument position for error messages: by field name when the
+    /// atom was written in named form, by index otherwise.
+    fn describe_arg(&self, atom: &ast::Atom, position: usize) -> String {
+        if matches!(atom.args, ast::Args::Named(_))
+            && let Some(schema) = self.schemas.get(&atom.predicate.name)
+            && let Some(field) = schema.fields.get(position)
+        {
+            return format!("field `{field}`");
+        }
+        format!("argument {}", position + 1)
     }
 
     fn lower_term(&mut self, term: &ast::Term, scope: &mut VarScope) -> ir::Term {
@@ -433,28 +617,11 @@ fn expr_vars(expr: &ir::Expr) -> Vec<ir::Var> {
     }
 }
 
-/// The positional terms of an atom known to be positional (facts only reach
-/// the ground check through the positional path).
-fn positional_terms(atom: &ast::Atom) -> &[ast::Term] {
-    match &atom.args {
-        ast::Args::Positional(terms) => terms,
-        ast::Args::Named(_) => &[],
-    }
-}
-
-/// Index of a term within its atom, for error messages.
-fn index_of(term: &ast::Term, atom: &ast::Atom) -> usize {
-    positional_terms(atom)
-        .iter()
-        .position(|t| std::ptr::eq(t, term))
-        .unwrap_or(0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::Span;
     use crate::ast::fixtures as ast_fix;
-    use crate::ast::{Args, Span};
     use crate::ir::fixtures as ir_fix;
 
     /// The contract test: lowering the hand-built §16.1 surface program
@@ -562,33 +729,399 @@ mod tests {
         );
     }
 
+    // --- Named-argument lowering (pass 2) ---
+
+    /// A `declare person(name, age).` statement, the schema most of the
+    /// named-argument tests below resolve against.
+    fn declare_person() -> ast::Statement {
+        ast_fix::declare(
+            "person",
+            vec![
+                ast_fix::field_decl("name", Some(ast::TypeName::String)),
+                ast_fix::field_decl("age", Some(ast::TypeName::Int)),
+            ],
+        )
+    }
+
+    /// The contract test: lowering the hand-built §16.7 surface program
+    /// produces exactly the hand-built §16.7 IR — field-to-position mapping,
+    /// partial selection into fresh slots, and both schema origins.
     #[test]
-    fn named_arguments_report_not_yet_implemented() {
+    fn lowering_16_7_matches_ir_fixture() {
+        let lowered = lower(&ast_fix::example_16_7()).expect("16.7 lowers cleanly");
+        assert_eq!(lowered, ir_fix::example_16_7());
+    }
+
+    /// The invariant behind the whole feature: a named literal and the
+    /// positional literal it denotes lower to identical IR.
+    #[test]
+    fn named_and_positional_forms_lower_identically() {
+        // adult(N) :- person(name: N, age: A).
+        let named = ast::Program {
+            statements: vec![
+                declare_person(),
+                ast_fix::rule(
+                    ast_fix::positional_atom("adult", vec![ast_fix::var_term("N")]),
+                    vec![ast_fix::positive_literal(ast_fix::named_atom(
+                        "person",
+                        vec![
+                            ast_fix::named_arg("name", ast_fix::var_term("N")),
+                            ast_fix::named_arg("age", ast_fix::var_term("A")),
+                        ],
+                    ))],
+                ),
+            ],
+        };
+        // adult(N) :- person(N, A).
+        let positional = ast::Program {
+            statements: vec![
+                declare_person(),
+                ast_fix::rule(
+                    ast_fix::positional_atom("adult", vec![ast_fix::var_term("N")]),
+                    vec![ast_fix::positive_literal(ast_fix::positional_atom(
+                        "person",
+                        vec![ast_fix::var_term("N"), ast_fix::var_term("A")],
+                    ))],
+                ),
+            ],
+        };
+
+        assert_eq!(
+            lower(&named).expect("named form lowers"),
+            lower(&positional).expect("positional form lowers")
+        );
+    }
+
+    /// Argument order inside a named literal is irrelevant — position comes
+    /// from the schema, not from how the literal was written (§4).
+    #[test]
+    fn named_argument_order_is_irrelevant() {
+        let in_order = ast::Program {
+            statements: vec![
+                declare_person(),
+                ast_fix::rule(
+                    ast_fix::positional_atom("adult", vec![ast_fix::var_term("N")]),
+                    vec![ast_fix::positive_literal(ast_fix::named_atom(
+                        "person",
+                        vec![
+                            ast_fix::named_arg("name", ast_fix::var_term("N")),
+                            ast_fix::named_arg("age", ast_fix::var_term("A")),
+                        ],
+                    ))],
+                ),
+            ],
+        };
+        let reversed = ast::Program {
+            statements: vec![
+                declare_person(),
+                ast_fix::rule(
+                    ast_fix::positional_atom("adult", vec![ast_fix::var_term("N")]),
+                    vec![ast_fix::positive_literal(ast_fix::named_atom(
+                        "person",
+                        vec![
+                            ast_fix::named_arg("age", ast_fix::var_term("A")),
+                            ast_fix::named_arg("name", ast_fix::var_term("N")),
+                        ],
+                    ))],
+                ),
+            ],
+        };
+
+        // Variable *numbering* differs (slots follow written order), so compare
+        // the resolved argument positions rather than whole programs.
+        let a = lower(&in_order).expect("lowers");
+        let b = lower(&reversed).expect("lowers");
+        let args_of = |program: &ir::Program| match &program.rules[0].body[0].kind {
+            ir::BodyLiteralKind::Atom(atom) => atom.args.clone(),
+            other => panic!("expected a positive atom, got {other:?}"),
+        };
+        let name_slot = |program: &ir::Program| {
+            program.rules[0]
+                .var_names
+                .iter()
+                .position(|n| n.as_deref() == Some("N"))
+                .expect("N is numbered") as u32
+        };
+        // In both programs, position 0 holds N and position 1 holds A.
+        assert_eq!(args_of(&a)[0], ir::Term::Var(ir::Var(name_slot(&a))));
+        assert_eq!(args_of(&b)[0], ir::Term::Var(ir::Var(name_slot(&b))));
+    }
+
+    /// Partial selection over a wide relation: omitted fields become distinct
+    /// fresh slots, and the atom still carries the predicate's full arity.
+    #[test]
+    fn partial_selection_fills_omitted_fields_with_fresh_slots() {
+        let program = ast::Program {
+            statements: vec![
+                ast_fix::declare(
+                    "employee",
+                    vec![
+                        ast_fix::field_decl("id", None),
+                        ast_fix::field_decl("name", None),
+                        ast_fix::field_decl("dept", None),
+                        ast_fix::field_decl("title", None),
+                    ],
+                ),
+                ast_fix::rule(
+                    ast_fix::positional_atom("manager_name", vec![ast_fix::var_term("N")]),
+                    vec![ast_fix::positive_literal(ast_fix::named_atom(
+                        "employee",
+                        vec![
+                            ast_fix::named_arg("name", ast_fix::var_term("N")),
+                            ast_fix::named_arg("title", ast_fix::string_term("manager")),
+                        ],
+                    ))],
+                ),
+            ],
+        };
+
+        let lowered = lower(&program).expect("partial selection lowers");
+        let rule = &lowered.rules[0];
+        let args = match &rule.body[0].kind {
+            ir::BodyLiteralKind::Atom(atom) => &atom.args,
+            other => panic!("expected a positive atom, got {other:?}"),
+        };
+        assert_eq!(args.len(), 4, "atom carries full arity");
+        assert_eq!(
+            args[3],
+            ir::Term::Const(ir::Value::String("manager".into()))
+        );
+
+        // id and dept are fresh, unnamed, and distinct from each other.
+        let fresh: Vec<ir::Var> = [0, 2]
+            .iter()
+            .map(|&i| match args[i] {
+                ir::Term::Var(var) => var,
+                ref other => panic!("expected a fresh variable, got {other:?}"),
+            })
+            .collect();
+        assert_ne!(fresh[0], fresh[1]);
+        for var in fresh {
+            assert_eq!(rule.var_names[var.0 as usize], None);
+        }
+    }
+
+    /// Schemas are collected over the whole program in pass 1, so a `declare`
+    /// may follow the rule that uses the named form.
+    #[test]
+    fn declare_may_follow_its_use() {
+        let program = ast::Program {
+            statements: vec![
+                ast_fix::rule(
+                    ast_fix::positional_atom("adult", vec![ast_fix::var_term("N")]),
+                    vec![ast_fix::positive_literal(ast_fix::named_atom(
+                        "person",
+                        vec![ast_fix::named_arg("name", ast_fix::var_term("N"))],
+                    ))],
+                ),
+                declare_person(),
+            ],
+        };
+        lower(&program).expect("declaration order does not matter");
+    }
+
+    #[test]
+    fn unknown_field_is_reported() {
+        let program = ast::Program {
+            statements: vec![
+                declare_person(),
+                ast_fix::rule(
+                    ast_fix::positional_atom("adult", vec![ast_fix::var_term("N")]),
+                    vec![ast_fix::positive_literal(ast_fix::named_atom(
+                        "person",
+                        vec![ast_fix::named_arg("nickname", ast_fix::var_term("N"))],
+                    ))],
+                ),
+            ],
+        };
+        let errors = lower(&program).expect_err("unknown field");
+        assert!(
+            errors.iter().any(|e| {
+                let text = e.to_string();
+                text.contains("unknown field `nickname`") && text.contains("name, age")
+            }),
+            "unexpected errors: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn duplicate_field_in_one_literal_is_reported() {
+        let program = ast::Program {
+            statements: vec![
+                declare_person(),
+                ast_fix::rule(
+                    ast_fix::positional_atom("adult", vec![ast_fix::var_term("N")]),
+                    vec![ast_fix::positive_literal(ast_fix::named_atom(
+                        "person",
+                        vec![
+                            ast_fix::named_arg("name", ast_fix::var_term("N")),
+                            ast_fix::named_arg("name", ast_fix::var_term("M")),
+                        ],
+                    ))],
+                ),
+            ],
+        };
+        let errors = lower(&program).expect_err("duplicate field");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.to_string().contains("`name` is given twice")),
+            "unexpected errors: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn named_arguments_without_a_schema_are_reported() {
         let program = ast::Program {
             statements: vec![ast_fix::rule(
                 ast_fix::positional_atom("adult", vec![ast_fix::var_term("N")]),
-                vec![ast::Literal {
-                    kind: ast::LiteralKind::Atom {
-                        negated: false,
-                        atom: ast::Atom {
-                            predicate: ast_fix::ident("person"),
-                            args: Args::Named(vec![ast::NamedArg {
-                                field: ast_fix::ident("name"),
-                                value: ast_fix::var_term("N"),
-                                span: Span::DUMMY,
-                            }]),
-                            span: Span::DUMMY,
-                        },
-                    },
-                    span: Span::DUMMY,
-                }],
+                vec![ast_fix::positive_literal(ast_fix::named_atom(
+                    "person",
+                    vec![ast_fix::named_arg("name", ast_fix::var_term("N"))],
+                ))],
             )],
         };
-        let errors = lower(&program).expect_err("named args unimplemented");
+        let errors = lower(&program).expect_err("no schema");
         assert!(
-            errors.iter().any(|e| e
-                .to_string()
-                .contains("named-argument lowering not yet implemented")),
+            errors.iter().any(|e| {
+                let text = e.to_string();
+                text.contains("require known field names for `person`")
+                    && text.contains("declare person(...)")
+            }),
+            "unexpected errors: {errors:?}"
+        );
+    }
+
+    /// §4: a head cannot leave columns unbound, so the named form must supply
+    /// every field there.
+    #[test]
+    fn partial_selection_in_a_rule_head_is_reported() {
+        let program = ast::Program {
+            statements: vec![
+                declare_person(),
+                // person(name: N) :- adult(N).   -- `age` left unbound
+                ast_fix::rule(
+                    ast_fix::named_atom(
+                        "person",
+                        vec![ast_fix::named_arg("name", ast_fix::var_term("N"))],
+                    ),
+                    vec![ast_fix::positive_literal(ast_fix::positional_atom(
+                        "adult",
+                        vec![ast_fix::var_term("N")],
+                    ))],
+                ),
+            ],
+        };
+        let errors = lower(&program).expect_err("partial head");
+        assert!(
+            errors.iter().any(|e| {
+                let text = e.to_string();
+                text.contains("must supply every field") && text.contains("missing: age")
+            }),
+            "unexpected errors: {errors:?}"
+        );
+    }
+
+    /// The same rule for facts — which, before the grounding path was checked
+    /// against the lowered head, silently produced no fact and no error.
+    #[test]
+    fn partial_selection_in_a_fact_is_reported() {
+        let program = ast::Program {
+            statements: vec![
+                declare_person(),
+                ast::Statement {
+                    kind: ast::StatementKind::Clause(ast::Clause {
+                        head: ast_fix::named_atom(
+                            "person",
+                            vec![ast_fix::named_arg("name", ast_fix::string_term("alice"))],
+                        ),
+                        body: Vec::new(),
+                        span: Span::DUMMY,
+                    }),
+                    span: Span::DUMMY,
+                },
+            ],
+        };
+        let errors = lower(&program).expect_err("partial fact");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.to_string().contains("must supply every field")),
+            "unexpected errors: {errors:?}"
+        );
+    }
+
+    /// A non-ground named fact names the offending *field*, not an index.
+    #[test]
+    fn non_ground_named_fact_reports_the_field_name() {
+        let program = ast::Program {
+            statements: vec![
+                declare_person(),
+                ast::Statement {
+                    kind: ast::StatementKind::Clause(ast::Clause {
+                        head: ast_fix::named_atom(
+                            "person",
+                            vec![
+                                ast_fix::named_arg("name", ast_fix::string_term("alice")),
+                                ast_fix::named_arg("age", ast_fix::var_term("A")),
+                            ],
+                        ),
+                        body: Vec::new(),
+                        span: Span::DUMMY,
+                    }),
+                    span: Span::DUMMY,
+                },
+            ],
+        };
+        let errors = lower(&program).expect_err("non-ground named fact");
+        assert!(
+            errors.iter().any(|e| {
+                let text = e.to_string();
+                text.contains("not ground") && text.contains("field `age`")
+            }),
+            "unexpected errors: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn conflicting_schemas_are_reported() {
+        let program = ast::Program {
+            statements: vec![
+                declare_person(),
+                ast_fix::declare(
+                    "person",
+                    vec![
+                        ast_fix::field_decl("name", None),
+                        ast_fix::field_decl("years", None),
+                    ],
+                ),
+            ],
+        };
+        let errors = lower(&program).expect_err("conflicting schemas");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.to_string().contains("conflicting schemas for `person`")),
+            "unexpected errors: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn duplicate_field_within_a_schema_is_reported() {
+        let program = ast::Program {
+            statements: vec![ast_fix::declare(
+                "person",
+                vec![
+                    ast_fix::field_decl("name", None),
+                    ast_fix::field_decl("name", None),
+                ],
+            )],
+        };
+        let errors = lower(&program).expect_err("duplicate schema field");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.to_string().contains("duplicate field `name`")),
             "unexpected errors: {errors:?}"
         );
     }
@@ -747,6 +1280,28 @@ mod tests {
                     "expected an error containing {:?}, got: {errors:?}",
                     defect.expected_error()
                 );
+            }
+
+            /// A13: named arguments are invisible to the IR. Rewriting every
+            /// named literal into the positional literal it denotes — fields at
+            /// their schema positions, omitted fields as `_` — lowers to
+            /// structurally identical IR.
+            #[test]
+            fn a13_named_and_positional_forms_agree(program in arb_safe_program()) {
+                let named = lower(&program);
+                let positional = lower(&crate::testgen::positionalize(&program));
+                match (named, positional) {
+                    (Ok(a), Ok(b)) => prop_assert_eq!(a, b),
+                    (Err(a), Err(b)) => prop_assert_eq!(
+                        a.len(), b.len(),
+                        "the two forms disagreed on how many errors to report"
+                    ),
+                    (a, b) => {
+                        return Err(TestCaseError::fail(format!(
+                            "named and positional forms disagreed: {a:?} vs {b:?}"
+                        )));
+                    }
+                }
             }
         }
     }

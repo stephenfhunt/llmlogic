@@ -378,6 +378,108 @@ pub(crate) mod fixtures {
             strata: vec![vec![RuleId(0), RuleId(1)]],
         }
     }
+
+    /// Spec §16.7 in lowered form, exactly as `lower()` must produce it from
+    /// `ast::fixtures::example_16_7()`.
+    ///
+    /// This is where named arguments disappear: `employee(name: N, title:
+    /// "manager")` becomes a full-arity eight-argument atom whose six omitted
+    /// fields are fresh anonymous slots, and `person(name: N, age: A)` becomes
+    /// the plain positional `person(N, A)`. Predicates intern in
+    /// first-appearance order (employee = 0, manager_name = 1, person = 2,
+    /// adult = 3).
+    pub(crate) fn example_16_7() -> Program {
+        let employee = PredId(0);
+        let manager_name = PredId(1);
+        let person = PredId(2);
+        let adult = PredId(3);
+        Program {
+            predicates: vec![
+                PredicateInfo {
+                    name: "employee".to_string(),
+                    arity: 8,
+                },
+                PredicateInfo {
+                    name: "manager_name".to_string(),
+                    arity: 1,
+                },
+                PredicateInfo {
+                    name: "person".to_string(),
+                    arity: 2,
+                },
+                PredicateInfo {
+                    name: "adult".to_string(),
+                    arity: 1,
+                },
+            ],
+            facts: vec![Fact {
+                pred: person,
+                tuple: Tuple(vec![string_value("alice"), Value::Int(30)]),
+            }],
+            rules: vec![
+                // manager_name(N) :- employee(name: N, title: "manager").
+                // Slot 0 is N (numbered from the head); the six omitted fields
+                // take fresh slots in schema order, skipping the two supplied.
+                Rule {
+                    head: Atom {
+                        pred: manager_name,
+                        args: vec![Term::Var(Var(0))],
+                    },
+                    body: vec![BodyLiteral {
+                        kind: BodyLiteralKind::Atom(Atom {
+                            pred: employee,
+                            args: vec![
+                                Term::Var(Var(1)),                    // id
+                                Term::Var(Var(0)),                    // name = N
+                                Term::Var(Var(2)),                    // age
+                                Term::Var(Var(3)),                    // dept
+                                Term::Const(string_value("manager")), // title
+                                Term::Var(Var(4)),                    // salary
+                                Term::Var(Var(5)),                    // city
+                                Term::Var(Var(6)),                    // start_date
+                            ],
+                        }),
+                        span: Span::DUMMY,
+                    }],
+                    var_names: vec![Some("N".to_string()), None, None, None, None, None, None],
+                    span: Span::DUMMY,
+                },
+                // adult(N) :- person(name: N, age: A), A >= 18.
+                Rule {
+                    head: Atom {
+                        pred: adult,
+                        args: vec![Term::Var(Var(0))],
+                    },
+                    body: vec![
+                        BodyLiteral {
+                            kind: BodyLiteralKind::Atom(Atom {
+                                pred: person,
+                                args: vec![Term::Var(Var(0)), Term::Var(Var(1))],
+                            }),
+                            span: Span::DUMMY,
+                        },
+                        BodyLiteral {
+                            kind: BodyLiteralKind::Compare {
+                                op: CmpOp::Ge,
+                                lhs: Expr::Term(Term::Var(Var(1))),
+                                rhs: Expr::Term(Term::Const(Value::Int(18))),
+                            },
+                            span: Span::DUMMY,
+                        },
+                    ],
+                    var_names: vec![Some("N".to_string()), Some("A".to_string())],
+                    span: Span::DUMMY,
+                },
+            ],
+            queries: Vec::new(),
+            imports: vec![ImportSpec {
+                pred: employee,
+                path: "data/employees.csv".to_string(),
+                span: Span::DUMMY,
+            }],
+            strata: vec![vec![RuleId(0), RuleId(1)]],
+        }
+    }
 }
 
 #[cfg(test)]

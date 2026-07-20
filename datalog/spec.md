@@ -95,7 +95,8 @@ Candidate principles to ratify:
 ## 4. Data model & types
 
 *Status: Draft — validated by the AST/IR prototype (`src/ast.rs`, `src/ir.rs`),
-2026-07-19*
+2026-07-19; the named-argument rules below implemented in lowering
+(`src/lower.rs`), 2026-07-20*
 
 ### Values and terms
 
@@ -529,6 +530,13 @@ adult(N) :- person(name: N, age: A), A >= 18.
 literal; partial selection (omitted fields bind to fresh anonymous variables);
 `declare` names fields, with types optional.
 
+*Implemented 2026-07-20* as lowering pass 2 (`src/lower.rs`), with
+`ast::fixtures::example_16_7` / `ir::fixtures::example_16_7` as the contract
+test. One adaptation in the fixture: the `employee` import is written with an
+explicit schema, because header-derived field names need fact sources (§13,
+not yet implemented). Until then, named access to a schema-less import is a
+structured error.
+
 ## 17. Decisions log & open questions
 
 *Status: living*
@@ -714,6 +722,39 @@ literal; partial selection (omitted fields bind to fresh anonymous variables);
   written. Lowering's wildcard elimination must therefore tag (or scope)
   fresh variables introduced under negation rather than treating them as
   ordinary rule variables.
+
+- **2026-07-20** — **Named-argument resolution is IR-invisible.** A named
+  literal and the positional literal it denotes lower to *structurally
+  identical* IR — the correctness condition for pass 2, and a property
+  (testing.md A13) rather than a comment. Fields land at their schema
+  positions regardless of the order written, and an omitted field becomes a
+  fresh anonymous slot exactly as a positional `_` would. Consequence: the
+  evaluator, provenance, and every later pass are entirely unaware that named
+  arguments exist, which is what makes §4's convenience free.
+- **2026-07-20** — **The field-name registry is `lower`-internal and
+  program-wide.** `Lowerer.schemas` maps predicate name → field names,
+  populated in pass 1 from `declare` statements and *explicit* import schemas.
+  Because pass 1 walks the whole program before any clause is lowered, a
+  `declare` may appear after the rule that uses the named form — declaration
+  order does not matter. Field names never enter the IR
+  (`ir::PredicateInfo` stays `{ name, arity }`). Two conflict rules: a
+  duplicate field name within one schema is an error, and a predicate given
+  two different schemas (e.g. a `declare` and an import schema that disagree)
+  is an error naming both origins; identical repeats are accepted.
+- **2026-07-20** — **Named access requires a *known* schema, and a schema-less
+  import has none until §13 lands.** `import "f.csv" as employee.` infers its
+  field names from the CSV header at load time, which lowering cannot see, so
+  `employee(name: N)` against it is a structured error suggesting a `declare`
+  or an explicit import schema. This is a temporary consequence of fact
+  sources being unimplemented, not a language rule — §16.7's spec text stays
+  as written, and its fixture uses the explicit-schema import form meanwhile.
+- **2026-07-20** — **Fact grounding is checked against the lowered head**, not
+  against surface positional terms, so the named and positional paths behave
+  identically and only the error *wording* differs (a named fact names the
+  offending field, a positional one names the index). This replaced a latent
+  bug: the previous zip-against-surface-terms formulation would have silently
+  dropped named facts, producing neither a fact nor an error, the moment named
+  heads began lowering successfully.
 
 ### Open questions
 

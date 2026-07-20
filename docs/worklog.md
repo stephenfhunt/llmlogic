@@ -16,6 +16,81 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-20 — Named-argument lowering (pass 2)
+
+**Done**
+- Implemented lowering pass 2, the last unimplemented path in `lower()`.
+  `src/lower.rs`: a `lower`-internal field registry (`Lowerer.schemas`,
+  `FieldSchema`/`SchemaOrigin`) populated in pass 1 from `declare` statements
+  and explicit import schemas; `lower_named_atom` resolving fields to schema
+  positions (order-insensitive), filling omitted fields with fresh slots
+  (partial selection) and enforcing §4's all-fields rule on heads via a new
+  `AtomPos` parameter; structured errors for unknown field, duplicate field in
+  a literal, missing schema, incomplete named head, duplicate field within a
+  schema, and conflicting schemas.
+- **Fixed a latent bug the stub was hiding**: fact grounding zipped the lowered
+  head against *surface positional terms*, and `positional_terms` returned
+  `&[]` for named args — so the first named fact to lower successfully would
+  have been silently dropped with no fact and no error. Grounding now runs
+  against the lowered head; `positional_terms`/`index_of` deleted.
+- Fixtures: `ast::fixtures::example_16_7` / `ir::fixtures::example_16_7` with
+  `lower(ast) == ir` as the contract test; the pre-existing §16.7 AST test now
+  uses the fixture instead of rebuilding it inline. Eleven example-based tests
+  (equivalence, order-insensitivity, partial selection, late `declare`, and one
+  per error case).
+- Testing: `testgen` now emits *both* argument forms — ~half the predicates get
+  a `declare`, atoms over those may be named, partially selected in bodies and
+  fully supplied in heads — so A6–A12 cover the named path. New `positionalize`
+  + property **A13** (named/positional lower identically), three new
+  `DefectKind`s feeding A11, and two generator-coverage guards so A13 cannot
+  pass vacuously. 64 tests, clippy/fmt clean.
+- Docs: spec §4 status, §16.7 implementation note, four new §17 decisions;
+  testing.md generator policy + A13; AGENTS.md roadmap corrected (see below).
+
+**Decided** (details in `spec.md` §17, 2026-07-20)
+- **Named-argument resolution is IR-invisible** — named and positional forms
+  lower to structurally identical IR. Stated as property A13, not a comment.
+- **The field registry is `lower`-internal and program-wide**: field names never
+  reach the IR, and a `declare` may appear *after* the rule that uses it.
+  Duplicate fields within a schema, and two disagreeing schemas for one
+  predicate, are errors.
+- **Named access needs a known schema**, so a *schema-less* import cannot be
+  accessed by field name until §13 fact sources land (header inference happens
+  at load time, which lowering cannot see). Temporary consequence, not a
+  language rule — §16.7's fixture uses the explicit-schema import meanwhile.
+- **Fact grounding is checked against the lowered head**, so named and
+  positional facts behave identically and only the error wording differs.
+
+**Corrected from the previous handoff**
+- The 2026-07-19 entry said "lowering already collects declare/import schemas
+  into its registry". It did not — `collect_predicates` read `fields.len()` for
+  arity and discarded the names; there was no registry. Building it was part of
+  this task.
+- `AGENTS.md` folded named-arg lowering into roadmap step 1 and marked that step
+  done, which is why the gap went unnoticed. Named-arg lowering is now its own
+  step 3 and the later steps are renumbered.
+
+**Next up**
+- **§7 stratified negation** (now roadmap step 4). Pre-decisions already in spec
+  §17 (2026-07-19): derivations record premises as a `BodyIdx`-aligned
+  `Premise::Fact | Premise::Absent(pattern)` enum, and wildcards inside negated
+  atoms are existential under the negation. Work: draft §7 (references.md group
+  3 — Apt/Blair/Walker perfect model), real stratification in lowering
+  (dependency graph, reject negative cycles), `NegAtom` evaluation in the
+  engine's per-stratum loop (`eval_stratum` shape is already there; negated
+  atoms filter rather than join, and never take a delta view), the `Premise`
+  change in `src/provenance.rs`, and Phase C properties C1–C3.
+- **Carry forward**: §16.2 currently fails safety even ignoring the "negation
+  not yet supported" error. `not parent(_, X)` lowers `_` to a fresh slot and
+  `check_body_safety` demands every variable in a negated atom be positively
+  bound — including that fresh one. The wildcards-are-existential decision fixes
+  it, but `VarScope` must start tracking which slots are wildcard-fresh, and
+  §10's range-restriction wording ("every variable in a negated atom") needs
+  narrowing to *named* variables to match.
+- Then **§8 builtins** (comparisons/arithmetic incl. the open `=` question) and
+  type inference (§4, C4–C5). Provenance *surface* (`?why`, JSON,
+  provenance-as-facts, E5) stays parked until step 5.
+
 ## 2026-07-19 — Core evaluator: semi-naive fixpoint, provenance, Phase B/E
 
 **Done**

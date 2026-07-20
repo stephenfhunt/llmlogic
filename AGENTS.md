@@ -80,9 +80,9 @@ rationale in spec §17):
 1. **AST + IR** (`src/ast.rs`, `src/ir.rs`, `src/lower.rs`) designed against spec
    §3–§5 — done 2026-07-19. Two distinct plain type hierarchies (spec §17): the
    surface AST mirrors the grammar (spans, named args, wildcards); the core IR is
-   **positional-only** and index-resolved — named arguments and partial selection
-   are resolved to positional form during front-end lowering, using the predicate
-   schema. The evaluator consumes `ir::Program` only.
+   **positional-only** and index-resolved. The evaluator consumes `ir::Program`
+   only. (Named-argument resolution — lowering pass 2 — was stubbed here and
+   landed 2026-07-20; see step 3.)
 2. **Core evaluator** (`src/engine/`, `src/provenance.rs`) — done 2026-07-19.
    `eval(&ir::Program) -> Result<Model, Error>`: stratified semi-naive fixpoint
    recording **all derivations per fact** (deduped by rule instance) plus
@@ -91,9 +91,15 @@ rationale in spec §17):
    evaluator (`src/engine/naive.rs`, test-only, permanent) is the differential
    oracle; testing.md Phase B (B1–B7) and Phase E (E1–E4, pulled forward) are
    green. Spec §6/§15 and the §11 data model are Draft.
-3. **Stratified negation** (§7), then **builtins + type inference** (§8/§4).
-4. **Lexer + parser** (§3–§5), wired to the engine.
-5. **CLI/REPL + agent API** (§14), full system tests.
+3. **Named-argument lowering** (`src/lower.rs` pass 2) — done 2026-07-20.
+   Named literals resolve against a `lower`-internal field registry collected
+   from `declare` statements and explicit import schemas; omitted fields become
+   fresh anonymous slots (partial selection) and named heads must supply every
+   field (§4). Named and positional forms lower to identical IR (testing.md
+   A13); §16.7 is the contract fixture.
+4. **Stratified negation** (§7), then **builtins + type inference** (§8/§4).
+5. **Lexer + parser** (§3–§5), wired to the engine.
+6. **CLI/REPL + agent API** (§14), full system tests.
 
 The test pyramid grows outward with the pipeline:
 - Engine unit tests over **hand-constructed IR** (`ir::Program`); lowering tests

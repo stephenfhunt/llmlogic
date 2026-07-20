@@ -281,6 +281,47 @@ pub(crate) mod fixtures {
         }
     }
 
+    pub(crate) fn int_term(value: i64) -> Term {
+        Term {
+            kind: TermKind::Constant(Constant::Int(value)),
+            span: Span::DUMMY,
+        }
+    }
+
+    pub(crate) fn named_arg(field: &str, value: Term) -> NamedArg {
+        NamedArg {
+            field: ident(field),
+            value,
+            span: Span::DUMMY,
+        }
+    }
+
+    pub(crate) fn named_atom(predicate: &str, args: Vec<NamedArg>) -> Atom {
+        Atom {
+            predicate: ident(predicate),
+            args: Args::Named(args),
+            span: Span::DUMMY,
+        }
+    }
+
+    pub(crate) fn field_decl(name: &str, ty: Option<TypeName>) -> FieldDecl {
+        FieldDecl {
+            name: ident(name),
+            ty,
+            span: Span::DUMMY,
+        }
+    }
+
+    pub(crate) fn declare(relation: &str, fields: Vec<FieldDecl>) -> Statement {
+        Statement {
+            kind: StatementKind::Declare(Declaration {
+                relation: ident(relation),
+                fields,
+            }),
+            span: Span::DUMMY,
+        }
+    }
+
     pub(crate) fn positional_atom(predicate: &str, args: Vec<Term>) -> Atom {
         Atom {
             predicate: ident(predicate),
@@ -362,6 +403,87 @@ pub(crate) mod fixtures {
             ],
         }
     }
+
+    /// Spec §16.7 — named arguments and partial selection: a wide imported
+    /// table selected by field name, and a `declare`d in-program predicate used
+    /// the same way.
+    ///
+    /// One adaptation from the spec text: §16.7 writes the import without a
+    /// schema and takes field names from the CSV header. Header inference needs
+    /// fact sources (§13, not yet implemented), so this fixture uses the
+    /// explicit-schema import form — which also exercises the `Import` schema
+    /// origin alongside `Declare`.
+    pub(crate) fn example_16_7() -> Program {
+        Program {
+            statements: vec![
+                Statement {
+                    kind: StatementKind::Import(Import {
+                        path: "data/employees.csv".to_string(),
+                        path_span: Span::DUMMY,
+                        relation: ident("employee"),
+                        schema: Some(vec![
+                            field_decl("id", Some(TypeName::Int)),
+                            field_decl("name", Some(TypeName::String)),
+                            field_decl("age", Some(TypeName::Int)),
+                            field_decl("dept", Some(TypeName::String)),
+                            field_decl("title", Some(TypeName::String)),
+                            field_decl("salary", Some(TypeName::Int)),
+                            field_decl("city", Some(TypeName::String)),
+                            field_decl("start_date", Some(TypeName::String)),
+                        ]),
+                    }),
+                    span: Span::DUMMY,
+                },
+                // manager_name(N) :- employee(name: N, title: "manager").
+                // Two fields selected out of eight — no wildcard run.
+                rule(
+                    positional_atom("manager_name", vec![var_term("N")]),
+                    vec![positive_literal(named_atom(
+                        "employee",
+                        vec![
+                            named_arg("name", var_term("N")),
+                            named_arg("title", string_term("manager")),
+                        ],
+                    ))],
+                ),
+                declare(
+                    "person",
+                    vec![
+                        field_decl("name", Some(TypeName::String)),
+                        field_decl("age", Some(TypeName::Int)),
+                    ],
+                ),
+                fact("person", vec![string_term("alice"), int_term(30)]),
+                // adult(N) :- person(name: N, age: A), A >= 18.
+                rule(
+                    positional_atom("adult", vec![var_term("N")]),
+                    vec![
+                        positive_literal(named_atom(
+                            "person",
+                            vec![
+                                named_arg("name", var_term("N")),
+                                named_arg("age", var_term("A")),
+                            ],
+                        )),
+                        Literal {
+                            kind: LiteralKind::Comparison(Comparison {
+                                op: CmpOp::Ge,
+                                lhs: Expr {
+                                    kind: ExprKind::Term(var_term("A")),
+                                    span: Span::DUMMY,
+                                },
+                                rhs: Expr {
+                                    kind: ExprKind::Term(int_term(18)),
+                                    span: Span::DUMMY,
+                                },
+                            }),
+                            span: Span::DUMMY,
+                        },
+                    ],
+                ),
+            ],
+        }
+    }
 }
 
 #[cfg(test)]
@@ -411,75 +533,40 @@ mod tests {
     /// `adult(N) :- person(name: N, age: A), A >= 18.` exercising `declare`,
     /// named arguments, and a comparison literal. Mixing positional and named
     /// arguments in one atom is unrepresentable: `Args` forces the choice.
+    /// Spec §16.7 — `declare`, named arguments, and a comparison literal.
+    /// Mixing positional and named arguments in one atom is unrepresentable:
+    /// `Args` forces the choice.
     #[test]
     fn example_16_7_named_arguments_shape() {
-        let declare = Statement {
-            kind: StatementKind::Declare(Declaration {
-                relation: ident("person"),
-                fields: vec![
-                    FieldDecl {
-                        name: ident("name"),
-                        ty: Some(TypeName::String),
-                        span: Span::DUMMY,
-                    },
-                    FieldDecl {
-                        name: ident("age"),
-                        ty: Some(TypeName::Int),
-                        span: Span::DUMMY,
-                    },
-                ],
-            }),
-            span: Span::DUMMY,
-        };
-        let adult_rule = rule(
-            positional_atom("adult", vec![var_term("N")]),
-            vec![
-                Literal {
-                    kind: LiteralKind::Atom {
-                        negated: false,
-                        atom: Atom {
-                            predicate: ident("person"),
-                            args: Args::Named(vec![
-                                NamedArg {
-                                    field: ident("name"),
-                                    value: var_term("N"),
-                                    span: Span::DUMMY,
-                                },
-                                NamedArg {
-                                    field: ident("age"),
-                                    value: var_term("A"),
-                                    span: Span::DUMMY,
-                                },
-                            ]),
-                            span: Span::DUMMY,
-                        },
-                    },
-                    span: Span::DUMMY,
-                },
-                Literal {
-                    kind: LiteralKind::Comparison(Comparison {
-                        op: CmpOp::Ge,
-                        lhs: Expr {
-                            kind: ExprKind::Term(var_term("A")),
-                            span: Span::DUMMY,
-                        },
-                        rhs: Expr {
-                            kind: ExprKind::Term(Term {
-                                kind: TermKind::Constant(Constant::Int(18)),
-                                span: Span::DUMMY,
-                            }),
-                            span: Span::DUMMY,
-                        },
-                    }),
-                    span: Span::DUMMY,
-                },
-            ],
-        );
-        let program = Program {
-            statements: vec![declare, adult_rule],
-        };
+        let program = example_16_7();
 
+        // The wide import carries an explicit eight-field schema.
         match &program.statements[0].kind {
+            StatementKind::Import(import) => {
+                let schema = import.schema.as_ref().expect("explicit schema");
+                assert_eq!(schema.len(), 8);
+                assert_eq!(schema[4].name.name, "title");
+            }
+            other => panic!("expected an import, got {other:?}"),
+        }
+
+        // Partial selection: two of eight fields named in the body literal.
+        match &program.statements[1].kind {
+            StatementKind::Clause(c) => match &c.body[0].kind {
+                LiteralKind::Atom { atom, .. } => match &atom.args {
+                    Args::Named(named) => {
+                        assert_eq!(named.len(), 2);
+                        assert_eq!(named[0].field.name, "name");
+                        assert_eq!(named[1].field.name, "title");
+                    }
+                    Args::Positional(_) => panic!("expected named arguments"),
+                },
+                other => panic!("expected an atom literal, got {other:?}"),
+            },
+            other => panic!("expected a clause, got {other:?}"),
+        }
+
+        match &program.statements[2].kind {
             StatementKind::Declare(d) => {
                 assert_eq!(d.relation.name, "person");
                 assert_eq!(d.fields.len(), 2);
@@ -487,17 +574,13 @@ mod tests {
             }
             other => panic!("expected a declaration, got {other:?}"),
         }
-        match &program.statements[1].kind {
-            StatementKind::Clause(c) => match &c.body[0].kind {
-                LiteralKind::Atom { atom, .. } => match &atom.args {
-                    Args::Named(named) => {
-                        assert_eq!(named.len(), 2);
-                        assert_eq!(named[0].field.name, "name");
-                    }
-                    Args::Positional(_) => panic!("expected named arguments"),
-                },
-                other => panic!("expected an atom literal, got {other:?}"),
-            },
+
+        // The `adult` rule pairs a named literal with a comparison.
+        match &program.statements[4].kind {
+            StatementKind::Clause(c) => {
+                assert_eq!(c.body.len(), 2);
+                assert!(matches!(c.body[1].kind, LiteralKind::Comparison(_)));
+            }
             other => panic!("expected a clause, got {other:?}"),
         }
     }
