@@ -17,7 +17,8 @@
 //!   `Ord` (symbol < string < int < float < bool) fixes the deterministic
 //!   canonical output order (§14).
 //! - `strata` is non-optional: evaluation order is part of the contract, not a
-//!   filled-in-later annotation. Until negation lands it is a single stratum.
+//!   filled-in-later annotation. Lowering's stratification (§7) populates it;
+//!   positive programs form a single stratum.
 //!
 //! ## Provenance guarantees (§11)
 //!
@@ -198,8 +199,9 @@ pub struct BodyLiteral {
 pub enum BodyLiteralKind {
     /// A positive atom.
     Atom(Atom),
-    /// A negated atom. Representable from day one; stratification rejects it
-    /// with "negation not yet supported" until roadmap step 3 lands.
+    /// A negated atom (§7): holds when no fact of the predicate matches, with
+    /// `None`-named slots existential under the negation. Stratification
+    /// places its predicate's defining rules in a strictly lower stratum.
     NegAtom(Atom),
     /// A comparison between arithmetic expressions.
     Compare { op: CmpOp, lhs: Expr, rhs: Expr },
@@ -259,7 +261,8 @@ pub struct Program {
     pub queries: Vec<Query>,
     pub imports: Vec<ImportSpec>,
     /// Evaluation order: each inner vec is one stratum, evaluated to fixpoint
-    /// before the next. A single stratum until stratified negation lands.
+    /// before the next (§7). Rules keep source order within a stratum; a
+    /// positive program is a single stratum.
     pub strata: Vec<Vec<RuleId>>,
 }
 
@@ -306,6 +309,13 @@ pub(crate) mod fixtures {
         Fact {
             pred,
             tuple: Tuple(vec![string_value(a), string_value(b)]),
+        }
+    }
+
+    pub(crate) fn fact1(pred: PredId, a: &str) -> Fact {
+        Fact {
+            pred,
+            tuple: Tuple(vec![string_value(a)]),
         }
     }
 
@@ -397,6 +407,74 @@ pub(crate) mod fixtures {
             ],
             imports: Vec::new(),
             strata: vec![vec![RuleId(0), RuleId(1)]],
+        }
+    }
+
+    /// Spec §16.2 in lowered form, exactly as `lower()` must produce it from
+    /// `ast::fixtures::example_16_2()`: predicates interned in
+    /// first-appearance order (person = 0, parent = 1, root = 2), the wildcard
+    /// under negation a fresh `None`-named slot, and a single stratum — `root`
+    /// negates only the EDB predicate `parent`, so no rule needs to wait on
+    /// another (its stratum *number* is 1, but empty levels are dropped).
+    pub(crate) fn example_16_2() -> Program {
+        let person = PredId(0);
+        let parent = PredId(1);
+        let root = PredId(2);
+        Program {
+            predicates: vec![
+                PredicateInfo {
+                    name: "person".to_string(),
+                    arity: 1,
+                    fields: None,
+                },
+                PredicateInfo {
+                    name: "parent".to_string(),
+                    arity: 2,
+                    fields: None,
+                },
+                PredicateInfo {
+                    name: "root".to_string(),
+                    arity: 1,
+                    fields: None,
+                },
+            ],
+            facts: vec![
+                fact1(person, "alice"),
+                fact1(person, "bob"),
+                fact1(person, "carol"),
+                fact2(parent, "alice", "bob"),
+                fact2(parent, "bob", "carol"),
+            ],
+            rules: vec![
+                // root(X) :- person(X), not parent(_, X).
+                Rule {
+                    head: Atom {
+                        pred: root,
+                        args: vec![Term::Var(Var(0))],
+                    },
+                    body: vec![
+                        BodyLiteral {
+                            kind: BodyLiteralKind::Atom(Atom {
+                                pred: person,
+                                args: vec![Term::Var(Var(0))],
+                            }),
+                            span: Span::DUMMY,
+                        },
+                        BodyLiteral {
+                            kind: BodyLiteralKind::NegAtom(Atom {
+                                pred: parent,
+                                args: vec![Term::Var(Var(1)), Term::Var(Var(0))],
+                            }),
+                            span: Span::DUMMY,
+                        },
+                    ],
+                    var_names: vec![Some("X".to_string()), None],
+                    span: Span::DUMMY,
+                },
+            ],
+            queries: Vec::new(),
+            imports: Vec::new(),
+            strata: vec![vec![RuleId(0)]],
         }
     }
 

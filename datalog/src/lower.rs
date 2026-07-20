@@ -25,10 +25,10 @@
 //! 4. **Safety / range restriction** (§10) — every variable in the head, in a
 //!    negated atom, or occurring only in comparisons must occur in a positive
 //!    body atom; facts must be ground.
-//! 5. **Stratification** — trivial for now: any negated literal is reported as
-//!    "negation not yet supported" (roadmap step 3 replaces this body with the
-//!    real dependency-graph algorithm — same signature), and all rules form a
-//!    single stratum in source order.
+//! 5. **Stratification** (§7) — number predicates by Ullman relaxation over
+//!    the dependency graph (negative edges strictly up), bucket rules by their
+//!    head predicate's stratum. Recursion through negation is a structured
+//!    error naming a concrete cycle; positive programs form a single stratum.
 //!
 //! Body literal order is preserved exactly — never reordered — because
 //! provenance references body positions ([`ir::BodyIdx`]).
@@ -73,10 +73,16 @@ pub fn lower(program: &ast::Program) -> Result<ir::Program, Vec<Error>> {
     // `ImportSpec` pointing past the end of the table.
     out.predicates = std::mem::take(&mut lowerer.predicates);
 
-    // Trivial stratification: negation is rejected above, so every rule lands
-    // in one stratum in source order.
-    if !out.rules.is_empty() {
-        out.strata = vec![(0..out.rules.len() as u32).map(ir::RuleId).collect()];
+    match stratify(&out.rules, &out.predicates) {
+        Ok(strata) => out.strata = strata,
+        Err(error) => {
+            lowerer.errors.push(error);
+            // Fall back to the single-stratum shape so the IR stays
+            // well-formed on the error path (`lower` returns `Err` anyway).
+            if !out.rules.is_empty() {
+                out.strata = vec![(0..out.rules.len() as u32).map(ir::RuleId).collect()];
+            }
+        }
     }
 
     if lowerer.errors.is_empty() {
@@ -380,10 +386,6 @@ impl Lowerer {
                         continue;
                     };
                     let kind = if *negated {
-                        self.errors.push(Error::Semantic(format!(
-                            "negation not yet supported: `not {}`",
-                            atom.predicate.name
-                        )));
                         ir::BodyLiteralKind::NegAtom(lowered_atom)
                     } else {
                         ir::BodyLiteralKind::Atom(lowered_atom)
@@ -597,8 +599,16 @@ impl Lowerer {
             match &literal.kind {
                 ir::BodyLiteralKind::Atom(_) => {}
                 ir::BodyLiteralKind::NegAtom(atom) => {
+                    // Only *named* variables need positive binding (§10):
+                    // wildcards under negation are existential (§7). A
+                    // `None`-named slot here is necessarily wildcard-fresh
+                    // inside this very literal — `VarScope::fresh` never
+                    // enters the name map, so a fresh slot occurs at exactly
+                    // one term position in the whole clause.
                     for arg in &atom.args {
-                        if let ir::Term::Var(var) = arg {
+                        if let ir::Term::Var(var) = arg
+                            && var_names[var.0 as usize].is_some()
+                        {
                             check(var, "negated atom");
                         }
                     }
@@ -613,6 +623,140 @@ impl Lowerer {
             }
         }
     }
+}
+
+/// Pass 5: stratification (§7). Numbers predicates by Ullman relaxation over
+/// the dependency graph — a head predicate's stratum is leveled up to each
+/// positive body predicate's stratum and strictly above each negated one's —
+/// then buckets rules by their head predicate's stratum, preserving source
+/// order within each bucket (empty levels are dropped). A stratum number
+/// reaching the predicate count witnesses recursion through negation; the
+/// error names a concrete cycle. By the independence theorem (§7) every valid
+/// stratification yields the same perfect model, so this particular numbering
+/// carries no semantic weight.
+///
+/// Everything here iterates rules in `RuleId` order and body literals in
+/// `BodyIdx` order — lowering is deterministic including its error list (A7).
+fn stratify(
+    rules: &[ir::Rule],
+    predicates: &[ir::PredicateInfo],
+) -> Result<Vec<Vec<ir::RuleId>>, Error> {
+    // Dependency edges: (head, body predicate, negated).
+    let mut edges = Vec::new();
+    for rule in rules {
+        for literal in &rule.body {
+            let (atom, negated) = match &literal.kind {
+                ir::BodyLiteralKind::Atom(atom) => (atom, false),
+                ir::BodyLiteralKind::NegAtom(atom) => (atom, true),
+                ir::BodyLiteralKind::Compare { .. } => continue,
+            };
+            edges.push((rule.head.pred, atom.pred, negated));
+        }
+    }
+
+    let mut stratum = vec![0u32; predicates.len()];
+    loop {
+        let mut changed = false;
+        for &(head, body, negated) in &edges {
+            let required = stratum[body.0 as usize] + u32::from(negated);
+            if stratum[head.0 as usize] < required {
+                if required as usize >= predicates.len() {
+                    // With n predicates a stratifiable program needs at most
+                    // n levels (0..n), so reaching n proves divergence.
+                    return Err(negative_cycle_error(&edges, predicates));
+                }
+                stratum[head.0 as usize] = required;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+
+    let levels = stratum.iter().copied().max().unwrap_or(0) as usize + 1;
+    let mut buckets: Vec<Vec<ir::RuleId>> = vec![Vec::new(); levels];
+    for (index, rule) in rules.iter().enumerate() {
+        buckets[stratum[rule.head.pred.0 as usize] as usize].push(ir::RuleId(index as u32));
+    }
+    buckets.retain(|bucket| !bucket.is_empty());
+    Ok(buckets)
+}
+
+/// Recovers a concrete cycle through a negative edge, for the stratification
+/// error. Only called once relaxation has diverged, which proves such a cycle
+/// exists: some negative edge `head → not body` closes back from `body` to
+/// `head` through dependency edges.
+fn negative_cycle_error(
+    edges: &[(ir::PredId, ir::PredId, bool)],
+    predicates: &[ir::PredicateInfo],
+) -> Error {
+    let name = |pred: ir::PredId| predicates[pred.0 as usize].name.as_str();
+    // Adjacency in edge order, so the recovered cycle is deterministic.
+    let mut deps: Vec<Vec<(ir::PredId, bool)>> = vec![Vec::new(); predicates.len()];
+    for &(head, body, negated) in edges {
+        deps[head.0 as usize].push((body, negated));
+    }
+    for &(head, body, negated) in edges {
+        if !negated {
+            continue;
+        }
+        let Some(steps) = dependency_path(&deps, body, head) else {
+            continue;
+        };
+        let mut parts = vec![name(head).to_string(), format!("not {}", name(body))];
+        for (pred, step_negated) in steps {
+            if step_negated {
+                parts.push(format!("not {}", name(pred)));
+            } else {
+                parts.push(name(pred).to_string());
+            }
+        }
+        return Error::Semantic(format!(
+            "program is not stratifiable: recursion through negation: {}",
+            parts.join(" -> ")
+        ));
+    }
+    unreachable!("stratification diverged, so a negative cycle must exist")
+}
+
+/// BFS over dependency edges from `start` to `target`; returns the traversed
+/// predicates after `start`, each with the negation flag of the edge into it.
+/// `Some(vec![])` when `start == target` (a self-loop needs no steps).
+fn dependency_path(
+    deps: &[Vec<(ir::PredId, bool)>],
+    start: ir::PredId,
+    target: ir::PredId,
+) -> Option<Vec<(ir::PredId, bool)>> {
+    if start == target {
+        return Some(Vec::new());
+    }
+    let mut parent: Vec<Option<(ir::PredId, bool)>> = vec![None; deps.len()];
+    let mut visited = vec![false; deps.len()];
+    visited[start.0 as usize] = true;
+    let mut queue = std::collections::VecDeque::from([start]);
+    while let Some(pred) = queue.pop_front() {
+        for &(next, negated) in &deps[pred.0 as usize] {
+            if visited[next.0 as usize] {
+                continue;
+            }
+            visited[next.0 as usize] = true;
+            parent[next.0 as usize] = Some((pred, negated));
+            if next == target {
+                let mut steps = Vec::new();
+                let mut at = target;
+                while at != start {
+                    let (prev, edge_negated) = parent[at.0 as usize].expect("walked via parent");
+                    steps.push((at, edge_negated));
+                    at = prev;
+                }
+                steps.reverse();
+                return Some(steps);
+            }
+            queue.push_back(next);
+        }
+    }
+    None
 }
 
 /// The variable slots bound by positive body atoms.
@@ -712,46 +856,153 @@ mod tests {
         );
     }
 
+    /// The contract test: lowering the hand-built §16.2 surface program
+    /// produces exactly the hand-built §16.2 IR — the negated atom survives,
+    /// its wildcard is a fresh `None`-named slot exempt from the safety check
+    /// (existential under the negation, §7), and stratification yields the
+    /// single stratum.
     #[test]
-    fn negation_lowers_structurally_but_is_rejected() {
-        // root(X) :- person(X), not parent(_, X).   (§16.2 shape)
+    fn lowering_16_2_matches_ir_fixture() {
+        let lowered = lower(&ast_fix::example_16_2()).expect("16.2 lowers cleanly");
+        assert_eq!(lowered, ir_fix::example_16_2());
+    }
+
+    /// A *named* variable under negation still needs a positive binder; only
+    /// wildcard-fresh slots are exempt.
+    #[test]
+    fn named_var_only_in_negated_atom_is_unsafe() {
+        // p(X) :- q(X), not r(Y).
         let program = ast::Program {
             statements: vec![ast_fix::rule(
-                ast_fix::positional_atom("root", vec![ast_fix::var_term("X")]),
+                ast_fix::positional_atom("p", vec![ast_fix::var_term("X")]),
                 vec![
                     ast_fix::positive_literal(ast_fix::positional_atom(
-                        "person",
+                        "q",
                         vec![ast_fix::var_term("X")],
                     )),
-                    ast::Literal {
-                        kind: ast::LiteralKind::Atom {
-                            negated: true,
-                            atom: ast_fix::positional_atom(
-                                "parent",
-                                vec![
-                                    ast::Term {
-                                        kind: ast::TermKind::Wildcard,
-                                        span: Span::DUMMY,
-                                    },
-                                    ast_fix::var_term("X"),
-                                ],
-                            ),
-                        },
-                        span: Span::DUMMY,
-                    },
+                    ast_fix::negated_literal(ast_fix::positional_atom(
+                        "r",
+                        vec![ast_fix::var_term("Y")],
+                    )),
                 ],
             )],
         };
-        let errors = lower(&program).expect_err("negation unsupported");
-        // The NegAtom path lowers structurally (the wildcard becomes a fresh
-        // var) and stratification then rejects it; the fresh var under
-        // negation also trips the safety check, which is acceptable noise
-        // until §7 defines wildcard-under-negation semantics.
+        let errors = lower(&program).expect_err("Y is unsafe");
         assert!(
-            errors
-                .iter()
-                .any(|e| e.to_string().contains("negation not yet supported")),
+            errors.iter().any(|e| {
+                let msg = e.to_string();
+                msg.contains("negated atom") && msg.contains("`Y`")
+            }),
             "unexpected errors: {errors:?}"
+        );
+    }
+
+    /// Recursion through negation of the rule's own head predicate.
+    #[test]
+    fn self_negation_is_not_stratifiable() {
+        // p(X) :- q(X), not p(X).
+        let program = ast::Program {
+            statements: vec![ast_fix::rule(
+                ast_fix::positional_atom("p", vec![ast_fix::var_term("X")]),
+                vec![
+                    ast_fix::positive_literal(ast_fix::positional_atom(
+                        "q",
+                        vec![ast_fix::var_term("X")],
+                    )),
+                    ast_fix::negated_literal(ast_fix::positional_atom(
+                        "p",
+                        vec![ast_fix::var_term("X")],
+                    )),
+                ],
+            )],
+        };
+        let errors = lower(&program).expect_err("negative self-loop");
+        assert!(
+            errors.iter().any(|e| e
+                .to_string()
+                .contains("not stratifiable: recursion through negation: p -> not p")),
+            "unexpected errors: {errors:?}"
+        );
+    }
+
+    /// A two-predicate negative cycle; the error names the whole cycle.
+    #[test]
+    fn a_negative_cycle_is_reported_with_its_path() {
+        // a(X) :- q(X), not b(X).    b(X) :- a(X).
+        let program = ast::Program {
+            statements: vec![
+                ast_fix::rule(
+                    ast_fix::positional_atom("a", vec![ast_fix::var_term("X")]),
+                    vec![
+                        ast_fix::positive_literal(ast_fix::positional_atom(
+                            "q",
+                            vec![ast_fix::var_term("X")],
+                        )),
+                        ast_fix::negated_literal(ast_fix::positional_atom(
+                            "b",
+                            vec![ast_fix::var_term("X")],
+                        )),
+                    ],
+                ),
+                ast_fix::rule(
+                    ast_fix::positional_atom("b", vec![ast_fix::var_term("X")]),
+                    vec![ast_fix::positive_literal(ast_fix::positional_atom(
+                        "a",
+                        vec![ast_fix::var_term("X")],
+                    ))],
+                ),
+            ],
+        };
+        let errors = lower(&program).expect_err("negative cycle");
+        assert!(
+            errors.iter().any(|e| e
+                .to_string()
+                .contains("recursion through negation: a -> not b -> a")),
+            "unexpected errors: {errors:?}"
+        );
+    }
+
+    /// Negation over an IDB predicate forces a second stratum; rules keep
+    /// source order within each stratum.
+    #[test]
+    fn negation_over_idb_yields_two_strata_in_order() {
+        // p(X) :- q(X).    r(X) :- q(X), not p(X).    s(X) :- q(X).
+        // p and s are stratum 0 (source order preserved); r is stratum 1.
+        let program = ast::Program {
+            statements: vec![
+                ast_fix::rule(
+                    ast_fix::positional_atom("p", vec![ast_fix::var_term("X")]),
+                    vec![ast_fix::positive_literal(ast_fix::positional_atom(
+                        "q",
+                        vec![ast_fix::var_term("X")],
+                    ))],
+                ),
+                ast_fix::rule(
+                    ast_fix::positional_atom("r", vec![ast_fix::var_term("X")]),
+                    vec![
+                        ast_fix::positive_literal(ast_fix::positional_atom(
+                            "q",
+                            vec![ast_fix::var_term("X")],
+                        )),
+                        ast_fix::negated_literal(ast_fix::positional_atom(
+                            "p",
+                            vec![ast_fix::var_term("X")],
+                        )),
+                    ],
+                ),
+                ast_fix::rule(
+                    ast_fix::positional_atom("s", vec![ast_fix::var_term("X")]),
+                    vec![ast_fix::positive_literal(ast_fix::positional_atom(
+                        "q",
+                        vec![ast_fix::var_term("X")],
+                    ))],
+                ),
+            ],
+        };
+        let lowered = lower(&program).expect("stratifiable");
+        assert_eq!(
+            lowered.strata,
+            vec![vec![ir::RuleId(0), ir::RuleId(2)], vec![ir::RuleId(1)]]
         );
     }
 

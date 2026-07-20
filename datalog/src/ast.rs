@@ -340,6 +340,23 @@ pub(crate) mod fixtures {
         }
     }
 
+    pub(crate) fn negated_literal(atom: Atom) -> Literal {
+        Literal {
+            kind: LiteralKind::Atom {
+                negated: true,
+                atom,
+            },
+            span: Span::DUMMY,
+        }
+    }
+
+    pub(crate) fn wildcard_term() -> Term {
+        Term {
+            kind: TermKind::Wildcard,
+            span: Span::DUMMY,
+        }
+    }
+
     pub(crate) fn fact(predicate: &str, args: Vec<Term>) -> Statement {
         Statement {
             kind: StatementKind::Clause(Clause {
@@ -400,6 +417,32 @@ pub(crate) mod fixtures {
                     }),
                     span: Span::DUMMY,
                 },
+            ],
+        }
+    }
+
+    /// Spec §16.2 — stratified negation-as-failure: `root` is everyone with no
+    /// recorded parent, via a negated atom with a wildcard existential under
+    /// the negation (§7).
+    pub(crate) fn example_16_2() -> Program {
+        Program {
+            statements: vec![
+                fact("person", vec![string_term("alice")]),
+                fact("person", vec![string_term("bob")]),
+                fact("person", vec![string_term("carol")]),
+                fact("parent", vec![string_term("alice"), string_term("bob")]),
+                fact("parent", vec![string_term("bob"), string_term("carol")]),
+                // root(X) :- person(X), not parent(_, X).
+                rule(
+                    positional_atom("root", vec![var_term("X")]),
+                    vec![
+                        positive_literal(positional_atom("person", vec![var_term("X")])),
+                        negated_literal(positional_atom(
+                            "parent",
+                            vec![wildcard_term(), var_term("X")],
+                        )),
+                    ],
+                ),
             ],
         }
     }
