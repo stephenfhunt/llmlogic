@@ -47,10 +47,7 @@ pub fn lower(program: &ast::Program) -> Result<ir::Program, Vec<Error>> {
     let mut lowerer = Lowerer::default();
     lowerer.collect_predicates(program);
     lowerer.attach_field_names();
-    let mut out = ir::Program {
-        predicates: lowerer.predicates.clone(),
-        ..ir::Program::default()
-    };
+    let mut out = ir::Program::default();
 
     for statement in &program.statements {
         match &statement.kind {
@@ -69,6 +66,12 @@ pub fn lower(program: &ast::Program) -> Result<ir::Program, Vec<Error>> {
             ast::StatementKind::Query(query) => lowerer.lower_query(query, &mut out),
         }
     }
+
+    // The table is taken only now because pass 2 can still intern: a
+    // schema-less import never used in a clause first appears at its
+    // `pred_id` call above, and snapshotting earlier would leave its
+    // `ImportSpec` pointing past the end of the table.
+    out.predicates = std::mem::take(&mut lowerer.predicates);
 
     // Trivial stratification: negation is rejected above, so every rule lands
     // in one stratum in source order.
@@ -1054,6 +1057,32 @@ mod tests {
         );
     }
 
+    /// A schema-less import never used in a clause is first interned during
+    /// pass 2 (`pred_id`), after the schema pass has run — the finished
+    /// program's predicate table must still contain it, or its `ImportSpec`
+    /// would hold a dangling `PredId`.
+    #[test]
+    fn a_schema_less_import_alone_still_reaches_the_predicate_table() {
+        let program = ast::Program {
+            statements: vec![ast::Statement {
+                kind: ast::StatementKind::Import(ast::Import {
+                    path: "data/employees.csv".to_string(),
+                    path_span: Span::DUMMY,
+                    relation: ast_fix::ident("employee"),
+                    schema: None,
+                }),
+                span: Span::DUMMY,
+            }],
+        };
+        let lowered = lower(&program).expect("a lone schema-less import lowers");
+
+        assert_eq!(lowered.imports.len(), 1);
+        let info = &lowered.predicates[lowered.imports[0].pred.0 as usize];
+        assert_eq!(info.name, "employee");
+        assert_eq!(info.arity, 0, "arity is pending source load (§13)");
+        assert_eq!(info.fields, None);
+    }
+
     #[test]
     fn unknown_field_is_reported() {
         let program = ast::Program {
@@ -1434,6 +1463,41 @@ mod tests {
                         return Err(TestCaseError::fail(format!(
                             "named and positional forms disagreed: {a:?} vs {b:?}"
                         )));
+                    }
+                }
+            }
+
+            /// A14: field names attach to exactly the predicates the program
+            /// gives a schema, and match it in order — so `Some(f)` implies
+            /// `f.len() == arity` for every predicate of every safe program.
+            #[test]
+            fn a14_field_names_attach_exactly_to_schema_predicates(
+                program in arb_safe_program()
+            ) {
+                let mut schemas = std::collections::HashMap::new();
+                for statement in &program.statements {
+                    let (relation, fields) = match &statement.kind {
+                        ast::StatementKind::Declare(d) => (&d.relation, &d.fields),
+                        ast::StatementKind::Import(i) => match &i.schema {
+                            Some(schema) => (&i.relation, schema),
+                            None => continue,
+                        },
+                        _ => continue,
+                    };
+                    let names: Vec<String> =
+                        fields.iter().map(|f| f.name.name.clone()).collect();
+                    schemas.insert(relation.name.clone(), names);
+                }
+
+                let lowered = lower(&program).expect("safe programs lower");
+                for info in &lowered.predicates {
+                    prop_assert_eq!(
+                        info.fields.as_ref(),
+                        schemas.get(&info.name),
+                        "for `{}`", &info.name
+                    );
+                    if let Some(fields) = &info.fields {
+                        prop_assert_eq!(fields.len(), info.arity as usize, "for `{}`", &info.name);
                     }
                 }
             }

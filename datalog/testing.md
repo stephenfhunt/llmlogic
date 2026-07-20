@@ -140,6 +140,11 @@ variants:
   lowering; A6–A12 additionally cover the named path because the generator
   emits both forms.
 
+- [x] **A14** Field names attach to exactly the predicates the program gives a
+  schema (`declare` or explicit import schema), and match it in order — hence
+  `Some(f)` implies `f.len() == arity` on every `ir::PredicateInfo` of every
+  safe program.
+
 Named-argument defects injected by A11: unknown field, partial selection in a
 head, and named arguments on a predicate with no schema.
 

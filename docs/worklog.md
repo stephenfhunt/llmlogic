@@ -92,6 +92,27 @@ raw transcripts (Claude Code auto-saves those under
   mismatched schema is not attached. Mutation-checked — removing the guard
   fails the test.
 
+**Follow-up — review fixes: predicate-table snapshot moved after pass 2, A14**
+- Review of the above found a latent dangling-`PredId` bug adjacent to the
+  seam it touched: `lower()` snapshotted `out.predicates` before the statement
+  loop, but pass 2 can still intern — `pred_id()` interns a schema-less import
+  never used in a clause at arity 0. A program whose only mention of a
+  predicate is such an import produced an `ImportSpec` pointing past the end
+  of the table. Pre-existing (the snapshot placement predates field-name
+  retention), but the field-name work added a second must-happen-before-the-
+  snapshot step, making the ordering more fragile. Fix: `out.predicates` is
+  now taken from the lowerer *after* the loop; pass 2 never reads it.
+  Regression test lowers a lone schema-less import and indexes the table at
+  the import's `PredId`.
+- **A14** added to the Phase A property suite: field names attach to exactly
+  the predicates the program gives a schema, matching it in order — so
+  `Some(f)` implies `f.len() == arity` across all generated safe programs,
+  not just the §16.7 fixture. The generator already emitted `declare`s, so
+  the property cost only the assertion.
+- Both fixes mutation-checked: reverting the snapshot placement panics the
+  regression test on the dangling index; deleting the `attach_field_names`
+  call fails A14. 69 tests.
+
 **Next up**
 - **§7 stratified negation** (now roadmap step 4). Pre-decisions already in spec
   §17 (2026-07-19): derivations record premises as a `BodyIdx`-aligned
