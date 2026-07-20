@@ -27,8 +27,8 @@
 use proptest::prelude::*;
 
 use crate::ast::fixtures::{
-    declare, fact, field_decl, named_arg, named_atom, positional_atom, positive_literal, rule,
-    var_term,
+    declare, fact, field_decl, named_arg, named_atom, negated_literal, positional_atom,
+    positive_literal, rule, var_term, wildcard_term,
 };
 use crate::ast::{Constant, Program, Span, Statement, Term, TermKind};
 use crate::ir;
@@ -103,14 +103,20 @@ fn arb_head_arg_spec() -> impl Strategy<Value = HeadArgSpec> {
     )
 }
 
-/// One body atom: predicate selector, whether to write it in named form, args.
-type BodyAtomSpec = (u8, bool, Vec<ArgSpec>);
+/// One body atom: predicate selector, named-form flag, negated flag, args.
+type BodyAtomSpec = (u8, bool, bool, Vec<ArgSpec>);
 /// A rule: body atoms, head predicate selector, named-head flag, head args.
 type RuleSpec = (Vec<BodyAtomSpec>, u8, bool, Vec<HeadArgSpec>);
 type FactSpec = (u8, Vec<Constant>);
-/// One predicate: arity, and whether it gets a `declare` naming its fields
-/// (only such predicates can be used with named arguments, §4).
-type PredSpec = (u32, bool);
+/// One predicate: arity, whether it gets a `declare` naming its fields (only
+/// such predicates can be used with named arguments, §4), and its *level*
+/// (0..=2) — the stratifiability witness: `build_program` remaps positive
+/// body selectors into predicates at ≤ the head's level and negated ones
+/// strictly below it, so any cycle is level-constant and positive — generated
+/// programs are stratifiable by construction (no rejection sampling). Levels
+/// are coarse (three of them) so positive recursion within a level stays
+/// common.
+type PredSpec = (u32, bool, u8);
 type ProgramSpec = (Vec<PredSpec>, Vec<FactSpec>, Vec<RuleSpec>);
 
 /// Size bounds for [`arb_program_spec`]. Spec argument vectors are always
@@ -126,7 +132,11 @@ struct SpecBounds {
 
 fn arb_program_spec(bounds: SpecBounds) -> impl Strategy<Value = ProgramSpec> {
     let arities = proptest::collection::vec(
-        (1u32..=bounds.max_arity, proptest::bool::weighted(0.5)),
+        (
+            1u32..=bounds.max_arity,
+            proptest::bool::weighted(0.5),
+            0u8..=2,
+        ),
         bounds.predicates,
     );
     let facts = proptest::collection::vec(
@@ -152,6 +162,7 @@ fn arb_body_atom_spec() -> impl Strategy<Value = BodyAtomSpec> {
     (
         any::<u8>(),
         proptest::bool::weighted(0.4),
+        proptest::bool::weighted(0.3),
         proptest::collection::vec(arb_arg_spec(), MAX_ARITY),
     )
 }
@@ -205,32 +216,40 @@ pub(crate) fn arb_program_with_edb() -> impl Strategy<Value = ir::Program> {
         .prop_map(|ast| crate::lower::lower(&ast).expect("safe-by-construction programs lower"))
 }
 
-/// A pair `(base, extended)` of safe programs over the same predicate
-/// universe where `extended` is `base` plus one extra fact and one extra rule
-/// (testing.md B4 monotonicity). Compare outputs by predicate *name*: the
-/// extra statements can change predicate first-appearance order, so `PredId`s
-/// need not line up between the two.
+/// A pair `(base, extended)` of safe programs where `extended` is `base` plus
+/// one extra fact and one extra rule (testing.md B4 monotonicity). The
+/// extension lives on fresh `ext_*` predicates — nothing in the base depends
+/// on them, so `extended ⊇ base` holds even when the base negates (testing.md
+/// C3's B4 restriction) — while the extra rule still joins against an
+/// existing relation. Compare outputs by predicate *name*: the extra
+/// statements change predicate first-appearance order, so `PredId`s need not
+/// line up between the two.
 pub(crate) fn arb_extension_pair() -> impl Strategy<Value = (Program, Program)> {
-    let extras = (
-        (
-            any::<u8>(),
-            proptest::collection::vec(arb_constant(), MAX_ARITY),
-        ),
-        (
-            proptest::collection::vec(arb_body_atom_spec(), 1..=2),
-            any::<u8>(),
-            proptest::bool::weighted(0.4),
-            proptest::collection::vec(arb_head_arg_spec(), MAX_ARITY),
-        ),
-    );
+    let extras = (any::<u8>(), arb_constant());
     (arb_program_spec(eval_bounds()), extras).prop_map(
-        |((arities, facts, rules), (extra_fact, extra_rule))| {
-            let base = build_program((arities.clone(), facts.clone(), rules.clone()));
-            let mut facts = facts;
-            let mut rules = rules;
-            facts.push(extra_fact);
-            rules.push(extra_rule);
-            let extended = build_program((arities, facts, rules));
+        |((arities, facts, rules), (join_sel, constant))| {
+            let join_index = join_sel as usize % arities.len();
+            let join_arity = arities[join_index].0 as usize;
+            let base = build_program((arities, facts, rules));
+            let mut extended = base.clone();
+            extended.statements.push(fact(
+                "ext_seed",
+                vec![Term {
+                    kind: TermKind::Constant(constant),
+                    span: Span::DUMMY,
+                }],
+            ));
+            // ext_result(V0) :- ext_seed(V0), p<join>(_, …).
+            extended.statements.push(rule(
+                positional_atom("ext_result", vec![var_term("V0")]),
+                vec![
+                    positive_literal(positional_atom("ext_seed", vec![var_term("V0")])),
+                    positive_literal(positional_atom(
+                        &format!("p{join_index}"),
+                        (0..join_arity).map(|_| wildcard_term()).collect(),
+                    )),
+                ],
+            ));
             (base, extended)
         },
     )
@@ -265,16 +284,54 @@ pub(crate) fn with_duplicated_facts(mut program: ir::Program, selectors: &[u8]) 
     program
 }
 
-/// B4: appends one extra ground fact for an existing predicate, at its
-/// declared arity. No-op on predicate-free programs. `values` must supply at
-/// least [`MAX_ARITY`] values.
+/// Predicates no negated atom transitively depends on. Adding facts to these
+/// cannot grow any negated relation, so evaluation stays monotone in them
+/// even under negation (testing.md C3's B4 restriction). For positive
+/// programs this is every predicate.
+pub(crate) fn negation_independent_preds(program: &ir::Program) -> Vec<ir::PredId> {
+    let n = program.predicates.len();
+    let mut deps: Vec<Vec<ir::PredId>> = vec![Vec::new(); n];
+    let mut tainted_roots: Vec<ir::PredId> = Vec::new();
+    for rule in &program.rules {
+        for literal in &rule.body {
+            match &literal.kind {
+                ir::BodyLiteralKind::Atom(atom) => {
+                    deps[rule.head.pred.0 as usize].push(atom.pred);
+                }
+                ir::BodyLiteralKind::NegAtom(atom) => {
+                    deps[rule.head.pred.0 as usize].push(atom.pred);
+                    tainted_roots.push(atom.pred);
+                }
+                ir::BodyLiteralKind::Compare { .. } => {}
+            }
+        }
+    }
+    let mut tainted = vec![false; n];
+    let mut worklist = tainted_roots;
+    while let Some(pred) = worklist.pop() {
+        if std::mem::replace(&mut tainted[pred.0 as usize], true) {
+            continue;
+        }
+        worklist.extend(deps[pred.0 as usize].iter().copied());
+    }
+    (0..n as u32)
+        .map(ir::PredId)
+        .filter(|pred| !tainted[pred.0 as usize])
+        .collect()
+}
+
+/// B4: appends one extra ground fact, at its predicate's declared arity, for
+/// a predicate no negation transitively depends on (adding facts elsewhere is
+/// not monotone under negation — testing.md C3). No-op when no such predicate
+/// exists. `values` must supply at least [`MAX_ARITY`] values.
 pub(crate) fn with_extra_fact(
     mut program: ir::Program,
     pred_sel: u8,
     values: Vec<ir::Value>,
 ) -> ir::Program {
-    if !program.predicates.is_empty() {
-        let pred = ir::PredId(pred_sel as u32 % program.predicates.len() as u32);
+    let safe = negation_independent_preds(&program);
+    if !safe.is_empty() {
+        let pred = safe[pred_sel as usize % safe.len()];
         let arity = program.pred_info(pred).arity as usize;
         program.facts.push(ir::Fact {
             pred,
@@ -324,16 +381,17 @@ pub(crate) fn with_swapped_stratum_rules(
 }
 
 fn build_program((arities, facts, rules): ProgramSpec) -> Program {
-    let pred_name = |sel: u8| format!("p{}", sel as usize % arities.len());
-    let pred_arity = |sel: u8| arities[sel as usize % arities.len()].0 as usize;
+    let pred_name = |index: usize| format!("p{index}");
+    let pred_arity = |index: usize| arities[index].0 as usize;
     // Only `declare`d predicates may be used with named arguments (§4).
-    let has_schema = |sel: u8| arities[sel as usize % arities.len()].1;
+    let has_schema = |index: usize| arities[index].1;
+    let level = |index: usize| arities[index].2;
 
     let mut statements = Vec::new();
 
     // Declarations first, though lowering collects schemas program-wide and
     // does not require it.
-    for (index, (arity, declared)) in arities.iter().enumerate() {
+    for (index, (arity, declared, _level)) in arities.iter().enumerate() {
         if *declared {
             let fields = (0..*arity as usize)
                 .map(|position| field_decl(&field_name(position), None))
@@ -342,28 +400,52 @@ fn build_program((arities, facts, rules): ProgramSpec) -> Program {
         }
     }
 
+    // Facts create no dependency edges, so their selectors map over every
+    // predicate regardless of level.
     for (sel, constants) in facts {
+        let index = sel as usize % arities.len();
         let args = constants
             .into_iter()
-            .take(pred_arity(sel))
+            .take(pred_arity(index))
             .map(|c| Term {
                 kind: TermKind::Constant(c),
                 span: Span::DUMMY,
             })
             .collect();
-        statements.push(fact(&pred_name(sel), args));
+        statements.push(fact(&pred_name(index), args));
     }
 
     for (body_specs, head_sel, named_head, head_specs) in rules {
+        let head_index = head_sel as usize % arities.len();
+        // The stratifiability witness (see `PredSpec`): positive body
+        // selectors remap into predicates at ≤ the head's level (the head
+        // itself is in the pool, so positive recursion survives), negated
+        // ones strictly below; a negation with nothing below falls back to a
+        // positive atom.
+        let positive_pool: Vec<usize> = (0..arities.len())
+            .filter(|&i| level(i) <= level(head_index))
+            .collect();
+        let negative_pool: Vec<usize> = (0..arities.len())
+            .filter(|&i| level(i) < level(head_index))
+            .collect();
+
         let mut body = Vec::new();
         // Body variables in first-occurrence order, deduplicated. Only
-        // *retained* arguments count: a partially selected named atom does not
-        // bind the variables of the fields it omits, so collecting them here
-        // is what keeps head variables safe by construction.
+        // *retained* arguments of *positive* atoms count: partially selected
+        // named atoms do not bind omitted fields, and negated atoms bind
+        // nothing — collecting here is what keeps head variables (and named
+        // variables under negation) safe by construction.
         let mut body_vars: Vec<u8> = Vec::new();
-        for (sel, named, arg_specs) in body_specs {
-            let arity = pred_arity(sel);
-            let named = named && has_schema(sel);
+        let mut negated_specs: Vec<(usize, bool, Vec<ArgSpec>)> = Vec::new();
+        for (sel, named, negated, arg_specs) in body_specs {
+            if negated && !negative_pool.is_empty() {
+                let index = negative_pool[sel as usize % negative_pool.len()];
+                negated_specs.push((index, named, arg_specs));
+                continue;
+            }
+            let index = positive_pool[sel as usize % positive_pool.len()];
+            let arity = pred_arity(index);
+            let named = named && has_schema(index);
             let specs: Vec<ArgSpec> = arg_specs.into_iter().take(arity).collect();
 
             // Partial selection keeps at least one field: `p()` is not
@@ -394,7 +476,7 @@ fn build_program((arities, facts, rules): ProgramSpec) -> Program {
 
             let atom = if named {
                 named_atom(
-                    &pred_name(sel),
+                    &pred_name(index),
                     terms
                         .into_iter()
                         .map(|(position, term)| named_arg(&field_name(position), term))
@@ -402,18 +484,68 @@ fn build_program((arities, facts, rules): ProgramSpec) -> Program {
                 )
             } else {
                 positional_atom(
-                    &pred_name(sel),
+                    &pred_name(index),
                     terms.into_iter().map(|(_, term)| term).collect(),
                 )
             };
             body.push(positive_literal(atom));
         }
 
+        // Negated atoms after the positives in source order (B5's IR-level
+        // body swaps supply the other orderings). Named variables draw only
+        // from the positively-bound `body_vars` — §10 safety by construction;
+        // everything else is a wildcard (existential under the negation, §7)
+        // or a constant. Named form still partially selects, so omitted
+        // fields exercise the wildcard-under-negation lowering path too.
+        for (index, named, arg_specs) in negated_specs {
+            let arity = pred_arity(index);
+            let named = named && has_schema(index);
+            let specs: Vec<ArgSpec> = arg_specs.into_iter().take(arity).collect();
+            let keep = |position: usize, spec: &ArgSpec| {
+                !named || spec.selected || specs.iter().all(|s| !s.selected) && position == 0
+            };
+
+            let mut terms = Vec::new();
+            for (position, spec) in specs.iter().enumerate() {
+                if !keep(position, spec) {
+                    continue;
+                }
+                let term = match spec.var {
+                    Some(v) if (named || spec.selected) && !body_vars.is_empty() => {
+                        let bound = body_vars[v as usize % body_vars.len()];
+                        var_term(&format!("V{bound}"))
+                    }
+                    Some(_) => wildcard_term(),
+                    None => Term {
+                        kind: TermKind::Constant(spec.constant.clone()),
+                        span: Span::DUMMY,
+                    },
+                };
+                terms.push((position, term));
+            }
+
+            let atom = if named {
+                named_atom(
+                    &pred_name(index),
+                    terms
+                        .into_iter()
+                        .map(|(position, term)| named_arg(&field_name(position), term))
+                        .collect(),
+                )
+            } else {
+                positional_atom(
+                    &pred_name(index),
+                    terms.into_iter().map(|(_, term)| term).collect(),
+                )
+            };
+            body.push(negated_literal(atom));
+        }
+
         // A named head must supply every field (§4), so head arguments are
         // built at full arity either way.
         let head_terms: Vec<Term> = head_specs
             .into_iter()
-            .take(pred_arity(head_sel))
+            .take(pred_arity(head_index))
             .map(|spec| match spec.body_var_index {
                 Some(i) if !body_vars.is_empty() => {
                     let v = body_vars[i as usize % body_vars.len()];
@@ -425,9 +557,9 @@ fn build_program((arities, facts, rules): ProgramSpec) -> Program {
                 },
             })
             .collect();
-        let head = if named_head && has_schema(head_sel) {
+        let head = if named_head && has_schema(head_index) {
             named_atom(
-                &pred_name(head_sel),
+                &pred_name(head_index),
                 head_terms
                     .into_iter()
                     .enumerate()
@@ -435,7 +567,7 @@ fn build_program((arities, facts, rules): ProgramSpec) -> Program {
                     .collect(),
             )
         } else {
-            positional_atom(&pred_name(head_sel), head_terms)
+            positional_atom(&pred_name(head_index), head_terms)
         };
         statements.push(rule(head, body));
     }
@@ -539,6 +671,10 @@ pub(crate) enum DefectKind {
     PartialSelectionInHead,
     /// Named arguments on a predicate with no `declare` and no import schema.
     NamedWithoutSchema,
+    /// Recursion through negation: a predicate negating itself.
+    NegativeCycle,
+    /// A named variable occurring only in a negated atom (§10).
+    UnsafeNegatedVar,
 }
 
 impl DefectKind {
@@ -551,6 +687,8 @@ impl DefectKind {
             DefectKind::UnknownField => "unknown field",
             DefectKind::PartialSelectionInHead => "must supply every field",
             DefectKind::NamedWithoutSchema => "require known field names",
+            DefectKind::NegativeCycle => "not stratifiable",
+            DefectKind::UnsafeNegatedVar => "negated atom",
         }
     }
 }
@@ -563,6 +701,8 @@ pub(crate) fn arb_defect() -> impl Strategy<Value = DefectKind> {
         Just(DefectKind::UnknownField),
         Just(DefectKind::PartialSelectionInHead),
         Just(DefectKind::NamedWithoutSchema),
+        Just(DefectKind::NegativeCycle),
+        Just(DefectKind::UnsafeNegatedVar),
     ]
 }
 
@@ -616,6 +756,20 @@ pub(crate) fn inject_defect(mut program: Program, kind: DefectKind) -> Program {
                 "defect_no_schema",
                 vec![named_arg("f0", var_term("Zz"))],
             ))],
+        )],
+        DefectKind::NegativeCycle => vec![rule(
+            positional_atom("defect_cycle", vec![var_term("Zz")]),
+            vec![
+                positive_literal(positional_atom("defect_seed", vec![var_term("Zz")])),
+                negated_literal(positional_atom("defect_cycle", vec![var_term("Zz")])),
+            ],
+        )],
+        DefectKind::UnsafeNegatedVar => vec![rule(
+            positional_atom("defect_unsafe", vec![var_term("Zz")]),
+            vec![
+                positive_literal(positional_atom("defect_pos", vec![var_term("Zz")])),
+                negated_literal(positional_atom("defect_other", vec![var_term("Yy")])),
+            ],
         )],
     };
     program.statements.extend(statements);
@@ -709,5 +863,60 @@ mod tests {
             }
         }
         assert!(partial > 0, "generator never produced a partial selection");
+    }
+
+    /// Coverage guard for the negation paths (the A13 precedent): sampling
+    /// must produce negated atoms, wildcards under negation, and programs
+    /// that lower to more than one stratum — otherwise C1/C3 could pass
+    /// vacuously if negation generation silently regressed.
+    #[test]
+    fn generator_emits_negation_shapes() {
+        let mut runner = TestRunner::deterministic();
+        let strategy = arb_safe_program();
+        let (mut negated, mut wildcard_under_negation, mut multi_strata) = (0, 0, 0);
+        for _ in 0..200 {
+            let program = strategy
+                .new_tree(&mut runner)
+                .expect("strategy produces a value")
+                .current();
+            for statement in &program.statements {
+                if let StatementKind::Clause(clause) = &statement.kind {
+                    for literal in &clause.body {
+                        if let LiteralKind::Atom {
+                            negated: true,
+                            atom,
+                        } = &literal.kind
+                        {
+                            negated += 1;
+                            // Count only explicit positional wildcards — the
+                            // conservative signal (named partial selection
+                            // also produces fresh slots, but is guarded by
+                            // `generator_emits_partial_selection`).
+                            if let Args::Positional(terms) = &atom.args
+                                && terms
+                                    .iter()
+                                    .any(|t| matches!(t.kind, crate::ast::TermKind::Wildcard))
+                            {
+                                wildcard_under_negation += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            let lowered =
+                crate::lower::lower(&program).expect("safe-by-construction programs lower");
+            if lowered.strata.len() > 1 {
+                multi_strata += 1;
+            }
+        }
+        assert!(negated > 0, "generator never produced a negated atom");
+        assert!(
+            wildcard_under_negation > 0,
+            "generator never produced a wildcard under negation"
+        );
+        assert!(
+            multi_strata > 0,
+            "generator never produced a multi-stratum program"
+        );
     }
 }

@@ -97,7 +97,13 @@ rationale in spec §17):
    fresh anonymous slots (partial selection) and named heads must supply every
    field (§4). Named and positional forms lower to identical IR (testing.md
    A13); §16.7 is the contract fixture.
-4. **Stratified negation** (§7), then **builtins + type inference** (§8/§4).
+4. **Stratified negation** (§7) — done 2026-07-20. Ullman relaxation numbering
+   in lowering (`stratify`) with structured concrete-cycle errors; the engine
+   evaluates negated atoms as anti-join filters over frozen lower strata and
+   records `Premise::Absent` patterns for provenance (`ProofTree::Absent`
+   leaves); the naive oracle iterates strata (perfect model). §16.2 is the
+   contract fixture; testing.md C1–C3 are green. **Builtins + type inference**
+   (§8/§4) remain in this step.
 5. **Lexer + parser** (§3–§5), wired to the engine.
 6. **CLI/REPL + agent API** (§14), full system tests.
 

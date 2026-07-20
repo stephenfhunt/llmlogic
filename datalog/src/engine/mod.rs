@@ -1364,6 +1364,44 @@ mod tests {
                 prop_assert_eq!(model.relation(ancestor), &expected);
             }
 
+            /// C2 — independent perfect-model oracle on the §16.2 shape:
+            /// random person/parent EDBs through `root(X) :- person(X),
+            /// not parent(_, X).` equal a hand-rolled set difference that
+            /// touches neither evaluator nor the strata machinery.
+            #[test]
+            fn c2_roots_are_a_set_difference(
+                persons in proptest::collection::btree_set(0u8..6, 0..=6),
+                edges in arb_parent_edges(),
+            ) {
+                let mut program = crate::ir::fixtures::example_16_2();
+                let person = PredId(0);
+                let parent = PredId(1);
+                let root = PredId(2);
+                program.facts = persons
+                    .iter()
+                    .map(|p| Fact {
+                        pred: person,
+                        tuple: Tuple(vec![Value::String(format!("n{p}"))]),
+                    })
+                    .chain(edges.iter().map(|(a, b)| Fact {
+                        pred: parent,
+                        tuple: Tuple(vec![
+                            Value::String(a.clone()),
+                            Value::String(b.clone()),
+                        ]),
+                    }))
+                    .collect();
+                let model = eval(&program).unwrap();
+
+                let expected: BTreeSet<Tuple> = persons
+                    .iter()
+                    .map(|p| format!("n{p}"))
+                    .filter(|p| edges.iter().all(|(_, child)| child != p))
+                    .map(|p| Tuple(vec![Value::String(p)]))
+                    .collect();
+                prop_assert_eq!(model.relation(root), &expected);
+            }
+
             /// E1 — every derived fact has at least one derivation.
             #[test]
             fn e1_derived_facts_have_derivations(program in arb_program_with_edb()) {

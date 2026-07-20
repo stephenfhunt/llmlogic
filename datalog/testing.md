@@ -178,12 +178,20 @@ compared keyed by predicate *name*, not `PredId`.
 
 ### Phase C — negation + type inference (roadmap step 4) — generalizes §16.2, §16.3
 
-- [ ] **C1** Stratification correctness: every negated dependency sits in a
-  strictly lower stratum; generated negative-cycle programs are rejected.
-- [ ] **C2** Brute-force perfect-model oracle on small domains (iterated
-  fixpoint per stratum, computed directly).
-- [ ] **C3** B1–B6 re-run over stratified programs (B4 restricted to fact
-  additions in predicates no negation depends on — or skipped under negation).
+- [x] **C1** Stratification correctness: every negated dependency sits in a
+  strictly lower stratum (checked against a dependency graph the test
+  recomputes from the lowered rules); generated negative-cycle programs are
+  rejected (A11's `NegativeCycle` defect).
+- [x] **C2** Independent oracle on the §16.2 shape: random person/parent EDBs
+  through `root(X) :- person(X), not parent(_, X).` vs. a hand-rolled set
+  difference touching neither evaluator (the B7 pattern). The per-stratum
+  iterated fixpoint itself lives in the naive oracle, which B1 exercises.
+- [x] **C3** B1–B6 re-run over stratified programs: the generator gives each
+  predicate a level and negated selectors draw strictly below the head's, so
+  programs are stratifiable by construction, and B1 becomes the perfect-model
+  differential. B4's fact half restricted to fact additions in predicates no
+  negation transitively depends on (`negation_independent_preds`); its rule
+  half extends on fresh `ext_*` predicates, monotone by construction.
 - [ ] **C4** Type-inference soundness: any program inference accepts evaluates
   with no type-based runtime error; derived facts match inferred column types.
 - [ ] **C5** Typed-generator completeness: well-typed-by-construction programs

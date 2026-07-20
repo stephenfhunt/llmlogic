@@ -1613,24 +1613,53 @@ mod tests {
                     }
                 };
 
-                // A12: fact/rule split and the trivial stratification.
+                // A12: fact/rule split; strata partition the rules in source
+                // order within each stratum, and a *positive* program is
+                // exactly one stratum (negation may or may not force more).
                 prop_assert_eq!(lowered.facts.len(), ast_fact_count(&program));
                 let source_rules = ast_rules(&program);
                 prop_assert_eq!(lowered.rules.len(), source_rules.len());
-                if lowered.rules.is_empty() {
-                    prop_assert!(lowered.strata.is_empty());
-                } else {
-                    let expected: Vec<ir::RuleId> =
-                        (0..lowered.rules.len() as u32).map(ir::RuleId).collect();
-                    prop_assert_eq!(&lowered.strata, &vec![expected]);
+                let mut covered: Vec<ir::RuleId> =
+                    lowered.strata.iter().flatten().copied().collect();
+                covered.sort();
+                let all: Vec<ir::RuleId> =
+                    (0..lowered.rules.len() as u32).map(ir::RuleId).collect();
+                prop_assert_eq!(&covered, &all, "strata must partition the rules");
+                for stratum in &lowered.strata {
+                    prop_assert!(!stratum.is_empty(), "empty strata are dropped");
+                    prop_assert!(
+                        stratum.windows(2).all(|w| w[0] < w[1]),
+                        "source order within a stratum"
+                    );
+                }
+                let has_negation = lowered.rules.iter().any(|rule| {
+                    rule.body
+                        .iter()
+                        .any(|l| matches!(l.kind, ir::BodyLiteralKind::NegAtom(_)))
+                });
+                if !has_negation && !lowered.rules.is_empty() {
+                    prop_assert_eq!(lowered.strata.len(), 1, "positive => single stratum");
                 }
 
                 for (rule, source) in lowered.rules.iter().zip(&source_rules) {
-                    // A9: body preserved 1:1 in order (generator emits only
-                    // positive atoms).
+                    // A9: body preserved 1:1 in order, kind for kind.
                     prop_assert_eq!(rule.body.len(), source.body.len());
-                    for literal in &rule.body {
-                        prop_assert!(matches!(literal.kind, ir::BodyLiteralKind::Atom(_)));
+                    for (literal, source_literal) in rule.body.iter().zip(&source.body) {
+                        let ast::LiteralKind::Atom { negated, .. } = &source_literal.kind
+                        else {
+                            return Err(TestCaseError::fail(
+                                "generator emits only atom literals".to_string(),
+                            ));
+                        };
+                        match &literal.kind {
+                            ir::BodyLiteralKind::Atom(_) => prop_assert!(!negated),
+                            ir::BodyLiteralKind::NegAtom(_) => prop_assert!(*negated),
+                            ir::BodyLiteralKind::Compare { .. } => {
+                                return Err(TestCaseError::fail(
+                                    "unexpected comparison".to_string(),
+                                ));
+                            }
+                        }
                     }
 
                     // A8: numbering is dense — referenced slots are exactly
@@ -1664,7 +1693,9 @@ mod tests {
                 for rule in &lowered.rules {
                     prop_assert!(check_atom(&rule.head));
                     for literal in &rule.body {
-                        if let ir::BodyLiteralKind::Atom(atom) = &literal.kind {
+                        if let ir::BodyLiteralKind::Atom(atom)
+                        | ir::BodyLiteralKind::NegAtom(atom) = &literal.kind
+                        {
                             prop_assert!(check_atom(atom));
                         }
                     }
@@ -1749,6 +1780,51 @@ mod tests {
                     );
                     if let Some(fields) = &info.fields {
                         prop_assert_eq!(fields.len(), info.arity as usize, "for `{}`", &info.name);
+                    }
+                }
+            }
+
+            /// C1 — stratification correctness, checked against a dependency
+            /// graph this test recomputes from the lowered rules: every
+            /// negated dependency's defining rules sit in a strictly lower
+            /// stratum, every positive dependency's in the same or lower.
+            /// (The reject side — negative cycles — is C1's other half,
+            /// covered by A11's `NegativeCycle` defect.)
+            #[test]
+            fn c1_negated_dependencies_sit_strictly_lower(program in arb_safe_program()) {
+                let lowered = lower(&program).expect("safe programs lower");
+                // Predicate -> the stratum indices of its defining rules.
+                let mut defined_in: Vec<Vec<usize>> =
+                    vec![Vec::new(); lowered.predicates.len()];
+                for (level, stratum) in lowered.strata.iter().enumerate() {
+                    for &rule_id in stratum {
+                        let head = lowered.rules[rule_id.0 as usize].head.pred;
+                        defined_in[head.0 as usize].push(level);
+                    }
+                }
+                for (level, stratum) in lowered.strata.iter().enumerate() {
+                    for &rule_id in stratum {
+                        for literal in &lowered.rules[rule_id.0 as usize].body {
+                            match &literal.kind {
+                                ir::BodyLiteralKind::NegAtom(atom) => {
+                                    prop_assert!(
+                                        defined_in[atom.pred.0 as usize]
+                                            .iter()
+                                            .all(|&def| def < level),
+                                        "negated dependency not strictly lower"
+                                    );
+                                }
+                                ir::BodyLiteralKind::Atom(atom) => {
+                                    prop_assert!(
+                                        defined_in[atom.pred.0 as usize]
+                                            .iter()
+                                            .all(|&def| def <= level),
+                                        "positive dependency above its reader"
+                                    );
+                                }
+                                ir::BodyLiteralKind::Compare { .. } => {}
+                            }
+                        }
                     }
                 }
             }

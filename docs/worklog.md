@@ -16,6 +16,64 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-20 (later session) — §7 stratified negation (roadmap step 4)
+
+**Done** — four commits, tree green after each.
+- **Spec first**: §7 drafted (perfect model per Apt/Blair/Walker; the
+  independence theorem stated, making the numbering choice semantics-free);
+  §10 narrowed to *named* variables in negated atoms; §11 premises became
+  fact-or-absence; §16.2 resolved; six new §17 entries. Closed a real
+  grounding gap: references.md group 5 was positive-programs-only — added
+  Grädel–Tannen 2017 and Dannert–Grädel–Naaf–Tannen CSL 2021 as the
+  principled semiring treatments of negation we deliberately do *not* adopt
+  (`Premise::Absent` is a proof-tree-level why-not record).
+- **Lowering**: `stratify` — Ullman relaxation, structured error naming a
+  concrete cycle ("a -> not b -> a"), single-stratum fallback on the error
+  path; safety narrowed in the `NegAtom` arm only; §16.2 became the
+  `lower(ast) == ir` contract fixture, plus cycle and two-strata hand tests.
+- **Engine/provenance/oracle**: anti-join filter in the join loop
+  (`AbsentPattern`; binds nothing; always the full frozen relation),
+  positives-then-negations evaluation order with premises recorded at their
+  true `BodyIdx`, two static malformed-IR guards (named negated vars
+  positively bound; negated preds defined strictly lower), the `Premise` enum
+  + `ProofTree::Absent` leaves + round-guard exemption for absences, naive
+  oracle iterating strata. §16.2 end-to-end (exact derivation + proof tree);
+  negation over a recursive IDB across two strata, written
+  negation-before-binder.
+- **Phase C**: generator levels (stratifiable by construction — negated
+  selectors draw strictly below the head's level), `NegativeCycle` /
+  `UnsafeNegatedVar` defects, negation coverage guards. C1 (recomputed-graph
+  check; reject side via A11), C2 (independent §16.2 set-difference oracle),
+  C3 (B1–B6 over the negation-emitting generator — B1 is now the
+  perfect-model differential). B4 fact-half restricted via
+  `negation_independent_preds`; rule-half extends on fresh `ext_*`
+  predicates. A9/A12 generalized. 79 tests, clippy/fmt clean.
+
+**Decided** (all in spec §17, 2026-07-20): Ullman relaxation over Tarjan SCC;
+`AbsentPattern` = `PredId` + `Vec<Option<Value>>`; evaluator-internal
+negations-last ordering; the naive oracle is the per-stratum perfect-model
+oracle; the engine statically validates the negation contract; negation
+provenance is a why-not record, not a semiring construction. The previous
+session's "`VarScope` must track wildcard-fresh slots" guess proved
+unnecessary: `VarScope::fresh` never enters the name map, so a `None`-named
+slot inside a negated atom was necessarily created there — the safety check
+simply skips unnamed slots (argument recorded at the check site and in §17).
+
+**Mutation checks** (each reverted after confirming failure): re-widened
+safety arm → §16.2 contract test; dropped negative-edge increment → all three
+stratification tests; raw body-order evaluation → negation-before-binder
+test; absences failing the round guard → §16.2 proof tree; broken
+wildcard-existential matching → B1 + C2 + §16.2 at once.
+
+**Next up**
+- **§8 builtins** (comparisons/arithmetic incl. the open `=` question), then
+  **type inference** (§4, C4–C5) — the rest of roadmap step 4. The engine's
+  evaluation-order scheduling (positives first, then filters) is the shape
+  comparison literals will slot into.
+- Provenance *surface* (`?why`, JSON encoding, provenance-as-facts, E5) stays
+  parked until step 6; rendering `AbsentPattern` in named form (§4 field
+  names) can ride along when it lands.
+
 ## 2026-07-20 — Named-argument lowering (pass 2)
 
 **Done**
