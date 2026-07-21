@@ -102,7 +102,8 @@ relying on it deeply.
 - **Dannert, Grädel, Naaf, Tannen — “Semiring Provenance for Fixed-Point
   Logic”**, CSL 2021. Absorptive polynomials for fixed-point logic — the
   closest principled treatment to Datalog with negation; same v1 stance as
-  above.
+  above. See `notes/semiring-provenance.md` for how both papers map onto the
+  engine's existing derivation store and what work they would unlock.
 
 ## 6. Notable implementations
 

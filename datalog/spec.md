@@ -905,6 +905,11 @@ structured error.
   precedence. — §8.
 - **Provenance query syntax:** `?why <fact>` is provisional across CLI and API; also
   decide proof-tree JSON encoding. (§16.6) — §11/§14.
+- **Semiring provenance under negation:** parked research thread with a worked
+  sketch in `notes/semiring-provenance.md` — the derivation store is already a
+  boolean provenance circuit, `Premise::Absent` a factored dual token; candidate
+  work: `?whynot` with minimal repairs, tropical cheapest-proof selection for
+  token economy. — §11.
 - **Provenance as facts:** the Datalog-in/Datalog-out closure property suggests
   `?why` output should also have a fact-shaped form (e.g. derivation edges as
   ground facts), so provenance can itself be piped back in and queried with

@@ -16,6 +16,36 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-20 (research-note session) — semiring provenance under negation, parked
+
+**Done**
+- Discussed the semiring-provenance-with-negation thread surfaced during §7
+  and recorded it as a parked research note:
+  `datalog/notes/semiring-provenance.md` (new `notes/` directory). Core
+  observations: `Model.derivations` is already a boolean provenance circuit
+  in DAG form (Deutch et al.'s representation at the boolean semiring);
+  `Premise::Absent` is a *factored* dual token — the symbolic form of
+  Grädel–Tannen's expanded ∀-product under CWA + active domain; strata are an
+  iterated `X·X̄ = 0` quotient and first-round stamping a monomial selector.
+  A semiring layer would therefore be an interpretation folded over the
+  existing derivation store, not a redesign.
+- Ranked opportunities recorded in the note: (1) `?whynot` with minimal
+  repairs (natural landing spot: the step-6 provenance surface), (2) a
+  `Semiring` trait over the derivation DAG with **tropical cheapest-proof
+  selection for token economy** as the on-brand novel application, (3) a
+  TaPP-sized theory write-up of the factored-dual-token observation.
+  Non-goals and a verify-before-use reading list included.
+- Pointers added: spec §17 open questions and references.md group 5 both
+  link the note.
+
+**Decided**
+- The thread is **parked** — not on the roadmap; the §17 proof-tree decision
+  stands unmodified. The note exists so a future session can reboot the
+  thread without this conversation's context.
+
+**Next up**
+- Unchanged: **§8 builtins**, then type inference (§4, C4–C5).
+
 ## 2026-07-20 (audit session) — FO-algebra coverage audit; the query gap
 
 **Done**
