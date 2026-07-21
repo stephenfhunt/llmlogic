@@ -27,10 +27,13 @@
 use proptest::prelude::*;
 
 use crate::ast::fixtures::{
-    declare, fact, field_decl, named_arg, named_atom, negated_literal, positional_atom,
-    positive_literal, query, rule, var_term, wildcard_term,
+    declare, fact, field_decl, int_term, named_arg, named_atom, negated_literal, positional_atom,
+    positive_literal, query, rule, string_term, var_term, wildcard_term,
 };
-use crate::ast::{Constant, Program, Span, Statement, Term, TermKind};
+use crate::ast::{
+    Args, ArithOp, Atom, CmpOp, Comparison, Constant, Expr, ExprKind, Literal, LiteralKind,
+    Program, Span, Statement, StatementKind, Term, TermKind,
+};
 use crate::ir;
 
 /// Maximum predicate arity the generators produce.
@@ -222,6 +225,7 @@ pub(crate) fn arb_safe_program() -> impl Strategy<Value = Program> {
 pub(crate) fn arb_program_with_edb() -> impl Strategy<Value = ir::Program> {
     arb_program_spec(eval_bounds())
         .prop_map(build_program)
+        .prop_map(monotype)
         .prop_map(|ast| crate::lower::lower(&ast).expect("safe-by-construction programs lower"))
 }
 
@@ -259,9 +263,353 @@ pub(crate) fn arb_extension_pair() -> impl Strategy<Value = (Program, Program)> 
                     )),
                 ],
             ));
-            (base, extended)
+            (monotype(base), monotype(extended))
         },
     )
+}
+
+/// Relabels every constant in `program` to a `symbol`, *injectively* — distinct
+/// constants map to distinct symbols and equal ones to equal symbols — so the
+/// program becomes well-typed (every column is a symbol) while staying
+/// isomorphic to the original as a relational structure (same joins, same
+/// output up to the relabeling). This is what makes the evaluation-property
+/// generators produce the well-typed programs the type checker accepts — the
+/// reachable state space `eval` sees — with A1–A5 keeping cross-type `Value`
+/// coverage (testing.md, 2026-07-21).
+fn monotype(mut program: Program) -> Program {
+    for statement in &mut program.statements {
+        match &mut statement.kind {
+            StatementKind::Clause(clause) => {
+                monotype_atom(&mut clause.head);
+                monotype_body(&mut clause.body);
+            }
+            StatementKind::Query(query) => monotype_body(&mut query.body),
+            StatementKind::Import(_) | StatementKind::Declare(_) => {}
+        }
+    }
+    program
+}
+
+fn monotype_body(body: &mut [Literal]) {
+    for literal in body {
+        match &mut literal.kind {
+            LiteralKind::Atom { atom, .. } => monotype_atom(atom),
+            LiteralKind::Comparison(cmp) => {
+                monotype_expr(&mut cmp.lhs);
+                monotype_expr(&mut cmp.rhs);
+            }
+        }
+    }
+}
+
+fn monotype_atom(atom: &mut Atom) {
+    match &mut atom.args {
+        Args::Positional(terms) => terms.iter_mut().for_each(monotype_term),
+        Args::Named(named) => named.iter_mut().for_each(|n| monotype_term(&mut n.value)),
+    }
+}
+
+fn monotype_expr(expr: &mut Expr) {
+    match &mut expr.kind {
+        ExprKind::Term(term) => monotype_term(term),
+        ExprKind::Binary { lhs, rhs, .. } => {
+            monotype_expr(lhs);
+            monotype_expr(rhs);
+        }
+    }
+}
+
+fn monotype_term(term: &mut Term) {
+    if let TermKind::Constant(constant) = &mut term.kind {
+        *constant = monotype_constant(constant);
+    }
+}
+
+/// The injective constant → symbol relabeling: type-prefixed so the five
+/// primitive types map to disjoint symbol ranges (an int and the string of the
+/// same text never collide), preserving the original equality relation exactly.
+fn monotype_constant(constant: &Constant) -> Constant {
+    let symbol = match constant {
+        Constant::Symbol(s) => format!("sym_{s}"),
+        Constant::String(s) => format!("str_{s}"),
+        Constant::Int(i) => format!("int_{i}"),
+        Constant::Float(f) => format!("flt_{}", f.to_bits()),
+        Constant::Bool(b) => format!("bool_{b}"),
+    };
+    Constant::Symbol(symbol)
+}
+
+// --- §8 comparison / arithmetic programs (testing.md, B1 extended) ---
+//
+// Well-typed-by-construction numeric programs: one EDB relation `n(key, val)`
+// with symbol keys and int values, and derived rules that filter, assign, or
+// join over it using comparison/arithmetic builtins. Every rule is safe by
+// construction (positives bind `V`/`V1`/`V2`; an assignment binds its own
+// target). Values and constants are small, so arithmetic never overflows; the
+// only runtime error a generated program can raise is a `/ 0`, which both the
+// engine and the naive oracle reject identically (B1 on the error path).
+
+/// One derived rule over the `n(key, val)` relation.
+#[derive(Debug, Clone)]
+enum CompRule {
+    /// `d(K) :- n(K, V), V <cmp> c.`
+    Filter { op: u8, c: i64 },
+    /// `d(K, W) :- n(K, V), W = V <arith> c.`
+    Assign { op: u8, c: i64 },
+    /// `d(K1, K2) :- n(K1, V1), n(K2, V2), V1 <cmp> V2.`
+    Join { op: u8 },
+}
+
+/// A comparison/arithmetic program: a numeric EDB plus derived filter/assign/
+/// join rules, lowered to IR.
+pub(crate) fn arb_comparison_program() -> impl Strategy<Value = ir::Program> {
+    let facts = proptest::collection::vec((0u8..3, -2i64..=2), 0..=8);
+    let rules = proptest::collection::vec(arb_comp_rule(), 0..=4);
+    (facts, rules).prop_map(|(facts, rules)| {
+        let ast = build_comparison_ast(&facts, &rules);
+        crate::lower::lower(&ast).expect("comparison programs are safe by construction")
+    })
+}
+
+fn arb_comp_rule() -> impl Strategy<Value = CompRule> {
+    prop_oneof![
+        (0u8..6, -3i64..=3).prop_map(|(op, c)| CompRule::Filter { op, c }),
+        (0u8..4, -3i64..=3).prop_map(|(op, c)| CompRule::Assign { op, c }),
+        (0u8..6).prop_map(|op| CompRule::Join { op }),
+    ]
+}
+
+fn cmp_from(i: u8) -> CmpOp {
+    [
+        CmpOp::Eq,
+        CmpOp::Ne,
+        CmpOp::Lt,
+        CmpOp::Le,
+        CmpOp::Gt,
+        CmpOp::Ge,
+    ][i as usize % 6]
+}
+
+fn arith_from(i: u8) -> ArithOp {
+    [ArithOp::Add, ArithOp::Sub, ArithOp::Mul, ArithOp::Div][i as usize % 4]
+}
+
+fn key_name(k: u8) -> &'static str {
+    ["a", "b", "c"][k as usize % 3]
+}
+
+fn expr_of(term: Term) -> Expr {
+    Expr {
+        kind: ExprKind::Term(term),
+        span: Span::DUMMY,
+    }
+}
+
+fn comparison_literal(op: CmpOp, lhs: Expr, rhs: Expr) -> Literal {
+    Literal {
+        kind: LiteralKind::Comparison(Comparison { op, lhs, rhs }),
+        span: Span::DUMMY,
+    }
+}
+
+fn build_comparison_ast(facts: &[(u8, i64)], rules: &[CompRule]) -> Program {
+    let mut statements = Vec::new();
+    for (k, v) in facts {
+        statements.push(fact("n", vec![string_term(key_name(*k)), int_term(*v)]));
+    }
+    for (i, comp_rule) in rules.iter().enumerate() {
+        let name = format!("d{i}");
+        let statement = match comp_rule {
+            CompRule::Filter { op, c } => rule(
+                positional_atom(&name, vec![var_term("K")]),
+                vec![
+                    positive_literal(positional_atom("n", vec![var_term("K"), var_term("V")])),
+                    comparison_literal(
+                        cmp_from(*op),
+                        expr_of(var_term("V")),
+                        expr_of(int_term(*c)),
+                    ),
+                ],
+            ),
+            CompRule::Assign { op, c } => rule(
+                positional_atom(&name, vec![var_term("K"), var_term("W")]),
+                vec![
+                    positive_literal(positional_atom("n", vec![var_term("K"), var_term("V")])),
+                    comparison_literal(
+                        CmpOp::Eq,
+                        expr_of(var_term("W")),
+                        Expr {
+                            kind: ExprKind::Binary {
+                                op: arith_from(*op),
+                                lhs: Box::new(expr_of(var_term("V"))),
+                                rhs: Box::new(expr_of(int_term(*c))),
+                            },
+                            span: Span::DUMMY,
+                        },
+                    ),
+                ],
+            ),
+            CompRule::Join { op } => rule(
+                positional_atom(&name, vec![var_term("K1"), var_term("K2")]),
+                vec![
+                    positive_literal(positional_atom("n", vec![var_term("K1"), var_term("V1")])),
+                    positive_literal(positional_atom("n", vec![var_term("K2"), var_term("V2")])),
+                    comparison_literal(
+                        cmp_from(*op),
+                        expr_of(var_term("V1")),
+                        expr_of(var_term("V2")),
+                    ),
+                ],
+            ),
+        };
+        statements.push(statement);
+    }
+    Program { statements }
+}
+
+// --- §4 well-typed programs (testing.md, C4 / C5) ---
+//
+// Well-typed-by-construction programs over one base relation
+// `p(key: symbol, val: int, flag: bool)` — three columns exercising three of
+// the five primitive types. Derived rules filter, assign, and join while
+// respecting those types: arithmetic and ordered comparisons touch only the
+// `int` column, equality filters touch `bool`/`symbol`, and joins share the
+// `symbol` key. No division, so evaluation never errors — C4 can assert every
+// derived fact matches its inferred column type.
+
+/// One derived rule over `p(key, val, flag)`.
+#[derive(Debug, Clone)]
+enum TypedRule {
+    /// `d(K) :- p(K, V, F), V <cmp> c.`  (ordered comparison on the int column)
+    FilterInt { op: u8, c: i64 },
+    /// `d(K, W) :- p(K, V, F), W = V <arith> c.`  (int assignment, no division)
+    AssignInt { op: u8, c: i64 },
+    /// `d(K) :- p(K, V, F), F = b.`  (equality filter on the bool column)
+    EqBool { b: bool },
+    /// `d(V) :- p(K, V, F), K = s.`  (equality filter on the symbol column)
+    EqSymbol { s: u8 },
+    /// `d(V1, V2) :- p(K, V1, F1), p(K, V2, F2), V1 > V2.`  (symbol-key join)
+    JoinOnKey,
+}
+
+/// A well-typed program: a `p(symbol, int, bool)` EDB plus derived rules that
+/// keep every column single-typed. Lowered to IR.
+pub(crate) fn arb_well_typed_program() -> impl Strategy<Value = ir::Program> {
+    let facts = proptest::collection::vec((0u8..3, -2i64..=2, any::<bool>()), 0..=8);
+    let rules = proptest::collection::vec(arb_typed_rule(), 0..=4);
+    (facts, rules).prop_map(|(facts, rules)| {
+        let ast = build_typed_ast(&facts, &rules);
+        crate::lower::lower(&ast).expect("well-typed programs are safe by construction")
+    })
+}
+
+fn arb_typed_rule() -> impl Strategy<Value = TypedRule> {
+    prop_oneof![
+        (0u8..6, -3i64..=3).prop_map(|(op, c)| TypedRule::FilterInt { op, c }),
+        // Only Add/Sub/Mul (indices 0..3 of `arith_from`), never division.
+        (0u8..3, -3i64..=3).prop_map(|(op, c)| TypedRule::AssignInt { op, c }),
+        any::<bool>().prop_map(|b| TypedRule::EqBool { b }),
+        (0u8..3).prop_map(|s| TypedRule::EqSymbol { s }),
+        Just(TypedRule::JoinOnKey),
+    ]
+}
+
+fn symbol_term(s: &str) -> Term {
+    Term {
+        kind: TermKind::Constant(Constant::Symbol(s.to_string())),
+        span: Span::DUMMY,
+    }
+}
+
+fn bool_term(b: bool) -> Term {
+    Term {
+        kind: TermKind::Constant(Constant::Bool(b)),
+        span: Span::DUMMY,
+    }
+}
+
+fn build_typed_ast(facts: &[(u8, i64, bool)], rules: &[TypedRule]) -> Program {
+    let mut statements = Vec::new();
+    for (k, v, f) in facts {
+        statements.push(fact(
+            "p",
+            vec![symbol_term(key_name(*k)), int_term(*v), bool_term(*f)],
+        ));
+    }
+    let p_body = || {
+        positive_literal(positional_atom(
+            "p",
+            vec![var_term("K"), var_term("V"), var_term("F")],
+        ))
+    };
+    for (i, typed_rule) in rules.iter().enumerate() {
+        let name = format!("d{i}");
+        let statement = match typed_rule {
+            TypedRule::FilterInt { op, c } => rule(
+                positional_atom(&name, vec![var_term("K")]),
+                vec![
+                    p_body(),
+                    comparison_literal(
+                        cmp_from(*op),
+                        expr_of(var_term("V")),
+                        expr_of(int_term(*c)),
+                    ),
+                ],
+            ),
+            TypedRule::AssignInt { op, c } => rule(
+                positional_atom(&name, vec![var_term("K"), var_term("W")]),
+                vec![
+                    p_body(),
+                    comparison_literal(
+                        CmpOp::Eq,
+                        expr_of(var_term("W")),
+                        Expr {
+                            kind: ExprKind::Binary {
+                                op: arith_from(*op),
+                                lhs: Box::new(expr_of(var_term("V"))),
+                                rhs: Box::new(expr_of(int_term(*c))),
+                            },
+                            span: Span::DUMMY,
+                        },
+                    ),
+                ],
+            ),
+            TypedRule::EqBool { b } => rule(
+                positional_atom(&name, vec![var_term("K")]),
+                vec![
+                    p_body(),
+                    comparison_literal(CmpOp::Eq, expr_of(var_term("F")), expr_of(bool_term(*b))),
+                ],
+            ),
+            TypedRule::EqSymbol { s } => rule(
+                positional_atom(&name, vec![var_term("V")]),
+                vec![
+                    p_body(),
+                    comparison_literal(
+                        CmpOp::Eq,
+                        expr_of(var_term("K")),
+                        expr_of(symbol_term(key_name(*s))),
+                    ),
+                ],
+            ),
+            TypedRule::JoinOnKey => rule(
+                positional_atom(&name, vec![var_term("V1"), var_term("V2")]),
+                vec![
+                    positive_literal(positional_atom(
+                        "p",
+                        vec![var_term("K"), var_term("V1"), var_term("F1")],
+                    )),
+                    positive_literal(positional_atom(
+                        "p",
+                        vec![var_term("K"), var_term("V2"), var_term("F2")],
+                    )),
+                    comparison_literal(CmpOp::Gt, expr_of(var_term("V1")), expr_of(var_term("V2"))),
+                ],
+            ),
+        };
+        statements.push(statement);
+    }
+    Program { statements }
 }
 
 /// Random edge sets over a small node pool — the `arb_edb` shape for the
@@ -998,5 +1346,117 @@ mod tests {
             negated_queries > 0,
             "generator never produced a negated query"
         );
+    }
+
+    /// Coverage guard for the §8 generator: sampling must produce filter,
+    /// assignment, and join rules, and at least one `/ 0` program that both
+    /// evaluators reject — otherwise B1's comparison case (and its error-path
+    /// branch) could pass vacuously.
+    #[test]
+    fn generator_emits_comparison_shapes() {
+        fn is_binary(expr: &ir::Expr) -> bool {
+            matches!(expr, ir::Expr::Binary { .. })
+        }
+
+        let mut runner = TestRunner::deterministic();
+        let strategy = arb_comparison_program();
+        let (mut filters, mut assigns, mut joins, mut errors) = (0, 0, 0, 0);
+        for _ in 0..400 {
+            let program = strategy
+                .new_tree(&mut runner)
+                .expect("strategy produces a value")
+                .current();
+            for rule in &program.rules {
+                let positives = rule
+                    .body
+                    .iter()
+                    .filter(|l| matches!(l.kind, ir::BodyLiteralKind::Atom(_)))
+                    .count();
+                let has_binary = rule.body.iter().any(|l| {
+                    matches!(&l.kind, ir::BodyLiteralKind::Compare { lhs, rhs, .. }
+                        if is_binary(lhs) || is_binary(rhs))
+                });
+                let has_compare = rule
+                    .body
+                    .iter()
+                    .any(|l| matches!(l.kind, ir::BodyLiteralKind::Compare { .. }));
+                if positives >= 2 {
+                    joins += 1;
+                } else if has_binary {
+                    assigns += 1;
+                } else if has_compare {
+                    filters += 1;
+                }
+            }
+            if crate::engine::eval(&program).is_err() {
+                errors += 1;
+            }
+        }
+        assert!(filters > 0, "generator never produced a filter rule");
+        assert!(assigns > 0, "generator never produced an assignment rule");
+        assert!(joins > 0, "generator never produced a join rule");
+        assert!(
+            errors > 0,
+            "generator never produced a division-by-zero program"
+        );
+    }
+
+    /// Coverage guard for the §4 typed generator: sampling must produce int
+    /// arithmetic (assignment), ordered int comparison, a non-numeric equality
+    /// filter (bool/symbol), and a symbol-key join — otherwise C4/C5 could pass
+    /// while exercising only one type or shape.
+    #[test]
+    fn generator_emits_typed_shapes() {
+        let mut runner = TestRunner::deterministic();
+        let strategy = arb_well_typed_program();
+        let (mut assigns, mut ordered, mut eq_non_numeric, mut joins) = (0, 0, 0, 0);
+        for _ in 0..400 {
+            let program = strategy
+                .new_tree(&mut runner)
+                .expect("strategy produces a value")
+                .current();
+            for rule in &program.rules {
+                let positives = rule
+                    .body
+                    .iter()
+                    .filter(|l| matches!(l.kind, ir::BodyLiteralKind::Atom(_)))
+                    .count();
+                if positives >= 2 {
+                    joins += 1;
+                }
+                for literal in &rule.body {
+                    let ir::BodyLiteralKind::Compare { op, lhs, rhs } = &literal.kind else {
+                        continue;
+                    };
+                    if matches!(lhs, ir::Expr::Binary { .. })
+                        || matches!(rhs, ir::Expr::Binary { .. })
+                    {
+                        assigns += 1;
+                    }
+                    if matches!(op, CmpOp::Lt | CmpOp::Le | CmpOp::Gt | CmpOp::Ge) {
+                        ordered += 1;
+                    }
+                    if *op == CmpOp::Eq {
+                        for expr in [lhs, rhs] {
+                            if let ir::Expr::Term(ir::Term::Const(v)) = expr
+                                && matches!(v, ir::Value::Bool(_) | ir::Value::Symbol(_))
+                            {
+                                eq_non_numeric += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(assigns > 0, "generator never produced an int assignment");
+        assert!(
+            ordered > 0,
+            "generator never produced an ordered int comparison"
+        );
+        assert!(
+            eq_non_numeric > 0,
+            "generator never produced a bool/symbol equality filter"
+        );
+        assert!(joins > 0, "generator never produced a symbol-key join");
     }
 }

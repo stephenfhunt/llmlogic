@@ -24,6 +24,7 @@ pub mod lower;
 pub mod parser;
 pub mod provenance;
 pub mod sources;
+pub mod typecheck;
 
 #[cfg(test)]
 pub(crate) mod testgen;

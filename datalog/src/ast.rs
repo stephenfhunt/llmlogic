@@ -180,7 +180,7 @@ pub struct Comparison {
 }
 
 /// Comparison operators: `=` `!=` `<` `<=` `>` `>=` (§3).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum CmpOp {
     Eq,
     Ne,
@@ -191,7 +191,7 @@ pub enum CmpOp {
 }
 
 /// Arithmetic operators: `+` `-` `*` `/` (§3; semantics §8).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ArithOp {
     Add,
     Sub,

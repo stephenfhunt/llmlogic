@@ -17,19 +17,25 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use crate::ir::{Atom, BodyLiteral, BodyLiteralKind, Fact, Program, Term, Tuple, Value, Var};
+use crate::Result;
+use crate::ast::{ArithOp, CmpOp};
+use crate::error::Error;
+use crate::ir::{
+    Atom, BodyLiteral, BodyLiteralKind, Expr, F64, Fact, Program, Term, Tuple, Value, Var,
+};
 
 /// Computes the perfect model — all facts, base and derived — by brute force:
 /// per stratum, apply every rule to the full fact set until nothing new
-/// appears.
-pub(crate) fn naive_eval(program: &Program) -> BTreeSet<Fact> {
+/// appears. A runtime error in a comparison/arithmetic builtin (§8) aborts, so
+/// the oracle can be differenced against the engine on the error path too (B1).
+pub(crate) fn naive_eval(program: &Program) -> Result<BTreeSet<Fact>> {
     let mut facts: BTreeSet<Fact> = program.facts.iter().cloned().collect();
     for stratum in &program.strata {
         loop {
             let mut derived: Vec<Fact> = Vec::new();
             for &rule_id in stratum {
                 let rule = &program.rules[rule_id.0 as usize];
-                for env in matches(&rule.body, &facts, &HashMap::new()) {
+                for env in matches(&rule.body, &facts, &HashMap::new())? {
                     derived.push(Fact {
                         pred: rule.head.pred,
                         tuple: Tuple(rule.head.args.iter().map(|t| ground(t, &env)).collect()),
@@ -43,28 +49,27 @@ pub(crate) fn naive_eval(program: &Program) -> BTreeSet<Fact> {
             }
         }
     }
-    facts
+    Ok(facts)
 }
 
 /// All variable environments satisfying `body` against `facts`: enumerate the
-/// positive atoms first (in body order), then keep each environment only if
-/// no fact refutes any negated atom under it. Positives-first mirrors §10
-/// safety (named variables under negation are positively bound), so an
-/// unbound variable in a negated atom can only be wildcard-fresh — open,
-/// existential under the negation.
+/// positive atoms first (in body order), then keep each environment only if no
+/// fact refutes any negated atom under it, then fold the comparison/assignment
+/// builtins in source order (filters prune, `=`-assignments extend the env).
+/// Positives-first mirrors §10 safety (named variables under negation are
+/// positively bound), so an unbound variable in a negated atom can only be
+/// wildcard-fresh — open, existential under the negation. Comparisons run last,
+/// matching the engine's scheduling.
 fn matches(
     body: &[BodyLiteral],
     facts: &BTreeSet<Fact>,
     env: &HashMap<Var, Value>,
-) -> Vec<HashMap<Var, Value>> {
+) -> Result<Vec<HashMap<Var, Value>>> {
     let positives: Vec<&Atom> = body
         .iter()
         .filter_map(|literal| match &literal.kind {
             BodyLiteralKind::Atom(atom) => Some(atom),
-            BodyLiteralKind::NegAtom(_) => None,
-            BodyLiteralKind::Compare { .. } => {
-                panic!("naive oracle handles atoms and negated atoms only")
-            }
+            _ => None,
         })
         .collect();
     let negatives: Vec<&Atom> = body
@@ -83,7 +88,128 @@ fn matches(
                 .any(|f| refutes(atom, &f.tuple, env))
         })
     });
-    envs
+    let mut out = Vec::new();
+    for env in envs {
+        if let Some(env) = apply_comparisons(body, env)? {
+            out.push(env);
+        }
+    }
+    Ok(out)
+}
+
+/// Folds every comparison literal (§8) over `env` in source order: a filter
+/// that fails discards the environment (`Ok(None)`); an `=`-assignment binds
+/// its target; a runtime error (overflow, division by zero, NaN, type mismatch)
+/// aborts.
+fn apply_comparisons(
+    body: &[BodyLiteral],
+    mut env: HashMap<Var, Value>,
+) -> Result<Option<HashMap<Var, Value>>> {
+    for literal in body {
+        let BodyLiteralKind::Compare { op, lhs, rhs } = &literal.kind else {
+            continue;
+        };
+        // Assignment: `=` where exactly one side is a bare, currently-unbound
+        // variable and the other side evaluates.
+        if *op == CmpOp::Eq {
+            match (unbound_var(lhs, &env), unbound_var(rhs, &env)) {
+                (Some(v), None) => {
+                    env.insert(v, eval_expr(rhs, &env)?);
+                    continue;
+                }
+                (None, Some(v)) => {
+                    env.insert(v, eval_expr(lhs, &env)?);
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        let l = eval_expr(lhs, &env)?;
+        let r = eval_expr(rhs, &env)?;
+        if !compare(*op, &l, &r)? {
+            return Ok(None);
+        }
+    }
+    Ok(Some(env))
+}
+
+/// A bare, currently-unbound variable expression, if that is what `expr` is.
+fn unbound_var(expr: &Expr, env: &HashMap<Var, Value>) -> Option<Var> {
+    match expr {
+        Expr::Term(Term::Var(v)) if !env.contains_key(v) => Some(*v),
+        _ => None,
+    }
+}
+
+/// Applies a comparison to two evaluated operands. Strict: cross-type operands
+/// are a structured error (§4), never a silent `false`.
+fn compare(op: CmpOp, lhs: &Value, rhs: &Value) -> Result<bool> {
+    if std::mem::discriminant(lhs) != std::mem::discriminant(rhs) {
+        return Err(Error::Semantic(
+            "type error: comparison requires operands of the same type".to_string(),
+        ));
+    }
+    Ok(match op {
+        CmpOp::Eq => lhs == rhs,
+        CmpOp::Ne => lhs != rhs,
+        CmpOp::Lt => lhs < rhs,
+        CmpOp::Le => lhs <= rhs,
+        CmpOp::Gt => lhs > rhs,
+        CmpOp::Ge => lhs >= rhs,
+    })
+}
+
+/// Evaluates an arithmetic expression under `env`.
+fn eval_expr(expr: &Expr, env: &HashMap<Var, Value>) -> Result<Value> {
+    match expr {
+        Expr::Term(Term::Const(value)) => Ok(value.clone()),
+        Expr::Term(Term::Var(var)) => env.get(var).cloned().ok_or_else(|| {
+            Error::Semantic("malformed IR: arithmetic operand variable is unbound".to_string())
+        }),
+        Expr::Binary { op, lhs, rhs } => {
+            let a = eval_expr(lhs, env)?;
+            let b = eval_expr(rhs, env)?;
+            arith(*op, a, b)
+        }
+    }
+}
+
+/// Applies an arithmetic operator: strict `int op int` / `float op float`,
+/// truncating integer division, checked overflow and division by zero, NaN
+/// rejected.
+fn arith(op: ArithOp, lhs: Value, rhs: Value) -> Result<Value> {
+    match (lhs, rhs) {
+        (Value::Int(a), Value::Int(b)) => {
+            let checked = match op {
+                ArithOp::Add => a.checked_add(b),
+                ArithOp::Sub => a.checked_sub(b),
+                ArithOp::Mul => a.checked_mul(b),
+                ArithOp::Div => {
+                    if b == 0 {
+                        return Err(Error::Semantic(
+                            "arithmetic error: division by zero".to_string(),
+                        ));
+                    }
+                    a.checked_div(b)
+                }
+            };
+            checked
+                .map(Value::Int)
+                .ok_or_else(|| Error::Semantic("arithmetic error: integer overflow".to_string()))
+        }
+        (Value::Float(a), Value::Float(b)) => {
+            let result = match op {
+                ArithOp::Add => a.get() + b.get(),
+                ArithOp::Sub => a.get() - b.get(),
+                ArithOp::Mul => a.get() * b.get(),
+                ArithOp::Div => a.get() / b.get(),
+            };
+            F64::new(result).map(Value::Float)
+        }
+        _ => Err(Error::Semantic(
+            "type error: arithmetic requires two ints or two floats".to_string(),
+        )),
+    }
 }
 
 /// All environments extending `env` that satisfy the positive atoms in order.

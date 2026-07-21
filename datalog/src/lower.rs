@@ -560,9 +560,10 @@ impl Lowerer {
         }
     }
 
-    /// Pass 4 for rules: head variables must be bound by a positive body atom.
+    /// Pass 4 for rules: head variables must be bound by a positive body atom
+    /// (or by an `=`-assignment in the body — spec §17, 2026-07-21).
     fn check_rule_safety(&mut self, rule: &ir::Rule, head_name: &str) {
-        let bound = positive_vars(&rule.body);
+        let bound = safe_bound_vars(&rule.body);
         for arg in &rule.head.args {
             if let ir::Term::Var(var) = arg
                 && !bound.contains(&var.0)
@@ -578,23 +579,20 @@ impl Lowerer {
     }
 
     /// Pass 4 shared by rules and queries: variables in negated atoms or
-    /// occurring only in comparisons must be bound by a positive body atom.
+    /// occurring only in comparisons must be bound by a positive body atom —
+    /// except an `=`-assignment target, which the assignment itself binds (spec
+    /// §17, 2026-07-21).
     fn check_body_safety(
         &mut self,
         body: &[ir::BodyLiteral],
         var_names: &[Option<String>],
         context: &str,
     ) {
-        let bound = positive_vars(body);
-        let mut check = |var: &ir::Var, place: &str| {
-            if !bound.contains(&var.0) {
-                let name = var_names[var.0 as usize].as_deref().unwrap_or("_");
-                self.errors.push(Error::Semantic(format!(
-                    "unsafe {place} in `{context}`: variable `{name}` does not occur in a \
-                     positive body atom"
-                )));
-            }
-        };
+        let positive = positive_vars(body);
+        // Variables available at each point: positively bound, plus any bound
+        // by a prior `=`-assignment in source order — the order the engine
+        // evaluates comparisons in.
+        let mut bound = positive.clone();
         for literal in body {
             match &literal.kind {
                 ir::BodyLiteralKind::Atom(_) => {}
@@ -604,20 +602,42 @@ impl Lowerer {
                     // `None`-named slot here is necessarily wildcard-fresh
                     // inside this very literal — `VarScope::fresh` never
                     // enters the name map, so a fresh slot occurs at exactly
-                    // one term position in the whole clause.
+                    // one term position in the whole clause. Negated atoms are
+                    // evaluated before comparisons, so an assignment cannot
+                    // bind one's variable — positive binding is required.
                     for arg in &atom.args {
                         if let ir::Term::Var(var) = arg
                             && var_names[var.0 as usize].is_some()
+                            && !positive.contains(&var.0)
                         {
-                            check(var, "negated atom");
+                            push_unsafe(
+                                &mut self.errors,
+                                var.0,
+                                var_names,
+                                "negated atom",
+                                context,
+                            );
                         }
                     }
                 }
-                ir::BodyLiteralKind::Compare { lhs, rhs, .. } => {
-                    for expr in [lhs, rhs] {
-                        for var in expr_vars(expr) {
-                            check(&var, "comparison");
+                ir::BodyLiteralKind::Compare { op, lhs, rhs } => {
+                    // `=` with one bare, not-yet-bound variable side is an
+                    // assignment binding it; that target is exempt.
+                    let target = if *op == ast::CmpOp::Eq {
+                        assignment_target(lhs, rhs, &bound)
+                    } else {
+                        None
+                    };
+                    for var in expr_vars(lhs).into_iter().chain(expr_vars(rhs)) {
+                        if Some(var.0) == target {
+                            continue;
                         }
+                        if !bound.contains(&var.0) {
+                            push_unsafe(&mut self.errors, var.0, var_names, "comparison", context);
+                        }
+                    }
+                    if let Some(slot) = target {
+                        bound.insert(slot);
                     }
                 }
             }
@@ -772,6 +792,66 @@ fn positive_vars(body: &[ir::BodyLiteral]) -> std::collections::HashSet<u32> {
         }
     }
     bound
+}
+
+/// Records an unsafe-variable error (a variable not bound by a positive body
+/// atom nor an `=`-assignment).
+fn push_unsafe(
+    errors: &mut Vec<Error>,
+    slot: u32,
+    var_names: &[Option<String>],
+    place: &str,
+    context: &str,
+) {
+    let name = var_names[slot as usize].as_deref().unwrap_or("_");
+    errors.push(Error::Semantic(format!(
+        "unsafe {place} in `{context}`: variable `{name}` does not occur in a positive body atom"
+    )));
+}
+
+/// Every variable the body binds: positively bound (occurring in a positive
+/// atom), plus any bound by an `=`-assignment. Computed in source order so a
+/// later assignment can depend on an earlier one (`N = A+1, M = N+1`) — matching
+/// the engine's comparison evaluation order.
+fn safe_bound_vars(body: &[ir::BodyLiteral]) -> std::collections::HashSet<u32> {
+    let mut bound = positive_vars(body);
+    for literal in body {
+        if let ir::BodyLiteralKind::Compare {
+            op: ast::CmpOp::Eq,
+            lhs,
+            rhs,
+        } = &literal.kind
+            && let Some(slot) = assignment_target(lhs, rhs, &bound)
+        {
+            bound.insert(slot);
+        }
+    }
+    bound
+}
+
+/// If this `=` comparison is an assignment — exactly one side a bare variable
+/// not yet in `bound`, with the other side's variables all already bound —
+/// returns that target variable's slot.
+fn assignment_target(
+    lhs: &ir::Expr,
+    rhs: &ir::Expr,
+    bound: &std::collections::HashSet<u32>,
+) -> Option<u32> {
+    let evaluable = |expr: &ir::Expr| expr_vars(expr).iter().all(|v| bound.contains(&v.0));
+    match (bare_var(lhs), bare_var(rhs)) {
+        (Some(v), _) if !bound.contains(&v) && evaluable(rhs) => Some(v),
+        (_, Some(v)) if !bound.contains(&v) && evaluable(lhs) => Some(v),
+        _ => None,
+    }
+}
+
+/// The slot of a bare variable expression (`Expr::Term(Term::Var)`), if that is
+/// what `expr` is.
+fn bare_var(expr: &ir::Expr) -> Option<u32> {
+    match expr {
+        ir::Expr::Term(ir::Term::Var(var)) => Some(var.0),
+        _ => None,
+    }
 }
 
 /// All variable slots occurring in an expression.
@@ -1994,5 +2074,71 @@ mod tests {
             errors.iter().any(|e| e.to_string().contains("`Y`")),
             "unexpected errors: {errors:?}"
         );
+    }
+
+    #[test]
+    fn assignment_target_is_safe_and_lowers() {
+        // next_year(X, N) :- age(X, A), N = A + 1.
+        // `N` is bound only by the `=`-assignment, yet is a head variable and a
+        // comparison operand — it must be accepted (spec §17, 2026-07-21), and
+        // the program must evaluate to next_year("alice", 31).
+        let program = ast::Program {
+            statements: vec![
+                ast_fix::fact(
+                    "age",
+                    vec![ast_fix::string_term("alice"), ast_fix::int_term(30)],
+                ),
+                ast_fix::rule(
+                    ast_fix::positional_atom(
+                        "next_year",
+                        vec![ast_fix::var_term("X"), ast_fix::var_term("N")],
+                    ),
+                    vec![
+                        ast_fix::positive_literal(ast_fix::positional_atom(
+                            "age",
+                            vec![ast_fix::var_term("X"), ast_fix::var_term("A")],
+                        )),
+                        ast::Literal {
+                            kind: ast::LiteralKind::Comparison(ast::Comparison {
+                                op: ast::CmpOp::Eq,
+                                lhs: ast::Expr {
+                                    kind: ast::ExprKind::Term(ast_fix::var_term("N")),
+                                    span: Span::DUMMY,
+                                },
+                                rhs: ast::Expr {
+                                    kind: ast::ExprKind::Binary {
+                                        op: ast::ArithOp::Add,
+                                        lhs: Box::new(ast::Expr {
+                                            kind: ast::ExprKind::Term(ast_fix::var_term("A")),
+                                            span: Span::DUMMY,
+                                        }),
+                                        rhs: Box::new(ast::Expr {
+                                            kind: ast::ExprKind::Term(ast_fix::int_term(1)),
+                                            span: Span::DUMMY,
+                                        }),
+                                    },
+                                    span: Span::DUMMY,
+                                },
+                            }),
+                            span: Span::DUMMY,
+                        },
+                    ],
+                ),
+            ],
+        };
+        let ir = lower(&program).expect("assignment rule should lower");
+        let model = crate::engine::eval(&ir).unwrap();
+        let next_year = ir::PredId(
+            ir.predicates
+                .iter()
+                .position(|p| p.name == "next_year")
+                .expect("next_year predicate") as u32,
+        );
+        let expected: std::collections::BTreeSet<ir::Tuple> = std::iter::once(ir::Tuple(vec![
+            ir::Value::String("alice".to_string()),
+            ir::Value::Int(31),
+        ]))
+        .collect();
+        assert_eq!(model.relation(next_year), &expected);
     }
 }

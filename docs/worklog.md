@@ -16,6 +16,53 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-21 — §8 literal-value builtins, then §4 type inference
+
+**Done**
+- **§8 comparison & arithmetic builtins now evaluate** (engine + naive oracle).
+  Comparisons are anti-join filters; `=` binds a bare unbound variable
+  (assignment) else compares. Strict numerics — `int op int`/`float op float`
+  only; truncating integer `/`; division-by-zero, integer overflow, NaN, and
+  cross-type comparison are structured `Error::Semantic`. The join now threads
+  `Result` (`enumerate_from`/`enumerate_matches`/`collect_rule_matches`/
+  `eval_stratum`/`eval`/`Model::answer`) so runtime arithmetic errors propagate;
+  comparisons are scheduled after positives/negations at their true `BodyIdx`.
+  New `Premise::Builtin`/`ProofTree::Builtin` keep provenance complete.
+- **Lowering assignment-safety exception** (`safe_bound_vars`/
+  `assignment_target`): an `=`-target counts as range-restricted for head vars
+  and comparison operands, computed in source order (negated-atom vars still
+  require *positive* binding, since negations run before comparisons).
+- **§4 type inference** — new `src/typecheck.rs`: a union-find over the five
+  primitives (one class per column / per rule-or-query variable), gathering
+  constraints from facts, variable flow, and §8 operand rules; conflicts
+  collected (not fail-fast) and reported naming the column/variable.
+  `typecheck` runs between `lower` and `eval`; `eval` stays type-blind.
+- **Tests: 88 → 107.** §16.3 end-to-end; §8 error-path units (div-by-zero,
+  overflow, NaN, mixed, cross-type); assignment lowers+evals; 5 typecheck
+  units; B1 extended over `arb_comparison_program` (incl. error path); **C4/C5**
+  over `arb_well_typed_program`; `injected_type_conflict_is_rejected`; coverage
+  guards for both new generators. Mutation-checked (7 mutants, each reverted
+  after confirming failure; no regression seeds kept). Clippy/rustfmt clean.
+- **Docs**: spec §8 → Draft (semantics + the three resolved open questions),
+  §4 status (inference implemented), §16.3 resolved, two §17 decision entries;
+  testing.md coverage map + B1/B5 + C4/C5.
+
+**Decided** (also in spec §17, 2026-07-21)
+- The three §8 open questions: `=` is assignment-or-equality; strict numerics,
+  no coercion; truncating int `/` with checked/structured arithmetic errors.
+- **`eval` stays type-blind** (separation of concerns), and the **evaluation
+  property generators migrated to well-typed programs**: `arb_program_with_edb`/
+  `arb_extension_pair` relabel every constant to a `symbol` injectively
+  (`monotype`) — isomorphic to the old programs, so no property changed
+  behavior — with A1–A5 keeping cross-type `Value` coverage.
+  `evaluation_generator_is_well_typed` pins the invariant.
+
+**Next up**
+- **`declare`-signature verification** (§4): thread declared `TypeName`s onto
+  `ir::PredicateInfo` (a parallel `field_types`, ~15 construction sites) and
+  verify inferred vs. declared — the one piece of §4 left. Then **lexer +
+  parser** (roadmap step 5, Phase D). Imported column types wait on §13.
+
 ## 2026-07-20 (research-note session) — semiring provenance under negation, parked
 
 **Done**

@@ -96,7 +96,10 @@ Candidate principles to ratify:
 
 *Status: Draft — validated by the AST/IR prototype (`src/ast.rs`, `src/ir.rs`),
 2026-07-19; the named-argument rules below implemented in lowering
-(`src/lower.rs`), 2026-07-20*
+(`src/lower.rs`), 2026-07-20; type inference implemented as a post-lowering pass
+(`src/typecheck.rs`), 2026-07-21. Sources (2) imported column types and the
+`declare` signature *verification* below land with §13 and IR-level declared
+types respectively.*
 
 ### Values and terms
 
@@ -293,10 +296,41 @@ semantics.
 
 ## 8. Arithmetic & comparison builtins
 
-*Status: TBD*
+*Status: Draft — evaluated in the engine and the naive oracle (`src/engine/`),
+lowered with the assignment-safety exception (`src/lower.rs`), 2026-07-21.*
 
-*To fill in: operators/functions, evaluation rules, type coercions, and the
-mode/safety conditions (which variables must be bound before evaluation).*
+**Operators.** Comparison `= != < <= > >=`; arithmetic `+ - * /`. Both appear
+as body literals: a comparison is an anti-join *filter*; arithmetic appears
+inside a comparison's operands.
+
+**`=` is assignment or equality.** If exactly one side is a bare variable not
+yet bound (by a positive atom or an earlier assignment) and the other side fully
+evaluates, `=` **binds** it (`next_year(X, N) :- age(X, A), N = A + 1.` binds
+`N`). Otherwise both sides evaluate and `=` is an equality **filter**
+(`A = 18`). `!= < <= > >=` are always filters.
+
+**Strict types, no coercion.** `int` and `float` are distinct; **symbol**,
+**string**, and **bool** are the other three. Arithmetic requires both operands
+the *same numeric* type — `int op int → int`, `float op float → float`; any
+mixed or non-numeric operand is a **type error**. A comparison requires both
+operands the *same* type (any type); a cross-type comparison is a type error,
+never a silent `false`. Ordered comparisons use the operand type's natural
+order (ints/floats numerically, strings/symbols lexicographically, `false <
+true`). Post-§4, these conflicts are caught before evaluation; pre-typecheck
+they are structured runtime errors — same error channel either way.
+
+**Arithmetic edge cases** are structured errors, never a wrap or panic: integer
+division truncates toward zero, division by zero and integer overflow error, and
+a NaN-producing float operation (`0.0 / 0.0`) errors via `F64::new`.
+
+**Mode / safety (§10).** Every comparison operand variable must be bound by a
+positive atom, *except* an `=`-assignment target, which the assignment binds.
+Assignments are evaluated in source order (after positives and negations), so a
+later one may depend on an earlier (`N = A+1, M = N+1`); a negated atom's
+variables must be *positively* bound (negations run before assignments).
+
+*Operator precedence for the surface syntax is deferred to the parser (§5, Phase
+D); the AST already carries whatever grouping the parser chose.*
 
 ## 9. Aggregation
 
@@ -521,9 +555,11 @@ older(X, Y)   :- age(X, A), age(Y, B), A > B.
 next_year(X, N) :- age(X, A), N = A + 1.
 % expected: adult("alice"), adult("carol"); older pairs; next_year offsets
 ```
-*Raises:* comparison vs arithmetic operators; is `=` unification, assignment, or an
-equality builtin? mode/safety conditions (which vars must be bound before an
-arithmetic term evaluates); numeric types and coercion (§4/§8).
+*Resolved (§8, 2026-07-21):* `=` is assignment when one side is a bare unbound
+variable (so `N = A + 1` binds `N`), else an equality filter; comparison and
+arithmetic operands must be bound by a positive atom or an earlier assignment;
+numerics are strict with no coercion. Evaluated end-to-end
+(`example_16_3_comparisons_and_assignment_evaluate`).
 
 ### 16.4 Aggregation — grouping
 
@@ -891,18 +927,54 @@ structured error.
   polynomials for fixed-point logic — are catalogued in group 5 and
   deliberately not adopted in v1. `Premise::Absent` records the instantiated
   pattern; that is what the explainability pillar needs (§7, §11).
+- **2026-07-21** — **§8 builtins evaluate; the three open questions are
+  resolved** (§8, replacing the like-named open questions): (1) `=` is
+  assignment when one side is a bare unbound variable, else an equality filter;
+  (2) numerics are strict — mixed `int`/`float` (and any cross-type comparison)
+  is a type error, no coercion; (3) integer `/` truncates toward zero, and
+  division by zero, integer overflow, and NaN-producing float ops are structured
+  errors. Comparisons are scheduled after positives and negations in the join
+  (evaluator-internal ordering; premises land at their true `BodyIdx`), so a
+  runtime arithmetic error propagates out of evaluation as `Error::Semantic`.
+  A new `Premise::Builtin { op, lhs, rhs }` records a satisfied comparison as a
+  self-justifying proof leaf (no round, no sub-proof — like `Absent`). Lowering
+  gains an assignment-safety exception: an `=`-target counts as bound for head
+  and comparison range-restriction, computed in source order. The naive oracle
+  learned the same evaluation so B1 (naive ≡ semi-naive) holds over
+  comparison/arithmetic programs, including the error path (both reject a
+  `/ 0`). Type *inference* (§4) — verifying these operand rules statically
+  before evaluation — is the next step.
+- **2026-07-21** — **Type inference is a separate pass, and `eval` stays
+  type-blind.** `typecheck(&ir::Program) -> Result<TypeEnv, Vec<Error>>`
+  (`src/typecheck.rs`) runs between `lower` and `eval` — a union-find over the
+  five primitive types with one class per predicate column and per rule/query
+  variable. Facts pin columns; a variable unifies every position it occupies;
+  §8 builtins add the operand constraints (arithmetic/ordered comparison ⇒
+  numeric; every comparison ⇒ same-type operands). Conflicts are collected (not
+  fail-fast) and reported naming the column/variable. `eval` deliberately does
+  **not** call it — the evaluator is a total function over the whole value space
+  (its laws are type-independent), and coupling the two would be a category
+  error. Consequently the **evaluation-property generators were migrated to
+  well-typed programs**: `arb_program_with_edb`/`arb_extension_pair` relabel
+  every constant to a `symbol` injectively (`monotype`), so the B/E suite runs
+  over the reachable, type-checkable state space while staying isomorphic to the
+  old programs (no property changed behavior); cross-type `Value` ordering stays
+  covered by A1–A5, its proper home. Properties **C4** (inference soundness) and
+  **C5** (typed-generator completeness) are green over a dedicated typed
+  generator `arb_well_typed_program`. Still deferred: imported column types
+  (§13) and `declare`-signature verification (needs declared types threaded onto
+  `ir::PredicateInfo`).
 
 ### Open questions
 
 - **Data sources beyond CSV** (TSV/JSON/JSONL, SQLite, DuckDB, Parquet/Arrow,
   Postgres): priority order and per-backend declaration details. — §13.
 - **Aggregation vs recursion:** how far to go on recursive aggregation semantics. — §9.
-- **`=` semantics:** unification, assignment, or an equality builtin? (raised by §16.3) — §8.
 - **Aggregate expression syntax:** `count { Var : Goal }` is provisional — and `:`
   now also delimits named arguments, so the form will likely be revisited. — §9.
-- **Arithmetic details:** `/` on ints (integer vs float division), overflow
-  behavior, mixed int/float arithmetic and comparison coercions, operator
-  precedence. — §8.
+- **Operator precedence:** the surface grammar for arithmetic/comparison
+  precedence and associativity (the evaluation semantics are settled in §8; this
+  is a parser concern). — §5/§8.
 - **Provenance query syntax:** `?why <fact>` is provisional across CLI and API; also
   decide proof-tree JSON encoding. (§16.6) — §11/§14.
 - **Semiring provenance under negation:** parked research thread with a worked

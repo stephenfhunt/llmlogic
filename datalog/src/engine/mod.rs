@@ -17,9 +17,14 @@
 //!   not just a first witness. Each fact is also stamped with the round it
 //!   first appeared in ([`Model::first_round`]), which is what makes finite
 //!   proof extraction possible ([`crate::provenance::ProofTree::explain`]).
-//! - Structured not-yet-supported errors for: comparison literals (§8 open,
-//!   incl. `=` semantics) and programs with imports (until `crate::sources`
-//!   lands).
+//! - Comparison and arithmetic builtins (§8) are evaluated as body literals:
+//!   ordered/equality comparisons act as anti-join *filters*, and `=` binds an
+//!   otherwise-unbound variable to the evaluated other side (assignment),
+//!   else compares (spec §17, 2026-07-21). Arithmetic is strict — `int op int`
+//!   and `float op float` only; mixed/non-numeric operands, integer overflow,
+//!   division by zero, and NaN are structured runtime errors.
+//! - Structured not-yet-supported errors for programs with imports (until
+//!   `crate::sources` lands).
 //!
 //! Stratified negation (§7, §17 2026-07-20): a negated atom is an anti-join
 //! *filter* — it binds nothing, always reads the full relation (its predicate's
@@ -29,8 +34,7 @@
 //! satisfied absence is recorded as a [`crate::provenance::Premise::Absent`]
 //! pattern.
 //!
-//! Still ahead here: builtins (§8) extend the join loop; magic sets are a
-//! future optimization.
+//! Still ahead here: magic sets are a future optimization.
 
 #[cfg(test)]
 pub(crate) mod naive;
@@ -38,10 +42,11 @@ pub(crate) mod naive;
 use std::collections::{BTreeSet, HashMap};
 
 use crate::Result;
+use crate::ast::{ArithOp, CmpOp};
 use crate::error::Error;
 use crate::ir::{
-    Atom, BodyLiteral, BodyLiteralKind, Fact, PredId, Program, Query, Rule, RuleId, Term, Tuple,
-    Value,
+    Atom, BodyLiteral, BodyLiteralKind, Expr, F64, Fact, PredId, Program, Query, Rule, RuleId,
+    Term, Tuple, Value,
 };
 use crate::provenance::{AbsentPattern, Derivation, Premise};
 
@@ -136,7 +141,7 @@ impl Model {
                 })
                 .collect();
             rows.insert(row);
-        });
+        })?;
         Ok(rows.into_iter().collect())
     }
 
@@ -170,7 +175,7 @@ pub fn eval(program: &Program) -> Result<Model> {
     }
     let mut round = 0;
     for stratum in &program.strata {
-        round = eval_stratum(program, stratum, &mut model, round);
+        round = eval_stratum(program, stratum, &mut model, round)?;
     }
     Ok(model)
 }
@@ -242,15 +247,16 @@ fn validate(program: &Program) -> Result<()> {
     Ok(())
 }
 
-/// Rejects body forms evaluation cannot handle: comparison literals (§8 open;
-/// spec §17 2026-07-19 step-2 policy), and negated atoms whose *named*
-/// variables are not bound by a positive atom of the same body. Well-lowered
-/// IR satisfies the latter via §10 safety; hand-built IR that violates it
-/// would otherwise silently evaluate the named variable as a wildcard.
+/// Enforces the negation IR contract: a negated atom's *named* variables must
+/// be bound by a positive atom of the same body. Well-lowered IR satisfies this
+/// via §10 safety; hand-built IR that violates it would otherwise silently
+/// evaluate the named variable as a wildcard. Comparison operand safety (§8) is
+/// enforced in lowering; a malformed comparison fed as hand-built IR surfaces as
+/// a structured error when its operand is evaluated.
 fn validate_body(body: &[BodyLiteral], var_names: &[Option<String>]) -> Result<()> {
     for literal in body {
         match &literal.kind {
-            BodyLiteralKind::Atom(_) => {}
+            BodyLiteralKind::Atom(_) | BodyLiteralKind::Compare { .. } => {}
             BodyLiteralKind::NegAtom(atom) => {
                 for arg in &atom.args {
                     if let Term::Var(var) = arg
@@ -263,11 +269,6 @@ fn validate_body(body: &[BodyLiteral], var_names: &[Option<String>]) -> Result<(
                         )));
                     }
                 }
-            }
-            BodyLiteralKind::Compare { .. } => {
-                return Err(Error::Semantic(
-                    "comparison literals not yet supported in evaluation (§8)".to_string(),
-                ));
             }
         }
     }
@@ -284,7 +285,12 @@ fn positively_bound(body: &[BodyLiteral], var: crate::ir::Var) -> bool {
 
 /// Runs one stratum to fixpoint, semi-naively. Returns the updated round
 /// counter (monotone across strata, for `first_round` stamping).
-fn eval_stratum(program: &Program, stratum: &[RuleId], model: &mut Model, mut round: u32) -> u32 {
+fn eval_stratum(
+    program: &Program,
+    stratum: &[RuleId],
+    model: &mut Model,
+    mut round: u32,
+) -> Result<u32> {
     // Seed pass: every rule against the full current relations. This finds
     // every instance derivable from base facts and earlier strata.
     round += 1;
@@ -293,7 +299,7 @@ fn eval_stratum(program: &Program, stratum: &[RuleId], model: &mut Model, mut ro
     for &rule_id in stratum {
         let rule = &program.rules[rule_id.0 as usize];
         let views = vec![AtomView::Full; rule.body.len()];
-        collect_rule_matches(model, &no_delta, rule, rule_id, &views, &mut pending);
+        collect_rule_matches(model, &no_delta, rule, rule_id, &views, &mut pending)?;
     }
 
     loop {
@@ -308,7 +314,7 @@ fn eval_stratum(program: &Program, stratum: &[RuleId], model: &mut Model, mut ro
             }
         }
         if delta.is_empty() {
-            return round;
+            return Ok(round);
         }
 
         // Delta round: for each rule and each body position i, join the delta
@@ -333,7 +339,7 @@ fn eval_stratum(program: &Program, stratum: &[RuleId], model: &mut Model, mut ro
                         std::cmp::Ordering::Greater => AtomView::Old,
                     })
                     .collect();
-                collect_rule_matches(model, &delta, rule, rule_id, &views, &mut pending);
+                collect_rule_matches(model, &delta, rule, rule_id, &views, &mut pending)?;
             }
         }
     }
@@ -367,7 +373,7 @@ fn collect_rule_matches(
     rule_id: RuleId,
     views: &[AtomView],
     pending: &mut Vec<(Fact, Derivation)>,
-) {
+) -> Result<()> {
     let cx = JoinCx {
         model,
         delta,
@@ -404,7 +410,7 @@ fn collect_rule_matches(
                     .collect(),
             },
         ));
-    });
+    })
 }
 
 /// A complete-match callback: receives the full bindings and one premise per
@@ -420,7 +426,11 @@ type OnMatch<'a> = dyn FnMut(&[Option<Value>], &[Option<Premise>]) + 'a;
 /// variable as a wildcard). Evaluation order is evaluator-internal; premises
 /// are recorded at their true body index, so `BodyIdx` alignment is
 /// untouched. Calls `on_match` once per match of the whole body.
-fn enumerate_matches(cx: &JoinCx<'_>, num_vars: usize, on_match: &mut OnMatch<'_>) {
+fn enumerate_matches(cx: &JoinCx<'_>, num_vars: usize, on_match: &mut OnMatch<'_>) -> Result<()> {
+    // Positive atoms first (they bind variables), then negated atoms as
+    // anti-join filters, then comparison/assignment builtins in source order.
+    // Positives-first guarantees every non-assignment operand is bound; source
+    // order among comparisons preserves assignment chains (`N = A+1, M = N+1`).
     let mut order: Vec<usize> = Vec::with_capacity(cx.body.len());
     for (idx, literal) in cx.body.iter().enumerate() {
         if matches!(literal.kind, BodyLiteralKind::Atom(_)) {
@@ -432,11 +442,14 @@ fn enumerate_matches(cx: &JoinCx<'_>, num_vars: usize, on_match: &mut OnMatch<'_
             order.push(idx);
         }
     }
-    // Comparisons are rejected by validation and never reach the join loop,
-    // so `order` covers the whole body.
+    for (idx, literal) in cx.body.iter().enumerate() {
+        if matches!(literal.kind, BodyLiteralKind::Compare { .. }) {
+            order.push(idx);
+        }
+    }
     let mut bindings: Vec<Option<Value>> = vec![None; num_vars];
     let mut premises: Vec<Option<Premise>> = vec![None; cx.body.len()];
-    enumerate_from(cx, &order, 0, &mut bindings, &mut premises, on_match);
+    enumerate_from(cx, &order, 0, &mut bindings, &mut premises, on_match)
 }
 
 fn enumerate_from(
@@ -446,10 +459,10 @@ fn enumerate_from(
     bindings: &mut [Option<Value>],
     premises: &mut [Option<Premise>],
     on_match: &mut OnMatch<'_>,
-) {
+) -> Result<()> {
     if depth == order.len() {
         on_match(bindings, premises);
-        return;
+        return Ok(());
     }
     let idx = order[depth];
     match &cx.body[idx].kind {
@@ -461,7 +474,7 @@ fn enumerate_from(
                     AtomView::Full => Box::new(full.iter()),
                     AtomView::Delta => match atom_delta {
                         Some(delta) => Box::new(delta.iter()),
-                        None => return,
+                        None => return Ok(()),
                     },
                     AtomView::Old => Box::new(full.iter().filter(move |tuple| {
                         atom_delta.is_none_or(|delta| !delta.contains(*tuple))
@@ -473,11 +486,12 @@ fn enumerate_from(
                         pred: atom.pred,
                         tuple: tuple.clone(),
                     }));
-                    enumerate_from(cx, order, depth + 1, bindings, premises, on_match);
+                    let result = enumerate_from(cx, order, depth + 1, bindings, premises, on_match);
                     premises[idx] = None;
                     for slot in bound {
                         bindings[slot] = None;
                     }
+                    result?;
                 }
             }
         }
@@ -507,16 +521,42 @@ fn enumerate_from(
                 .iter()
                 .any(|tuple| pattern.matches(tuple))
             {
-                return;
+                return Ok(());
             }
             premises[idx] = Some(Premise::Absent(pattern));
-            enumerate_from(cx, order, depth + 1, bindings, premises, on_match);
+            let result = enumerate_from(cx, order, depth + 1, bindings, premises, on_match);
             premises[idx] = None;
+            result?;
         }
-        BodyLiteralKind::Compare { .. } => {
-            unreachable!("validated: comparison literals are rejected before evaluation")
+        BodyLiteralKind::Compare { op, lhs, rhs } => {
+            // A comparison is a filter; `=` with one bare unbound-variable side
+            // is an assignment that binds it (§8). Runtime errors (overflow,
+            // division by zero, NaN, type mismatch) short-circuit the whole
+            // evaluation.
+            match eval_compare(*op, lhs, rhs, bindings)? {
+                CompareOutcome::Fail => {}
+                CompareOutcome::Pass { lhs, rhs } => {
+                    premises[idx] = Some(Premise::Builtin { op: *op, lhs, rhs });
+                    let result = enumerate_from(cx, order, depth + 1, bindings, premises, on_match);
+                    premises[idx] = None;
+                    result?;
+                }
+                CompareOutcome::Bind { slot, value } => {
+                    premises[idx] = Some(Premise::Builtin {
+                        op: *op,
+                        lhs: value.clone(),
+                        rhs: value.clone(),
+                    });
+                    bindings[slot] = Some(value);
+                    let result = enumerate_from(cx, order, depth + 1, bindings, premises, on_match);
+                    premises[idx] = None;
+                    bindings[slot] = None;
+                    result?;
+                }
+            }
         }
     }
+    Ok(())
 }
 
 /// Unifies an atom against a ground tuple under the current bindings.
@@ -547,6 +587,190 @@ fn try_match(atom: &Atom, tuple: &Tuple, bindings: &mut [Option<Value>]) -> Opti
         }
     }
     Some(bound)
+}
+
+/// The effect of evaluating a comparison/assignment literal (§8) under the
+/// current bindings.
+enum CompareOutcome {
+    /// A filter that held; carries the evaluated operands for the premise.
+    Pass { lhs: Value, rhs: Value },
+    /// A filter that did not hold — prune this branch.
+    Fail,
+    /// An `=`-assignment binding `slot` to `value`.
+    Bind { slot: usize, value: Value },
+}
+
+/// Evaluates a comparison literal (§8): either an assignment (`=` with one bare
+/// unbound-variable side) or a filter. Range restriction (§10) guarantees every
+/// non-assignment operand variable is bound by the time this is scheduled.
+fn eval_compare(
+    op: CmpOp,
+    lhs: &Expr,
+    rhs: &Expr,
+    bindings: &[Option<Value>],
+) -> Result<CompareOutcome> {
+    // Assignment: `=` where exactly one side is a bare, currently-unbound
+    // variable and the other side fully evaluates (spec §17, 2026-07-21).
+    if op == CmpOp::Eq {
+        match (unbound_slot(lhs, bindings), unbound_slot(rhs, bindings)) {
+            (Some(slot), None) => {
+                let value = eval_expr(rhs, bindings)?;
+                return Ok(CompareOutcome::Bind { slot, value });
+            }
+            (None, Some(slot)) => {
+                let value = eval_expr(lhs, bindings)?;
+                return Ok(CompareOutcome::Bind { slot, value });
+            }
+            // Both sides bare unbound variables cannot be assigned (neither
+            // evaluates); range restriction rejects this, so it is malformed IR.
+            // Fall through to the filter path, which surfaces the unbound operand.
+            _ => {}
+        }
+    }
+    let l = eval_expr(lhs, bindings)?;
+    let r = eval_expr(rhs, bindings)?;
+    if apply_compare(op, &l, &r)? {
+        Ok(CompareOutcome::Pass { lhs: l, rhs: r })
+    } else {
+        Ok(CompareOutcome::Fail)
+    }
+}
+
+/// The slot of a bare, currently-unbound variable expression, if that is what
+/// `expr` is.
+fn unbound_slot(expr: &Expr, bindings: &[Option<Value>]) -> Option<usize> {
+    match expr {
+        Expr::Term(Term::Var(var)) if bindings[var.0 as usize].is_none() => Some(var.0 as usize),
+        _ => None,
+    }
+}
+
+/// Applies a comparison to two evaluated operands. Strict: operands must share
+/// a type (symbols never equal strings, ints never equal floats — §4); a
+/// cross-type comparison is a structured type error, not a silent `false`. The
+/// ordering used is the operand type's natural order (`Value`'s within-type
+/// `Ord`).
+fn apply_compare(op: CmpOp, lhs: &Value, rhs: &Value) -> Result<bool> {
+    if std::mem::discriminant(lhs) != std::mem::discriminant(rhs) {
+        return Err(Error::Semantic(format!(
+            "type error: comparison `{}` requires operands of the same type, got {} and {}",
+            cmp_symbol(op),
+            value_type_name(lhs),
+            value_type_name(rhs),
+        )));
+    }
+    Ok(match op {
+        CmpOp::Eq => lhs == rhs,
+        CmpOp::Ne => lhs != rhs,
+        CmpOp::Lt => lhs < rhs,
+        CmpOp::Le => lhs <= rhs,
+        CmpOp::Gt => lhs > rhs,
+        CmpOp::Ge => lhs >= rhs,
+    })
+}
+
+/// Evaluates an arithmetic expression to a value under the current bindings.
+fn eval_expr(expr: &Expr, bindings: &[Option<Value>]) -> Result<Value> {
+    match expr {
+        Expr::Term(Term::Const(value)) => Ok(value.clone()),
+        Expr::Term(Term::Var(var)) => bindings[var.0 as usize].clone().ok_or_else(|| {
+            Error::Semantic(
+                "malformed IR: arithmetic operand variable is not bound by the body".to_string(),
+            )
+        }),
+        Expr::Binary { op, lhs, rhs } => {
+            let l = eval_expr(lhs, bindings)?;
+            let r = eval_expr(rhs, bindings)?;
+            apply_arith(*op, l, r)
+        }
+    }
+}
+
+/// Applies an arithmetic operator. Strict (§4, spec §17 2026-07-21): `int op
+/// int -> int` and `float op float -> float`; any mixed or non-numeric operand
+/// is a structured type error.
+fn apply_arith(op: ArithOp, lhs: Value, rhs: Value) -> Result<Value> {
+    match (&lhs, &rhs) {
+        (Value::Int(a), Value::Int(b)) => arith_int(op, *a, *b),
+        (Value::Float(a), Value::Float(b)) => arith_float(op, *a, *b),
+        _ => Err(Error::Semantic(format!(
+            "type error: arithmetic `{}` requires two ints or two floats, got {} and {}",
+            arith_symbol(op),
+            value_type_name(&lhs),
+            value_type_name(&rhs),
+        ))),
+    }
+}
+
+/// Integer arithmetic: truncating division, checked overflow and division by
+/// zero (spec §17, 2026-07-21) — each a structured error rather than a wrap or
+/// panic.
+fn arith_int(op: ArithOp, a: i64, b: i64) -> Result<Value> {
+    let checked = match op {
+        ArithOp::Add => a.checked_add(b),
+        ArithOp::Sub => a.checked_sub(b),
+        ArithOp::Mul => a.checked_mul(b),
+        ArithOp::Div => {
+            if b == 0 {
+                return Err(Error::Semantic(format!(
+                    "arithmetic error: division by zero in `{a} / {b}`"
+                )));
+            }
+            a.checked_div(b)
+        }
+    };
+    checked.map(Value::Int).ok_or_else(|| {
+        Error::Semantic(format!(
+            "arithmetic error: integer overflow in `{a} {} {b}`",
+            arith_symbol(op)
+        ))
+    })
+}
+
+/// Float arithmetic: ordinary IEEE operations, with a NaN result (e.g.
+/// `0.0 / 0.0`) rejected as a structured error via [`F64::new`].
+fn arith_float(op: ArithOp, a: F64, b: F64) -> Result<Value> {
+    let (x, y) = (a.get(), b.get());
+    let result = match op {
+        ArithOp::Add => x + y,
+        ArithOp::Sub => x - y,
+        ArithOp::Mul => x * y,
+        ArithOp::Div => x / y,
+    };
+    F64::new(result).map(Value::Float)
+}
+
+/// The name of a value's type, for error messages.
+fn value_type_name(value: &Value) -> &'static str {
+    match value {
+        Value::Symbol(_) => "symbol",
+        Value::String(_) => "string",
+        Value::Int(_) => "int",
+        Value::Float(_) => "float",
+        Value::Bool(_) => "bool",
+    }
+}
+
+/// The source symbol of a comparison operator, for error messages.
+fn cmp_symbol(op: CmpOp) -> &'static str {
+    match op {
+        CmpOp::Eq => "=",
+        CmpOp::Ne => "!=",
+        CmpOp::Lt => "<",
+        CmpOp::Le => "<=",
+        CmpOp::Gt => ">",
+        CmpOp::Ge => ">=",
+    }
+}
+
+/// The source symbol of an arithmetic operator, for error messages.
+fn arith_symbol(op: ArithOp) -> &'static str {
+    match op {
+        ArithOp::Add => "+",
+        ArithOp::Sub => "-",
+        ArithOp::Mul => "*",
+        ArithOp::Div => "/",
+    }
 }
 
 #[cfg(test)]
@@ -740,11 +964,17 @@ mod tests {
     }
 
     #[test]
-    fn comparison_literals_are_a_structured_error() {
-        // q(X) :- p(X), X < 2.
+    fn comparison_literal_filters_matches() {
+        // q(X) :- p(X), X < 2.  with p(0..=3)  =>  q(0), q(1).
         let mut program = Program::default();
         let p = program.intern_pred("p", 1);
         let q = program.intern_pred("q", 1);
+        for n in 0..=3 {
+            program.facts.push(Fact {
+                pred: p,
+                tuple: Tuple(vec![Value::Int(n)]),
+            });
+        }
         program.rules.push(Rule {
             head: Atom {
                 pred: q,
@@ -771,10 +1001,268 @@ mod tests {
             span: Span::DUMMY,
         });
         program.strata = vec![vec![RuleId(0)]];
+        let model = eval(&program).unwrap();
+        let expected: BTreeSet<Tuple> = [0, 1].map(|n| Tuple(vec![Value::Int(n)])).into();
+        assert_eq!(model.relation(q), &expected);
+    }
+
+    /// Spec §16.3 end-to-end over hand-built IR: a comparison filter
+    /// (`adult`), a join with a filter (`older`), and an `=`-assignment
+    /// (`next_year`). Exercises all three §8 body shapes at once.
+    #[test]
+    fn example_16_3_comparisons_and_assignment_evaluate() {
+        let mut program = Program::default();
+        let age = program.intern_pred("age", 2);
+        let adult = program.intern_pred("adult", 1);
+        let older = program.intern_pred("older", 2);
+        let next_year = program.intern_pred("next_year", 2);
+        for (name, years) in [("alice", 30), ("bob", 15), ("carol", 42)] {
+            program.facts.push(Fact {
+                pred: age,
+                tuple: Tuple(vec![string_value(name), Value::Int(years)]),
+            });
+        }
+        // adult(X) :- age(X, A), A >= 18.
+        program.rules.push(Rule {
+            head: Atom {
+                pred: adult,
+                args: vec![Term::Var(Var(0))],
+            },
+            body: vec![
+                BodyLiteral {
+                    kind: BodyLiteralKind::Atom(Atom {
+                        pred: age,
+                        args: vec![Term::Var(Var(0)), Term::Var(Var(1))],
+                    }),
+                    span: Span::DUMMY,
+                },
+                BodyLiteral {
+                    kind: BodyLiteralKind::Compare {
+                        op: CmpOp::Ge,
+                        lhs: Expr::Term(Term::Var(Var(1))),
+                        rhs: Expr::Term(Term::Const(Value::Int(18))),
+                    },
+                    span: Span::DUMMY,
+                },
+            ],
+            var_names: vec![Some("X".to_string()), Some("A".to_string())],
+            span: Span::DUMMY,
+        });
+        // older(X, Y) :- age(X, A), age(Y, B), A > B.
+        program.rules.push(Rule {
+            head: Atom {
+                pred: older,
+                args: vec![Term::Var(Var(0)), Term::Var(Var(2))],
+            },
+            body: vec![
+                BodyLiteral {
+                    kind: BodyLiteralKind::Atom(Atom {
+                        pred: age,
+                        args: vec![Term::Var(Var(0)), Term::Var(Var(1))],
+                    }),
+                    span: Span::DUMMY,
+                },
+                BodyLiteral {
+                    kind: BodyLiteralKind::Atom(Atom {
+                        pred: age,
+                        args: vec![Term::Var(Var(2)), Term::Var(Var(3))],
+                    }),
+                    span: Span::DUMMY,
+                },
+                BodyLiteral {
+                    kind: BodyLiteralKind::Compare {
+                        op: CmpOp::Gt,
+                        lhs: Expr::Term(Term::Var(Var(1))),
+                        rhs: Expr::Term(Term::Var(Var(3))),
+                    },
+                    span: Span::DUMMY,
+                },
+            ],
+            var_names: vec![
+                Some("X".to_string()),
+                Some("A".to_string()),
+                Some("Y".to_string()),
+                Some("B".to_string()),
+            ],
+            span: Span::DUMMY,
+        });
+        // next_year(X, N) :- age(X, A), N = A + 1.
+        program.rules.push(Rule {
+            head: Atom {
+                pred: next_year,
+                args: vec![Term::Var(Var(0)), Term::Var(Var(2))],
+            },
+            body: vec![
+                BodyLiteral {
+                    kind: BodyLiteralKind::Atom(Atom {
+                        pred: age,
+                        args: vec![Term::Var(Var(0)), Term::Var(Var(1))],
+                    }),
+                    span: Span::DUMMY,
+                },
+                BodyLiteral {
+                    kind: BodyLiteralKind::Compare {
+                        op: CmpOp::Eq,
+                        lhs: Expr::Term(Term::Var(Var(2))),
+                        rhs: Expr::Binary {
+                            op: ArithOp::Add,
+                            lhs: Box::new(Expr::Term(Term::Var(Var(1)))),
+                            rhs: Box::new(Expr::Term(Term::Const(Value::Int(1)))),
+                        },
+                    },
+                    span: Span::DUMMY,
+                },
+            ],
+            var_names: vec![
+                Some("X".to_string()),
+                Some("A".to_string()),
+                Some("N".to_string()),
+            ],
+            span: Span::DUMMY,
+        });
+        program.strata = vec![vec![RuleId(0), RuleId(1), RuleId(2)]];
+
+        let model = eval(&program).unwrap();
+
+        let expected_adult: BTreeSet<Tuple> = ["alice", "carol"]
+            .map(|n| Tuple(vec![string_value(n)]))
+            .into();
+        assert_eq!(model.relation(adult), &expected_adult);
+
+        let expected_older: BTreeSet<Tuple> =
+            [("alice", "bob"), ("carol", "alice"), ("carol", "bob")]
+                .map(|(x, y)| Tuple(vec![string_value(x), string_value(y)]))
+                .into();
+        assert_eq!(model.relation(older), &expected_older);
+
+        let expected_next: BTreeSet<Tuple> = [("alice", 31), ("bob", 16), ("carol", 43)]
+            .map(|(n, y)| Tuple(vec![string_value(n), Value::Int(y)]))
+            .into();
+        assert_eq!(model.relation(next_year), &expected_next);
+    }
+
+    /// Evaluates `t(M) :- seed(0), M = lhs <op> rhs.` and returns the error the
+    /// single forced arithmetic evaluation raises. Shared by the arithmetic
+    /// error-path tests below.
+    fn arithmetic_error(lhs: Value, op: ArithOp, rhs: Value) -> Error {
+        let mut program = Program::default();
+        let seed = program.intern_pred("seed", 1);
+        let t = program.intern_pred("t", 1);
+        program.facts.push(Fact {
+            pred: seed,
+            tuple: Tuple(vec![Value::Int(0)]),
+        });
+        program.rules.push(Rule {
+            head: Atom {
+                pred: t,
+                args: vec![Term::Var(Var(1))],
+            },
+            body: vec![
+                BodyLiteral {
+                    kind: BodyLiteralKind::Atom(Atom {
+                        pred: seed,
+                        args: vec![Term::Var(Var(0))],
+                    }),
+                    span: Span::DUMMY,
+                },
+                BodyLiteral {
+                    kind: BodyLiteralKind::Compare {
+                        op: CmpOp::Eq,
+                        lhs: Expr::Term(Term::Var(Var(1))),
+                        rhs: Expr::Binary {
+                            op,
+                            lhs: Box::new(Expr::Term(Term::Const(lhs))),
+                            rhs: Box::new(Expr::Term(Term::Const(rhs))),
+                        },
+                    },
+                    span: Span::DUMMY,
+                },
+            ],
+            var_names: vec![Some("V".to_string()), Some("M".to_string())],
+            span: Span::DUMMY,
+        });
+        program.strata = vec![vec![RuleId(0)]];
+        eval(&program).unwrap_err()
+    }
+
+    #[test]
+    fn division_by_zero_is_a_structured_error() {
+        let err = arithmetic_error(Value::Int(1), ArithOp::Div, Value::Int(0));
+        assert!(
+            err.to_string().contains("division by zero"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn integer_overflow_is_a_structured_error() {
+        let err = arithmetic_error(Value::Int(i64::MAX), ArithOp::Add, Value::Int(1));
+        assert!(
+            err.to_string().contains("integer overflow"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn nan_producing_arithmetic_is_a_structured_error() {
+        let zero = F64::new(0.0).unwrap();
+        let err = arithmetic_error(Value::Float(zero), ArithOp::Div, Value::Float(zero));
+        assert!(err.to_string().contains("NaN"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn mixed_numeric_types_are_a_structured_error() {
+        let err = arithmetic_error(
+            Value::Int(1),
+            ArithOp::Add,
+            Value::Float(F64::new(2.0).unwrap()),
+        );
+        assert!(
+            err.to_string().contains("type error"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn cross_type_comparison_is_a_structured_error() {
+        // t(X) :- seed(X), X > "a".  seed(0):int, "a":string  =>  type error.
+        let mut program = Program::default();
+        let seed = program.intern_pred("seed", 1);
+        let t = program.intern_pred("t", 1);
+        program.facts.push(Fact {
+            pred: seed,
+            tuple: Tuple(vec![Value::Int(0)]),
+        });
+        program.rules.push(Rule {
+            head: Atom {
+                pred: t,
+                args: vec![Term::Var(Var(0))],
+            },
+            body: vec![
+                BodyLiteral {
+                    kind: BodyLiteralKind::Atom(Atom {
+                        pred: seed,
+                        args: vec![Term::Var(Var(0))],
+                    }),
+                    span: Span::DUMMY,
+                },
+                BodyLiteral {
+                    kind: BodyLiteralKind::Compare {
+                        op: CmpOp::Gt,
+                        lhs: Expr::Term(Term::Var(Var(0))),
+                        rhs: Expr::Term(Term::Const(Value::String("a".to_string()))),
+                    },
+                    span: Span::DUMMY,
+                },
+            ],
+            var_names: vec![Some("X".to_string())],
+            span: Span::DUMMY,
+        });
+        program.strata = vec![vec![RuleId(0)]];
         let err = eval(&program).unwrap_err();
         assert!(
-            err.to_string()
-                .contains("comparison literals not yet supported")
+            err.to_string().contains("type error"),
+            "unexpected error: {err}"
         );
     }
 
@@ -837,7 +1325,7 @@ mod tests {
         // Hand-run differential until the generator emits negation (C3):
         // the per-stratum naive oracle agrees.
         assert_eq!(
-            naive::naive_eval(&program),
+            naive::naive_eval(&program).unwrap(),
             model.facts().collect::<BTreeSet<Fact>>()
         );
     }
@@ -959,7 +1447,7 @@ mod tests {
 
         // Hand-run differential until the generator emits negation (C3).
         assert_eq!(
-            naive::naive_eval(&program),
+            naive::naive_eval(&program).unwrap(),
             model.facts().collect::<BTreeSet<Fact>>()
         );
     }
@@ -1013,7 +1501,7 @@ mod tests {
             .into();
         assert_eq!(model.relation(root), &expected);
         assert_eq!(
-            naive::naive_eval(&program),
+            naive::naive_eval(&program).unwrap(),
             model.facts().collect::<BTreeSet<Fact>>()
         );
     }
@@ -1080,7 +1568,7 @@ mod tests {
         assert_eq!(model.relation(b), &expected_b);
         assert_eq!(model.relation(c), model.relation(a));
         assert_eq!(
-            naive::naive_eval(&program),
+            naive::naive_eval(&program).unwrap(),
             model.facts().collect::<BTreeSet<Fact>>()
         );
     }
@@ -1253,13 +1741,27 @@ mod tests {
 
         use super::super::naive::{ground, match_atom, naive_eval};
         use super::super::*;
+        use crate::ast::TypeName;
         use crate::ir::fixtures::example_16_1;
         use crate::lower::lower;
         use crate::provenance::ProofTree;
         use crate::testgen::{
-            arb_extension_pair, arb_parent_edges, arb_program_with_edb, arb_value,
-            with_duplicated_facts, with_extra_fact, with_swapped_body, with_swapped_stratum_rules,
+            arb_comparison_program, arb_extension_pair, arb_parent_edges, arb_program_with_edb,
+            arb_value, arb_well_typed_program, with_duplicated_facts, with_extra_fact,
+            with_swapped_body, with_swapped_stratum_rules,
         };
+        use crate::typecheck::typecheck;
+
+        /// The primitive type of a ground value (for C4).
+        fn value_type(value: &Value) -> TypeName {
+            match value {
+                Value::Symbol(_) => TypeName::Symbol,
+                Value::String(_) => TypeName::String,
+                Value::Int(_) => TypeName::Int,
+                Value::Float(_) => TypeName::Float,
+                Value::Bool(_) => TypeName::Bool,
+            }
+        }
 
         fn model_facts(model: &Model) -> BTreeSet<Fact> {
             model.facts().collect()
@@ -1347,6 +1849,11 @@ mod tests {
                         "absence leaf {pattern:?} is refuted by the model"
                     );
                 }
+                ProofTree::Builtin { .. } => {
+                    // A satisfied comparison/assignment leaf carries its own
+                    // justification (the evaluated operands) — nothing to check
+                    // against the model.
+                }
                 ProofTree::Derived { children, .. } => {
                     for child in children {
                         assert_leaves_are_base(child, model)?;
@@ -1365,7 +1872,94 @@ mod tests {
             #[test]
             fn b1_naive_matches_seminaive(program in arb_program_with_edb()) {
                 let model = eval(&program).unwrap();
-                prop_assert_eq!(model_facts(&model), naive_eval(&program));
+                prop_assert_eq!(model_facts(&model), naive_eval(&program).unwrap());
+            }
+
+            /// The evaluation-property generator produces well-typed programs
+            /// (the migration to the reachable state space, 2026-07-21): every
+            /// program the type checker accepts, so the whole B/E suite runs
+            /// over programs `eval` could actually see in production.
+            #[test]
+            fn evaluation_generator_is_well_typed(program in arb_program_with_edb()) {
+                prop_assert!(
+                    typecheck(&program).is_ok(),
+                    "evaluation generator produced an ill-typed program: {:?}",
+                    typecheck(&program).err()
+                );
+            }
+
+            /// B1 extended over §8 comparison/arithmetic programs: naive and
+            /// semi-naive agree, including on the error path (a `/ 0` in a
+            /// generated rule makes both reject).
+            #[test]
+            fn b1_comparison_programs_agree(program in arb_comparison_program()) {
+                match (eval(&program), naive_eval(&program)) {
+                    (Ok(model), Ok(facts)) => prop_assert_eq!(model_facts(&model), facts),
+                    (Err(_), Err(_)) => {}
+                    (engine, naive) => prop_assert!(
+                        false,
+                        "engine/naive disagree: engine ok={}, naive ok={}",
+                        engine.is_ok(),
+                        naive.is_ok()
+                    ),
+                }
+            }
+
+            /// C5 — typed-generator completeness: every well-typed-by-
+            /// construction program is accepted by the type checker (no false
+            /// rejections).
+            #[test]
+            fn c5_well_typed_programs_are_accepted(program in arb_well_typed_program()) {
+                prop_assert!(
+                    typecheck(&program).is_ok(),
+                    "well-typed program rejected: {:?}",
+                    typecheck(&program).err()
+                );
+            }
+
+            /// A self-contained type conflict is always rejected: appending a
+            /// fresh predicate with two facts of different column types must
+            /// make the type checker fail (the C-series analogue of A11's
+            /// lowering-defect property).
+            #[test]
+            fn injected_type_conflict_is_rejected(program in arb_well_typed_program()) {
+                let mut bad = program.clone();
+                let conflict = bad.intern_pred("conflict", 1);
+                bad.facts.push(Fact {
+                    pred: conflict,
+                    tuple: Tuple(vec![Value::String("x".to_string())]),
+                });
+                bad.facts.push(Fact {
+                    pred: conflict,
+                    tuple: Tuple(vec![Value::Int(0)]),
+                });
+                prop_assert!(
+                    typecheck(&bad).is_err(),
+                    "conflicting `conflict(\"x\").`/`conflict(0).` facts accepted"
+                );
+            }
+
+            /// C4 — inference soundness: a type-checked program evaluates
+            /// without a type-based runtime error, and every fact's values
+            /// match the inferred column types.
+            #[test]
+            fn c4_inference_is_sound(program in arb_well_typed_program()) {
+                let env = typecheck(&program).expect("well-typed program");
+                // The typed generator emits no division, so evaluation cannot
+                // raise even a non-type arithmetic error.
+                let model = eval(&program).expect("type-checked program evaluates");
+                for fact in model.facts() {
+                    for (col, value) in fact.tuple.0.iter().enumerate() {
+                        if let Some(ty) = env.column_type(fact.pred, col) {
+                            prop_assert_eq!(
+                                value_type(value),
+                                ty,
+                                "fact {:?} column {} has type {:?}, inferred {:?}",
+                                fact, col, value_type(value), ty
+                            );
+                        }
+                    }
+                }
             }
 
             /// B2 — re-running on the saturated fact set derives nothing new.
@@ -1599,7 +2193,7 @@ mod tests {
                                 Premise::Fact(f) => model
                                     .first_round(f)
                                     .is_some_and(|r| r < round),
-                                Premise::Absent(_) => true,
+                                Premise::Absent(_) | Premise::Builtin { .. } => true,
                             })
                         }),
                         "no well-founded derivation for {:?}", fact
@@ -1639,6 +2233,11 @@ mod tests {
                                         !refuted,
                                         "absence premise {pattern:?} is refuted"
                                     );
+                                }
+                                Premise::Builtin { .. } => {
+                                    // Self-justifying; `arb_program_with_edb`
+                                    // emits no comparisons, so this is not yet
+                                    // exercised here.
                                 }
                             }
                         }

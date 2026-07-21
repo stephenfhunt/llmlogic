@@ -129,7 +129,7 @@ it. A future audit starts here.
 | Existential (wildcards, partial selection) | wildcard/named specs | A8/A13; §16.2/§16.7 |
 | Ad-hoc queries (incl. negated) | `QuerySpec` bodies | **B8**; §16.1/§16.2 hand tests |
 | Set semantics | duplication mutators | A5, B3 |
-| Comparisons / arithmetic | — pending §8 (step 4 remainder) | C4/C5 typed phases |
+| Comparisons / arithmetic (§8) | `arb_comparison_program` (filter/assign/join) | B1 extended (incl. error path); §16.3 hand test |
 | Aggregation | — pending §9 | future phase |
 
 ## Property catalog
@@ -197,7 +197,10 @@ can change predicate interning order (B4's added statements), outputs are
 compared keyed by predicate *name*, not `PredId`.
 
 - [x] **B1** Differential oracle: `naive(p) == seminaive(p)` as `Fact` sets.
-  The anchor property — catches delta-bookkeeping bugs directly.
+  The anchor property — catches delta-bookkeeping bugs directly. Extended over
+  §8 comparison/arithmetic programs (`arb_comparison_program`,
+  `b1_comparison_programs_agree`): both evaluators agree as fact sets and agree
+  on the error path (a generated `/ 0` makes both reject).
 - [x] **B2** Fixpoint idempotence: re-running with `facts ∪ output` derives
   nothing new.
 - [x] **B3** Set semantics: duplicating any subset of input facts leaves
@@ -205,8 +208,10 @@ compared keyed by predicate *name*, not `PredId`.
 - [x] **B4** Monotonicity for positive programs (the queryFuzz relation):
   `output(p) ⊆ output(p + fact)` and `⊆ output(p + fact + rule)`.
 - [x] **B5** Body-reorder invariance: permuting a rule's body leaves output
-  unchanged. (Safety is occurrence-based, so permutations of a safe rule stay
-  safe; revisit when §8 mode/binding rules for arithmetic land.)
+  unchanged. (Scoped to atoms and negations, which the generator produces:
+  positives/negations reorder freely. §8 assignment *chains* are order-sensitive
+  — `N = A+1, M = N+1` binds in source order — so full-body permutation is not
+  invariant once comparisons are present; the generator here emits none.)
 - [x] **B6** Rule-order invariance within a stratum.
 - [x] **B7** Independent oracle for a fixed shape: random `parent` edge sets
   into the §16.1 ancestor program vs. a hand-rolled DFS transitive closure
@@ -234,10 +239,17 @@ compared keyed by predicate *name*, not `PredId`.
   differential. B4's fact half restricted to fact additions in predicates no
   negation transitively depends on (`negation_independent_preds`); its rule
   half extends on fresh `ext_*` predicates, monotone by construction.
-- [ ] **C4** Type-inference soundness: any program inference accepts evaluates
-  with no type-based runtime error; derived facts match inferred column types.
-- [ ] **C5** Typed-generator completeness: well-typed-by-construction programs
-  are always accepted by inference.
+- [x] **C4** Type-inference soundness: any program `typecheck` accepts
+  evaluates with no type-based runtime error; every fact's values match the
+  inferred column types (`arb_well_typed_program`, division-free so evaluation
+  cannot error).
+- [x] **C5** Typed-generator completeness: every well-typed-by-construction
+  program is accepted by `typecheck` (no false rejections). Also
+  `injected_type_conflict_is_rejected` (a fresh predicate with two
+  differently-typed facts is always rejected — the A11 analogue for types) and
+  `evaluation_generator_is_well_typed` (the migrated B/E generator only produces
+  type-checkable programs). Deferred: `declare`-signature verification and
+  imported column types (need §13 / IR-level declared types).
 
 ### Phase D — lexer + parser (roadmap step 5) — generalizes all §16 source texts
 

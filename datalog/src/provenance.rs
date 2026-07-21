@@ -15,6 +15,7 @@
 //! over a wide relation in named form — `employee(name: "alice", title:
 //! "manager")` rather than eight positional columns (§17, 2026-07-20).
 
+use crate::ast::CmpOp;
 use crate::engine::Model;
 use crate::ir::{Fact, PredId, RuleId, Tuple, Value};
 
@@ -56,6 +57,11 @@ pub enum Premise {
     Fact(Fact),
     /// The pattern no fact matched, satisfying a negated literal.
     Absent(AbsentPattern),
+    /// A satisfied comparison/assignment builtin (§8), carrying the operator
+    /// and the evaluated operand values (for an assignment `N = expr`, both
+    /// values are the assigned value). Self-justifying — like [`Premise::Absent`]
+    /// it carries no fixpoint round and recurses into nothing.
+    Builtin { op: CmpOp, lhs: Value, rhs: Value },
 }
 
 /// One way a fact was derived: a ground rule instance.
@@ -83,6 +89,9 @@ pub enum ProofTree {
     /// A satisfied negation: no fact matches the pattern (§7). Terminates its
     /// branch — an absence needs no sub-proof.
     Absent(AbsentPattern),
+    /// A satisfied comparison/assignment builtin (§8). Terminates its branch —
+    /// a builtin holds on its evaluated operands and needs no sub-proof.
+    Builtin { op: CmpOp, lhs: Value, rhs: Value },
     /// A derived fact with one supporting rule instance; `children[i]` proves
     /// the instance's `premises[i]`.
     Derived {
@@ -116,7 +125,7 @@ impl ProofTree {
         let derivation = model.derivations_of(fact).find(|d| {
             d.premises.iter().all(|premise| match premise {
                 Premise::Fact(f) => model.first_round(f).is_some_and(|r| r < round),
-                Premise::Absent(_) => true,
+                Premise::Absent(_) | Premise::Builtin { .. } => true,
             })
         })?;
         let children = derivation
@@ -125,6 +134,11 @@ impl ProofTree {
             .map(|premise| match premise {
                 Premise::Fact(f) => ProofTree::explain(model, f),
                 Premise::Absent(pattern) => Some(ProofTree::Absent(pattern.clone())),
+                Premise::Builtin { op, lhs, rhs } => Some(ProofTree::Builtin {
+                    op: *op,
+                    lhs: lhs.clone(),
+                    rhs: rhs.clone(),
+                }),
             })
             .collect::<Option<Vec<ProofTree>>>()?;
         Some(ProofTree::Derived {
@@ -142,7 +156,7 @@ impl ProofTree {
         match self {
             ProofTree::Leaf(fact) => Some(fact),
             ProofTree::Derived { fact, .. } => Some(fact),
-            ProofTree::Absent(_) => None,
+            ProofTree::Absent(_) | ProofTree::Builtin { .. } => None,
         }
     }
 }
