@@ -63,13 +63,26 @@ raw transcripts (Claude Code auto-saves those under
   query answer shape; minimal binary contract (exit 0/1/2) pulled forward to
   enable system tests. The full `-q`/`--format json`/skill CLI stays step 6.
 
-**Next up — roadmap step 6: CLI + agent API (§14).**
-- `-q` one-shot flag (bare atom vs define-and-select; synthesized answer
-  predicate naming), `--format json` for structured errors (§12) and provenance
-  (§11), the agent skill definition. Then the deferred side-threads: §13 imports
-  (+ imported inferred column types), §9 aggregation, §11 provenance surface,
-  §12 machine-readable error taxonomy (codes + spans-as-data; today errors are
-  structured strings with byte offsets).
+**Next up — roadmap step 6: agent CLI (§14). Scoped + planned 2026-07-22;
+execution-ready plan in Claude Code plan file `let-s-start-the-next-piped-lagoon.md`.**
+- **Scope: CLI-only, zero new deps.** `-q` one-shot queries + an agent skill doc
+  (`datalog/docs/agent-skill.md`). Keep the logic in the library
+  (`api::run_with_queries` / `program_with_queries`) so `main.rs` stays thin;
+  add a small hand-rolled arg loop (no clap).
+- **`-q` semantics (settled):** a bare atom / comma-body → append `?- <arg>.`;
+  a rule (`… :- …`) → append the rule + a synthesized `?- <head>.` (classify by
+  *parsing* the arg, not splitting on `:-`; print the head via a newly-`pub`
+  `print::print_atom`). Multiple `-q` apply in order; the positional source
+  (file/`-`) is optional.
+- **JSON output deferred — judged low-value here (decided 2026-07-22).** The
+  data path is already Datalog-native (`-q` over facts *is* the jq analog, so
+  JSON would work against the design); errors are structured *prose* with spans +
+  hints, which suits an LLM consumer better than JSON codes; provenance, if ever
+  surfaced, should be **provenance-as-facts**, not JSON. `--format json` stays a
+  documented future *edge* feature only (hand-rolled if ever — no serde).
+- **Then the deferred post-v1 threads:** §13 imports (+ imported inferred column
+  types), §9 aggregation, §11 provenance-as-facts surface, §12 machine-readable
+  error taxonomy (today errors are structured strings with byte offsets).
 - One v1 gap noted in §14: a query with no named variables that is not a
   substitutable single atom (pure existence check) yields no fact-shaped output.
 
