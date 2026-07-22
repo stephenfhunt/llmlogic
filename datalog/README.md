@@ -56,6 +56,35 @@ datalog people.dl -q 'adult(N) :- person(name: N, age: A), A >= 18.' \
 
 The full agent-facing guide is [`docs/agent-skill.md`](docs/agent-skill.md).
 
+## Use as a Claude Code skill
+
+`datalog` ships as a [Claude Code](https://claude.com/claude-code) skill so an
+agent is nudged to encode a reasoning problem as Datalog and run the engine
+instead of hand-reasoning in prose — best on transitive/recursive relationships,
+multi-hop deduction, stratified negation, arithmetic filtering, and
+constraint/consistency puzzles. The skill definition is [`skill/SKILL.md`](skill/SKILL.md).
+
+**From this checkout** (dev), symlink it into a Claude Code skills directory and
+start a new session:
+
+```sh
+ln -s ../../datalog/skill .claude/skills/datalog   # from the repo root
+```
+
+The skill calls a co-located `./datalog` wrapper that builds the release binary
+on first use.
+
+**As a standalone bundle**, build a drop-in package (compiled binary + `SKILL.md`
++ examples, plus a tarball):
+
+```sh
+cargo package-skill        # → target/dist/datalog-skill/ and datalog-skill.tar.gz
+```
+
+Drop `datalog-skill/` into any `~/.claude/skills/` or project `.claude/skills/`
+as `datalog` (see the generated `INSTALL.md`). Try-it tasks with expected answers
+are in [`EXPERIMENTS.md`](EXPERIMENTS.md).
+
 ## Build, test, run
 
 ```sh

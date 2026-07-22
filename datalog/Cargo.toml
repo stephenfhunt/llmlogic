@@ -8,6 +8,8 @@ description = "A Datalog engine targeted at LLM/agent use, with convenient impor
 readme = "README.md"
 keywords = ["datalog", "logic", "reasoning", "llm", "agent"]
 categories = ["database", "parsing"]
+# `cargo run` means the engine; the packaging bin is opt-in via its feature.
+default-run = "datalog"
 
 # The engine lives in the library so it stays reusable and testable; the binary
 # is a thin CLI/REPL wrapper over it.
@@ -18,6 +20,19 @@ path = "src/lib.rs"
 [[bin]]
 name = "datalog"
 path = "src/main.rs"
+
+# Build-tooling only: assembles the drop-in Claude Code skill bundle
+# (`cargo package-skill`, aliased in `.cargo/config.toml`). Gated behind the
+# `packaging` feature so it is excluded from normal `build`/`test`/`clippy
+# --all-targets`; std-only, no dependencies.
+[[bin]]
+name = "package-skill"
+path = "src/bin/package_skill.rs"
+required-features = ["packaging"]
+
+[features]
+# Enables the `package-skill` build-tooling binary only.
+packaging = []
 
 # Dependencies are intentionally empty for the starter. Candidates (serde/serde_json
 # for the agent API, csv/rusqlite/parquet for sources, a lexer/parser crate) get

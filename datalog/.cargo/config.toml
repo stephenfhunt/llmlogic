@@ -1,0 +1,5 @@
+# Project-local cargo aliases.
+[alias]
+# Build the drop-in Claude Code skill bundle (target/dist/datalog-skill[.tar.gz]).
+# Runs the feature-gated `package-skill` build-tooling binary.
+package-skill = "run --release --bin package-skill --features packaging --"

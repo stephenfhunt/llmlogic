@@ -1,0 +1,27 @@
+# A tiny logic-grid puzzle, solved by generate-and-test in Datalog.
+#
+# Three people — ann, bob, cy — live in three houses in a row, numbered 1, 2, 3,
+# one person per house. Clues:
+#   1. ann lives in house 3.
+#   2. bob lives immediately to the left of cy.
+# Who lives where?
+#
+# The engine enumerates every assignment consistent with the constraints. This is
+# the kind of puzzle where step-by-step prose reasoning slips; the engine returns
+# the complete, correct answer set.
+
+house(1). house(2). house(3).
+
+# `next(L, R)` — house L is immediately to the left of house R.
+next(1, 2).
+next(2, 3).
+
+# A solution assigns each person a distinct house and satisfies both clues.
+solution(Ann, Bob, Cy) :-
+    house(Ann), house(Bob), house(Cy),
+    Ann != Bob, Ann != Cy, Bob != Cy,   # all in different houses
+    Ann = 3,                            # clue 1
+    next(Bob, Cy).                      # clue 2
+
+?- solution(Ann, Bob, Cy).
+# expected: solution(3, 1, 2).  (ann→3, bob→1, cy→2)

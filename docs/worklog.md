@@ -16,6 +16,55 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-23 — First agent exposure: `datalog` as a Claude Code skill
+
+**Done**
+- **`datalog/skill/` — a committed Claude Code skill.** `SKILL.md` (trigger-rich
+  frontmatter so the model auto-selects it on transitive/recursive relations,
+  multi-hop deduction, stratified negation, arithmetic filtering, and
+  constraint/consistency puzzles; a self-contained quickstart adapted from
+  `docs/agent-skill.md`) + a `datalog` wrapper that builds the release binary on
+  first use and execs it (`pwd -P` so it resolves through the activation symlink).
+- **`cargo package-skill` — a standalone deliverable.** A cargo alias
+  (`datalog/.cargo/config.toml`) drives a feature-gated, std-only build-tooling
+  bin (`src/bin/package_skill.rs`, `required-features = ["packaging"]`, so it is
+  excluded from normal `build`/`test`/`clippy --all-targets`). It builds the
+  release engine, then assembles `target/dist/datalog-skill/` = `SKILL.md` + the
+  **compiled `datalog` binary** (named `datalog`, so the skill's `./datalog` call
+  resolves to the real binary — one SKILL.md serves both dev and bundle modes) +
+  `examples/` + a generated `INSTALL.md`, and rolls a `.tar.gz`. Added
+  `default-run = "datalog"` so plain `cargo run` stays unambiguous with two bins.
+- **Seed experiment material.** `skill/examples/houses_puzzle.dl` (a 3×3 logic-grid
+  puzzle solved by generate-and-test → `solution(3, 1, 2).`) and
+  `datalog/EXPERIMENTS.md` (try-it tasks reusing the §16 corpus, each with the
+  expected answer and what to watch: did the model reach for the tool, was it
+  correct, did structured errors help it self-correct).
+- **Local activation** (not committed; `.claude/` is gitignored): symlink
+  `.claude/skills/datalog → ../../datalog/skill`, plus wrapper allow-entries in
+  `.claude/settings.local.json`.
+- **Docs**: README "Use as a Claude Code skill" section; AGENTS.md skill note; no
+  spec/engine change (tooling only). Verified end-to-end — dev wrapper, packaged
+  binary standalone, tarball, and clippy/fmt/test all clean (211 tests).
+
+**Decided** (with the user)
+- **Form: a Claude Code skill** first — the lowest-friction realization of the
+  "skill-based, CLI-first" design pillar. A **Claude API agent-loop harness** and
+  an **MCP server** are deferred alternative forms, revisited once the skill
+  experiment shows how well the model uses the tool.
+- **Experiment now with inline facts** — §13 CSV imports is *not* a prerequisite;
+  the reasoning tasks where a logic engine beats prose chain-of-thought all work
+  today. The "large external fact base" token-economy demo waits on §13.
+- **Packaging is cargo-native, zero new deps**: feature-gated in-crate bin over
+  an `xtask` crate (no root workspace, AGENTS.md forbids adding one) or a shell
+  script (user asked for a cargo task).
+
+**Next up**
+- **Run the experiment**: work the `EXPERIMENTS.md` tasks in a fresh session
+  (the skill auto-appears once Claude Code re-scans `.claude/skills/`) and record
+  observations. Let the results steer whether to build the API harness / MCP form.
+- Post-v1 engine threads unchanged: **§13 imports** (unlocks the big-fact-base
+  demo), §9 aggregation, §11 provenance-as-facts, §12 error taxonomy.
+
 ## 2026-07-23 — Step 6: agent CLI — `-q` one-shot queries + skill doc
 
 **Done**

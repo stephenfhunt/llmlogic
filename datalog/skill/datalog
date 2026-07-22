@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# In-repo invocation wrapper for the datalog Claude Code skill.
+#
+# The skill always calls `./datalog` (an executable co-located with SKILL.md).
+# In this source checkout that name is *this wrapper*, which builds the release
+# binary on first use and then execs it. In a packaged bundle (`cargo
+# package-skill`) the same name is the compiled binary itself — so SKILL.md is
+# identical in both modes.
+set -euo pipefail
+
+# Resolve the real skill dir even when invoked through the
+# `.claude/skills/datalog` symlink (`pwd -P` follows symlinks).
+SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+CRATE_DIR="$(cd "$SKILL_DIR/.." && pwd -P)" # → …/datalog
+BIN="$CRATE_DIR/target/release/datalog"
+
+if [[ ! -x "$BIN" ]]; then
+  cargo build --release --manifest-path "$CRATE_DIR/Cargo.toml" >&2
+fi
+
+exec "$BIN" "$@"

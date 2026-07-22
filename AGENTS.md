@@ -130,6 +130,19 @@ rationale in spec §17):
    aggregation, §11 provenance-as-facts surface, §12 machine-readable error
    taxonomy.
 
+### Using `datalog` as an agent skill
+
+`datalog/skill/` is a committed Claude Code skill (`SKILL.md` + a `datalog`
+wrapper) — the first experiment in exposing the engine to an LLM agent
+(2026-07-23; form + inline-facts-now decided with the user). Activate it in a
+dev checkout by symlinking `datalog/skill` to `.claude/skills/datalog`; build a
+standalone bundle with `cargo package-skill` (feature-gated build-tooling bin
+`src/bin/package_skill.rs`, std-only, excluded from normal builds). Try-it tasks
+are in `datalog/EXPERIMENTS.md`. A Claude API agent-loop harness and an MCP
+server are possible later forms, deferred until the skill experiment tells us how
+well the model uses the tool. The "big external fact base" demo waits on §13 CSV
+imports.
+
 The test pyramid grows outward with the pipeline:
 - Engine unit tests over **hand-constructed IR** (`ir::Program`); lowering tests
   over **hand-constructed ASTs**. Verbose construction in tests is acceptable —
