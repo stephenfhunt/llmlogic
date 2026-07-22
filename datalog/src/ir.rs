@@ -43,7 +43,7 @@
 
 use std::hash::{Hash, Hasher};
 
-use crate::ast::{ArithOp, CmpOp, Span};
+use crate::ast::{ArithOp, CmpOp, Span, TypeName};
 use crate::error::Error;
 
 /// An interned predicate identity: index into [`Program::predicates`].
@@ -82,6 +82,17 @@ pub struct PredicateInfo {
     /// a way to say *which column* conflicts, and let proof trees (§11) print
     /// `employee(name: "alice", …)` instead of eight positional columns.
     pub fields: Option<Vec<String>>,
+    /// Declared column types in positional order, from the type annotations of a
+    /// `declare` or explicit import schema (§4). A position is `None` when the
+    /// field was named without a type; the whole field is `None` when the
+    /// predicate has no schema at all.
+    ///
+    /// Invariant: `field_types` is `Some` **iff** [`fields`](Self::fields) is
+    /// `Some`, with the same length. (The grammar forbids a type without a name,
+    /// so types never appear without a schema.) These are the *asserted* types
+    /// type inference (§4) verifies against the *inferred* ones; imported
+    /// *inferred* column types (§13) are a separate, later channel.
+    pub field_types: Option<Vec<Option<TypeName>>>,
 }
 
 /// A never-NaN `f64` with total `Eq`/`Ord`/`Hash`.
@@ -283,6 +294,7 @@ impl Program {
             // Only lowering knows about schemas; callers that have field names
             // set them afterwards.
             fields: None,
+            field_types: None,
         });
         PredId((self.predicates.len() - 1) as u32)
     }
@@ -332,11 +344,13 @@ pub(crate) mod fixtures {
                     name: "parent".to_string(),
                     arity: 2,
                     fields: None,
+                    field_types: None,
                 },
                 PredicateInfo {
                     name: "ancestor".to_string(),
                     arity: 2,
                     fields: None,
+                    field_types: None,
                 },
             ],
             facts: vec![
@@ -426,16 +440,19 @@ pub(crate) mod fixtures {
                     name: "person".to_string(),
                     arity: 1,
                     fields: None,
+                    field_types: None,
                 },
                 PredicateInfo {
                     name: "parent".to_string(),
                     arity: 2,
                     fields: None,
+                    field_types: None,
                 },
                 PredicateInfo {
                     name: "root".to_string(),
                     arity: 1,
                     fields: None,
+                    field_types: None,
                 },
             ],
             facts: vec![
@@ -515,21 +532,35 @@ pub(crate) mod fixtures {
                         .map(|f| f.to_string())
                         .collect(),
                     ),
+                    // The explicit import schema types every column (§4).
+                    field_types: Some(vec![
+                        Some(TypeName::Int),
+                        Some(TypeName::String),
+                        Some(TypeName::Int),
+                        Some(TypeName::String),
+                        Some(TypeName::String),
+                        Some(TypeName::Int),
+                        Some(TypeName::String),
+                        Some(TypeName::String),
+                    ]),
                 },
                 PredicateInfo {
                     name: "manager_name".to_string(),
                     arity: 1,
                     fields: None,
+                    field_types: None,
                 },
                 PredicateInfo {
                     name: "person".to_string(),
                     arity: 2,
                     fields: Some(vec!["name".to_string(), "age".to_string()]),
+                    field_types: Some(vec![Some(TypeName::String), Some(TypeName::Int)]),
                 },
                 PredicateInfo {
                     name: "adult".to_string(),
                     arity: 1,
                     fields: None,
+                    field_types: None,
                 },
             ],
             facts: vec![Fact {

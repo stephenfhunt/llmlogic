@@ -106,10 +106,13 @@ struct Lowerer {
     errors: Vec<Error>,
 }
 
-/// A predicate's field names, positionally ordered.
+/// A predicate's field names and declared types, positionally ordered.
 struct FieldSchema {
     /// Position → field name.
     fields: Vec<String>,
+    /// Position → declared type, `None` where the field was named without a
+    /// type. Same length as [`fields`](Self::fields).
+    field_types: Vec<Option<ast::TypeName>>,
     /// Field name → position.
     by_field: HashMap<String, usize>,
     origin: SchemaOrigin,
@@ -242,6 +245,7 @@ impl Lowerer {
             let info = &mut self.predicates[id.0 as usize];
             if schema.fields.len() == info.arity as usize {
                 info.fields = Some(schema.fields.clone());
+                info.field_types = Some(schema.field_types.clone());
             }
         }
     }
@@ -250,9 +254,11 @@ impl Lowerer {
     /// schema and conflicts with a schema already recorded for the predicate.
     fn collect_schema(&mut self, name: &str, fields: &[ast::FieldDecl], origin: SchemaOrigin) {
         let mut positions = Vec::with_capacity(fields.len());
+        let mut field_types = Vec::with_capacity(fields.len());
         let mut by_field = HashMap::with_capacity(fields.len());
         for (position, field) in fields.iter().enumerate() {
             positions.push(field.name.name.clone());
+            field_types.push(field.ty);
             if by_field.insert(field.name.name.clone(), position).is_some() {
                 self.errors.push(Error::Semantic(format!(
                     "duplicate field `{}` in the schema for `{name}`",
@@ -271,6 +277,16 @@ impl Lowerer {
                     positions.join(", ")
                 );
                 self.errors.push(Error::Semantic(conflict));
+            } else if existing.field_types != field_types {
+                // Same field names, disagreeing declared types (§17): name both
+                // origins so the mismatch is traceable.
+                let conflict = format!(
+                    "conflicting declared types for `{name}`: {} and {} give different \
+                     column types",
+                    existing.origin.label(),
+                    origin.label(),
+                );
+                self.errors.push(Error::Semantic(conflict));
             }
             return;
         }
@@ -279,6 +295,7 @@ impl Lowerer {
             name.to_string(),
             FieldSchema {
                 fields: positions,
+                field_types,
                 by_field,
                 origin,
             },
@@ -303,6 +320,7 @@ impl Lowerer {
             arity,
             // Filled in by `attach_field_names` once pass 1 completes.
             fields: None,
+            field_types: None,
         });
         self.by_name.insert(name.to_string(), id);
         id
@@ -1447,7 +1465,64 @@ mod tests {
             if let Some(fields) = &info.fields {
                 assert_eq!(fields.len(), info.arity as usize, "for `{}`", info.name);
             }
+            // Declared types are Some exactly when field names are, same length.
+            assert_eq!(
+                info.fields.is_some(),
+                info.field_types.is_some(),
+                "for `{}`",
+                info.name
+            );
+            if let Some(types) = &info.field_types {
+                assert_eq!(types.len(), info.arity as usize, "for `{}`", info.name);
+            }
         }
+    }
+
+    /// Declared column types survive lowering onto `PredicateInfo.field_types`,
+    /// from both a `declare` (`person`) and an explicit import schema
+    /// (`employee`); a predicate with no schema carries none.
+    #[test]
+    fn declared_types_reach_the_ir() {
+        let lowered = lower(&ast_fix::example_16_7()).expect("16.7 lowers cleanly");
+
+        let person = lowered
+            .predicates
+            .iter()
+            .find(|p| p.name == "person")
+            .expect("person is interned");
+        assert_eq!(
+            person.field_types.as_deref(),
+            Some([Some(ast::TypeName::String), Some(ast::TypeName::Int)].as_slice())
+        );
+
+        let employee = lowered
+            .predicates
+            .iter()
+            .find(|p| p.name == "employee")
+            .expect("employee is interned");
+        assert_eq!(
+            employee.field_types.as_deref(),
+            Some(
+                [
+                    Some(ast::TypeName::Int),
+                    Some(ast::TypeName::String),
+                    Some(ast::TypeName::Int),
+                    Some(ast::TypeName::String),
+                    Some(ast::TypeName::String),
+                    Some(ast::TypeName::Int),
+                    Some(ast::TypeName::String),
+                    Some(ast::TypeName::String),
+                ]
+                .as_slice()
+            )
+        );
+
+        let manager_name = lowered
+            .predicates
+            .iter()
+            .find(|p| p.name == "manager_name")
+            .expect("manager_name is interned");
+        assert_eq!(manager_name.field_types, None);
     }
 
     /// Schemas are collected program-wide, so a late `declare` still lands in
@@ -1723,6 +1798,33 @@ mod tests {
             errors
                 .iter()
                 .any(|e| e.to_string().contains("conflicting schemas for `person`")),
+            "unexpected errors: {errors:?}"
+        );
+    }
+
+    /// Two schemas agreeing on field names but disagreeing on declared types
+    /// are a conflict naming both origins (§17), just like a name mismatch.
+    #[test]
+    fn schemas_conflicting_only_on_types_are_reported() {
+        let program = ast::Program {
+            statements: vec![
+                // declare person(name: string, age: int).
+                declare_person(),
+                // declare person(name: string, age: string).  -- age type differs
+                ast_fix::declare(
+                    "person",
+                    vec![
+                        ast_fix::field_decl("name", Some(ast::TypeName::String)),
+                        ast_fix::field_decl("age", Some(ast::TypeName::String)),
+                    ],
+                ),
+            ],
+        };
+        let errors = lower(&program).expect_err("conflicting declared types");
+        assert!(
+            errors.iter().any(|e| e
+                .to_string()
+                .contains("conflicting declared types for `person`")),
             "unexpected errors: {errors:?}"
         );
     }

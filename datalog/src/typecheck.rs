@@ -291,6 +291,31 @@ impl<'a> TypeChecker<'a> {
                 )));
             }
         }
+        // Verify asserted declared types (§4) against the inferred ones. A
+        // declared type that contradicts what inference derived is an error
+        // naming the column; a declared column inference never constrained is
+        // simply unrefuted (no error).
+        for (p, info) in self.program.predicates.iter().enumerate() {
+            let Some(declared) = &info.field_types else {
+                continue;
+            };
+            for (col, declared_ty) in declared.iter().enumerate() {
+                let Some(declared_ty) = *declared_ty else {
+                    continue;
+                };
+                let root = self.find(self.col_base[p] + col);
+                if let Some(inferred) = self.ty[root]
+                    && inferred != declared_ty
+                {
+                    self.errors.push(Error::Semantic(format!(
+                        "type error: {} is declared as {} but its values are {}",
+                        column_label(info, col),
+                        type_label(declared_ty),
+                        type_label(inferred),
+                    )));
+                }
+            }
+        }
         if !self.errors.is_empty() {
             return Err(dedup(self.errors));
         }
@@ -303,7 +328,11 @@ impl<'a> TypeChecker<'a> {
                 (0..info.arity as usize)
                     .map(|col| {
                         let root = self.find(self.col_base[p] + col);
+                        // Fall back to the declared type for a column inference
+                        // left unconstrained, so a declared-only column still
+                        // reports its asserted type.
                         self.ty[root]
+                            .or_else(|| info.field_types.as_ref().and_then(|types| types[col]))
                     })
                     .collect()
             })
@@ -508,5 +537,93 @@ mod tests {
                 .any(|e| e.to_string().contains("int or float")),
             "unexpected: {errors:?}"
         );
+    }
+
+    /// Attaches a `declare`-style schema (names + declared types) to a predicate,
+    /// as lowering does via `attach_field_names`.
+    fn declare_schema(
+        program: &mut Program,
+        pred: ir::PredId,
+        schema: &[(&str, Option<TypeName>)],
+    ) {
+        let info = &mut program.predicates[pred.0 as usize];
+        info.fields = Some(schema.iter().map(|(n, _)| n.to_string()).collect());
+        info.field_types = Some(schema.iter().map(|(_, t)| *t).collect());
+    }
+
+    #[test]
+    fn declared_signature_matching_inferred_is_accepted() {
+        // declare person(name: string, age: int).  person("alice", 30).
+        let mut program = Program::default();
+        let person = program.intern_pred("person", 2);
+        program.facts.push(Fact {
+            pred: person,
+            tuple: Tuple(vec![Value::String("alice".to_string()), Value::Int(30)]),
+        });
+        declare_schema(
+            &mut program,
+            person,
+            &[
+                ("name", Some(TypeName::String)),
+                ("age", Some(TypeName::Int)),
+            ],
+        );
+        let env = typecheck(&program).expect("declared types match inference");
+        assert_eq!(env.column_type(person, 0), Some(TypeName::String));
+        assert_eq!(env.column_type(person, 1), Some(TypeName::Int));
+    }
+
+    #[test]
+    fn declared_signature_conflicting_with_fact_is_rejected() {
+        // declare person(name: string, age: string).  person("alice", 30).
+        // `age` is declared string but the fact makes it int.
+        let mut program = Program::default();
+        let person = program.intern_pred("person", 2);
+        program.facts.push(Fact {
+            pred: person,
+            tuple: Tuple(vec![Value::String("alice".to_string()), Value::Int(30)]),
+        });
+        declare_schema(
+            &mut program,
+            person,
+            &[
+                ("name", Some(TypeName::String)),
+                ("age", Some(TypeName::String)),
+            ],
+        );
+        let errors = typecheck(&program).expect_err("declared/inferred mismatch");
+        assert!(
+            errors.iter().any(|e| {
+                let s = e.to_string();
+                s.contains("person.age") && s.contains("declared as string") && s.contains("int")
+            }),
+            "unexpected: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn declared_field_without_type_is_not_verified() {
+        // declare person(name, age).  person("alice", 30).  Names only — no
+        // asserted types, so nothing to verify.
+        let mut program = Program::default();
+        let person = program.intern_pred("person", 2);
+        program.facts.push(Fact {
+            pred: person,
+            tuple: Tuple(vec![Value::String("alice".to_string()), Value::Int(30)]),
+        });
+        declare_schema(&mut program, person, &[("name", None), ("age", None)]);
+        let env = typecheck(&program).expect("untyped declaration adds no constraint");
+        assert_eq!(env.column_type(person, 1), Some(TypeName::Int));
+    }
+
+    #[test]
+    fn declared_only_column_reports_its_declared_type() {
+        // declare thing(kind: symbol).  No fact or rule constrains `kind`, so the
+        // declaration is unrefuted and seeds the inferred type.
+        let mut program = Program::default();
+        let thing = program.intern_pred("thing", 1);
+        declare_schema(&mut program, thing, &[("kind", Some(TypeName::Symbol))]);
+        let env = typecheck(&program).expect("declared-only column is unrefuted");
+        assert_eq!(env.column_type(thing, 0), Some(TypeName::Symbol));
     }
 }

@@ -16,6 +16,43 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-21 — `declare`-signature verification (closes §4)
+
+**Done**
+- **Declared column types now flow AST→IR and are verified.** `ir::PredicateInfo`
+  gains `field_types: Option<Vec<Option<TypeName>>>` parallel to `fields`
+  (invariant: `Some` iff `fields` is `Some`, same length; per-position `None` for a
+  named-but-untyped field). `lower::collect_schema` records `FieldDecl.ty` and
+  `attach_field_names` threads it onto the IR (13 `PredicateInfo` sites updated;
+  §16.7 fixture now carries `person` and `employee` types). Two schemas agreeing on
+  names but disagreeing on types now conflict, naming both origins.
+- **Verification is a dedicated pass in `typecheck::finish`** (not via `set_type` in
+  `gather`): each declared column type is compared against the resolved inferred
+  type; a contradiction is a structured `Error::Semantic` naming the column
+  ("declared as X but its values are Y"). A declared type inference never
+  constrains is left unrefuted and seeds the column's type in `TypeEnv`. `eval`
+  stays type-blind; no pipeline change.
+- **Tests: 107 → 115.** typecheck units (match / conflict naming `person.age` /
+  untyped field ignored / declared-only seeds type); lowering units
+  (`declared_types_reach_the_ir` + the `field_types`↔`fields` invariant;
+  `schemas_conflicting_only_on_types_are_reported`); **property C6** over
+  `arb_well_typed_program` (correct signature always accepted; a self-contained
+  wrong-typed probe column always rejected, naming it). Clippy/rustfmt clean.
+- **Docs**: spec §4 status + `declare` paragraph + a §17 decision entry (2026-07-21);
+  testing.md **C6** added, C5 deferral updated (only imported *inferred* types
+  remain, §13).
+
+**Decided** (also in spec §17, 2026-07-21)
+- `field_types` reuses `ast::TypeName` — `ir` already imports `ArithOp`/`CmpOp`/
+  `Span` from `ast`, so no new coupling. Verification lives in `typecheck::finish`
+  for a tailored message and to keep declared types out of inference propagation.
+
+**Next up**
+- **Lexer + parser** (roadmap step 5, Phase D): source text → AST, golden tests for
+  structured errors (testing.md D1–D4). Then wire the full `parse → lower →
+  typecheck → eval` pipeline (today `typecheck` is only invoked from tests).
+- Imported *inferred* column types remain deferred to §13.
+
 ## 2026-07-21 — §8 literal-value builtins, then §4 type inference
 
 **Done**

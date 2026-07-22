@@ -97,9 +97,10 @@ Candidate principles to ratify:
 *Status: Draft — validated by the AST/IR prototype (`src/ast.rs`, `src/ir.rs`),
 2026-07-19; the named-argument rules below implemented in lowering
 (`src/lower.rs`), 2026-07-20; type inference implemented as a post-lowering pass
-(`src/typecheck.rs`), 2026-07-21. Sources (2) imported column types and the
-`declare` signature *verification* below land with §13 and IR-level declared
-types respectively.*
+(`src/typecheck.rs`), 2026-07-21; `declare`-signature verification implemented
+(declared types threaded onto `ir::PredicateInfo.field_types`, verified in
+`typecheck`), 2026-07-21. Source (2) imported *inferred* column types lands with
+§13.*
 
 ### Values and terms
 
@@ -141,7 +142,12 @@ declare person(name: string, age: int).    % (b) also assert column types
 predicates; imported relations get field names from their source automatically.
 (b) An asserted signature is **verified against the inferred types** — it buys
 documentation and earlier, clearer errors, not new obligations. Fields may be named
-without types; a type always follows a field name.
+without types; a type always follows a field name. A declared type that contradicts
+what inference derives for that column (e.g. `age` declared `string` while a fact
+supplies `30`) is a structured type error naming the column; a declared type
+inference never otherwise constrains is simply left unrefuted (and seeds the
+column's type). Two schemas for one predicate that disagree on declared types
+conflict, naming both origins.
 
 ### Positional and named arguments
 
@@ -964,6 +970,22 @@ structured error.
   generator `arb_well_typed_program`. Still deferred: imported column types
   (§13) and `declare`-signature verification (needs declared types threaded onto
   `ir::PredicateInfo`).
+- **2026-07-21** — **`declare`-signature verification, closing §4.** Declared
+  column types now flow AST→IR: `ir::PredicateInfo` gains a
+  `field_types: Option<Vec<Option<TypeName>>>` parallel to `fields` (invariant:
+  `Some` iff `fields` is `Some`, same length; a position is `None` when a field
+  was named without a type — the grammar forbids a type without a name).
+  `lower::collect_schema` records `FieldDecl.ty` and `attach_field_names` threads
+  it onto the IR; two schemas agreeing on names but disagreeing on types now
+  conflict, naming both origins. Verification is a **dedicated pass in
+  `typecheck::finish`** (not fed through `set_type` during `gather`), so declared
+  types stay out of inference propagation and the message is tailored ("declared
+  as X but its values are Y") rather than the generic "used as both". A declared
+  type inference never constrains is left unrefuted and seeds the column's type in
+  the `TypeEnv`. Rationale for reusing `ast::TypeName` in the IR: `ir` already
+  imports `ArithOp`/`CmpOp`/`Span` from `ast`, so no new coupling. Only
+  user-written `declare`/import-schema types are checked here; imported *inferred*
+  column types remain a §13 concern. testing.md **C6** covers it.
 
 ### Open questions
 

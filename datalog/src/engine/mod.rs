@@ -844,11 +844,13 @@ mod tests {
                     name: "edge".to_string(),
                     arity: 2,
                     fields: None,
+                    field_types: None,
                 },
                 PredicateInfo {
                     name: "path".to_string(),
                     arity: 2,
                     fields: None,
+                    field_types: None,
                 },
             ],
             facts: vec![
@@ -1936,6 +1938,57 @@ mod tests {
                 prop_assert!(
                     typecheck(&bad).is_err(),
                     "conflicting `conflict(\"x\").`/`conflict(0).` facts accepted"
+                );
+            }
+
+            /// C6 — declare-signature verification (accept half): asserting the
+            /// *inferred* types as a `declare` signature never changes
+            /// acceptance. A correct signature buys documentation, not new
+            /// obligations (§4).
+            #[test]
+            fn c6_correct_declared_signature_is_accepted(program in arb_well_typed_program()) {
+                let env = typecheck(&program).expect("well-typed program");
+                let mut annotated = program.clone();
+                for p in 0..annotated.predicates.len() {
+                    let arity = annotated.predicates[p].arity as usize;
+                    let pred = crate::ir::PredId(p as u32);
+                    let types: Vec<Option<TypeName>> =
+                        (0..arity).map(|c| env.column_type(pred, c)).collect();
+                    let names = (0..arity).map(|c| format!("f{c}")).collect();
+                    annotated.predicates[p].fields = Some(names);
+                    annotated.predicates[p].field_types = Some(types);
+                }
+                prop_assert!(
+                    typecheck(&annotated).is_ok(),
+                    "correct declared signature rejected: {:?}",
+                    typecheck(&annotated).err()
+                );
+            }
+
+            /// C6 — declare-signature verification (reject half): a declared
+            /// column type that contradicts inference is rejected, naming the
+            /// column. Self-contained (like `injected_type_conflict_is_rejected`)
+            /// so there is always a typed column to contradict.
+            #[test]
+            fn c6_wrong_declared_type_is_rejected(program in arb_well_typed_program()) {
+                let mut bad = program.clone();
+                let probe = bad.intern_pred("c6probe", 1);
+                bad.facts.push(Fact {
+                    pred: probe,
+                    tuple: Tuple(vec![Value::Int(0)]),
+                });
+                // Declare the (inferred int) column as string — a contradiction.
+                bad.predicates[probe.0 as usize].fields = Some(vec!["v".to_string()]);
+                bad.predicates[probe.0 as usize].field_types = Some(vec![Some(TypeName::String)]);
+                let result = typecheck(&bad);
+                prop_assert!(
+                    result.is_err(),
+                    "declaring int column `c6probe.v` as string was accepted"
+                );
+                let err = format!("{:?}", result.err());
+                prop_assert!(
+                    err.contains("c6probe.v"),
+                    "type error did not name the column: {err}"
                 );
             }
 

@@ -248,8 +248,20 @@ compared keyed by predicate *name*, not `PredId`.
   `injected_type_conflict_is_rejected` (a fresh predicate with two
   differently-typed facts is always rejected — the A11 analogue for types) and
   `evaluation_generator_is_well_typed` (the migrated B/E generator only produces
-  type-checkable programs). Deferred: `declare`-signature verification and
-  imported column types (need §13 / IR-level declared types).
+  type-checkable programs).
+- [x] **C6** `declare`-signature verification: a `declare`/import-schema type
+  that contradicts inference is rejected, a matching one is accepted, and neither
+  changes evaluation. Two proptests over `arb_well_typed_program`
+  (`c6_correct_declared_signature_is_accepted` — asserting the inferred types as a
+  signature never changes acceptance; `c6_wrong_declared_type_is_rejected` — a
+  self-contained probe column declared against its inferred type is rejected,
+  naming the column). Hand units cover a matching signature, a fact/declare
+  conflict naming `person.age`, an untyped field (no constraint), a declared-only
+  column (unrefuted, seeds the type), and a two-schema type conflict
+  (`schemas_conflicting_only_on_types_are_reported`); `declared_types_reach_the_ir`
+  pins the AST→IR threading and the "`field_types` is `Some` iff `fields` is
+  `Some`, same length" invariant (A14's type-side companion). Deferred: imported
+  *inferred* column types (need §13).
 
 ### Phase D — lexer + parser (roadmap step 5) — generalizes all §16 source texts
 
