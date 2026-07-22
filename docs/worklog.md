@@ -46,12 +46,36 @@ raw transcripts (Claude Code auto-saves those under
 - `field_types` reuses `ast::TypeName` — `ir` already imports `ArithOp`/`CmpOp`/
   `Span` from `ast`, so no new coupling. Verification lives in `typecheck::finish`
   for a tailored message and to keep declared types out of inference propagation.
+- **Query syntax stays `?-` only** (reconfirmed; previously inherited without a
+  recorded rationale). Kept for LLM priors on the Prolog/Datalog marker, symmetry
+  with `:-`, prefix legibility / conjunctive-body scoping, and consistency with the
+  provisional `?why`/`?whynot`; the "just ask a bare atom" ergonomic is served by
+  the §14 `-q` CLI sugar, not a second grammar sigil. No postfix `?`. (Formalize as
+  a §17 entry when Phase D lands.)
 
-**Next up**
-- **Lexer + parser** (roadmap step 5, Phase D): source text → AST, golden tests for
-  structured errors (testing.md D1–D4). Then wire the full `parse → lower →
-  typecheck → eval` pipeline (today `typecheck` is only invoked from tests).
-- Imported *inferred* column types remain deferred to §13.
+**Next up — Phase D (lexer + parser) is fully planned and ready to execute.**
+Roadmap step 5: source text → AST, then wire the first production
+`parse → lower → typecheck → eval` path (today the engine is test-only; `main.rs`
+is a stub). Detailed plan drafted this session (Claude Code plan file
+`check-the-workflow-and-polished-kahan.md`). Pre-settled decisions to confirm at
+start:
+- **Hand-rolled lexer + recursive-descent parser, zero new deps** (structured
+  span-carrying errors + statement-level recovery; grammar is LL(1)-ish). Reject
+  `logos`/`chumsky` for v1.
+- **Operator precedence** (§5/§8 left it to the parser): `*` `/` above `+` `-`,
+  both left-assoc (precedence-climbing); comparisons non-associative.
+- **Signed literals**: parser folds a prefix `-` on a numeric literal into a
+  negative `Constant` (resolves the §3-vs-§5 gap; no unary-minus AST node).
+- **Prerequisite**: no pretty-printer exists (only `Error`) — add `src/print.rs`;
+  it *defines* the §14 canonical output form and is needed for the D1–D3 closure
+  properties.
+- **Tests**: encode §16.1/2/3/5/7 as source-text fixtures asserting equality with
+  `ast::fixtures` twins; D1–D4 (closure, `parse(print)==`, canonical fixpoint,
+  never-panic); structured-error goldens. **Out of scope**: aggregates `count{…}`
+  (§16.4) and `?why` (§16.6) — not in the ratified grammar.
+- Then roadmap step 6: CLI + agent API (§14).
+- Deferred side-threads: §13 imports (+ imported *inferred* column types), §9
+  aggregation, §11 provenance surface, §12 error taxonomy.
 
 ## 2026-07-21 — §8 literal-value builtins, then §4 type inference
 
