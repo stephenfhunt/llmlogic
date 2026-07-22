@@ -503,39 +503,60 @@ double-quoted with the §3 escapes; a float always carries a decimal point
   variables;
 - rows are deduplicated and sorted.
 
-**Minimal binary contract** (2026-07-22; the full `-q`/`--format` CLI is step 6).
-`datalog <file | ->` reads a program (`-` = stdin), prints each query's answers
-to stdout, and exits **0**; program errors (lex/parse/lower/type/eval) print to
-stderr, one per line, exit **1**; a usage error exits **2**.
+**Binary contract** (2026-07-22; `-q` completed 2026-07-23, roadmap step 6).
+Invocation is `datalog [<file> | -] [-q <query>]…`. The positional source is a
+program file, `-` for stdin, or **omitted** (empty base program); at most one is
+allowed. Each query's answers print to stdout as canonical facts and the process
+exits **0**; program errors (lex/parse/lower/type/eval) print to stderr, one per
+line, exit **1**; a usage error (bad arguments, unreadable file, or a bare
+`datalog` with no source and no `-q`) exits **2**. Argument parsing is a small
+hand-rolled loop in `src/main.rs`; the logic lives in the library
+(`api::run_with_queries` / `program_with_queries`), so `main` stays thin.
 
-One-shot queries via a command-line flag — the jq analog:
+**One-shot `-q` queries** — the jq analog (resolved 2026-07-23):
 
 ```sh
 # bare-atom query: sugar for appending `?- ...` to the loaded program
 datalog family.dl -q 'ancestor("alice", X)'
 
-# rule query: define-and-select in one flag; emits the head predicate's facts
+# comma-body query: also just a query body (answered by the answer/N shape)
+datalog people.dl -q 'person(name: N, age: A), A >= 18'
+
+# define-and-select: append the rule, then a synthesized `?- <head>.`
 datalog family.dl -q 'grandparent(X, Z) :- parent(X, Y), parent(Y, Z)'
 
 # composition over pipes ("-" reads stdin)
 datalog people.dl -q 'adult(N) :- person(name: N, age: A), A >= 18.' \
-  | datalog - -q 'answer(N) :- adult(N), N != "bob".'
+  | datalog - -q 'adult(N), N != "bob"'
 ```
+
+`-q` semantics: an argument is classified by **parsing** it (never by splitting
+on `:-`, which a string literal may contain). A single clause with a non-empty
+body is a **rule** — appended verbatim, followed by a synthesized `?- <head>.`
+over its head atom. Anything else (a bare atom, or a comma-separated body) is a
+**query body** and is appended as `?- <arg>.`. A trailing `.` is optional.
+Multiple `-q` apply in CLI order, so a later one may reference a predicate an
+earlier one defined; each produces its own answer block, in order.
 
 The motivating workflow is **token economy**: an agent issues precise, narrow
 queries over large fact bases and reads back only the derived facts, instead of
 loading raw data into context — the piecemeal analysis pattern agents already use
-jq for over JSON, made Datalog-native.
+jq for over JSON, made Datalog-native. The agent-facing usage guide is
+[`docs/agent-skill.md`](docs/agent-skill.md).
 
-JSON serves the machine-readable edges rather than the data path: structured
-errors (§12) and provenance trees (§11), likely via `--format json` and/or stderr.
+**JSON is deferred as low-value** (decided 2026-07-23), not just unimplemented.
+The data path is already Datalog-native — the focused filtering an agent does
+with jq over JSON is done here with *another `-q`* over facts, so JSON on the
+data path works against the design. At the edges, structured errors (§12) are
+already actionable *prose* with spans and did-you-mean hints (more useful to an
+LLM consumer than JSON codes), and provenance (§11), if ever surfaced, should be
+**provenance-as-facts** (Datalog-native, preserving the closure). `--format
+json` therefore stays a documented future *edge* feature only — hand-rolled if it
+ever lands, keeping the zero-runtime-dependency stance.
 
-*Open (§17):* exact `-q` semantics (bare atom vs rule set; the synthesized answer
-predicate for bare-body queries), `--format json` scope, and the agent skill
-definition that documents this surface. (Output ordering, stdin/`-`, and the
-query answer shape are resolved above, 2026-07-22.) One shape the closure does
-not yet cover: a body with no named variables that is not a substitutable single
-atom (a pure existence check) produces no fact-shaped output in v1.
+One shape the closure does not yet cover: a body with no named variables that is
+not a substitutable single atom (a pure existence check) produces no fact-shaped
+output in v1.
 
 ## 15. Evaluation strategy (non-normative)
 
@@ -593,7 +614,8 @@ ancestor(X, Y) :- parent(X, Z), ancestor(Z, Y).
 % expected: Who ∈ {"bob", "carol", "dave"}
 ```
 *Raised (resolved in §3/§5):* fact vs rule vs query syntax; variable vs constant
-lexing; comment syntax. *Still open:* how query results are shaped (§14).
+lexing; comment syntax. Query-result shaping resolved in §14 (canonical output
+form, 2026-07-22).
 
 ### 16.2 Negation — stratified negation-as-failure
 
@@ -713,6 +735,26 @@ structured error.
 
 ### Decisions
 
+- **2026-07-23** — **Step 6: agent CLI** (`-q` one-shot queries;
+  `api::program_with_queries` / `run_with_queries`, a hand-rolled arg loop in
+  `src/main.rs`, and [`docs/agent-skill.md`](docs/agent-skill.md)):
+  - **`-q` semantics.** An argument is classified by **parsing** it, never by
+    string-splitting on `:-` (a string literal can contain `:-`): a single clause
+    with a non-empty body is a rule (appended verbatim + a synthesized
+    `?- <head>.`); anything else (bare atom, comma-body) is a query body appended
+    as `?- <arg>.`. Trailing `.` optional; multiple `-q` apply in CLI order (a
+    later one may reference an earlier one's predicate); the positional source is
+    optional (empty base when only `-q` is given), and a bare `datalog` with
+    neither source nor `-q` is a usage error.
+  - **CLI-only, zero new dependencies.** The logic stays in the library so the
+    binary is thin and unit-testable; no clap.
+  - **JSON output deferred as low-value**, not merely unimplemented. The data
+    path is Datalog-native — `-q` over facts *is* the jq analog, so JSON there
+    works against the design; errors (§12) are already actionable prose with
+    spans/hints (better for an LLM than JSON codes); provenance (§11), if
+    surfaced, should be provenance-as-facts. `--format json` remains a documented
+    future *edge* feature only (hand-rolled if ever — no serde).
+
 - **2026-07-22** — **Phase D: lexer + parser** (`src/lexer.rs`, `src/parser.rs`,
   `src/print.rs`, `src/api.rs`, thin `src/main.rs`). Decisions ratified this
   session:
@@ -819,8 +861,7 @@ structured error.
   (structured errors §12, provenance trees §11).
 - **2026-07-10** — **One-shot query flag** (`-q`, jq analog) accepting a bare atom
   (sugar for `?- …`) or a rule (define-and-select: emit the head predicate's
-  facts). Exact semantics — synthesized answer predicate for bare-body queries,
-  multiple `-q` flags, stdin conventions — still open.
+  facts). *Semantics settled 2026-07-23 (see the step-6 entry above).*
 - **2026-07-19** — **Surface AST / core IR split.** The parser's output
   (`src/ast.rs`) and the evaluator's input (`src/ir.rs`) are two distinct plain
   Rust type hierarchies connected by a lowering pass (`src/lower.rs`): schema &
@@ -1108,9 +1149,11 @@ structured error.
   ground facts), so provenance can itself be piped back in and queried with
   Datalog — not just rendered as a tree or JSON. Design alongside §11; exercise
   with a §16 example. — §11/§14.
-- **`-q` details:** synthesized answer-predicate naming for bare-body queries;
-  multiple `-q` flags; stdin/`-` conventions; output ordering rule; `--format
-  json` scope; the agent skill definition documenting the CLI surface. — §14.
+- **`--format json` scope:** the only surviving §14 CLI question — a documented
+  future *edge* feature (structured errors §12, provenance §11), deferred as
+  low-value 2026-07-23 with the data path staying Datalog-native. (`-q`
+  semantics, multiple flags, stdin/`-`, optional source, and output ordering all
+  resolved 2026-07-23; the agent skill definition is `docs/agent-skill.md`.) — §14.
 - **Dependency choices:** `serde` for the API and source backends — decide as
-  the relevant sections stabilize. (Lexer/parser: resolved 2026-07-22 —
-  hand-rolled, zero new deps.)
+  the relevant sections stabilize. (Lexer/parser + CLI: resolved 2026-07-22 /
+  2026-07-23 — hand-rolled, zero new deps.)

@@ -27,6 +27,49 @@ fn run_file(name: &str) -> Output {
     }
 }
 
+/// Runs the binary with an arbitrary argument vector (no stdin).
+fn run_args(args: &[&str]) -> Output {
+    let output = Command::new(BIN).args(args).output().expect("binary runs");
+    Output {
+        stdout: String::from_utf8(output.stdout).unwrap(),
+        stderr: String::from_utf8(output.stderr).unwrap(),
+        code: output.status.code().expect("process exited normally"),
+    }
+}
+
+/// Runs the binary on a corpus file with extra trailing arguments (e.g. `-q`).
+fn run_file_args(name: &str, extra: &[&str]) -> Output {
+    let mut args = vec![format!("tests/programs/{name}")];
+    args.extend(extra.iter().map(|s| s.to_string()));
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    run_args(&refs)
+}
+
+/// Runs the binary reading its program from stdin (`-`), optionally with extra
+/// trailing arguments.
+fn run_stdin_args(program: &str, extra: &[&str]) -> Output {
+    let mut child = Command::new(BIN)
+        .arg("-")
+        .args(extra)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("binary spawns");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(program.as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().expect("binary finishes");
+    Output {
+        stdout: String::from_utf8(output.stdout).unwrap(),
+        stderr: String::from_utf8(output.stderr).unwrap(),
+        code: output.status.code().expect("process exited normally"),
+    }
+}
+
 /// Runs the binary reading its program from stdin (`-`).
 fn run_stdin(program: &str) -> Output {
     let mut child = Command::new(BIN)
@@ -181,4 +224,87 @@ fn binary_output_composes_over_a_pipe() {
     assert_eq!(second.code, 0);
     // 16.1's query materialized only alice's ancestors, so alice is the match.
     assert_eq!(second.stdout, "ancestor(\"alice\", \"carol\").\n");
+}
+
+// --- `-q` one-shot queries (spec §14, step 6) ---
+
+#[test]
+fn dash_q_bare_atom_over_a_file() {
+    // The file carries its own `?- ancestor("alice", Who).`; the `-q` block
+    // follows it in program order.
+    let out = run_file_args("16_1_ancestry.dl", &["-q", "ancestor(Who, \"dave\")"]);
+    assert_eq!(out.code, 0);
+    assert!(out.stderr.is_empty(), "{}", out.stderr);
+    assert!(
+        out.stdout.ends_with(
+            "ancestor(\"alice\", \"dave\").\n\
+             ancestor(\"bob\", \"dave\").\n\
+             ancestor(\"carol\", \"dave\").\n"
+        ),
+        "{}",
+        out.stdout
+    );
+}
+
+#[test]
+fn dash_q_define_and_select_rule() {
+    // A rule query over stdin facts with no query of their own: the only output
+    // is the synthesized head query's answers.
+    let out = run_stdin_args(
+        "parent(\"a\", \"b\").\nparent(\"b\", \"c\").\n",
+        &["-q", "gp(X,Z) :- parent(X,Y), parent(Y,Z)"],
+    );
+    assert_eq!(out.code, 0);
+    assert_eq!(out.stdout, "gp(\"a\", \"c\").\n");
+}
+
+#[test]
+fn dash_q_multiple_in_order() {
+    let out = run_stdin_args(
+        "p(1).\np(2).\n",
+        &["-q", "p(X)", "-q", "big(X) :- p(X), X >= 2"],
+    );
+    assert_eq!(out.code, 0);
+    // First block: p(X). Second block: the synthesized big(X) head query.
+    assert_eq!(out.stdout, "p(1).\np(2).\nbig(2).\n");
+}
+
+#[test]
+fn dash_q_only_with_empty_base() {
+    let out = run_args(&["-q", "p(X)"]);
+    assert_eq!(out.code, 0);
+    // No facts, so the query has no answers.
+    assert!(out.stdout.is_empty(), "{}", out.stdout);
+    assert!(out.stderr.is_empty(), "{}", out.stderr);
+}
+
+#[test]
+fn dash_q_over_stdin_base() {
+    let out = run_stdin_args("p(\"a\"). p(\"b\").", &["-q", "p(X)"]);
+    assert_eq!(out.code, 0);
+    assert_eq!(out.stdout, "p(\"a\").\np(\"b\").\n");
+}
+
+#[test]
+fn lone_dash_q_is_a_usage_error() {
+    let out = run_file_args("16_1_ancestry.dl", &["-q"]);
+    assert_eq!(out.code, 2);
+    assert!(out.stdout.is_empty());
+    assert!(out.stderr.contains("requires a query"), "{}", out.stderr);
+}
+
+#[test]
+fn an_unknown_flag_is_a_usage_error() {
+    let out = run_args(&["--json"]);
+    assert_eq!(out.code, 2);
+    assert!(out.stdout.is_empty());
+    assert!(out.stderr.contains("unknown flag"), "{}", out.stderr);
+}
+
+#[test]
+fn a_malformed_dash_q_is_a_program_error() {
+    let out = run_args(&["-q", "p("]);
+    assert_eq!(out.code, 1);
+    assert!(out.stdout.is_empty());
+    assert!(!out.stderr.is_empty());
 }

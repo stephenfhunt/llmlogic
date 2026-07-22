@@ -16,6 +16,60 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-23 — Step 6: agent CLI — `-q` one-shot queries + skill doc
+
+**Done**
+- **`-q` one-shot queries, zero new deps.** Logic in the library so `main.rs`
+  stays thin: `api::program_with_queries(base, queries)` builds the combined
+  source and `api::run_with_queries` runs it (both re-exported from `lib.rs`).
+  Each `-q` is classified by **parsing** it (never string-splitting on `:-`): a
+  single clause with a non-empty body → append the rule + a synthesized
+  `?- <head>.`; anything else (bare atom, comma-body) → append `?- <arg>.`.
+  Trailing `.` optional; multiple `-q` apply in CLI order (a later one may
+  reference an earlier one's predicate). `print::print_atom` made `pub` to render
+  the synthesized head.
+- **`main.rs` grew a small hand-rolled arg loop** (no clap): repeated `-q <value>`
+  pairs + at most one optional positional source (`file`/`-`); empty base when
+  only `-q` is given. Unknown flag / lone `-q` / a second positional / a bare
+  `datalog` with nothing → usage error, exit 2. The 0/1/2 contract is otherwise
+  unchanged. (One behavior change: bare `datalog` now prints usage+exit-2 via the
+  explicit empty-invocation guard, not via the old single-arg match.)
+- **New agent guide `datalog/docs/agent-skill.md`** (§14's "agent skill
+  definition"): the Datalog-in/Datalog-out contract, invocation, the two `-q`
+  forms, pipe composition, exit codes, value/output formatting, token-economy
+  workflow. Linked from README + AGENTS.md.
+- **Tests 168→178 lib + 13→21 system (211 total).** api units: bare atom,
+  comma-body, define-and-select (exact synthesized head), trailing-`.`
+  normalization, base preservation, multi-`-q` order, a `:-`-inside-a-string
+  (classifier not fooled), malformed `-q` → `Err`, two `run_with_queries`
+  end-to-ends. system: `run_args`/`run_file_args`/`run_stdin_args` helpers; `-q`
+  over file/stdin/empty-base, rule `-q`, two `-q`, usage-error paths.
+  Clippy/fmt clean.
+- **Docs**: spec §14 (binary contract + `-q` semantics + JSON-deferred rationale;
+  `--format json` now the only open §14 question), §17 (a 2026-07-23 decision
+  block; resolved the `-q` and query-shaping open items); AGENTS.md step 6 done;
+  README status + CLI section.
+
+**Decided** (spec §17, 2026-07-23)
+- **`-q` semantics** as above (parse-to-classify; rule vs body; optional source;
+  order-sensitive multi-`-q`). **CLI-only, zero new deps.**
+- **JSON output deferred as low-value** (not just unimplemented): the data path
+  is Datalog-native (`-q` over facts *is* the jq analog); errors are already
+  actionable prose with spans/hints; provenance, if surfaced, → provenance-as-
+  facts. `--format json` stays a documented future *edge* feature only.
+
+**Next up — v1 core is complete; remaining threads are post-v1.**
+- **§13 imports** (CSV first; + imported *inferred* column types, closing C5) —
+  the biggest remaining feature; `import "<path>" as rel.` currently errors
+  "imports not yet supported" at eval.
+- **§9 aggregation** (`count{…}` etc; revisit the `:`-vs-named-arg syntax collision).
+- **§11 provenance surface** — `?why`, and provenance-as-facts (Datalog-native,
+  preserves the closure); E5.
+- **§12 machine-readable error taxonomy** (today: structured prose with byte
+  offsets). Would also be where any `--format json` edge feature lands.
+- One v1 gap noted in §14: a query with no named variables that is not a
+  substitutable single atom (pure existence check) yields no fact-shaped output.
+
 ## 2026-07-22 — Phase D: lexer + parser + printer + first end-to-end pipeline (roadmap step 5)
 
 **Done**

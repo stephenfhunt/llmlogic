@@ -117,9 +117,18 @@ rationale in spec §17):
    binary over `tests/programs/*.dl`) tests are green. A minimal binary contract
    (stdout/stderr, exit 0/1/2) was pulled forward here; the full agent CLI stays
    step 6.
-6. **CLI/REPL + agent API** (§14): `-q` one-shot flag, `--format json` for the
-   machine-readable edges (§12 errors, §11 provenance), the agent skill
-   definition. Extend the system-test harness landed in step 5.
+6. **Agent CLI** (§14) — done 2026-07-23. One-shot `-q` queries: a bare atom /
+   comma-body appends `?- <arg>.`, a `head :- body` rule appends the rule plus a
+   synthesized `?- <head>.` (classified by *parsing* the arg, not splitting on
+   `:-`). Logic lives in the library (`api::program_with_queries` /
+   `run_with_queries`); `src/main.rs` grew a small hand-rolled arg loop (zero new
+   deps, no clap); optional positional source (empty base when only `-q`). Agent
+   guide: `docs/agent-skill.md`. **JSON output was deferred as low-value** — the
+   data path is Datalog-native (`-q` over facts is the jq analog) and errors are
+   already actionable prose; `--format json` stays a documented future edge only.
+   Post-v1 threads remain: §13 imports (+ imported inferred column types), §9
+   aggregation, §11 provenance-as-facts surface, §12 machine-readable error
+   taxonomy.
 
 The test pyramid grows outward with the pipeline:
 - Engine unit tests over **hand-constructed IR** (`ir::Program`); lowering tests

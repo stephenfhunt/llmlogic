@@ -27,12 +27,13 @@
 //! roadmap step 6; JSON stays reserved for the machine-readable edges (§12
 //! errors, §11 provenance).
 
+use crate::ast::StatementKind;
 use crate::engine::{Model, eval};
 use crate::error::Error;
 use crate::ir;
 use crate::lower::lower;
 use crate::parser::parse;
-use crate::print::print_ground_fact;
+use crate::print::{print_atom, print_ground_fact};
 use crate::typecheck::typecheck;
 
 /// The result of a successful [`run`]: the least model plus each query's
@@ -75,6 +76,67 @@ pub fn run(src: &str) -> Result<RunResult, Vec<Error>> {
         answers.push(answer_lines(query, &rows, &program));
     }
     Ok(RunResult { model, answers })
+}
+
+/// Builds the combined program source for the agent CLI: the `base` program
+/// followed by one appended query (or rule + synthesized query) per `-q`
+/// argument, in order (`spec.md` §14, `-q` semantics).
+///
+/// Each `-q` argument is classified by **parsing** it (never by splitting on
+/// `:-`, which a string literal may contain):
+///
+/// - A **define-and-select rule** — a single clause with a non-empty body, e.g.
+///   `gp(X,Z) :- parent(X,Y), parent(Y,Z)` — appends the rule plus a synthesized
+///   query over its head, `?- gp(X, Z).`.
+/// - Anything else (a **bare atom** `ancestor("alice", X)`, a **comma-body**
+///   `adult(N), N != "bob"`) is a query body and appends `?- <arg>.`.
+///
+/// A trailing `.` on the argument is optional. A malformed `-q` returns its own
+/// parse errors, attributed to that argument rather than to the synthesized
+/// combined source.
+pub fn program_with_queries(base: &str, queries: &[String]) -> Result<String, Vec<Error>> {
+    let mut source = base.to_string();
+    if !source.is_empty() && !source.ends_with('\n') {
+        source.push('\n');
+    }
+    for query in queries {
+        source.push_str(&query_source(query)?);
+    }
+    Ok(source)
+}
+
+/// Renders one `-q` argument to the program text it contributes (see
+/// [`program_with_queries`]). The returned string ends with a newline.
+fn query_source(arg: &str) -> Result<String, Vec<Error>> {
+    // Normalize: trim surrounding whitespace and any single trailing `.`.
+    let core = arg.trim();
+    let core = core.strip_suffix('.').unwrap_or(core).trim_end();
+
+    // A define-and-select rule parses as exactly one clause with a non-empty
+    // body. A bare atom parses as a clause with an *empty* body (a fact), which
+    // we treat as a query body, not a rule.
+    if let Ok(program) = parse(&format!("{core}."))
+        && let [statement] = &program.statements[..]
+        && let StatementKind::Clause(clause) = &statement.kind
+        && !clause.body.is_empty()
+    {
+        let head = print_atom(&clause.head);
+        return Ok(format!("{core}.\n?- {head}.\n"));
+    }
+
+    // Otherwise it is a query body. Validate it as one so a genuinely malformed
+    // `-q` surfaces its own parse error here.
+    let query = format!("?- {core}.");
+    parse(&query)?;
+    Ok(format!("{query}\n"))
+}
+
+/// Runs a `base` program plus one-shot `-q` queries end to end: builds the
+/// combined source with [`program_with_queries`], then [`run`]s it. This is the
+/// agent CLI's entry point (`datalog [<file>|-] [-q …]`).
+pub fn run_with_queries(base: &str, queries: &[String]) -> Result<RunResult, Vec<Error>> {
+    let source = program_with_queries(base, queries)?;
+    run(&source)
 }
 
 /// Renders one query's answer rows to canonical fact lines per the §14 output
@@ -223,6 +285,104 @@ age(\"bob\", 15).
         assert!(run("p(X) :- q(Y).").is_err());
         // Type error.
         assert!(run("age(\"a\", 30).\nage(\"b\", \"old\").").is_err());
+    }
+
+    // --- `-q` one-shot queries (spec §14, step 6) ---
+
+    fn build(base: &str, queries: &[&str]) -> String {
+        let queries: Vec<String> = queries.iter().map(|q| q.to_string()).collect();
+        program_with_queries(base, &queries).expect("builds")
+    }
+
+    #[test]
+    fn bare_atom_query_becomes_a_query_line() {
+        assert_eq!(
+            build("", &["ancestor(\"alice\", X)"]),
+            "?- ancestor(\"alice\", X).\n"
+        );
+    }
+
+    #[test]
+    fn comma_body_query_becomes_one_query_line() {
+        // A conjunction is a query body, not a valid statement, so it must fall
+        // through to the `?- …` branch rather than being misclassified.
+        assert_eq!(
+            build("", &["adult(N), N != \"bob\""]),
+            "?- adult(N), N != \"bob\".\n"
+        );
+    }
+
+    #[test]
+    fn define_and_select_rule_appends_rule_then_head_query() {
+        // The rule text is kept verbatim; only the synthesized head query is
+        // canonically printed (note the space after the comma).
+        assert_eq!(
+            build("", &["gp(X,Z) :- parent(X,Y), parent(Y,Z)"]),
+            "gp(X,Z) :- parent(X,Y), parent(Y,Z).\n?- gp(X, Z).\n"
+        );
+    }
+
+    #[test]
+    fn trailing_period_is_normalized() {
+        assert_eq!(build("", &["p(X)."]), build("", &["p(X)"]));
+    }
+
+    #[test]
+    fn base_program_is_preserved_and_newline_separated() {
+        assert_eq!(build("p(1).", &["p(X)"]), "p(1).\n?- p(X).\n");
+    }
+
+    #[test]
+    fn multiple_queries_apply_in_order() {
+        let source = build(
+            "",
+            &["gp(X,Z) :- parent(X,Y), parent(Y,Z)", "gp(X, \"dave\")"],
+        );
+        assert_eq!(
+            source,
+            "gp(X,Z) :- parent(X,Y), parent(Y,Z).\n?- gp(X, Z).\n?- gp(X, \"dave\").\n"
+        );
+    }
+
+    #[test]
+    fn a_colon_dash_inside_a_string_is_not_a_rule() {
+        // Classification parses the arg; it must not string-split on `:-`.
+        assert_eq!(
+            build("", &["note(\"build :- run\")"]),
+            "?- note(\"build :- run\").\n"
+        );
+    }
+
+    #[test]
+    fn a_malformed_query_is_an_error() {
+        let queries = vec!["p(".to_string()];
+        assert!(program_with_queries("", &queries).is_err());
+    }
+
+    #[test]
+    fn run_with_queries_answers_over_an_in_memory_base() {
+        let base = "\
+parent(\"alice\", \"bob\").
+parent(\"bob\", \"carol\").
+anc(X, Y) :- parent(X, Y).
+anc(X, Y) :- parent(X, Z), anc(Z, Y).
+";
+        let result = run_with_queries(base, &["anc(\"alice\", Who)".to_string()]).expect("runs");
+        assert_eq!(
+            result.answers,
+            vec![vec![
+                "anc(\"alice\", \"bob\").".to_string(),
+                "anc(\"alice\", \"carol\").".to_string(),
+            ]]
+        );
+    }
+
+    #[test]
+    fn run_with_queries_evaluates_a_define_and_select_rule() {
+        let base = "parent(\"a\", \"b\").\nparent(\"b\", \"c\").\n";
+        let result = run_with_queries(base, &["gp(X,Z) :- parent(X,Y), parent(Y,Z)".to_string()])
+            .expect("runs");
+        assert_eq!(result.answers, vec![vec!["gp(\"a\", \"c\").".to_string()]]);
     }
 
     #[test]

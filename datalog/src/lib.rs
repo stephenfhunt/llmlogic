@@ -30,7 +30,7 @@ pub mod typecheck;
 #[cfg(test)]
 pub(crate) mod testgen;
 
-pub use api::{RunResult, run};
+pub use api::{RunResult, program_with_queries, run, run_with_queries};
 pub use error::{Error, Result};
 pub use parser::parse;
 

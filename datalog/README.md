@@ -26,15 +26,42 @@ papers and notable implementations, grouped by topic) that guides the design.
 
 ## Status
 
-Early scaffold. The module layout mirrors the intended architecture, but the lexer,
-parser, evaluator, provenance, and import layers are stubs pending the spec.
+Working end-to-end for v1 core: lexer, recursive-descent parser, lowering, static
+type inference, stratified semi-naive evaluation with provenance, and a canonical
+printer are implemented, wired as `parse → lower → typecheck → eval`. The CLI runs
+programs and answers one-shot `-q` queries. Still pending: external imports (§13),
+aggregation (§9), and the provenance query surface (§11).
+
+## CLI usage
+
+```sh
+datalog [<file> | -] [-q <query>]…
+```
+
+Feed the engine facts and rules; it derives new facts and answers your queries as
+**ground facts in the same Datalog syntax** — so output is valid input and runs
+compose over pipes.
+
+```sh
+# query a program file
+datalog family.dl -q 'ancestor("alice", X)'
+
+# define-and-select in one flag
+datalog family.dl -q 'grandparent(X, Z) :- parent(X, Y), parent(Y, Z)'
+
+# compose over pipes ("-" reads stdin)
+datalog people.dl -q 'adult(N) :- person(name: N, age: A), A >= 18.' \
+  | datalog - -q 'adult(N), N != "bob"'
+```
+
+The full agent-facing guide is [`docs/agent-skill.md`](docs/agent-skill.md).
 
 ## Build, test, run
 
 ```sh
 cargo build          # compile
-cargo test           # unit + integration tests
-cargo run            # launch the (stub) CLI/REPL
+cargo test           # unit + integration + system tests
+cargo run -- <file>  # run a program (or `-` for stdin)
 cargo clippy         # lints
 cargo fmt --check    # formatting check
 ```

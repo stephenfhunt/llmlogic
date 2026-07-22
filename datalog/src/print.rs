@@ -130,7 +130,10 @@ fn print_comparison(comparison: &Comparison) -> String {
     )
 }
 
-fn print_atom(atom: &Atom) -> String {
+/// Renders a single atom to canonical Datalog text (no trailing `.`). Public so
+/// the CLI can print the head of a define-and-select `-q` rule as a synthesized
+/// query (`src/api.rs`).
+pub fn print_atom(atom: &Atom) -> String {
     let args = match &atom.args {
         Args::Positional(exprs) => exprs.iter().map(print_expr).collect::<Vec<_>>().join(", "),
         Args::Named(named) => named
