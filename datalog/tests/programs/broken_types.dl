@@ -1,0 +1,4 @@
+% a heterogeneous column: age's second field is int here, symbol there
+age(alice, 30).
+age(bob, old).
+?- age(Who, A).

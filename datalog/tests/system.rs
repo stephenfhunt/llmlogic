@@ -74,6 +74,42 @@ fn named_and_negation_programs_run() {
 }
 
 #[test]
+fn feature_program_prints_floats_and_symbols() {
+    // Proves value formatting survives the real binary: floats keep a decimal
+    // point, symbols print bare, answer/N and multiple queries concatenate.
+    let out = run_file("features.dl");
+    assert_eq!(out.code, 0);
+    assert_eq!(
+        out.stdout,
+        "scaled(a, 3.0).\nscaled(b, 6.0).\nanswer(b, 3.0).\n"
+    );
+    assert!(out.stderr.is_empty());
+}
+
+#[test]
+fn disjunction_program_runs() {
+    let out = run_file("disjunction.dl");
+    assert_eq!(out.code, 0);
+    assert_eq!(out.stdout, "drinks(alice).\ndrinks(bob).\n");
+}
+
+#[test]
+fn a_type_error_exits_one() {
+    let out = run_file("broken_types.dl");
+    assert_eq!(out.code, 1);
+    assert!(out.stdout.is_empty());
+    assert!(out.stderr.contains("type error"), "{}", out.stderr);
+}
+
+#[test]
+fn a_runtime_error_exits_one() {
+    let out = run_file("broken_arith.dl");
+    assert_eq!(out.code, 1);
+    assert!(out.stdout.is_empty());
+    assert!(out.stderr.contains("division by zero"), "{}", out.stderr);
+}
+
+#[test]
 fn import_program_fails_with_a_structured_error() {
     let out = run_file("16_5_import.dl");
     assert_eq!(out.code, 1);
@@ -100,6 +136,8 @@ fn a_malformed_file_reports_multiple_errors_and_exits_one() {
         "{}",
         out.stderr
     );
+    // A lexical near-miss hint reaches stderr alongside the parse errors.
+    assert!(out.stderr.contains("did you mean `<=`?"), "{}", out.stderr);
     // Multiple errors surface in one run (statement-level recovery).
     assert!(out.stderr.lines().count() >= 3, "{}", out.stderr);
 }

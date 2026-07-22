@@ -292,18 +292,34 @@ did-you-mean set, one test each).
 
 ### Phase D — integration & system tests (roadmap step 5)
 
+The outer layers stay **thin by design** (breadth lives in the unit/property
+suites); these prove the *wiring* — that features survive end-to-end through
+`run`/the binary — not the feature matrix. Coverage targets the genuinely
+integration-level behaviors: the process contract, output shaping, and error
+*rendering*.
+
 - **Integration** (`tests/pipeline.rs`): source text → query answers through
-  the public `datalog::run`, over the §16 corpus files in `tests/programs/*.dl`
-  (16.1/2/3/7 assert answers; 16.5 asserts the structured
-  imports-not-yet-supported eval error; a broken file asserts multiple errors in
-  one run; a closure test materializes output and re-queries it).
+  the public `datalog::run`, over corpus files in `tests/programs/*.dl` —
+  16.1/2/3/7 answers; 16.5's structured imports-not-yet-supported eval error;
+  multi-error recovery; a closure test (materialize output, re-query it);
+  `features.dl` (inline arithmetic, float + symbol value formatting, the
+  `answer/N` fallback, two queries in one program); `disjunction.dl`; and the
+  two error-path shapes lacking earlier — a **type error** (`broken_types.dl`)
+  and a **runtime arithmetic error** (`broken_arith.dl`, div-by-zero).
 - **System** (`tests/system.rs`): run the compiled binary via
-  `env!("CARGO_BIN_EXE_datalog")` (no new deps) over the corpus, asserting
-  stdout bytes, stderr content, and exit codes (0/1/2). Includes the §14
-  **composition-over-a-pipe** test — run 16.1, feed its stdout back on stdin
-  with an appended query — and stdin (`-`) / usage-error paths.
+  `env!("CARGO_BIN_EXE_datalog")` (no new deps), asserting stdout bytes, stderr
+  content, and exit codes (0/1/2). Includes the §14 **composition-over-a-pipe**
+  test — run 16.1, feed its stdout back on stdin with an appended query —
+  stdin (`-`) / usage-error paths, exact float/symbol stdout via `features.dl`,
+  and exit-1 stderr rendering for type, runtime, and lexical near-miss errors
+  (the `=<`→`<=` hint).
 - Corpus lives in `datalog/tests/programs/`: the §16 examples as real `.dl`
-  files, plus `broken_multi.dl` / `broken_unsafe.dl` for the error paths.
+  files, `features.dl` / `disjunction.dl` for feature wiring, and
+  `broken_{multi,unsafe,types,arith}.dl` for the error paths.
+
+Known remaining thin spots (deliberate, per the pyramid): the full did-you-mean
+near-miss set is unit-tested, not each re-checked through the binary; provenance
+output (§11) has no end-to-end path yet (step 6).
 
 ### Phase E — provenance (§11) — generalizes §16.6
 

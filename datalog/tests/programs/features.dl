@@ -1,0 +1,6 @@
+# inline arithmetic in a head arg, float + symbol output, and two queries
+measure(a, 1.5).
+measure(b, 3.0).
+scaled(N, X * 2.0) :- measure(N, X).
+?- scaled(Who, V).
+?- measure(N, X), X > 2.0.

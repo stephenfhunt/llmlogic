@@ -1,0 +1,5 @@
+% disjunction `;` in a rule body, expanded at parse time
+likes(alice, tea).
+likes(bob, coffee).
+drinks(X) :- likes(X, tea) ; likes(X, coffee).
+?- drinks(Who).

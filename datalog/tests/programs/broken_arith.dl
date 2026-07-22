@@ -1,0 +1,4 @@
+% well-typed but fails at evaluation: division by zero
+n(4).
+bad(X, Y) :- n(X), Y = X / 0.
+?- bad(A, B).
