@@ -52,6 +52,15 @@ raw transcripts (Claude Code auto-saves those under
   provisional `?why`/`?whynot`; the "just ask a bare atom" ergonomic is served by
   the §14 `-q` CLI sugar, not a second grammar sigil. No postfix `?`. (Formalize as
   a §17 entry when Phase D lands.)
+- **Syntax review for LLM-friendliness** (a pass before freezing the grammar):
+  **keep the `symbol` type** — well-represented in the Prolog/Datalog LLM training
+  corpus, so useful in a model's own deductive rules even though it never arises
+  from imported data (make the symbol-vs-string error explicit + skill guidance).
+  Fold four ergonomics wins into Phase D: **inline arithmetic in atom args**
+  (`succ(N, N+1)`, desugared to `=` in lowering; IR/engine unchanged), **disjunction
+  `;` in rule bodies** (parser expands to multiple clauses), **`#` comments**
+  (alias for `%`; not `//`), and a **casing-error hint** (capitalized-constant →
+  suggest the symbol or the quoted string). All to be recorded in §17 when built.
 
 **Next up — Phase D (lexer + parser) is fully planned and ready to execute.**
 Roadmap step 5: source text → AST, then wire the first production
@@ -69,10 +78,15 @@ start:
 - **Prerequisite**: no pretty-printer exists (only `Error`) — add `src/print.rs`;
   it *defines* the §14 canonical output form and is needed for the D1–D3 closure
   properties.
+- **LLM-friendliness extensions** (from the syntax review — see Decided): inline
+  arithmetic in atom args (surface-AST widens `Term`→`Expr`, lowering hoists to
+  `=`), disjunction `;` in rule bodies (parser expands to multiple clauses), `#`
+  comments, casing-error hint. Additive; IR/engine stay frozen.
 - **Tests**: encode §16.1/2/3/5/7 as source-text fixtures asserting equality with
   `ast::fixtures` twins; D1–D4 (closure, `parse(print)==`, canonical fixpoint,
-  never-panic); structured-error goldens. **Out of scope**: aggregates `count{…}`
-  (§16.4) and `?why` (§16.6) — not in the ratified grammar.
+  never-panic); structured-error goldens; feature tests for the four extensions.
+  **Out of scope**: aggregates `count{…}` (§16.4) and `?why` (§16.6) — not in the
+  ratified grammar.
 - Then roadmap step 6: CLI + agent API (§14).
 - Deferred side-threads: §13 imports (+ imported *inferred* column types), §9
   aggregation, §11 provenance surface, §12 error taxonomy.
