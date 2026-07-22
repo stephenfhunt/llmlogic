@@ -104,8 +104,22 @@ rationale in spec §17):
    leaves); the naive oracle iterates strata (perfect model). §16.2 is the
    contract fixture; testing.md C1–C3 are green. **Builtins + type inference**
    (§8/§4) remain in this step.
-5. **Lexer + parser** (§3–§5), wired to the engine.
-6. **CLI/REPL + agent API** (§14), full system tests.
+5. **Lexer + parser** (§3–§5), wired to the engine — done 2026-07-22.
+   Hand-rolled zero-dep lexer (`src/lexer.rs`) + recursive-descent parser
+   (`src/parser.rs`) producing the existing surface AST, with statement-level
+   error recovery and did-you-mean messages for Prolog-prior near-misses; a
+   canonical printer (`src/print.rs`) defining the §14 output form; and the
+   first production pipeline `parse → lower → typecheck → eval` (`src/api.rs`,
+   thin `src/main.rs`). Atom arguments widened `Term → Expr` for inline
+   arithmetic (lowering hoists); disjunction `;` expands in the parser. The §16
+   corpus is now source-text-first (golden AST fixtures); testing.md D1–D4 plus
+   integration (`tests/pipeline.rs`) and system (`tests/system.rs`, compiled
+   binary over `tests/programs/*.dl`) tests are green. A minimal binary contract
+   (stdout/stderr, exit 0/1/2) was pulled forward here; the full agent CLI stays
+   step 6.
+6. **CLI/REPL + agent API** (§14): `-q` one-shot flag, `--format json` for the
+   machine-readable edges (§12 errors, §11 provenance), the agent skill
+   definition. Extend the system-test harness landed in step 5.
 
 The test pyramid grows outward with the pipeline:
 - Engine unit tests over **hand-constructed IR** (`ir::Program`); lowering tests

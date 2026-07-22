@@ -16,6 +16,63 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-22 — Phase D: lexer + parser + printer + first end-to-end pipeline (roadmap step 5)
+
+**Done**
+- **Front end, zero new deps.** `src/lexer.rs` (hand-rolled, span-carrying,
+  recovers on bad input), `src/parser.rs` (recursive descent → the *existing*
+  `ast::Program`, statement-level recovery collecting all errors in one run),
+  `src/print.rs` (canonical Datalog printer), `src/api.rs::run` (the first
+  production `parse → lower → typecheck → eval` path), and a thin real
+  `src/main.rs`. The engine core is unchanged.
+- **AST widened `Term → Expr` in atom arguments** for inline arithmetic
+  (`succ(N, N+1)`); lowering hoists a compound arg to an `=`-assignment (facts
+  constant-fold `p(1+1)` through the engine's §8 arithmetic — one source of
+  truth, `engine::eval_expr` now `pub(crate)`). IR/engine untouched; the fixture
+  constructors wrap terms internally so every existing call site compiled
+  unchanged. `testgen` consumption sites (monotype, positionalize, coverage
+  guard) updated.
+- **LLM-friendliness features** all landed: disjunction `;` in rule bodies
+  (parser expands to one clause per disjunct — AST/IR stay conjunction-only),
+  `#` comments, and the **did-you-mean near-miss set** (`=<`→`<=`, `\=`→`!=`,
+  `\+`/`!`→`not`, `//`/`/* */`, uppercase relation, chained comparison, `not`
+  before a comparison, zero-arity atom, mixed args, trailing comma, curly
+  quotes). Operator precedence (`*`/`/` over `+`/`-`, left-assoc; comparisons
+  non-chaining) and signed-literal folding resolved.
+- **§14 query output shape** (new decision): single positive-atom queries
+  re-emit the substituted atom; other bodies emit `answer/N`; floats always
+  print a decimal point so output re-lexes as input.
+- **Tests 150 → 168 lib + 17 integration/system.** Golden AST fixtures for
+  §16.1/2/7 (`parse(src) == fixtures`); D1 closure, D2/D3 round-trips (new
+  `arb_ast_program`/`arb_printable_fact_set` generators), D4 never-panic;
+  near-miss error goldens; feature tests (inline-arith ≡ hand-hoisted,
+  disjunction ≡ separate rules, constant-folding). `tests/pipeline.rs`
+  (in-process) and `tests/system.rs` (compiled binary via `CARGO_BIN_EXE`,
+  incl. pipe-composition) over `tests/programs/*.dl`. Clippy/fmt clean.
+- **D4 found a real bug**: a multi-byte string escape (`"\¡`) walked the scanner
+  off a char boundary → fixed with char-aware advancement; regression seed kept.
+- **Docs**: spec §3/§5/§8 validated-by-parser + precedence/atom-args/`;`/`#`;
+  §14 canonical output form + answer shape + binary contract; §17 the Phase D
+  decision block; removed the resolved operator-precedence / lexer-parser open
+  questions. testing.md D1–D4 `[x]` + a system-test section. AGENTS.md step 5.
+
+**Decided** (all in spec §17, 2026-07-22)
+- Hand-rolled zero-dep lexer/parser; precedence table; signed-literal fold;
+  `?-`-only queries; keep `symbol`; inline-arithmetic desugar; `;` disjunction;
+  `#` comments; strict-grammar did-you-mean errors; canonical output form +
+  query answer shape; minimal binary contract (exit 0/1/2) pulled forward to
+  enable system tests. The full `-q`/`--format json`/skill CLI stays step 6.
+
+**Next up — roadmap step 6: CLI + agent API (§14).**
+- `-q` one-shot flag (bare atom vs define-and-select; synthesized answer
+  predicate naming), `--format json` for structured errors (§12) and provenance
+  (§11), the agent skill definition. Then the deferred side-threads: §13 imports
+  (+ imported inferred column types), §9 aggregation, §11 provenance surface,
+  §12 machine-readable error taxonomy (codes + spans-as-data; today errors are
+  structured strings with byte offsets).
+- One v1 gap noted in §14: a query with no named variables that is not a
+  substitutable single atom (pure existence check) yields no fact-shaped output.
+
 ## 2026-07-21 — `declare`-signature verification (closes §4)
 
 **Done**

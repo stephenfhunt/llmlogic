@@ -1,0 +1,3 @@
+% A single lowering (safety) error: the head variable Y is not bound by a
+% positive body atom.
+p(X) :- q(Y).

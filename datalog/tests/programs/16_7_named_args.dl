@@ -1,0 +1,8 @@
+% Spec §16.7 — named arguments & partial selection (in-program `declare`).
+declare person(name: string, age: int).
+person("alice", 30).
+person("bob", 15).
+
+adult(N) :- person(name: N, age: A), A >= 18.
+
+?- adult(Who).

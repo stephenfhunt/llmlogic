@@ -1,0 +1,8 @@
+% Spec §16.2 — stratified negation-as-failure.
+person("alice"). person("bob"). person("carol").
+parent("alice", "bob").
+parent("bob", "carol").
+
+root(X) :- person(X), not parent(_, X).
+
+?- root(Who).

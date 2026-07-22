@@ -1,0 +1,9 @@
+% Spec §16.1 — recursion: ancestry / reachability.
+parent("alice", "bob").
+parent("bob", "carol").
+parent("carol", "dave").
+
+ancestor(X, Y) :- parent(X, Y).
+ancestor(X, Y) :- parent(X, Z), ancestor(Z, Y).
+
+?- ancestor("alice", Who).

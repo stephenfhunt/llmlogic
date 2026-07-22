@@ -670,7 +670,13 @@ fn apply_compare(op: CmpOp, lhs: &Value, rhs: &Value) -> Result<bool> {
 }
 
 /// Evaluates an arithmetic expression to a value under the current bindings.
-fn eval_expr(expr: &Expr, bindings: &[Option<Value>]) -> Result<Value> {
+///
+/// Exposed `pub(crate)` so lowering can constant-fold a ground fact argument
+/// (`p(1+1).`) through the *same* §8 arithmetic — single source of truth for
+/// strictness, overflow, and division-by-zero. Callers folding a constant pass
+/// empty `bindings`; the expression must be variable-free (lowering checks this
+/// first, since a `Var` here would index out of bounds).
+pub(crate) fn eval_expr(expr: &Expr, bindings: &[Option<Value>]) -> Result<Value> {
     match expr {
         Expr::Term(Term::Const(value)) => Ok(value.clone()),
         Expr::Term(Term::Var(var)) => bindings[var.0 as usize].clone().ok_or_else(|| {

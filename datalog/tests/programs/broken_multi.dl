@@ -1,0 +1,6 @@
+% Several independent errors in one file — the parser recovers at each `.` and
+% reports them all in one run.
+Parent(X, Y) :- edge(X, Y).
+good("a").
+p(1, 2,).
+q(X) :- r(X), 0 <= X <= 9.

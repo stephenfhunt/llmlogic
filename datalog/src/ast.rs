@@ -137,17 +137,23 @@ pub struct Atom {
 /// represent it.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Args {
-    Positional(Vec<Term>),
+    /// Positional arguments. Each is a full [`Expr`], not just a [`Term`], so
+    /// inline arithmetic parses (`succ(N, N+1)`, spec §17 Phase D). A bare term
+    /// is the common case, represented as [`ExprKind::Term`]; lowering hoists any
+    /// non-term argument to a fresh `=`-assignment body literal, so the IR and
+    /// engine still see only positional terms.
+    Positional(Vec<Expr>),
     /// Named arguments; partial selection is allowed in bodies (§4). Lowering
     /// resolves these to positional form against the predicate schema.
     Named(Vec<NamedArg>),
 }
 
-/// One `field: value` pair in a named-argument literal.
+/// One `field: value` pair in a named-argument literal. The value is a full
+/// [`Expr`] for the same reason positional arguments are (inline arithmetic).
 #[derive(Debug, Clone, PartialEq)]
 pub struct NamedArg {
     pub field: Ident,
-    pub value: Term,
+    pub value: Expr,
     pub span: Span,
 }
 
@@ -190,6 +196,25 @@ pub enum CmpOp {
     Ge,
 }
 
+impl CmpOp {
+    /// The canonical source spelling of this operator.
+    pub fn symbol(self) -> &'static str {
+        match self {
+            CmpOp::Eq => "=",
+            CmpOp::Ne => "!=",
+            CmpOp::Lt => "<",
+            CmpOp::Le => "<=",
+            CmpOp::Gt => ">",
+            CmpOp::Ge => ">=",
+        }
+    }
+}
+
+/// The canonical source spelling of a comparison operator.
+pub fn cmp_symbol(op: CmpOp) -> &'static str {
+    op.symbol()
+}
+
 /// Arithmetic operators: `+` `-` `*` `/` (§3; semantics §8).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum ArithOp {
@@ -197,6 +222,23 @@ pub enum ArithOp {
     Sub,
     Mul,
     Div,
+}
+
+impl ArithOp {
+    /// The canonical source spelling of this operator.
+    pub fn symbol(self) -> &'static str {
+        match self {
+            ArithOp::Add => "+",
+            ArithOp::Sub => "-",
+            ArithOp::Mul => "*",
+            ArithOp::Div => "/",
+        }
+    }
+}
+
+/// The canonical source spelling of an arithmetic operator.
+pub fn arith_symbol(op: ArithOp) -> &'static str {
+    op.symbol()
 }
 
 /// An arithmetic expression with its span.
@@ -267,6 +309,16 @@ pub(crate) mod fixtures {
         }
     }
 
+    /// Wraps a leaf term as an expression — atom arguments are [`Expr`] since
+    /// the inline-arithmetic widening (spec §17, Phase D). Fixtures keep passing
+    /// bare terms; this is where they become `Expr::Term`.
+    pub(crate) fn expr_of(term: Term) -> Expr {
+        Expr {
+            span: term.span,
+            kind: ExprKind::Term(term),
+        }
+    }
+
     pub(crate) fn string_term(s: &str) -> Term {
         Term {
             kind: TermKind::Constant(Constant::String(s.to_string())),
@@ -291,7 +343,7 @@ pub(crate) mod fixtures {
     pub(crate) fn named_arg(field: &str, value: Term) -> NamedArg {
         NamedArg {
             field: ident(field),
-            value,
+            value: expr_of(value),
             span: Span::DUMMY,
         }
     }
@@ -325,7 +377,7 @@ pub(crate) mod fixtures {
     pub(crate) fn positional_atom(predicate: &str, args: Vec<Term>) -> Atom {
         Atom {
             predicate: ident(predicate),
-            args: Args::Positional(args),
+            args: Args::Positional(args.into_iter().map(expr_of).collect()),
             span: Span::DUMMY,
         }
     }

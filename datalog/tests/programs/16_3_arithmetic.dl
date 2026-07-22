@@ -1,0 +1,9 @@
+% Spec §16.3 — arithmetic & comparison builtins.
+age("alice", 30).
+age("bob", 15).
+age("carol", 42).
+
+adult(X)        :- age(X, A), A >= 18.
+next_year(X, N) :- age(X, A), N = A + 1.
+
+?- adult(Who).

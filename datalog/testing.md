@@ -265,14 +265,45 @@ compared keyed by predicate *name*, not `PredId`.
 
 ### Phase D — lexer + parser (roadmap step 5) — generalizes all §16 source texts
 
-- [ ] **D1** **The §14 closure property**: pretty-print any IR fact set in
-  canonical output form → parse → lower → identical `Fact` set.
-  Datalog-out is Datalog-in, mechanically checked.
-- [ ] **D2** `parse(print(ast)) == ast` modulo spans, over generated ASTs
-  (including named-argument forms).
-- [ ] **D3** Canonical fixpoint: `print(parse(t)) == t` for canonical-form
-  text.
-- [ ] **D4** Lexer/parser never panic on arbitrary byte strings.
+Implemented 2026-07-22 (`src/lexer.rs`, `src/parser.rs`, `src/print.rs`). The
+§16 corpus is now **source-text-first**: the ratified examples are golden AST
+fixtures (`parser::tests::golden_16_*` assert `parse(src) == ast::fixtures::…`
+modulo spans, via a span-zeroing helper) — 16.4/16.6 excluded (not in the
+grammar). Structured-error quality stays example/golden-based (the near-miss
+did-you-mean set, one test each).
+
+- [x] **D1** **The §14 closure property**: print any IR fact set in canonical
+  output form → parse → lower → identical `Fact` set
+  (`d1_fact_set_closure` over `arb_printable_fact_set`). Datalog-out is
+  Datalog-in, mechanically checked.
+- [x] **D2** `parse(print(ast)) == ast` modulo spans, over generated
+  parse-reachable ASTs incl. named-argument and arithmetic forms
+  (`d2_ast_round_trip` over `arb_ast_program`; expressions generated in
+  canonical left-leaning shape so printing re-parses to the same tree).
+- [x] **D3** Canonical fixpoint: `print(parse(print(ast)))` equals
+  `print(ast)` (`d3_canonical_print_is_a_fixpoint`) — the printed form is a
+  stable canonical representative. Also `print::tests::corpus_round_trips`
+  over §16.
+- [x] **D4** Lexer/parser never panic on arbitrary text or bytes
+  (`d4_parse_never_panics_on_{text,bytes}`). *Found a genuine bug*: a
+  multi-byte escape (`"\¡`) advanced the string scanner off a char boundary;
+  the fix is char-aware advancement (regression seed kept in
+  `proptest-regressions/parser.txt`).
+
+### Phase D — integration & system tests (roadmap step 5)
+
+- **Integration** (`tests/pipeline.rs`): source text → query answers through
+  the public `datalog::run`, over the §16 corpus files in `tests/programs/*.dl`
+  (16.1/2/3/7 assert answers; 16.5 asserts the structured
+  imports-not-yet-supported eval error; a broken file asserts multiple errors in
+  one run; a closure test materializes output and re-queries it).
+- **System** (`tests/system.rs`): run the compiled binary via
+  `env!("CARGO_BIN_EXE_datalog")` (no new deps) over the corpus, asserting
+  stdout bytes, stderr content, and exit codes (0/1/2). Includes the §14
+  **composition-over-a-pipe** test — run 16.1, feed its stdout back on stdin
+  with an appended query — and stdin (`-`) / usage-error paths.
+- Corpus lives in `datalog/tests/programs/`: the §16 examples as real `.dl`
+  files, plus `broken_multi.dl` / `broken_unsafe.dl` for the error paths.
 
 ### Phase E — provenance (§11) — generalizes §16.6
 

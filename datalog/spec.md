@@ -69,17 +69,23 @@ Candidate principles to ratify:
 
 ## 3. Lexical structure
 
-*Status: Draft*
+*Status: Draft — validated by the hand-rolled lexer (`src/lexer.rs`), 2026-07-22.*
 
-- **Comments** — `%` to end of line.
+- **Comments** — `%` **or `#`** to end of line (the `#` alias is added for LLM
+  ergonomics, §17 2026-07-22; `//` is *not* a comment — reserved against a
+  future floor-division operator, and lexed to a targeted did-you-mean error).
 - **Identifiers** (relation names, symbols, field names) — start with a lowercase
   letter, continue with letters, digits, `_` (snake_case by convention): `parent`,
   `family_tree`.
 - **Variables** — start with an uppercase letter or `_`: `X`, `Who`, `_Age`. A lone
   `_` is the anonymous variable; each occurrence is a fresh variable.
 - **Literals**
-  - *Integers* — `0`, `42`, `-7` (64-bit signed).
-  - *Floats* — `3.14`, `-0.5`, `6.02e23` (64-bit IEEE 754).
+  - *Integers* — `0`, `42`, `-7` (64-bit signed). The lexer produces *unsigned*
+    integers; a leading `-` is the subtraction operator, folded onto the literal
+    by the parser in operand position (§17, 2026-07-22).
+  - *Floats* — `3.14`, `-0.5`, `6.02e23` (64-bit IEEE 754). A `.` begins the
+    fraction only when a digit follows, so `p(1).` lexes as `1` then the
+    terminator.
   - *Strings* — `"alice"` or `'alice'` (both delimiters accepted, identical
     semantics); backslash escapes `\\`, `\"`, `\'`, `\n`, `\t`.
   - *Booleans* — `true`, `false`.
@@ -91,6 +97,13 @@ Candidate principles to ratify:
 - **Reserved words** — `import`, `as`, `declare`, `not`, `true`, `false`. These
   cannot be used as relation or field names.
 - **Whitespace** is insignificant except as a token separator.
+- **Character set** — identifiers, variables, and operators are ASCII; string
+  *contents* may be any Unicode. A non-ASCII character outside a string is a
+  lexical error with a span; curly/smart quotes get a dedicated hint.
+- **Near-miss recovery** — Prolog-prior spellings are recognized and rejected
+  with a targeted, actionable message rather than a bare "unexpected character":
+  `=<`→`<=`, `\=`→`!=`, `\+`/`!`→`not`, `//`/`/* */`→comment markers. The lexer
+  substitutes the intended token so parsing continues (§17, 2026-07-22).
 
 ## 4. Data model & types
 
@@ -167,7 +180,8 @@ adult(N) :- person(name: N, age: A), A >= 18.
 
 ## 5. Syntax
 
-*Status: Draft — validated by the AST/IR prototype (`src/ast.rs`), 2026-07-19*
+*Status: Draft — validated by the AST/IR prototype (`src/ast.rs`), 2026-07-19,
+and by the hand-rolled recursive-descent parser (`src/parser.rs`), 2026-07-22.*
 
 A program is a sequence of statements, each terminated by `.`:
 
@@ -191,29 +205,51 @@ field       = ident [ ":" type ] ;
 type        = "int" | "float" | "string" | "symbol" | "bool" ;
 
 clause      = atom [ ":-" body ] "." ;          (* fact when no body, else rule *)
-query       = "?-" body "." ;
-body        = literal { "," literal } ;
+query       = "?-" conjunction "." ;            (* queries are conjunctive *)
+body        = conjunction { ";" conjunction } ;  (* rule bodies: DNF, §17 *)
+conjunction = literal { "," literal } ;
 literal     = [ "not" ] atom | comparison ;
 
-atom        = ident "(" args ")" ;
+atom        = ident "(" args ")" ;              (* at least one argument *)
 args        = positional | named ;
-positional  = term { "," term } ;
-named       = ident ":" term { "," ident ":" term } ;
+positional  = expr { "," expr } ;               (* args are expressions, §17 *)
+named       = ident ":" expr { "," ident ":" expr } ;
 
 term        = constant | variable ;
 constant    = integer | float | string | bool | ident ;    (* bare ident = symbol *)
 variable    = VARIABLE ;                        (* uppercase- or "_"-initial, §3 *)
 
-comparison  = expr cmp expr ;
+comparison  = expr cmp expr ;                   (* non-associative; no chaining *)
 cmp         = "=" | "!=" | "<" | "<=" | ">" | ">=" ;
-expr        = term | expr ( "+" | "-" | "*" | "/" ) expr ;  (* precedence: §8, TBD *)
+expr        = add ;
+add         = mul { ( "+" | "-" ) mul } ;       (* left-assoc *)
+mul         = primary { ( "*" | "/" ) primary } ;  (* binds tighter, left-assoc *)
+primary     = [ "-" ] number | term ;           (* prefix "-" folds onto a literal *)
 ```
 
 Notes:
-- Whether `args` is positional or named is decided by the literal's first argument;
-  mixing the two styles in one literal is a syntax error with a targeted message
-  (§12).
+- **Operator precedence** (was open): `*` `/` bind tighter than `+` `-`, both
+  left-associative (precedence climbing); comparisons are non-associative and do
+  **not** chain — `0 <= X <= 9` is a targeted error suggesting `0 <= X, X <= 9`
+  (§17, 2026-07-22).
+- **Atom arguments are full expressions**, so inline arithmetic parses
+  (`succ(N, N+1)`); lowering hoists a compound argument to an `=`-assignment, so
+  the IR is unchanged (§17, 2026-07-22). A compound argument in a *fact* is
+  constant-folded (`p(1+1).` → `p(2).`).
+- **Disjunction `;`** in a rule body is top-level DNF (no parentheses in v1);
+  `,` binds tighter than `;`. The parser expands each disjunct into its own
+  clause sharing the head, so the AST/IR stay conjunction-only. Queries stay
+  conjunctive (§17, 2026-07-22).
+- **Signed literals**: a prefix `-` on a numeric literal folds into a negative
+  constant; a prefix `-` on anything else is an error (there is no unary-minus
+  node).
+- A predicate takes **at least one argument** — `p.`/`p()` is a targeted error.
+- Whether `args` is positional or named is decided by the literal's first
+  argument (`ident :`); mixing the two styles in one literal is a syntax error
+  with a targeted message (§12).
 - `not` applies to atoms only, not comparisons; semantics and safety are §7.
+  Uppercase relation names, `not` before a comparison, and trailing commas each
+  get a targeted did-you-mean error (the strict-grammar pillar, §2).
 - Aggregate expressions (§9) are **not yet in the grammar** — their syntax is an
   open question (§17), in part because `:` now also delimits named arguments.
 
@@ -307,7 +343,11 @@ lowered with the assignment-safety exception (`src/lower.rs`), 2026-07-21.*
 
 **Operators.** Comparison `= != < <= > >=`; arithmetic `+ - * /`. Both appear
 as body literals: a comparison is an anti-join *filter*; arithmetic appears
-inside a comparison's operands.
+inside a comparison's operands. **Precedence** (parser, §5, resolved
+2026-07-22): `*` `/` bind tighter than `+` `-`, both left-associative;
+comparisons are non-associative and do not chain. Arithmetic may also be written
+**inline in an atom argument** (`succ(N, N+1)`), which lowering hoists to an
+`=`-assignment — surface sugar only, the §8 semantics are unchanged.
 
 **`=` is assignment or equality.** If exactly one side is a bare variable not
 yet bound (by a positive atom or an earlier assignment) and the other side fully
@@ -446,7 +486,27 @@ itself**:
   syntax**, one per line, deterministically ordered (sorted). Output is therefore
   valid input: runs compose over pipes, and an agent can materialize an
   intermediate result to a fact file and query it again later (the closure
-  property that makes jq effective for agents).
+  property that makes jq effective for agents, mechanically checked by
+  `testing.md` D1). Implemented by the canonical printer (`src/print.rs`) and
+  the `run` pipeline (`src/api.rs`), 2026-07-22.
+
+**Canonical output form** (resolved 2026-07-22). Values print in the §4
+cross-type order (symbol < string < int < float < bool); strings are
+double-quoted with the §3 escapes; a float always carries a decimal point
+(`1.0`, not `1`) so it re-lexes as a float. The **query answer shape** is:
+
+- a **single positive-atom** query re-emits that atom with the answer bindings
+  substituted (`?- ancestor("alice", Who).` → `ancestor("alice", "bob").` …)
+  when every variable position is a projected variable; a ground such query
+  prints the atom once if it holds;
+- any **other** body emits synthesized `answer/N` facts over the query's named
+  variables;
+- rows are deduplicated and sorted.
+
+**Minimal binary contract** (2026-07-22; the full `-q`/`--format` CLI is step 6).
+`datalog <file | ->` reads a program (`-` = stdin), prints each query's answers
+to stdout, and exits **0**; program errors (lex/parse/lower/type/eval) print to
+stderr, one per line, exit **1**; a usage error exits **2**.
 
 One-shot queries via a command-line flag — the jq analog:
 
@@ -471,8 +531,11 @@ JSON serves the machine-readable edges rather than the data path: structured
 errors (§12) and provenance trees (§11), likely via `--format json` and/or stderr.
 
 *Open (§17):* exact `-q` semantics (bare atom vs rule set; the synthesized answer
-predicate for bare-body queries), output ordering rule, stdin/`-` conventions,
-`--format json` scope, and the agent skill definition that documents this surface.
+predicate for bare-body queries), `--format json` scope, and the agent skill
+definition that documents this surface. (Output ordering, stdin/`-`, and the
+query answer shape are resolved above, 2026-07-22.) One shape the closure does
+not yet cover: a body with no named variables that is not a substitutable single
+atom (a pure existence check) produces no fact-shaped output in v1.
 
 ## 15. Evaluation strategy (non-normative)
 
@@ -649,6 +712,45 @@ structured error.
 *Status: living*
 
 ### Decisions
+
+- **2026-07-22** — **Phase D: lexer + parser** (`src/lexer.rs`, `src/parser.rs`,
+  `src/print.rs`, `src/api.rs`, thin `src/main.rs`). Decisions ratified this
+  session:
+  - **Hand-rolled lexer + recursive-descent parser, zero new dependencies.** The
+    structured-error pillar wants full control over spans and multi-error
+    recovery (statement-level, skipping to the next `.`); the grammar is
+    LL(1)-ish. `logos`/`chumsky` rejected for v1.
+  - **Operator precedence** (closes the §5/§8 open question): `*` `/` above
+    `+` `-`, both left-associative (precedence climbing); comparisons
+    non-associative, no chaining.
+  - **Signed literals** fold in the parser: a prefix `-` on a numeric literal
+    becomes a negative constant; no unary-minus node; prefix `-` on anything else
+    is an error.
+  - **Query syntax stays `?-` only** (reconfirmed): LLM priors on the
+    Prolog/Datalog marker, symmetry with `:-`, sigil consistency with
+    `?why`/`?whynot`; the bare-atom ergonomic is served by the future `-q` CLI.
+  - **Keep the `symbol` type**: well-represented in LLM training data, useful in
+    a model's own deductive rules; the symbol-vs-string type error is made
+    explicit.
+  - **Inline arithmetic in atom arguments** (`succ(N, N+1)`): atom args widen to
+    expressions; lowering hoists a compound arg to an `=`-assignment (facts
+    constant-fold). IR/engine unchanged — verified by equivalence to hand-hoisted
+    IR (`api::tests`).
+  - **Disjunction `;` in rule bodies** (top-level DNF, `,` over `;`): the parser
+    expands each disjunct into its own clause; AST/IR stay conjunction-only.
+    Queries stay conjunctive.
+  - **`#` line comments** alias `%`; **no `//`** (reserved). ASCII outside
+    strings; Unicode inside string contents.
+  - **Strict grammar + did-you-mean errors** for the Prolog-prior near-misses
+    (`=<`, `\=`, `\+`, `!`, `//`, uppercase relation, chained comparison, `not`
+    before a comparison, zero-arity atom, mixed argument styles, trailing comma,
+    curly quotes). One canonical spelling each — hints, not silent aliases.
+  - **Canonical output form + query answer shape** (§14): single positive-atom
+    queries re-emit the substituted atom, other bodies emit `answer/N`; floats
+    always print a decimal point so output re-lexes as input (D1 closure).
+  - **Minimal binary contract** pulled forward from step 6 to enable system
+    tests: `datalog <file | ->`, answers to stdout / errors to stderr, exit
+    codes 0/1/2. The full `-q`/`--format json`/skill CLI remains step 6.
 
 - **2026-07-03** — Language scope for v1 is **full-featured**: facts, rules,
   recursion, stratified negation, arithmetic/comparison builtins, and aggregation.
@@ -994,9 +1096,6 @@ structured error.
 - **Aggregation vs recursion:** how far to go on recursive aggregation semantics. — §9.
 - **Aggregate expression syntax:** `count { Var : Goal }` is provisional — and `:`
   now also delimits named arguments, so the form will likely be revisited. — §9.
-- **Operator precedence:** the surface grammar for arithmetic/comparison
-  precedence and associativity (the evaluation semantics are settled in §8; this
-  is a parser concern). — §5/§8.
 - **Provenance query syntax:** `?why <fact>` is provisional across CLI and API; also
   decide proof-tree JSON encoding. (§16.6) — §11/§14.
 - **Semiring provenance under negation:** parked research thread with a worked
@@ -1012,5 +1111,6 @@ structured error.
 - **`-q` details:** synthesized answer-predicate naming for bare-body queries;
   multiple `-q` flags; stdin/`-` conventions; output ordering rule; `--format
   json` scope; the agent skill definition documenting the CLI surface. — §14.
-- **Dependency choices:** lexer/parser approach, `serde` for the API, source
-  backends — decide as the relevant sections stabilize.
+- **Dependency choices:** `serde` for the API and source backends — decide as
+  the relevant sections stabilize. (Lexer/parser: resolved 2026-07-22 —
+  hand-rolled, zero new deps.)

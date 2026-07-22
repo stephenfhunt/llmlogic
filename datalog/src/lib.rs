@@ -22,6 +22,7 @@ pub mod ir;
 pub mod lexer;
 pub mod lower;
 pub mod parser;
+pub mod print;
 pub mod provenance;
 pub mod sources;
 pub mod typecheck;
@@ -29,7 +30,9 @@ pub mod typecheck;
 #[cfg(test)]
 pub(crate) mod testgen;
 
+pub use api::{RunResult, run};
 pub use error::{Error, Result};
+pub use parser::parse;
 
 /// Returns the crate version string (from `CARGO_PKG_VERSION`).
 ///

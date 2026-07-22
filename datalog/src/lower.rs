@@ -142,6 +142,15 @@ enum AtomPos {
     Body,
 }
 
+/// How a compound (inline-arithmetic) atom argument is resolved (spec §17,
+/// Phase D). Rules and queries hoist it to an `=`-assignment; facts, having no
+/// body, constant-fold it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ArgMode {
+    Hoist,
+    Fold,
+}
+
 /// Per-clause variable numbering state.
 #[derive(Default)]
 struct VarScope {
@@ -339,40 +348,30 @@ impl Lowerer {
 
     fn lower_clause(&mut self, clause: &ast::Clause, out: &mut ir::Program) {
         let mut scope = VarScope::default();
-        let Some(head) = self.lower_atom(&clause.head, &mut scope, AtomPos::Head) else {
-            return;
-        };
 
         if clause.body.is_empty() {
-            // A fact must be ground (§10). Checked against the *lowered* head
-            // so the named and positional paths behave identically; only the
-            // wording of the error distinguishes them.
-            let mut values = Vec::with_capacity(head.args.len());
-            let mut ground = true;
-            for (position, arg) in head.args.iter().enumerate() {
-                match arg {
-                    ir::Term::Const(value) => values.push(value.clone()),
-                    ir::Term::Var(var) => {
-                        ground = false;
-                        let name = scope.names[var.0 as usize].as_deref().unwrap_or("_");
-                        let place = self.describe_arg(&clause.head, position);
-                        self.errors.push(Error::Semantic(format!(
-                            "fact `{}` is not ground: variable `{name}` in {place}",
-                            clause.head.predicate.name,
-                        )));
-                    }
-                }
-            }
-            if ground {
-                out.facts.push(ir::Fact {
-                    pred: head.pred,
-                    tuple: ir::Tuple(values),
-                });
-            }
+            self.lower_fact(clause, &mut scope, out);
             return;
         }
 
-        let body = self.lower_body(&clause.body, &mut scope);
+        // Inline arithmetic in the head hoists to `=`-assignments *after* the
+        // body (spec §17, Phase D): head variables are bound by the body, so
+        // the assignment must follow. A bare-term head (the common case) yields
+        // no hoisted literals.
+        let mut head_hoisted = Vec::new();
+        let Some(head) = self.lower_atom(
+            &clause.head,
+            &mut scope,
+            AtomPos::Head,
+            ArgMode::Hoist,
+            &mut head_hoisted,
+        ) else {
+            return;
+        };
+
+        let mut body = self.lower_body(&clause.body, &mut scope);
+        body.extend(head_hoisted);
+
         let rule = ir::Rule {
             head,
             body,
@@ -381,6 +380,49 @@ impl Lowerer {
         };
         self.check_rule_safety(&rule, &clause.head.predicate.name);
         out.rules.push(rule);
+    }
+
+    /// Lowers an empty-body clause to a ground fact (§10). Named arguments
+    /// resolve as for any head; inline arithmetic is *constant-folded* rather
+    /// than hoisted (a fact has no body to hold an assignment), so `p(1+1).`
+    /// becomes `p(2).`. Any variable or a non-ground expression makes the fact
+    /// non-ground — a structured error, checked against the *lowered* head so
+    /// the named and positional paths differ only in wording.
+    fn lower_fact(&mut self, clause: &ast::Clause, scope: &mut VarScope, out: &mut ir::Program) {
+        let mut discard = Vec::new();
+        let Some(head) = self.lower_atom(
+            &clause.head,
+            scope,
+            AtomPos::Head,
+            ArgMode::Fold,
+            &mut discard,
+        ) else {
+            return;
+        };
+        debug_assert!(discard.is_empty(), "fold mode never hoists");
+
+        let mut values = Vec::with_capacity(head.args.len());
+        let mut ground = true;
+        for (position, arg) in head.args.iter().enumerate() {
+            match arg {
+                ir::Term::Const(value) => values.push(value.clone()),
+                ir::Term::Var(var) => {
+                    ground = false;
+                    let name = scope.names[var.0 as usize].as_deref().unwrap_or("_");
+                    let place = self.describe_arg(&clause.head, position);
+                    self.errors.push(Error::Semantic(format!(
+                        "fact `{}` is not ground: variable `{name}` in {place}",
+                        clause.head.predicate.name,
+                    )));
+                }
+            }
+        }
+        if ground {
+            out.facts.push(ir::Fact {
+                pred: head.pred,
+                tuple: ir::Tuple(values),
+            });
+        }
     }
 
     fn lower_query(&mut self, query: &ast::Query, out: &mut ir::Program) {
@@ -400,9 +442,16 @@ impl Lowerer {
         for literal in body {
             match &literal.kind {
                 ast::LiteralKind::Atom { negated, atom } => {
-                    let Some(lowered_atom) = self.lower_atom(atom, scope, AtomPos::Body) else {
+                    // Inline arithmetic in a body atom hoists to `=`-assignments
+                    // placed immediately *before* the atom, so the computed
+                    // value is bound when the atom is matched.
+                    let mut hoisted = Vec::new();
+                    let Some(lowered_atom) =
+                        self.lower_atom(atom, scope, AtomPos::Body, ArgMode::Hoist, &mut hoisted)
+                    else {
                         continue;
                     };
+                    lowered.extend(hoisted);
                     let kind = if *negated {
                         ir::BodyLiteralKind::NegAtom(lowered_atom)
                     } else {
@@ -429,23 +478,83 @@ impl Lowerer {
     }
 
     /// Lowers an atom to positional form, or reports an error and returns
-    /// `None`.
+    /// `None`. `mode` decides how a non-term (inline-arithmetic) argument is
+    /// handled: hoisted to a fresh `=`-assignment appended to `hoisted`
+    /// ([`ArgMode::Hoist`], rules/queries) or constant-folded ([`ArgMode::Fold`],
+    /// facts).
     fn lower_atom(
         &mut self,
         atom: &ast::Atom,
         scope: &mut VarScope,
         pos: AtomPos,
+        mode: ArgMode,
+        hoisted: &mut Vec<ir::BodyLiteral>,
     ) -> Option<ir::Atom> {
         match &atom.args {
-            ast::Args::Positional(terms) => {
+            ast::Args::Positional(exprs) => {
                 let pred = self.pred_id(&atom.predicate.name);
-                let args = terms
+                let args = exprs
                     .iter()
-                    .map(|term| self.lower_term(term, scope))
+                    .map(|expr| self.lower_arg_expr(expr, scope, mode, hoisted))
                     .collect();
                 Some(ir::Atom { pred, args })
             }
-            ast::Args::Named(named) => self.lower_named_atom(atom, named, scope, pos),
+            ast::Args::Named(named) => {
+                self.lower_named_atom(atom, named, scope, pos, mode, hoisted)
+            }
+        }
+    }
+
+    /// Lowers one atom argument, which is a full [`ast::Expr`] since the
+    /// inline-arithmetic widening (spec §17, Phase D). A bare term lowers
+    /// directly; a compound expression is either hoisted or constant-folded per
+    /// `mode`.
+    fn lower_arg_expr(
+        &mut self,
+        expr: &ast::Expr,
+        scope: &mut VarScope,
+        mode: ArgMode,
+        hoisted: &mut Vec<ir::BodyLiteral>,
+    ) -> ir::Term {
+        if let ast::ExprKind::Term(term) = &expr.kind {
+            return self.lower_term(term, scope);
+        }
+        let ir_expr = self.lower_expr(expr, scope);
+        match mode {
+            ArgMode::Hoist => {
+                // Fresh var V, plus `V = <expr>` for the caller to place. The
+                // fresh (`None`-named) slot and `=`-assignment are exactly what a
+                // hand-written `V = <expr>` produces, so the IR is engine-identical.
+                let var = scope.fresh();
+                hoisted.push(ir::BodyLiteral {
+                    kind: ir::BodyLiteralKind::Compare {
+                        op: ast::CmpOp::Eq,
+                        lhs: ir::Expr::Term(ir::Term::Var(var)),
+                        rhs: ir_expr,
+                    },
+                    span: expr.span,
+                });
+                ir::Term::Var(var)
+            }
+            ArgMode::Fold => {
+                // Fact context: fold a ground expression through the engine's §8
+                // arithmetic (single source of truth). A variable operand makes
+                // the fact non-ground; returning a fresh slot lets the caller's
+                // ground check report it.
+                if expr_vars(&ir_expr).is_empty() {
+                    match crate::engine::eval_expr(&ir_expr, &[]) {
+                        Ok(value) => ir::Term::Const(value),
+                        Err(error) => {
+                            self.errors.push(error);
+                            // Placeholder; lowering already failed, so it is
+                            // never emitted in a successful result.
+                            ir::Term::Const(ir::Value::Int(0))
+                        }
+                    }
+                } else {
+                    ir::Term::Var(scope.fresh())
+                }
+            }
         }
     }
 
@@ -460,6 +569,8 @@ impl Lowerer {
         named: &[ast::NamedArg],
         scope: &mut VarScope,
         pos: AtomPos,
+        mode: ArgMode,
+        hoisted: &mut Vec<ir::BodyLiteral>,
     ) -> Option<ir::Atom> {
         let predicate = &atom.predicate.name;
         let Some(schema) = self.schemas.get(predicate) else {
@@ -520,7 +631,7 @@ impl Lowerer {
         let args = assigned
             .into_iter()
             .map(|supplied| match supplied {
-                Some(index) => self.lower_term(&named[index].value, scope),
+                Some(index) => self.lower_arg_expr(&named[index].value, scope, mode, hoisted),
                 // Partial selection: an omitted field binds a fresh anonymous
                 // variable, exactly as a positional `_` would.
                 None => ir::Term::Var(scope.fresh()),

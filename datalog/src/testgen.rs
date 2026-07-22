@@ -303,9 +303,11 @@ fn monotype_body(body: &mut [Literal]) {
 }
 
 fn monotype_atom(atom: &mut Atom) {
+    // Atom arguments are `Expr` since the inline-arithmetic widening; the
+    // generator only ever builds `Expr::Term`, but recurse generally.
     match &mut atom.args {
-        Args::Positional(terms) => terms.iter_mut().for_each(monotype_term),
-        Args::Named(named) => named.iter_mut().for_each(|n| monotype_term(&mut n.value)),
+        Args::Positional(exprs) => exprs.iter_mut().for_each(monotype_expr),
+        Args::Named(named) => named.iter_mut().for_each(|n| monotype_expr(&mut n.value)),
     }
 }
 
@@ -620,6 +622,175 @@ pub(crate) fn arb_parent_edges() -> impl Strategy<Value = Vec<(String, String)>>
             .into_iter()
             .map(|(a, b)| (format!("n{a}"), format!("n{b}")))
             .collect()
+    })
+}
+
+// --- Phase D: printable/parse-reachable generators (testing.md D1–D3) ---
+
+/// A set of ground facts over fixed-arity predicates `p/1`, `q/2`, `r/3`, drawn
+/// from the round-trippable [`arb_value`] pools. Used by **D1**: printing these
+/// as canonical Datalog and re-parsing must recover the identical fact set.
+pub(crate) fn arb_printable_fact_set() -> impl Strategy<Value = Vec<(String, Vec<ir::Value>)>> {
+    // (predicate index -> arity): p/1, q/2, r/3.
+    let one = arb_value().prop_map(|v| ("p".to_string(), vec![v]));
+    let two = (arb_value(), arb_value()).prop_map(|(a, b)| ("q".to_string(), vec![a, b]));
+    let three = (arb_value(), arb_value(), arb_value())
+        .prop_map(|(a, b, c)| ("r".to_string(), vec![a, b, c]));
+    let fact = prop_oneof![one, two, three];
+    proptest::collection::vec(fact, 0..=12)
+}
+
+/// A syntactically valid, **parse-reachable** surface program: facts, rules
+/// (conjunction-only bodies — disjunction is expanded at parse time, so it
+/// never appears in an AST), and queries, over safe name pools. Not necessarily
+/// safe or well-typed — **D2/D3** are pure syntax round-trips (`parse(print)`),
+/// independent of lowering. Expressions are generated in canonical left-leaning
+/// shape so printing and re-parsing reproduce the same tree.
+pub(crate) fn arb_ast_program() -> impl Strategy<Value = Program> {
+    proptest::collection::vec(arb_statement(), 1..=5).prop_map(|statements| Program { statements })
+}
+
+fn dummy_term(kind: TermKind) -> Term {
+    Term {
+        kind,
+        span: Span::DUMMY,
+    }
+}
+
+fn dummy_expr(kind: ExprKind) -> Expr {
+    Expr {
+        kind,
+        span: Span::DUMMY,
+    }
+}
+
+fn arb_printable_term() -> impl Strategy<Value = Term> {
+    prop_oneof![
+        arb_constant().prop_map(|c| dummy_term(TermKind::Constant(c))),
+        prop_oneof![Just("X"), Just("Y"), Just("Z")]
+            .prop_map(|v| dummy_term(TermKind::Variable(v.to_string()))),
+        Just(dummy_term(TermKind::Wildcard)),
+    ]
+}
+
+/// A term, or a left-associative chain over one operator class (additive or
+/// multiplicative) — both round-trip through the parser's precedence climbing.
+fn arb_printable_expr() -> impl Strategy<Value = Expr> {
+    let term = arb_printable_term().prop_map(|t| dummy_expr(ExprKind::Term(t)));
+    let additive = arb_chain(prop_oneof![Just(ArithOp::Add), Just(ArithOp::Sub)]);
+    let multiplicative = arb_chain(prop_oneof![Just(ArithOp::Mul), Just(ArithOp::Div)]);
+    prop_oneof![3 => term, 1 => additive, 1 => multiplicative]
+}
+
+/// A left-leaning binary chain `((t op t) op t) …` over one operator class.
+fn arb_chain(op: impl Strategy<Value = ArithOp> + Clone) -> impl Strategy<Value = Expr> {
+    (
+        arb_printable_term(),
+        proptest::collection::vec((op, arb_printable_term()), 1..=2),
+    )
+        .prop_map(|(first, rest)| {
+            let mut expr = dummy_expr(ExprKind::Term(first));
+            for (op, term) in rest {
+                let rhs = dummy_expr(ExprKind::Term(term));
+                expr = dummy_expr(ExprKind::Binary {
+                    op,
+                    lhs: Box::new(expr),
+                    rhs: Box::new(rhs),
+                });
+            }
+            expr
+        })
+}
+
+fn arb_printable_atom() -> impl Strategy<Value = Atom> {
+    let pred = prop_oneof![Just("p"), Just("q"), Just("r")];
+    let positional =
+        proptest::collection::vec(arb_printable_expr(), 1..=3).prop_map(Args::Positional);
+    let named = proptest::collection::vec(
+        (prop_oneof![Just("f0"), Just("f1")], arb_printable_expr()),
+        1..=2,
+    )
+    .prop_map(|pairs| {
+        Args::Named(
+            pairs
+                .into_iter()
+                .map(|(field, value)| crate::ast::NamedArg {
+                    field: crate::ast::Ident {
+                        name: field.to_string(),
+                        span: Span::DUMMY,
+                    },
+                    value,
+                    span: Span::DUMMY,
+                })
+                .collect(),
+        )
+    });
+    (pred, prop_oneof![positional, named]).prop_map(|(pred, args)| Atom {
+        predicate: crate::ast::Ident {
+            name: pred.to_string(),
+            span: Span::DUMMY,
+        },
+        args,
+        span: Span::DUMMY,
+    })
+}
+
+fn arb_printable_literal() -> impl Strategy<Value = Literal> {
+    let positive = arb_printable_atom().prop_map(|atom| LiteralKind::Atom {
+        negated: false,
+        atom,
+    });
+    let negated = arb_printable_atom().prop_map(|atom| LiteralKind::Atom {
+        negated: true,
+        atom,
+    });
+    let comparison = (arb_printable_expr(), arb_cmp_op(), arb_printable_expr())
+        .prop_map(|(lhs, op, rhs)| LiteralKind::Comparison(Comparison { op, lhs, rhs }));
+    prop_oneof![positive, negated, comparison].prop_map(|kind| Literal {
+        kind,
+        span: Span::DUMMY,
+    })
+}
+
+fn arb_cmp_op() -> impl Strategy<Value = CmpOp> {
+    prop_oneof![
+        Just(CmpOp::Eq),
+        Just(CmpOp::Ne),
+        Just(CmpOp::Lt),
+        Just(CmpOp::Le),
+        Just(CmpOp::Gt),
+        Just(CmpOp::Ge),
+    ]
+}
+
+fn arb_statement() -> impl Strategy<Value = Statement> {
+    let fact = arb_printable_atom().prop_map(|head| {
+        StatementKind::Clause(crate::ast::Clause {
+            head,
+            body: Vec::new(),
+            span: Span::DUMMY,
+        })
+    });
+    let rule = (
+        arb_printable_atom(),
+        proptest::collection::vec(arb_printable_literal(), 1..=3),
+    )
+        .prop_map(|(head, body)| {
+            StatementKind::Clause(crate::ast::Clause {
+                head,
+                body,
+                span: Span::DUMMY,
+            })
+        });
+    let query = proptest::collection::vec(arb_printable_literal(), 1..=3).prop_map(|body| {
+        StatementKind::Query(crate::ast::Query {
+            body,
+            span: Span::DUMMY,
+        })
+    });
+    prop_oneof![fact, rule, query].prop_map(|kind| Statement {
+        kind,
+        span: Span::DUMMY,
     })
 }
 
@@ -994,20 +1165,29 @@ pub(crate) fn positionalize(program: &Program) -> Program {
         let fields = schemas
             .get(&atom.predicate.name)
             .expect("generated named atoms always have a declared schema");
-        let args = fields
+        // Atom arguments are `Expr`; an omitted field becomes a wildcard term,
+        // wrapped as `Expr::Term` to match the widened `Args::Positional`.
+        let args: Vec<crate::ast::Expr> = fields
             .iter()
             .map(|field| {
                 named
                     .iter()
                     .find(|arg| &arg.field.name == field)
                     .map(|arg| arg.value.clone())
-                    .unwrap_or(Term {
-                        kind: TermKind::Wildcard,
+                    .unwrap_or_else(|| crate::ast::Expr {
+                        kind: ExprKind::Term(Term {
+                            kind: TermKind::Wildcard,
+                            span: Span::DUMMY,
+                        }),
                         span: Span::DUMMY,
                     })
             })
             .collect();
-        positional_atom(&atom.predicate.name, args)
+        Atom {
+            predicate: atom.predicate.clone(),
+            args: Args::Positional(args),
+            span: atom.span,
+        }
     };
 
     let rewrite_body = |body: &[crate::ast::Literal]| -> Vec<crate::ast::Literal> {
@@ -1288,10 +1468,14 @@ mod tests {
                             // conservative signal (named partial selection
                             // also produces fresh slots, but is guarded by
                             // `generator_emits_partial_selection`).
-                            if let Args::Positional(terms) = &atom.args
-                                && terms
-                                    .iter()
-                                    .any(|t| matches!(t.kind, crate::ast::TermKind::Wildcard))
+                            if let Args::Positional(exprs) = &atom.args
+                                && exprs.iter().any(|e| {
+                                    matches!(
+                                        &e.kind,
+                                        ExprKind::Term(t)
+                                            if matches!(t.kind, crate::ast::TermKind::Wildcard)
+                                    )
+                                })
                             {
                                 wildcard_under_negation += 1;
                             }

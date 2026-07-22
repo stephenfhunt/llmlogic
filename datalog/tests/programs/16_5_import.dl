@@ -1,0 +1,7 @@
+% Spec §16.5 — external fact source. Imports do not yet evaluate (§13), so this
+% program parses and lowers but eval reports a structured not-yet-supported error.
+import "data/parents.csv" as parent.
+
+ancestor(X, Y) :- parent(X, Y).
+
+?- ancestor("alice", Who).
