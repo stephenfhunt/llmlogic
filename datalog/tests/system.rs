@@ -226,6 +226,33 @@ fn binary_output_composes_over_a_pipe() {
     assert_eq!(second.stdout, "ancestor(\"alice\", \"carol\").\n");
 }
 
+#[test]
+fn an_undefined_predicate_warns_on_stderr_but_still_succeeds() {
+    // `ancester` is a typo for `ancestor`: valid closed-world semantics (it is
+    // just empty), so the run succeeds with exit 0 and prints the real answers
+    // to stdout — but the likely mistake is flagged on stderr.
+    let out = run_stdin(
+        "parent(\"alice\", \"bob\").\n\
+         ancestor(X, Y) :- parent(X, Y).\n\
+         ancestor(X, Y) :- parent(X, Z), ancester(Z, Y).\n\
+         ?- ancestor(\"alice\", Who).",
+    );
+    assert_eq!(out.code, 0);
+    // stdout stays a clean fact stream, valid as pipe input.
+    assert_eq!(out.stdout, "ancestor(\"alice\", \"bob\").\n");
+    assert!(
+        out.stderr
+            .contains("predicate `ancester/2` is referenced but never defined"),
+        "{}",
+        out.stderr
+    );
+    assert!(
+        out.stderr.contains("did you mean `ancestor`?"),
+        "{}",
+        out.stderr
+    );
+}
+
 // --- `-q` one-shot queries (spec §14, step 6) ---
 
 #[test]
@@ -275,7 +302,14 @@ fn dash_q_only_with_empty_base() {
     assert_eq!(out.code, 0);
     // No facts, so the query has no answers.
     assert!(out.stdout.is_empty(), "{}", out.stdout);
-    assert!(out.stderr.is_empty(), "{}", out.stderr);
+    // `p` is referenced by the query but nowhere defined — the warning explains
+    // *why* the result is empty (an undefined relation, not a false query).
+    assert!(
+        out.stderr
+            .contains("predicate `p/1` is referenced but never defined"),
+        "{}",
+        out.stderr
+    );
 }
 
 #[test]

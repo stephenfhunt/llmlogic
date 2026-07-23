@@ -39,7 +39,7 @@
 use std::collections::HashMap;
 
 use crate::ast;
-use crate::error::Error;
+use crate::error::{Error, Warning};
 use crate::ir;
 
 /// Lowers a surface program to the core IR, or reports every error found.
@@ -994,6 +994,116 @@ fn expr_vars(expr: &ir::Expr) -> Vec<ir::Var> {
             vars
         }
     }
+}
+
+/// Post-lowering lint: flags every predicate that is *referenced* in a rule or
+/// query body but never *defined* (no fact, no rule head, no import). Under
+/// closed-world semantics such a predicate is simply the empty relation — valid,
+/// so this is a [`Warning`], not an [`Error`] — but it is almost always a typo,
+/// and its silent emptiness is indistinguishable from a legitimately-empty
+/// answer. Each warning offers the nearest defined predicate name as a fix.
+///
+/// Warnings come out in referenced-predicate first-appearance order (rules
+/// before queries, body order within each) — deterministic, matching the
+/// crate's A7 stance.
+pub fn check_program(program: &ir::Program) -> Vec<Warning> {
+    // A predicate is "defined" if it can contribute tuples: an in-program fact,
+    // a rule head (even one whose body never fires — definedness is syntactic,
+    // not about the model), or an import.
+    let mut defined = std::collections::HashSet::new();
+    for fact in &program.facts {
+        defined.insert(fact.pred.0);
+    }
+    for rule in &program.rules {
+        defined.insert(rule.head.pred.0);
+    }
+    for import in &program.imports {
+        defined.insert(import.pred.0);
+    }
+
+    // Referenced predicates in first-appearance order, deduplicated.
+    let mut referenced = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for rule in &program.rules {
+        collect_body_refs(&rule.body, &mut referenced, &mut seen);
+    }
+    for query in &program.queries {
+        collect_body_refs(&query.body, &mut referenced, &mut seen);
+    }
+
+    referenced
+        .into_iter()
+        .filter(|pred| !defined.contains(&pred.0))
+        .map(|pred| {
+            let info = &program.predicates[pred.0 as usize];
+            Warning::UndefinedPredicate {
+                name: info.name.clone(),
+                arity: info.arity,
+                suggestion: nearest_defined(&info.name, info.arity, &defined, program),
+            }
+        })
+        .collect()
+}
+
+/// Appends the predicate of every positive/negated body atom to `referenced`,
+/// in body order, skipping ones already `seen`. Comparisons carry no predicate.
+fn collect_body_refs(
+    body: &[ir::BodyLiteral],
+    referenced: &mut Vec<ir::PredId>,
+    seen: &mut std::collections::HashSet<u32>,
+) {
+    for literal in body {
+        let atom = match &literal.kind {
+            ir::BodyLiteralKind::Atom(atom) | ir::BodyLiteralKind::NegAtom(atom) => atom,
+            ir::BodyLiteralKind::Compare { .. } => continue,
+        };
+        if seen.insert(atom.pred.0) {
+            referenced.push(atom.pred);
+        }
+    }
+}
+
+/// The nearest *defined* predicate name to `target` by Levenshtein distance,
+/// offered only when within distance 2 (close enough to be a plausible typo).
+/// Same-arity candidates are preferred over closer-but-wrong-arity ones only as
+/// a tie-break on distance; ties beyond that break on name for determinism.
+fn nearest_defined(
+    target: &str,
+    arity: u32,
+    defined: &std::collections::HashSet<u32>,
+    program: &ir::Program,
+) -> Option<String> {
+    defined
+        .iter()
+        .map(|&id| &program.predicates[id as usize])
+        .filter_map(|info| {
+            let distance = levenshtein(target, &info.name);
+            (1..=2).contains(&distance).then_some((
+                distance,
+                info.arity != arity,
+                info.name.as_str(),
+            ))
+        })
+        .min()
+        .map(|(_, _, name)| name.to_string())
+}
+
+/// Levenshtein edit distance over Unicode scalar values (two-row DP). Small
+/// inputs (predicate names), so the quadratic table is not a concern.
+fn levenshtein(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    let mut curr = vec![0usize; b.len() + 1];
+    for (i, &ca) in a.iter().enumerate() {
+        curr[0] = i + 1;
+        for (j, &cb) in b.iter().enumerate() {
+            let cost = usize::from(ca != cb);
+            curr[j + 1] = (prev[j + 1] + 1).min(curr[j] + 1).min(prev[j] + cost);
+        }
+        std::mem::swap(&mut prev, &mut curr);
+    }
+    prev[b.len()]
 }
 
 #[cfg(test)]
@@ -2353,5 +2463,132 @@ mod tests {
         ]))
         .collect();
         assert_eq!(model.relation(next_year), &expected);
+    }
+
+    // --- check_program: referenced-but-undefined predicates ---
+
+    /// Parses + lowers `src`, then runs the undefined-predicate lint.
+    fn warnings(src: &str) -> Vec<Warning> {
+        let ast = crate::parser::parse(src).expect("parses");
+        let program = lower(&ast).expect("lowers");
+        check_program(&program)
+    }
+
+    #[test]
+    fn levenshtein_matches_known_distances() {
+        assert_eq!(levenshtein("ancestor", "ancester"), 1);
+        assert_eq!(levenshtein("", "abc"), 3);
+        assert_eq!(levenshtein("kitten", "sitting"), 3);
+        assert_eq!(levenshtein("same", "same"), 0);
+    }
+
+    #[test]
+    fn undefined_body_predicate_warns_with_suggestion() {
+        // `ancester` in the recursive rule is a typo for `ancestor`.
+        let src = "\
+parent(\"alice\", \"bob\").
+ancestor(X, Y) :- parent(X, Y).
+ancestor(X, Y) :- parent(X, Z), ancester(Z, Y).
+?- ancestor(\"alice\", Who).
+";
+        assert_eq!(
+            warnings(src),
+            vec![Warning::UndefinedPredicate {
+                name: "ancester".to_string(),
+                arity: 2,
+                suggestion: Some("ancestor".to_string()),
+            }]
+        );
+    }
+
+    #[test]
+    fn fully_defined_program_warns_nothing() {
+        let src = "\
+parent(\"alice\", \"bob\").
+ancestor(X, Y) :- parent(X, Y).
+ancestor(X, Y) :- parent(X, Z), ancestor(Z, Y).
+?- ancestor(\"alice\", Who).
+";
+        assert_eq!(warnings(src), Vec::new());
+    }
+
+    #[test]
+    fn rule_head_counts_as_defined_even_if_never_derivable() {
+        // `unreachable` heads a rule whose body predicate `never` is undefined:
+        // `unreachable` itself is defined (a rule head), so only `never` warns.
+        let src = "\
+base(\"a\").
+unreachable(X) :- never(X).
+?- unreachable(Who).
+";
+        assert_eq!(
+            warnings(src),
+            vec![Warning::UndefinedPredicate {
+                name: "never".to_string(),
+                arity: 1,
+                suggestion: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn query_only_undefined_predicate_warns() {
+        let src = "person(\"alice\").\n?- ghost(Who).";
+        assert_eq!(
+            warnings(src),
+            vec![Warning::UndefinedPredicate {
+                name: "ghost".to_string(),
+                arity: 1,
+                suggestion: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn undefined_under_negation_still_warns() {
+        // `not missing(X)` matches everything precisely because `missing` is
+        // empty — usually not what was meant, so we still flag it.
+        let src = "person(\"alice\").\n?- person(X), not missing(X).";
+        assert_eq!(
+            warnings(src),
+            vec![Warning::UndefinedPredicate {
+                name: "missing".to_string(),
+                arity: 1,
+                suggestion: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn suggestion_prefers_matching_arity_on_a_distance_tie() {
+        // `usr` is edit-distance 1 from both `use/1` and `user/2` (insert one
+        // char). The referenced arity is 2, so `user` wins the tie-break.
+        let src = "\
+use(\"x\").
+user(\"a\", 1).
+lookup(N) :- usr(N, _).
+?- lookup(N).
+";
+        assert_eq!(
+            warnings(src),
+            vec![Warning::UndefinedPredicate {
+                name: "usr".to_string(),
+                arity: 2,
+                suggestion: Some("user".to_string()),
+            }]
+        );
+    }
+
+    #[test]
+    fn no_suggestion_when_nothing_is_close() {
+        let src = "aardvark(\"x\").\n?- zzz(W).";
+        assert_eq!(
+            warnings(src),
+            vec![Warning::UndefinedPredicate {
+                name: "zzz".to_string(),
+                arity: 1,
+                suggestion: None,
+            }]
+        );
     }
 }

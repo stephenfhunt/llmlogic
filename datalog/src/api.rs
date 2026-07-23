@@ -29,9 +29,9 @@
 
 use crate::ast::StatementKind;
 use crate::engine::{Model, eval};
-use crate::error::Error;
+use crate::error::{Error, Warning};
 use crate::ir;
-use crate::lower::lower;
+use crate::lower::{check_program, lower};
 use crate::parser::parse;
 use crate::print::{print_atom, print_ground_fact};
 use crate::typecheck::typecheck;
@@ -44,6 +44,9 @@ pub struct RunResult {
     /// One entry per query, each a list of canonical fact lines (no trailing
     /// newline).
     pub answers: Vec<Vec<String>>,
+    /// Non-fatal diagnostics (e.g. referenced-but-undefined predicates). The
+    /// program still ran; these belong on stderr, never in the fact stream.
+    pub warnings: Vec<Warning>,
 }
 
 impl RunResult {
@@ -68,6 +71,7 @@ pub fn run(src: &str) -> Result<RunResult, Vec<Error>> {
     let ast = parse(src)?;
     let program = lower(&ast)?;
     typecheck(&program)?;
+    let warnings = check_program(&program);
     let model = eval(&program).map_err(|e| vec![e])?;
 
     let mut answers = Vec::with_capacity(program.queries.len());
@@ -75,7 +79,11 @@ pub fn run(src: &str) -> Result<RunResult, Vec<Error>> {
         let rows = model.answer(query).map_err(|e| vec![e])?;
         answers.push(answer_lines(query, &rows, &program));
     }
-    Ok(RunResult { model, answers })
+    Ok(RunResult {
+        model,
+        answers,
+        warnings,
+    })
 }
 
 /// Builds the combined program source for the agent CLI: the `base` program

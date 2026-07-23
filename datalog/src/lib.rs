@@ -31,7 +31,7 @@ pub mod typecheck;
 pub(crate) mod testgen;
 
 pub use api::{RunResult, program_with_queries, run, run_with_queries};
-pub use error::{Error, Result};
+pub use error::{Error, Result, Warning};
 pub use parser::parse;
 
 /// Returns the crate version string (from `CARGO_PKG_VERSION`).

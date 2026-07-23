@@ -9,7 +9,8 @@
 //!   `?- <head>.`. Multiple `-q` apply in CLI order.
 //! - On success, each query's answers print to **stdout** as canonical Datalog
 //!   facts (so output is valid input); a program with no queries prints nothing.
-//!   Exit code **0**.
+//!   Any non-fatal warnings (e.g. a referenced-but-undefined predicate) print to
+//!   **stderr**, keeping stdout a clean fact stream. Exit code **0**.
 //! - On any program error (lex / parse / lowering / type / evaluation), the
 //!   structured errors print to **stderr**, one per line. Exit code **1**.
 //! - On a usage problem (bad arguments, unreadable file), a usage message prints
@@ -61,6 +62,11 @@ fn main() -> ExitCode {
     match datalog::run_with_queries(&base, &cli.queries) {
         Ok(result) => {
             print!("{}", result.output());
+            // Warnings go to stderr so the stdout fact stream stays valid Datalog
+            // input; they do not affect the (success) exit code.
+            for warning in &result.warnings {
+                eprintln!("{warning}");
+            }
             ExitCode::SUCCESS
         }
         Err(errors) => {
