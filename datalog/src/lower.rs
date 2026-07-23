@@ -51,14 +51,23 @@ pub fn lower(program: &ast::Program) -> Result<ir::Program, Vec<Error>> {
 
     for statement in &program.statements {
         match &statement.kind {
-            ast::StatementKind::Import(import) => {
-                let pred = lowerer.pred_id(&import.relation.name);
-                out.imports.push(ir::ImportSpec {
-                    pred,
-                    path: import.path.clone(),
-                    span: statement.span,
-                });
-            }
+            ast::StatementKind::Import(import) => match &import.kind {
+                // Module imports are spliced away by resolution before
+                // lowering; one reaching this point means the caller skipped
+                // that stage (§13).
+                ast::ImportKind::Module => lowerer.errors.push(Error::Semantic(format!(
+                    "module import \"{}\" must be resolved before lowering",
+                    import.path
+                ))),
+                ast::ImportKind::Data { relation, .. } => {
+                    let pred = lowerer.pred_id(&relation.name);
+                    out.imports.push(ir::ImportSpec {
+                        pred,
+                        path: import.path.clone(),
+                        span: statement.span,
+                    });
+                }
+            },
             // Declarations contribute schema/arity only (collected above);
             // nothing survives into the IR itself.
             ast::StatementKind::Declare(_) => {}
@@ -188,9 +197,16 @@ impl Lowerer {
                     // source at load time; use sites will establish it below.
                     // Field names likewise — so named access to a schema-less
                     // import is an error until fact sources (§13) land.
-                    if let Some(schema) = &import.schema {
-                        self.intern_checked(&import.relation.name, schema.len() as u32);
-                        self.collect_schema(&import.relation.name, schema, SchemaOrigin::Import);
+                    // Module imports contribute nothing here: resolution
+                    // splices them away before lowering.
+                    if let ast::ImportKind::Data {
+                        relation,
+                        schema: Some(schema),
+                        ..
+                    } = &import.kind
+                    {
+                        self.intern_checked(&relation.name, schema.len() as u32);
+                        self.collect_schema(&relation.name, schema, SchemaOrigin::Import);
                     }
                 }
                 ast::StatementKind::Declare(declaration) => {
@@ -1822,8 +1838,11 @@ mod tests {
                 kind: ast::StatementKind::Import(ast::Import {
                     path: "data/employees.csv".to_string(),
                     path_span: Span::DUMMY,
-                    relation: ast_fix::ident("employee"),
-                    schema: None,
+                    kind: ast::ImportKind::Data {
+                        table: None,
+                        relation: ast_fix::ident("employee"),
+                        schema: None,
+                    },
                 }),
                 span: Span::DUMMY,
             }],
@@ -2290,9 +2309,13 @@ mod tests {
                 for statement in &program.statements {
                     let (relation, fields) = match &statement.kind {
                         ast::StatementKind::Declare(d) => (&d.relation, &d.fields),
-                        ast::StatementKind::Import(i) => match &i.schema {
-                            Some(schema) => (&i.relation, schema),
-                            None => continue,
+                        ast::StatementKind::Import(i) => match &i.kind {
+                            ast::ImportKind::Data {
+                                relation,
+                                schema: Some(schema),
+                                ..
+                            } => (relation, schema),
+                            _ => continue,
                         },
                         _ => continue,
                     };

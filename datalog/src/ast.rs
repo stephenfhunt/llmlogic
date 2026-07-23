@@ -60,7 +60,8 @@ pub struct Statement {
 /// become a new variant here once its syntax is ratified.
 #[derive(Debug, Clone, PartialEq)]
 pub enum StatementKind {
-    /// `import "<path>" as rel [ (field [: type], …) ].` (§13)
+    /// `import "<path>" [table "<t>"] as rel [ (field [: type], …) ].` or the
+    /// module form `import "<path>".` (§13)
     Import(Import),
     /// `declare rel(field [: type], …).` (§4)
     Declare(Declaration),
@@ -70,16 +71,30 @@ pub enum StatementKind {
     Query(Query),
 }
 
-/// An `import` statement binding an external source to a relation (§13).
+/// An `import` statement (§13): external data bound to a relation, or another
+/// Datalog file spliced in as a module.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Import {
     /// The source path as written (contents of the string literal).
     pub path: String,
     /// Span of the path string literal, for path-related errors.
     pub path_span: Span,
-    pub relation: Ident,
-    /// Explicit schema override; `None` means infer from the source (§13).
-    pub schema: Option<Vec<FieldDecl>>,
+    pub kind: ImportKind,
+}
+
+/// The two import forms of §13, distinguished by the presence of `as`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ImportKind {
+    /// `import "lib.dl".` — splice another program's statements in place.
+    Module,
+    /// `import "<src>" [table "<t>"] as rel [ (field [: type], …) ].`
+    Data {
+        /// Database table selection; syntax ratified, loading deferred (§13).
+        table: Option<(String, Span)>,
+        relation: Ident,
+        /// Explicit schema override; `None` means infer from the source (§13).
+        schema: Option<Vec<FieldDecl>>,
+    },
 }
 
 /// A `declare` statement naming fields and optionally asserting types (§4).
@@ -525,17 +540,20 @@ pub(crate) mod fixtures {
                     kind: StatementKind::Import(Import {
                         path: "data/employees.csv".to_string(),
                         path_span: Span::DUMMY,
-                        relation: ident("employee"),
-                        schema: Some(vec![
-                            field_decl("id", Some(TypeName::Int)),
-                            field_decl("name", Some(TypeName::String)),
-                            field_decl("age", Some(TypeName::Int)),
-                            field_decl("dept", Some(TypeName::String)),
-                            field_decl("title", Some(TypeName::String)),
-                            field_decl("salary", Some(TypeName::Int)),
-                            field_decl("city", Some(TypeName::String)),
-                            field_decl("start_date", Some(TypeName::String)),
-                        ]),
+                        kind: ImportKind::Data {
+                            table: None,
+                            relation: ident("employee"),
+                            schema: Some(vec![
+                                field_decl("id", Some(TypeName::Int)),
+                                field_decl("name", Some(TypeName::String)),
+                                field_decl("age", Some(TypeName::Int)),
+                                field_decl("dept", Some(TypeName::String)),
+                                field_decl("title", Some(TypeName::String)),
+                                field_decl("salary", Some(TypeName::Int)),
+                                field_decl("city", Some(TypeName::String)),
+                                field_decl("start_date", Some(TypeName::String)),
+                            ]),
+                        },
                     }),
                     span: Span::DUMMY,
                 },
@@ -647,11 +665,15 @@ mod tests {
 
         // The wide import carries an explicit eight-field schema.
         match &program.statements[0].kind {
-            StatementKind::Import(import) => {
-                let schema = import.schema.as_ref().expect("explicit schema");
-                assert_eq!(schema.len(), 8);
-                assert_eq!(schema[4].name.name, "title");
-            }
+            StatementKind::Import(import) => match &import.kind {
+                ImportKind::Data { table, schema, .. } => {
+                    assert!(table.is_none());
+                    let schema = schema.as_ref().expect("explicit schema");
+                    assert_eq!(schema.len(), 8);
+                    assert_eq!(schema[4].name.name, "title");
+                }
+                ImportKind::Module => panic!("expected a data import"),
+            },
             other => panic!("expected an import, got {other:?}"),
         }
 

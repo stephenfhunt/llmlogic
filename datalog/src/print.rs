@@ -17,8 +17,8 @@
 
 use crate::ast::{
     Args, Atom, Clause, Comparison, Constant, Declaration, Expr, ExprKind, FieldDecl, Import,
-    Literal, LiteralKind, NamedArg, Program, Query, Statement, StatementKind, Term, TermKind,
-    TypeName,
+    ImportKind, Literal, LiteralKind, NamedArg, Program, Query, Statement, StatementKind, Term,
+    TermKind, TypeName,
 };
 use crate::ir::{PredicateInfo, Value};
 
@@ -42,18 +42,27 @@ fn print_statement(statement: &Statement) -> String {
 }
 
 fn print_import(import: &Import) -> String {
-    let mut out = format!(
-        "import {} as {}",
-        print_string_literal(&import.path),
-        import.relation.name
-    );
-    if let Some(schema) = &import.schema {
-        out.push('(');
-        out.push_str(&print_fields(schema));
-        out.push(')');
+    match &import.kind {
+        ImportKind::Module => format!("import {}.", print_string_literal(&import.path)),
+        ImportKind::Data {
+            table,
+            relation,
+            schema,
+        } => {
+            let mut out = format!("import {}", print_string_literal(&import.path));
+            if let Some((table, _)) = table {
+                out.push_str(&format!(" table {}", print_string_literal(table)));
+            }
+            out.push_str(&format!(" as {}", relation.name));
+            if let Some(schema) = schema {
+                out.push('(');
+                out.push_str(&print_fields(schema));
+                out.push(')');
+            }
+            out.push('.');
+            out
+        }
     }
-    out.push('.');
-    out
 }
 
 fn print_declare(declaration: &Declaration) -> String {
@@ -266,6 +275,21 @@ mod tests {
         round_trips(&fixtures::example_16_1());
         round_trips(&fixtures::example_16_2());
         round_trips(&fixtures::example_16_7());
+    }
+
+    /// The three import shapes of §13 print canonically and re-parse to the
+    /// same text (the D3 fixpoint, statement-level).
+    #[test]
+    fn import_forms_round_trip() {
+        for src in [
+            "import \"lib/family.dl\".\n",
+            "import \"data/parents.csv\" as parent.\n",
+            "import \"analytics.duckdb\" table \"orders\" as order.\n",
+            "import \"db.sqlite\" table \"t\" as t(a: int, b: string).\n",
+        ] {
+            let program = parse(src).unwrap_or_else(|e| panic!("parse failed for {src:?}: {e:?}"));
+            assert_eq!(print_program(&program), src);
+        }
     }
 
     #[test]

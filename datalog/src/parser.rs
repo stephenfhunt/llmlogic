@@ -29,8 +29,8 @@
 
 use crate::ast::{
     Args, Atom, Clause, Comparison, Constant, Declaration, Expr, ExprKind, FieldDecl, Ident,
-    Import, Literal, LiteralKind, NamedArg, Program, Query, Span, Statement, StatementKind, Term,
-    TermKind, TypeName,
+    Import, ImportKind, Literal, LiteralKind, NamedArg, Program, Query, Span, Statement,
+    StatementKind, Term, TermKind, TypeName,
 };
 use crate::error::Error;
 use crate::lexer::{Token, TokenKind, lex};
@@ -173,7 +173,39 @@ impl Parser {
             TokenKind::Str(s) => (s, path_tok.span),
             _ => unreachable!("expect_string returns a string token"),
         };
-        self.expect(&TokenKind::As, "`as` after the import path")?;
+
+        // Module form (§13): no `as` clause — `import "lib.dl".`
+        if let TokenKind::Dot = self.kind() {
+            let end = self.bump().span;
+            return Ok(Statement {
+                kind: StatementKind::Import(Import {
+                    path,
+                    path_span,
+                    kind: ImportKind::Module,
+                }),
+                span: join(start, end),
+            });
+        }
+
+        // `table "<name>"` selection — `table` is a contextual keyword (§5):
+        // after the path only `.`, `table`, or `as` can follow, so an ident
+        // spelled `table` here is unambiguous and stays an ordinary ident
+        // everywhere else.
+        let table = if matches!(self.kind(), TokenKind::Ident(name) if name == "table") {
+            self.bump();
+            let table_tok = self.expect_string("a quoted table name after `table`")?;
+            match table_tok.kind {
+                TokenKind::Str(s) => Some((s, table_tok.span)),
+                _ => unreachable!("expect_string returns a string token"),
+            }
+        } else {
+            None
+        };
+
+        self.expect(
+            &TokenKind::As,
+            "`as` after the import path (or `.` for a module import)",
+        )?;
         let relation = self.expect_relation_name("a relation name after `as`")?;
         let schema = if self.eat(&TokenKind::LParen) {
             Some(self.parse_field_list()?)
@@ -185,8 +217,11 @@ impl Parser {
             kind: StatementKind::Import(Import {
                 path,
                 path_span,
-                relation,
-                schema,
+                kind: ImportKind::Data {
+                    table,
+                    relation,
+                    schema,
+                },
             }),
             span: join(start, end),
         })
@@ -778,9 +813,21 @@ mod tests {
             match &mut statement.kind {
                 StatementKind::Import(import) => {
                     import.path_span = Span::DUMMY;
-                    import.relation.span = Span::DUMMY;
-                    if let Some(schema) = &mut import.schema {
-                        schema.iter_mut().for_each(zero_field);
+                    match &mut import.kind {
+                        ImportKind::Module => {}
+                        ImportKind::Data {
+                            table,
+                            relation,
+                            schema,
+                        } => {
+                            if let Some((_, table_span)) = table {
+                                *table_span = Span::DUMMY;
+                            }
+                            relation.span = Span::DUMMY;
+                            if let Some(schema) = schema {
+                                schema.iter_mut().for_each(zero_field);
+                            }
+                        }
                     }
                 }
                 StatementKind::Declare(declaration) => {
@@ -890,6 +937,76 @@ person(\"alice\", 30).
 adult(N) :- person(name: N, age: A), A >= 18.
 ";
         assert_eq!(parse_ok(src), fixtures::example_16_7());
+    }
+
+    // --- Import forms (§13) ---
+
+    #[test]
+    fn module_import_parses_without_as() {
+        let program = parse_ok("import \"lib/family.dl\".");
+        let StatementKind::Import(import) = &program.statements[0].kind else {
+            panic!("expected an import");
+        };
+        assert_eq!(import.path, "lib/family.dl");
+        assert_eq!(import.kind, ImportKind::Module);
+    }
+
+    #[test]
+    fn table_import_parses_with_selection() {
+        let program = parse_ok("import \"analytics.duckdb\" table \"orders\" as order.");
+        let StatementKind::Import(import) = &program.statements[0].kind else {
+            panic!("expected an import");
+        };
+        assert_eq!(import.path, "analytics.duckdb");
+        let ImportKind::Data {
+            table,
+            relation,
+            schema,
+        } = &import.kind
+        else {
+            panic!("expected a data import");
+        };
+        assert_eq!(
+            table.as_ref().map(|(name, _)| name.as_str()),
+            Some("orders")
+        );
+        assert_eq!(relation.name, "order");
+        assert!(schema.is_none());
+    }
+
+    #[test]
+    fn table_import_composes_with_an_explicit_schema() {
+        let program = parse_ok("import \"db.sqlite\" table \"t\" as t(a: int, b: string).");
+        let StatementKind::Import(import) = &program.statements[0].kind else {
+            panic!("expected an import");
+        };
+        let ImportKind::Data { schema, .. } = &import.kind else {
+            panic!("expected a data import");
+        };
+        assert_eq!(schema.as_ref().map(Vec::len), Some(2));
+    }
+
+    #[test]
+    fn table_stays_an_ordinary_identifier_elsewhere() {
+        // `table` is contextual (§5): fine as a relation name, a field name,
+        // and a symbol constant.
+        let program = parse_ok("declare table(kind: symbol).\ntable(dining).\np(X) :- table(X).");
+        assert_eq!(program.statements.len(), 3);
+        let StatementKind::Declare(declaration) = &program.statements[0].kind else {
+            panic!("expected a declare");
+        };
+        assert_eq!(declaration.relation.name, "table");
+    }
+
+    #[test]
+    fn import_error_mentions_the_module_alternative() {
+        let errors = parse_err("import \"x.csv\" garbage.");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.to_string().contains("or `.` for a module import")),
+            "got: {errors:?}"
+        );
     }
 
     // --- Core grammar ---
