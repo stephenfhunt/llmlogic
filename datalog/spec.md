@@ -735,6 +735,42 @@ structured error.
 
 ### Decisions
 
+- **2026-07-23** — **Diagnostic warnings** (`Warning::UndefinedPredicate`, the
+  first use of the §12 severity axis; `f7581ba`):
+  - A predicate referenced in a rule/query body but never **defined** (no fact,
+    rule head, or import) is valid closed-world Datalog (the empty relation) yet
+    almost always a typo. It is a **warning, not an error**: printed to **stderr**
+    with a nearest-defined-name suggestion (Levenshtein ≤ 2, matching arity
+    preferred), **exit 0**, and stdout kept a clean canonical-fact stream so the
+    pipe/closure property holds.
+  - **Scope includes `-q`:** *any* referenced-but-undefined predicate warns,
+    including a bare `-q` query over an empty/partial base — the warning explains
+    an empty result (an undefined relation, not a false query) instead of staying
+    silent.
+
+- **2026-07-23** — **Source analysis as a driving use case; §13/§9 sequencing**
+  (dogfooding session; no engine change — see `docs/worklog.md` of this date):
+  - **§13 import is designed against a real consumer, not the abstract CSV.** The
+    motivating case is bulk-loading a *machine-generated fact table* — a
+    `syn`/`tsc`-class extractor's edges as CSV/JSONL (`import "callgraph.jsonl" as
+    calls(caller, callee).`) — alongside the hand-written `parent/child` CSV; that
+    fact-table shape drives the schema/type rules.
+  - **§13 import embraces dependencies for breadth** (decided 2026-07-23): the
+    long-term goal is broad source support — the more formats the better — so the
+    import layer is *not* held to the core's zero-dependency pillar. **DuckDB and
+    Parquet/Arrow are high-value and worth their deps** (DuckDB especially: one
+    dependency yields CSV + Parquet + SQL, resolving the §13 format-priority open
+    item). The zero-dep pillar stays for the **core engine**; import backends are
+    **feature-gated** (cf. the existing `packaging` feature) so the default build
+    and the skill binary stay lightweight. Deep-dive lead: consider building the
+    import layer on DuckDB from the outset rather than a throwaway std-only CSV
+    reader. Downstream: the "zero runtime dependencies" wording in README/AGENTS.md
+    becomes "zero-dependency core, optional import backends" once this lands.
+  - **§9 aggregation is the paired expressivity pillar** for source analysis
+    (count/sum/min/max + grouping); deferred after §13, but confirmed important —
+    every ranking/"how-many" in the dogfooding session was hand-done outside the
+    engine (`sort | uniq -c`).
+
 - **2026-07-23** — **Step 6: agent CLI** (`-q` one-shot queries;
   `api::program_with_queries` / `run_with_queries`, a hand-rolled arg loop in
   `src/main.rs`, and [`docs/agent-skill.md`](docs/agent-skill.md)):

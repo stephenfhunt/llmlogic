@@ -16,6 +16,66 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-23 — Dogfooding: source-code analysis as a use case (+ two engine fixes)
+
+**Done**
+- Ran the `EXPERIMENTS.md` tasks through the skill — all five correct; the
+  structured error channel even caught an `=<` typo mid-session.
+- **Shipped `Warning::UndefinedPredicate`** (`f7581ba`): a predicate referenced
+  in a body but never defined is valid closed-world Datalog (empty relation) yet
+  usually a typo. Now a stderr warning with a nearest-name (Levenshtein)
+  suggestion, exit 0, stdout kept a clean fact stream (`check_program` in
+  `src/lower.rs`, threaded through `RunResult`). First concrete piece of the §12
+  severity axis.
+- **Shipped a targeted parse error for grouped expressions** (`a7d1ff1`):
+  confirmed the flat expression grammar (`primary = [ "-" ] number | term`, §5)
+  is *intentional*, not a bug; `parse_primary` now catches `(` with a
+  decomposition hint (`(A+B)*C` → `T = A+B, X = T*C`) plus the rejection test that
+  was missing.
+- **Exercised the use case** end-to-end: module dep graph (strict DAG, no import
+  cycles; hotspots `ast`/`ir`/`engine`, anchor `error`); git change-coupling ×
+  static deps × spec-§ citations (hidden `parser↔print` coupling = the print/parse
+  round-trip *closure* invariant no `use`-edge records); call graph (14
+  self-recursive tree-walkers, **zero mutual recursion**, parser expression grammar
+  acyclic); test reachability; variant exhaustiveness (structural enums complete;
+  operator/value totality centralized in compiler-exhaustive `symbol()`/`compare`);
+  diagnostic surface (`Error::Semantic` overloaded across 4 phases — a §12 signal;
+  **`Error::Source` is a dead variant**, a third triangulation with the isolated
+  `sources` module and unconsumed `provenance` of the un-wired §13 import feature).
+
+**Decided** (with the user)
+- **Extraction is the weak link; the engine is exact.** Every negation-derived
+  "gap" (parser "bug", print coverage, dead-variant) was reshaped by
+  source-verifying it — the reliable loop is **Datalog proposes, source verifies**.
+  Regex pitfalls hit: higher-order `.map(fn)` refs, struct-vs-tuple variant syntax,
+  same-name method collisions, comment/`Display`-arm false constructions, a
+  function's own signature as a self-edge. Production path: facts from a real
+  parser — **`syn` (Rust), the `tsc` compiler API (TypeScript), `tree-sitter`
+  (general)** — not regex.
+- **Sequencing (also in §17):** **§13 import next**, designed against the
+  machine-generated fact-table consumer; **§9 aggregation** second; a **`syn`
+  extractor** is a parallel companion track.
+- **§13 embraces dependencies for breadth** (also in §17): broad source support is
+  the long-term goal, so import is exempt from the core's zero-dep pillar — DuckDB
+  + Parquet are high-value; backends **feature-gated** to keep the core and skill
+  binary lightweight; likely built on DuckDB from the outset (one dep → CSV +
+  Parquet + SQL).
+- **Source-analysis recipe doc deferred** until §13/§9 land (mechanics shift:
+  piped→imported facts, hand-counts→native aggregation) — this entry is the interim
+  capture; the recipe will seed a per-use-case `skill/recipes/` pattern.
+
+**Next up**
+- **§13 import — a scoped, design-first deep-dive** (public syntax + `FactSource`
+  seam + type/schema rules + provenance/error path = expensive to reverse).
+  **Dependency stance decided**: embrace deps for breadth — DuckDB + Parquet are
+  high-value; backends feature-gated so the core/skill stay zero-dep; lead is to
+  build on DuckDB from the outset (one dep → CSV + Parquet + SQL) over a throwaway
+  std-CSV reader. Pressure-test against the two consumers (hand `parent/child` CSV;
+  extractor JSONL/CSV fact table). Aim: nail the `FactSource` seam + schema/type
+  rules for the long haul. Output: ratified §13, §17 updates, execution plan.
+- §9 aggregation queued next; optionally start the `syn` extractor companion track;
+  write the deferred `skill/recipes/source-analysis.md` once §13/§9 settle.
+
 ## 2026-07-23 — First agent exposure: `datalog` as a Claude Code skill
 
 **Done**
