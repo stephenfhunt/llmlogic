@@ -34,6 +34,12 @@ pub use api::{RunResult, program_with_queries, run, run_with_queries};
 pub use error::{Error, Result, Warning};
 pub use parser::parse;
 
+// Re-exported for the import integration tests, which write fixtures (e.g.
+// parquet via `COPY`) through DuckDB itself; not part of the API contract.
+#[cfg(feature = "duckdb")]
+#[doc(hidden)]
+pub use duckdb;
+
 /// Returns the crate version string (from `CARGO_PKG_VERSION`).
 ///
 /// Placeholder public entry point so the scaffold has something meaningful to

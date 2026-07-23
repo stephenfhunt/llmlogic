@@ -162,4 +162,6 @@ The test pyramid grows outward with the pipeline:
 - Match the style of surrounding code; keep modules documented with `//!` headers.
 - Commit only when asked. Use a branch off `main` if committing.
 - Don't introduce dependencies casually — dependency choices are tracked as decisions
-  in `spec.md` §17 and made as the relevant section stabilizes.
+  in `spec.md` §17 and made as the relevant section stabilizes. The core language
+  engine (lexer/parser/lowering/eval) stays zero-dependency; §13 imports are powered
+  by DuckDB (a default-on cargo feature; `--no-default-features` builds without it).

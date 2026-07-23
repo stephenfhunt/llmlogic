@@ -31,13 +31,22 @@ path = "src/bin/package_skill.rs"
 required-features = ["packaging"]
 
 [features]
+# Imports are on by default (§13, §17 2026-07-23): DuckDB is the single reader
+# backend for CSV/JSONL/Parquet/URLs. `--no-default-features` is the escape
+# hatch (fast lane, exotic targets); data imports then yield a structured error.
+default = ["duckdb"]
+duckdb = ["dep:duckdb"]
 # Enables the `package-skill` build-tooling binary only.
 packaging = []
 
-# Dependencies are intentionally empty for the starter. Candidates (serde/serde_json
-# for the agent API, csv/rusqlite/parquet for sources, a lexer/parser crate) get
-# chosen as the spec matures — see spec.md §17 (decisions log).
+# The core language engine stays zero-dependency (lexer/parser/lowering/eval);
+# the §13 import layer is the deliberate exception (spec §17, 2026-07-23).
+# Remaining candidates (serde/serde_json for the agent API) get chosen as the
+# spec matures — see spec.md §17 (decisions log).
 [dependencies]
+# `json`/`parquet` compile those DuckDB extensions into the bundled build
+# (read_json / read_parquet, §13 formats).
+duckdb = { version = "1", features = ["bundled", "json", "parquet"], optional = true }
 
 [dev-dependencies]
 proptest = "1.11.0"

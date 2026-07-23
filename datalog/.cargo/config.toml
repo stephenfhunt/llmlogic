@@ -1,3 +1,11 @@
+# The bundled-DuckDB C++ build (the `duckdb` default feature) is compiled with
+# clang: GCC 15.3 hits a nondeterministic internal compiler error (GC segfault)
+# on DuckDB's unity-build translation units on this toolchain. Delete this
+# section if your default C++ compiler handles DuckDB.
+[env]
+CC = "clang"
+CXX = "clang++"
+
 # Project-local cargo aliases.
 [alias]
 # Build the drop-in Claude Code skill bundle (target/dist/datalog-skill[.tar.gz]).

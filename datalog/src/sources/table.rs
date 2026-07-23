@@ -1,0 +1,799 @@
+//! The shared §13 semantics layer: raw backend output → a typed, deduplicated
+//! fact table.
+//!
+//! Backends read; this module types. CSV type inference is **defined by the
+//! language's own literal grammar** (§13/§17, 2026-07-23): a cell is int,
+//! float, or bool iff [`crate::lexer::lex`] reads it as exactly that literal
+//! (optionally signed), otherwise it is a string — so no second classifier
+//! exists, and an import means precisely the facts you would get by writing
+//! its cells as in-program literals.
+
+use crate::ast::{FieldDecl, TypeName};
+use crate::error::Error;
+use crate::ir::{F64, Value};
+use crate::lexer::{TokenKind, lex};
+
+/// One loaded data import after every §13 rule has been applied: field names
+/// are valid and unique, rows are rectangular and column-uniform, and the row
+/// set is sorted and deduplicated (set semantics at import time).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoadedTable {
+    pub fields: Vec<String>,
+    pub rows: Vec<Vec<Value>>,
+}
+
+/// A backend-produced table before typing.
+///
+/// `columns` is `Some` for self-describing sources (JSONL keys, Parquet or
+/// database columns) and `None` for CSV, where header extraction is
+/// [`finalize`]'s decision.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct RawTable {
+    pub columns: Option<Vec<String>>,
+    pub rows: Vec<Vec<RawValue>>,
+}
+
+/// One backend-produced cell.
+///
+/// `Text` is an untyped CSV cell — the literal-grammar inference applies.
+/// The typed variants come from sources that are their own authority (JSON,
+/// Parquet, databases); a `Str` is definitely a string and is never
+/// re-inferred (a JSON `"42"` stays a string).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum RawValue {
+    Text(String),
+    Str(String),
+    Int(i64),
+    /// Always finite: backends reject NaN/±inf at read.
+    Float(f64),
+    Bool(bool),
+}
+
+/// What the literal grammar says one cell denotes (the §13 classification).
+enum CellClass {
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+    Str,
+}
+
+/// Classifies untyped cell text by the language's literal grammar: the lexer
+/// must read the whole cell as exactly one (optionally signed) literal.
+/// Anything else — empty text, multiple tokens, lexical errors — is a string.
+fn classify_cell(text: &str) -> CellClass {
+    let lexed = lex(text);
+    if !lexed.errors.is_empty() {
+        return CellClass::Str;
+    }
+    let kinds: Vec<&TokenKind> = lexed.tokens.iter().map(|t| &t.kind).collect();
+    match kinds.as_slice() {
+        [TokenKind::Int(n), TokenKind::Eof] => CellClass::Int(*n),
+        [TokenKind::Minus, TokenKind::Int(n), TokenKind::Eof] => CellClass::Int(-*n),
+        [TokenKind::Float(f), TokenKind::Eof] => CellClass::Float(*f),
+        [TokenKind::Minus, TokenKind::Float(f), TokenKind::Eof] => CellClass::Float(-*f),
+        [TokenKind::True, TokenKind::Eof] => CellClass::Bool(true),
+        [TokenKind::False, TokenKind::Eof] => CellClass::Bool(false),
+        _ => CellClass::Str,
+    }
+}
+
+/// The symbol reading of cell text: a single bare identifier token. Used only
+/// under an explicit `symbol` schema type (§13 inference never produces
+/// symbol).
+fn classify_symbol(text: &str) -> Option<String> {
+    let lexed = lex(text);
+    if !lexed.errors.is_empty() {
+        return None;
+    }
+    match lexed.tokens.as_slice() {
+        [ident, eof] if matches!(eof.kind, TokenKind::Eof) => match &ident.kind {
+            TokenKind::Ident(name) => Some(name.clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// A legal field name is a single identifier token spelled exactly as given
+/// (so keywords, uppercase-initial names, and padded text all fail).
+fn is_legal_field_name(name: &str) -> bool {
+    classify_symbol(name).as_deref() == Some(name)
+}
+
+/// Applies every §13 rule to a backend's raw table. `source` names the import
+/// in errors (the path as resolved).
+pub(crate) fn finalize(
+    raw: RawTable,
+    schema: Option<&[FieldDecl]>,
+    source: &str,
+) -> Result<LoadedTable, Vec<Error>> {
+    let (fields, data, first_data_row) = arrange(raw, schema, source)?;
+
+    let mut errors = Vec::new();
+    let arity = fields.len();
+    for (index, row) in data.iter().enumerate() {
+        if row.len() != arity {
+            errors.push(Error::Source(format!(
+                "in `{source}`: row {} has {} column(s), expected {arity}",
+                first_data_row + index,
+                row.len(),
+            )));
+        }
+    }
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+
+    let declared: Vec<Option<TypeName>> = match schema {
+        Some(schema) => schema.iter().map(|f| f.ty).collect(),
+        None => vec![None; arity],
+    };
+
+    let mut columns: Vec<Vec<Value>> = Vec::with_capacity(arity);
+    for (col, declared_ty) in declared.iter().enumerate() {
+        match type_column(
+            &data,
+            col,
+            *declared_ty,
+            &fields[col],
+            first_data_row,
+            source,
+        ) {
+            Ok(values) => columns.push(values),
+            Err(mut column_errors) => errors.append(&mut column_errors),
+        }
+    }
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+
+    let mut rows: Vec<Vec<Value>> = (0..data.len())
+        .map(|r| columns.iter().map(|c| c[r].clone()).collect())
+        .collect();
+    rows.sort();
+    rows.dedup();
+    Ok(LoadedTable { fields, rows })
+}
+
+/// [`arrange`]'s result: the field names, the data rows (reordered to field
+/// order where binding is by name), and the 1-based source row number of the
+/// first data row (for error messages).
+type Arranged = (Vec<String>, Vec<Vec<RawValue>>, usize);
+
+/// Resolves field names and the data-row window: header extraction for CSV,
+/// name binding for self-describing sources.
+fn arrange(
+    raw: RawTable,
+    schema: Option<&[FieldDecl]>,
+    source: &str,
+) -> Result<Arranged, Vec<Error>> {
+    match (raw.columns, schema) {
+        // Self-describing source, inferred schema: the source's names win.
+        (Some(columns), None) => {
+            validate_field_names(&columns, source)?;
+            Ok((columns, raw.rows, 1))
+        }
+        // Self-describing source, explicit schema: bind by name (set
+        // equality), reorder to schema order.
+        (Some(columns), Some(schema)) => {
+            let fields: Vec<String> = schema.iter().map(|f| f.name.name.clone()).collect();
+            validate_field_names(&fields, source)?;
+            let mut errors = Vec::new();
+            let positions: Vec<usize> = fields
+                .iter()
+                .filter_map(|name| {
+                    let position = columns.iter().position(|c| c == name);
+                    if position.is_none() {
+                        errors.push(Error::Source(format!(
+                            "in `{source}`: the explicit schema names `{name}`, which the \
+                             source does not have (source fields: {})",
+                            columns.join(", ")
+                        )));
+                    }
+                    position
+                })
+                .collect();
+            for column in &columns {
+                if !fields.contains(column) {
+                    errors.push(Error::Source(format!(
+                        "in `{source}`: the source has field `{column}`, which the \
+                         explicit schema does not name (schema fields: {})",
+                        fields.join(", ")
+                    )));
+                }
+            }
+            if !errors.is_empty() {
+                return Err(errors);
+            }
+            let rows = raw
+                .rows
+                .into_iter()
+                .map(|row| positions.iter().map(|&p| row[p].clone()).collect())
+                .collect();
+            Ok((fields, rows, 1))
+        }
+        // CSV, inferred schema: the first row is the header.
+        (None, None) => {
+            let mut rows = raw.rows.into_iter();
+            let Some(header) = rows.next() else {
+                return Err(vec![Error::Source(format!(
+                    "in `{source}`: the file is empty; a header row (or an explicit \
+                     schema) is required"
+                ))]);
+            };
+            let names: Vec<String> = header.iter().map(raw_text).collect();
+            validate_field_names(&names, source)?;
+            Ok((names, rows.collect(), 2))
+        }
+        // CSV, explicit schema: every row is data — except a first row whose
+        // cells exactly equal the schema's field names, which is a header and
+        // is skipped (§13, decided 2026-07-23).
+        (None, Some(schema)) => {
+            let fields: Vec<String> = schema.iter().map(|f| f.name.name.clone()).collect();
+            validate_field_names(&fields, source)?;
+            let mut rows = raw.rows;
+            let mut first_data_row = 1;
+            if rows
+                .first()
+                .is_some_and(|row| row.iter().map(raw_text).collect::<Vec<_>>() == fields)
+            {
+                rows.remove(0);
+                first_data_row = 2;
+            }
+            Ok((fields, rows, first_data_row))
+        }
+    }
+}
+
+/// The text of an untyped cell (header rows are always untyped CSV text).
+fn raw_text(value: &RawValue) -> String {
+    match value {
+        RawValue::Text(t) | RawValue::Str(t) => t.clone(),
+        RawValue::Int(n) => n.to_string(),
+        RawValue::Float(f) => f.to_string(),
+        RawValue::Bool(b) => b.to_string(),
+    }
+}
+
+fn validate_field_names(names: &[String], source: &str) -> Result<(), Vec<Error>> {
+    let mut errors = Vec::new();
+    for (index, name) in names.iter().enumerate() {
+        if !is_legal_field_name(name) {
+            errors.push(Error::Source(format!(
+                "in `{source}`: field {} (`{name}`) is not a legal field name \
+                 (§3: lowercase-initial identifier); give the import an explicit \
+                 schema to rename it",
+                index + 1
+            )));
+        }
+        if names[..index].contains(name) {
+            errors.push(Error::Source(format!(
+                "in `{source}`: duplicate field name `{name}`; give the import an \
+                 explicit schema to rename it"
+            )));
+        }
+    }
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
+    }
+}
+
+/// The inferred or declared type of one column, then its materialized values.
+fn type_column(
+    data: &[Vec<RawValue>],
+    col: usize,
+    declared: Option<TypeName>,
+    field: &str,
+    first_data_row: usize,
+    source: &str,
+) -> Result<Vec<Value>, Vec<Error>> {
+    let ty = match declared {
+        Some(ty) => ty,
+        None => infer_column(data, col, field, source)?,
+    };
+
+    let mut errors = Vec::new();
+    let mut values = Vec::with_capacity(data.len());
+    for (index, row) in data.iter().enumerate() {
+        match coerce(&row[col], ty) {
+            Ok(value) => values.push(value),
+            Err(cell) => errors.push(Error::Source(format!(
+                "in `{source}`: row {}, column `{field}`: {cell} is not {}",
+                first_data_row + index,
+                type_label(ty),
+            ))),
+        }
+    }
+    if errors.is_empty() {
+        Ok(values)
+    } else {
+        Err(errors)
+    }
+}
+
+/// §13 column inference: unify the cells' classifications. Untyped (CSV)
+/// columns fall back to string on any conflict — the cells' own text is the
+/// value. Typed sources widen int/float and otherwise conflict as an error
+/// (the strict-typing pillar; there is no text to fall back to).
+fn infer_column(
+    data: &[Vec<RawValue>],
+    col: usize,
+    field: &str,
+    source: &str,
+) -> Result<TypeName, Vec<Error>> {
+    let mut inferred: Option<TypeName> = None;
+    for (index, row) in data.iter().enumerate() {
+        let cell_ty = match &row[col] {
+            RawValue::Text(t) => match classify_cell(t) {
+                CellClass::Int(_) => TypeName::Int,
+                CellClass::Float(_) => TypeName::Float,
+                CellClass::Bool(_) => TypeName::Bool,
+                CellClass::Str => TypeName::String,
+            },
+            RawValue::Str(_) => TypeName::String,
+            RawValue::Int(_) => TypeName::Int,
+            RawValue::Float(_) => TypeName::Float,
+            RawValue::Bool(_) => TypeName::Bool,
+        };
+        inferred = Some(match (inferred, cell_ty) {
+            (None, ty) => ty,
+            (Some(a), b) if a == b => a,
+            (Some(TypeName::Int), TypeName::Float) | (Some(TypeName::Float), TypeName::Int) => {
+                TypeName::Float
+            }
+            (Some(a), b) => {
+                // A conflict. Untyped text always has the string reading;
+                // typed sources do not.
+                if matches!(row[col], RawValue::Text(_)) {
+                    return Ok(TypeName::String);
+                }
+                return Err(vec![Error::Source(format!(
+                    "in `{source}`: column `{field}` mixes {} and {} (row {}); the \
+                     value space has no mixed columns — declare an explicit type",
+                    type_label(a),
+                    type_label(b),
+                    index + 1,
+                ))]);
+            }
+        });
+    }
+    // An empty table types every column string; the type never matters (no
+    // facts), and string is the bottom of the §13 inference order.
+    Ok(inferred.unwrap_or(TypeName::String))
+}
+
+/// Converts one cell to a declared/inferred column type, or reports the cell
+/// (rendered for the error message).
+fn coerce(value: &RawValue, ty: TypeName) -> Result<Value, String> {
+    let fail = |value: &RawValue| Err(render(value));
+    match ty {
+        TypeName::Int => match value {
+            RawValue::Text(t) => match classify_cell(t) {
+                CellClass::Int(n) => Ok(Value::Int(n)),
+                _ => fail(value),
+            },
+            RawValue::Int(n) => Ok(Value::Int(*n)),
+            _ => fail(value),
+        },
+        TypeName::Float => match value {
+            RawValue::Text(t) => match classify_cell(t) {
+                CellClass::Float(f) => new_float(f).ok_or_else(|| render(value)),
+                CellClass::Int(n) => new_float(n as f64).ok_or_else(|| render(value)),
+                _ => fail(value),
+            },
+            RawValue::Float(f) => new_float(*f).ok_or_else(|| render(value)),
+            RawValue::Int(n) => new_float(*n as f64).ok_or_else(|| render(value)),
+            _ => fail(value),
+        },
+        TypeName::Bool => match value {
+            RawValue::Text(t) => match classify_cell(t) {
+                CellClass::Bool(b) => Ok(Value::Bool(b)),
+                _ => fail(value),
+            },
+            RawValue::Bool(b) => Ok(Value::Bool(*b)),
+            _ => fail(value),
+        },
+        TypeName::String => match value {
+            RawValue::Text(t) | RawValue::Str(t) => Ok(Value::String(t.clone())),
+            _ => fail(value),
+        },
+        TypeName::Symbol => match value {
+            RawValue::Text(t) | RawValue::Str(t) => match classify_symbol(t) {
+                Some(name) => Ok(Value::Symbol(name)),
+                None => fail(value),
+            },
+            _ => fail(value),
+        },
+    }
+}
+
+fn new_float(f: f64) -> Option<Value> {
+    F64::new(f).ok().map(Value::Float)
+}
+
+fn render(value: &RawValue) -> String {
+    match value {
+        RawValue::Text(t) | RawValue::Str(t) => format!("`{t}`"),
+        RawValue::Int(n) => format!("`{n}`"),
+        RawValue::Float(f) => format!("`{f}`"),
+        RawValue::Bool(b) => format!("`{b}`"),
+    }
+}
+
+fn type_label(ty: TypeName) -> &'static str {
+    match ty {
+        TypeName::Symbol => "a symbol",
+        TypeName::String => "a string",
+        TypeName::Int => "an int",
+        TypeName::Float => "a float",
+        TypeName::Bool => "a bool",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::{FieldDecl, Ident, Span};
+
+    fn text_row(cells: &[&str]) -> Vec<RawValue> {
+        cells
+            .iter()
+            .map(|c| RawValue::Text(c.to_string()))
+            .collect()
+    }
+
+    fn csv(rows: &[&[&str]]) -> RawTable {
+        RawTable {
+            columns: None,
+            rows: rows.iter().map(|r| text_row(r)).collect(),
+        }
+    }
+
+    fn field(name: &str, ty: Option<TypeName>) -> FieldDecl {
+        FieldDecl {
+            name: Ident {
+                name: name.to_string(),
+                span: Span::DUMMY,
+            },
+            ty,
+            span: Span::DUMMY,
+        }
+    }
+
+    fn ok(table: RawTable, schema: Option<&[FieldDecl]>) -> LoadedTable {
+        finalize(table, schema, "test.csv").expect("finalize succeeds")
+    }
+
+    fn err(table: RawTable, schema: Option<&[FieldDecl]>) -> Vec<Error> {
+        finalize(table, schema, "test.csv").expect_err("finalize fails")
+    }
+
+    // --- Literal-grammar cell classification (§13 inference) ---
+
+    #[test]
+    fn all_int_column_infers_int() {
+        let table = ok(csv(&[&["n"], &["1"], &["-42"], &["007"]]), None);
+        assert_eq!(
+            table.rows,
+            vec![
+                vec![Value::Int(-42)],
+                vec![Value::Int(1)],
+                vec![Value::Int(7)],
+            ]
+        );
+    }
+
+    #[test]
+    fn int_float_mix_widens_to_float() {
+        let table = ok(csv(&[&["x"], &["1"], &["2.5"]]), None);
+        assert_eq!(
+            table.rows,
+            vec![
+                vec![Value::Float(F64::new(1.0).unwrap())],
+                vec![Value::Float(F64::new(2.5).unwrap())],
+            ]
+        );
+    }
+
+    #[test]
+    fn bool_column_infers_bool_only_on_exact_literals() {
+        let table = ok(csv(&[&["b"], &["true"], &["false"]]), None);
+        assert_eq!(
+            table.rows,
+            vec![vec![Value::Bool(false)], vec![Value::Bool(true)]]
+        );
+
+        // `TRUE` is not the language's bool literal, so the column is strings.
+        let table = ok(csv(&[&["b"], &["TRUE"], &["false"]]), None);
+        assert_eq!(
+            table.rows,
+            vec![
+                vec![Value::String("TRUE".to_string())],
+                vec![Value::String("false".to_string())],
+            ]
+        );
+    }
+
+    #[test]
+    fn any_empty_cell_makes_the_column_string() {
+        let table = ok(csv(&[&["n"], &["1"], &[""]]), None);
+        assert_eq!(
+            table.rows,
+            vec![
+                vec![Value::String(String::new())],
+                vec![Value::String("1".to_string())],
+            ]
+        );
+    }
+
+    #[test]
+    fn non_literal_spellings_stay_verbatim_strings() {
+        // NaN/inf are not literals (§3 has no NaN token); nor is `1 2`.
+        let table = ok(csv(&[&["x"], &["NaN"], &["inf"], &["1 2"]]), None);
+        let strings: Vec<&Value> = table.rows.iter().map(|r| &r[0]).collect();
+        assert_eq!(
+            strings,
+            [
+                &Value::String("1 2".to_string()),
+                &Value::String("NaN".to_string()),
+                &Value::String("inf".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn scientific_notation_is_a_float_literal_iff_the_lexer_says_so() {
+        // Whatever the lexer accepts as a float literal, the import accepts —
+        // the two can never disagree because there is only one rulebook.
+        let cell = "1e5";
+        let lexes_as_float = matches!(classify_cell(cell), CellClass::Float(_));
+        let table = ok(csv(&[&["x"], &[cell]]), None);
+        match &table.rows[0][0] {
+            Value::Float(_) => assert!(lexes_as_float),
+            Value::String(s) => {
+                assert!(!lexes_as_float);
+                assert_eq!(s, cell);
+            }
+            other => panic!("unexpected value {other:?}"),
+        }
+    }
+
+    #[test]
+    fn whitespace_padding_follows_the_lexer() {
+        // The lexer skips whitespace around a token, so ` 42 ` is the int 42 —
+        // one rulebook, no trimming pass of our own.
+        let table = ok(csv(&[&["n"], &[" 42 "]]), None);
+        assert_eq!(table.rows, vec![vec![Value::Int(42)]]);
+    }
+
+    // --- Explicit schemas ---
+
+    #[test]
+    fn explicit_string_keeps_a_numeric_cell_verbatim() {
+        let schema = [field("code", Some(TypeName::String))];
+        let table = ok(csv(&[&["42"]]), Some(&schema));
+        assert_eq!(table.rows, vec![vec![Value::String("42".to_string())]]);
+    }
+
+    #[test]
+    fn explicit_symbol_reads_bare_identifiers() {
+        let schema = [field("color", Some(TypeName::Symbol))];
+        let table = ok(csv(&[&["red"], &["blue"]]), Some(&schema));
+        assert_eq!(
+            table.rows,
+            vec![
+                vec![Value::Symbol("blue".to_string())],
+                vec![Value::Symbol("red".to_string())],
+            ]
+        );
+
+        // Uppercase-initial text is a variable, not a symbol literal.
+        let errors = err(csv(&[&["Red"]]), Some(&schema));
+        assert!(
+            errors[0].to_string().contains("not a symbol"),
+            "got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn explicit_int_reports_the_offending_cell_row_and_column() {
+        let schema = [field("age", Some(TypeName::Int))];
+        let errors = err(csv(&[&["30"], &["abc"]]), Some(&schema));
+        let message = errors[0].to_string();
+        assert!(message.contains("row 2"), "got: {message}");
+        assert!(message.contains("column `age`"), "got: {message}");
+        assert!(message.contains("`abc` is not an int"), "got: {message}");
+    }
+
+    #[test]
+    fn explicit_float_widens_int_cells() {
+        let schema = [field("x", Some(TypeName::Float))];
+        let table = ok(csv(&[&["1"], &["2.5"]]), Some(&schema));
+        assert_eq!(
+            table.rows,
+            vec![
+                vec![Value::Float(F64::new(1.0).unwrap())],
+                vec![Value::Float(F64::new(2.5).unwrap())],
+            ]
+        );
+    }
+
+    #[test]
+    fn header_is_skipped_iff_it_equals_the_schema_field_names() {
+        let schema = [
+            field("parent", Some(TypeName::String)),
+            field("child", Some(TypeName::String)),
+        ];
+        // Matching first row: a header, skipped.
+        let table = ok(
+            csv(&[&["parent", "child"], &["alice", "bob"]]),
+            Some(&schema),
+        );
+        assert_eq!(table.rows.len(), 1);
+
+        // Non-matching first row: data.
+        let table = ok(csv(&[&["eve", "adam"], &["alice", "bob"]]), Some(&schema));
+        assert_eq!(table.rows.len(), 2);
+    }
+
+    #[test]
+    fn untyped_schema_fields_still_infer() {
+        let schema = [field("n", None)];
+        let table = ok(csv(&[&["1"], &["2"]]), Some(&schema));
+        assert_eq!(table.rows, vec![vec![Value::Int(1)], vec![Value::Int(2)]]);
+    }
+
+    // --- Headers and field names ---
+
+    #[test]
+    fn header_names_become_fields() {
+        let table = ok(csv(&[&["parent", "child"], &["alice", "bob"]]), None);
+        assert_eq!(table.fields, ["parent", "child"]);
+    }
+
+    #[test]
+    fn an_empty_file_needs_a_header_or_schema() {
+        let errors = err(csv(&[]), None);
+        assert!(errors[0].to_string().contains("empty"), "got: {errors:?}");
+        // …but with an explicit schema an empty file is a legal empty table.
+        let schema = [field("a", Some(TypeName::Int))];
+        let table = ok(csv(&[]), Some(&schema));
+        assert!(table.rows.is_empty());
+        assert_eq!(table.fields, ["a"]);
+    }
+
+    #[test]
+    fn a_header_only_file_is_a_legal_empty_table() {
+        let table = ok(csv(&[&["a", "b"]]), None);
+        assert!(table.rows.is_empty());
+        assert_eq!(table.fields, ["a", "b"]);
+    }
+
+    #[test]
+    fn illegal_header_names_suggest_an_explicit_schema() {
+        for bad in ["First Name", "AGE", "import", "1st"] {
+            let errors = err(csv(&[&[bad], &["x"]]), None);
+            assert!(
+                errors[0].to_string().contains("explicit"),
+                "for {bad:?}, got: {errors:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_header_names_are_an_error() {
+        let errors = err(csv(&[&["a", "a"], &["1", "2"]]), None);
+        assert!(
+            errors[0].to_string().contains("duplicate"),
+            "got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn ragged_rows_report_their_row_number() {
+        let errors = err(csv(&[&["a", "b"], &["1", "2"], &["3"]]), None);
+        let message = errors[0].to_string();
+        assert!(message.contains("row 3"), "got: {message}");
+        assert!(
+            message.contains("1 column(s), expected 2"),
+            "got: {message}"
+        );
+    }
+
+    // --- Typed (self-describing) sources ---
+
+    fn typed(columns: &[&str], rows: Vec<Vec<RawValue>>) -> RawTable {
+        RawTable {
+            columns: Some(columns.iter().map(|c| c.to_string()).collect()),
+            rows,
+        }
+    }
+
+    #[test]
+    fn json_strings_are_never_reinferred() {
+        let table = ok(
+            typed(
+                &["code"],
+                vec![
+                    vec![RawValue::Str("42".to_string())],
+                    vec![RawValue::Str("true".to_string())],
+                ],
+            ),
+            None,
+        );
+        assert_eq!(
+            table.rows,
+            vec![
+                vec![Value::String("42".to_string())],
+                vec![Value::String("true".to_string())],
+            ]
+        );
+    }
+
+    #[test]
+    fn typed_int_float_mix_widens() {
+        let table = ok(
+            typed(
+                &["x"],
+                vec![vec![RawValue::Int(1)], vec![RawValue::Float(2.5)]],
+            ),
+            None,
+        );
+        assert_eq!(
+            table.rows,
+            vec![
+                vec![Value::Float(F64::new(1.0).unwrap())],
+                vec![Value::Float(F64::new(2.5).unwrap())],
+            ]
+        );
+    }
+
+    #[test]
+    fn typed_string_number_mix_is_an_error_not_a_fallback() {
+        let errors = err(
+            typed(
+                &["x"],
+                vec![vec![RawValue::Int(1)], vec![RawValue::Str("x".to_string())]],
+            ),
+            None,
+        );
+        assert!(errors[0].to_string().contains("mixes"), "got: {errors:?}");
+    }
+
+    #[test]
+    fn explicit_schema_binds_typed_sources_by_name_in_schema_order() {
+        let schema = [
+            field("b", Some(TypeName::Int)),
+            field("a", Some(TypeName::Int)),
+        ];
+        let table = ok(
+            typed(&["a", "b"], vec![vec![RawValue::Int(1), RawValue::Int(2)]]),
+            Some(&schema),
+        );
+        assert_eq!(table.fields, ["b", "a"]);
+        assert_eq!(table.rows, vec![vec![Value::Int(2), Value::Int(1)]]);
+    }
+
+    #[test]
+    fn schema_source_field_set_mismatch_names_both_sides() {
+        let schema = [field("z", Some(TypeName::Int))];
+        let errors = err(typed(&["a"], vec![vec![RawValue::Int(1)]]), Some(&schema));
+        let all = errors
+            .iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(all.contains("names `z`"), "got: {all}");
+        assert!(all.contains("field `a`"), "got: {all}");
+    }
+
+    // --- Set semantics ---
+
+    #[test]
+    fn rows_are_sorted_and_deduplicated() {
+        let table = ok(csv(&[&["n"], &["2"], &["1"], &["2"]]), None);
+        assert_eq!(table.rows, vec![vec![Value::Int(1)], vec![Value::Int(2)]]);
+    }
+}
