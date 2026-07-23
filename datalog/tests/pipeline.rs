@@ -54,6 +54,34 @@ fn named_arguments_16_7() {
     );
 }
 
+/// §13 module imports: the corpus program splices `modules/family.dl` —
+/// resolved relative to the program file, while this test runs with the crate
+/// root as working directory.
+#[test]
+fn module_import_splices_a_library() {
+    let path = std::path::Path::new("tests/programs/modules_import.dl");
+    let source = fs::read_to_string(path).expect("corpus file exists");
+    let result = datalog::run_at(&source, Some(path)).unwrap_or_else(|e| panic!("run: {e:?}"));
+    let answers: Vec<String> = result.answers.into_iter().flatten().collect();
+    assert_eq!(
+        answers,
+        vec![
+            "ancestor(\"alice\", \"bob\").",
+            "ancestor(\"alice\", \"carol\").",
+        ]
+    );
+}
+
+/// A pathless program (stdin/`-q` shape) resolves module imports against the
+/// working directory — for tests, the crate root.
+#[test]
+fn pathless_module_import_resolves_against_the_working_directory() {
+    let src = "import \"tests/programs/modules/family.dl\".\n?- parent(X, Y).\n";
+    let result = datalog::run(src).unwrap_or_else(|e| panic!("run: {e:?}"));
+    let answers: Vec<String> = result.answers.into_iter().flatten().collect();
+    assert_eq!(answers.len(), 2);
+}
+
 #[test]
 fn imports_are_a_structured_eval_error_16_5() {
     let errors = datalog::run(&corpus("16_5_import.dl")).expect_err("imports do not evaluate yet");

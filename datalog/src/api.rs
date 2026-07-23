@@ -27,6 +27,8 @@
 //! roadmap step 6; JSON stays reserved for the machine-readable edges (§12
 //! errors, §11 provenance).
 
+use std::path::Path;
+
 use crate::ast::StatementKind;
 use crate::engine::{Model, eval};
 use crate::error::{Error, Warning};
@@ -34,6 +36,7 @@ use crate::ir;
 use crate::lower::{check_program, lower};
 use crate::parser::parse;
 use crate::print::{print_atom, print_ground_fact};
+use crate::resolve::resolve_modules;
 use crate::typecheck::typecheck;
 
 /// The result of a successful [`run`]: the least model plus each query's
@@ -64,12 +67,24 @@ impl RunResult {
     }
 }
 
-/// Runs a program end to end: `parse → lower → typecheck → eval`, then answers
-/// every query. Returns every error found at the first failing stage (each
-/// stage collects all of its own errors).
+/// Runs a program end to end with no file context: module and data imports
+/// resolve against the working directory (§13). Equivalent to
+/// [`run_at`]`(src, None)`.
 pub fn run(src: &str) -> Result<RunResult, Vec<Error>> {
+    run_at(src, None)
+}
+
+/// Runs a program end to end: `parse → resolve modules → lower → typecheck →
+/// eval`, then answers every query. Returns every error found at the first
+/// failing stage (each stage collects all of its own errors).
+///
+/// `source_path` is the program file itself when there is one; each file's
+/// imports resolve relative to that file's directory (`None` — stdin or
+/// `-q`-only programs — resolves against the working directory).
+pub fn run_at(src: &str, source_path: Option<&Path>) -> Result<RunResult, Vec<Error>> {
     let ast = parse(src)?;
-    let program = lower(&ast)?;
+    let resolved = resolve_modules(ast, source_path)?;
+    let program = lower(&resolved.program)?;
     typecheck(&program)?;
     let warnings = check_program(&program);
     let model = eval(&program).map_err(|e| vec![e])?;
@@ -139,12 +154,24 @@ fn query_source(arg: &str) -> Result<String, Vec<Error>> {
     Ok(format!("{query}\n"))
 }
 
-/// Runs a `base` program plus one-shot `-q` queries end to end: builds the
-/// combined source with [`program_with_queries`], then [`run`]s it. This is the
-/// agent CLI's entry point (`datalog [<file>|-] [-q …]`).
+/// Runs a `base` program plus one-shot `-q` queries with no file context.
+/// Equivalent to [`run_with_queries_at`]`(base, None, queries)`.
 pub fn run_with_queries(base: &str, queries: &[String]) -> Result<RunResult, Vec<Error>> {
+    run_with_queries_at(base, None, queries)
+}
+
+/// Runs a `base` program plus one-shot `-q` queries end to end: builds the
+/// combined source with [`program_with_queries`], then [`run_at`]s it. This is
+/// the agent CLI's entry point (`datalog [<file>|-] [-q …]`); `source_path` is
+/// the base program's file, threading §13 relative-path resolution (the
+/// appended `-q` text has no paths of its own).
+pub fn run_with_queries_at(
+    base: &str,
+    source_path: Option<&Path>,
+    queries: &[String],
+) -> Result<RunResult, Vec<Error>> {
     let source = program_with_queries(base, queries)?;
-    run(&source)
+    run_at(&source, source_path)
 }
 
 /// Renders one query's answer rows to canonical fact lines per the §14 output

@@ -24,13 +24,16 @@ pub mod lower;
 pub mod parser;
 pub mod print;
 pub mod provenance;
+pub mod resolve;
 pub mod sources;
 pub mod typecheck;
 
 #[cfg(test)]
 pub(crate) mod testgen;
 
-pub use api::{RunResult, program_with_queries, run, run_with_queries};
+pub use api::{
+    RunResult, program_with_queries, run, run_at, run_with_queries, run_with_queries_at,
+};
 pub use error::{Error, Result, Warning};
 pub use parser::parse;
 

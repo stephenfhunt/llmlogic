@@ -1,0 +1,9 @@
+% Spec §13 — module imports: splice a library file's statements in place.
+% The path resolves relative to THIS file's directory, not the working
+% directory the binary runs from.
+import "modules/family.dl".
+
+ancestor(X, Y) :- parent(X, Y).
+ancestor(X, Y) :- parent(X, Z), ancestor(Z, Y).
+
+?- ancestor("alice", Who).

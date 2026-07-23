@@ -1,0 +1,3 @@
+% A library module: defines, never asks (§13).
+parent("alice", "bob").
+parent("bob", "carol").

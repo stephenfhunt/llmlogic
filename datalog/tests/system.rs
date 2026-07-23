@@ -116,6 +116,39 @@ fn named_and_negation_programs_run() {
     );
 }
 
+/// §13 module imports through the real binary: `modules_import.dl` splices
+/// `modules/family.dl` relative to the program file's directory, while the
+/// binary runs with the crate root as working directory — the
+/// relative-resolution proof.
+#[test]
+fn module_import_program_runs() {
+    let out = run_file("modules_import.dl");
+    assert_eq!(out.code, 0);
+    assert_eq!(
+        out.stdout,
+        "ancestor(\"alice\", \"bob\").\nancestor(\"alice\", \"carol\").\n"
+    );
+    assert!(out.stderr.is_empty());
+}
+
+/// A query inside an imported module is refused, naming the module file.
+#[test]
+fn a_query_in_a_module_exits_one_naming_the_file() {
+    let dir = std::env::temp_dir().join(format!("datalog-system-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    std::fs::write(dir.join("asks.dl"), "p(1).\n?- p(X).\n").expect("write");
+    let root = dir.join("main.dl");
+    std::fs::write(&root, "import \"asks.dl\".\n").expect("write");
+    let out = run_args(&[root.to_str().unwrap()]);
+    assert_eq!(out.code, 1);
+    assert!(out.stderr.contains("asks.dl"), "{}", out.stderr);
+    assert!(
+        out.stderr.contains("not allowed in imported modules"),
+        "{}",
+        out.stderr
+    );
+}
+
 #[test]
 fn feature_program_prints_floats_and_symbols() {
     // Proves value formatting survives the real binary: floats keep a decimal

@@ -59,7 +59,16 @@ fn main() -> ExitCode {
         None => String::new(),
     };
 
-    match datalog::run_with_queries(&base, &cli.queries) {
+    // The program file's own path threads §13 relative-path resolution;
+    // stdin (`-`) and `-q`-only programs resolve against the working
+    // directory.
+    let source_path = cli
+        .source
+        .as_deref()
+        .filter(|arg| *arg != "-")
+        .map(std::path::Path::new);
+
+    match datalog::run_with_queries_at(&base, source_path, &cli.queries) {
         Ok(result) => {
             print!("{}", result.output());
             // Warnings go to stderr so the stdout fact stream stays valid Datalog
