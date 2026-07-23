@@ -185,16 +185,20 @@ fn a_runtime_error_exits_one() {
     assert!(out.stderr.contains("division by zero"), "{}", out.stderr);
 }
 
+/// §16.5 through the real binary: the CSV import evaluates to ancestry facts,
+/// resolved relative to the program file (the binary runs from the crate root).
+#[cfg(feature = "duckdb")]
 #[test]
-fn import_program_fails_with_a_structured_error() {
+fn import_program_evaluates() {
     let out = run_file("16_5_import.dl");
-    assert_eq!(out.code, 1);
-    assert!(out.stdout.is_empty());
-    assert!(
-        out.stderr.contains("imports not yet supported"),
-        "{}",
-        out.stderr
+    assert_eq!(out.code, 0, "{}", out.stderr);
+    assert_eq!(
+        out.stdout,
+        "ancestor(\"alice\", \"bob\").\n\
+         ancestor(\"alice\", \"carol\").\n\
+         ancestor(\"alice\", \"dave\").\n"
     );
+    assert!(out.stderr.is_empty());
 }
 
 #[test]

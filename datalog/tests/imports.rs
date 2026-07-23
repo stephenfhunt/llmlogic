@@ -103,6 +103,30 @@ fn as_set(mut rows: Vec<Vec<Value>>) -> Vec<Vec<Value>> {
     rows
 }
 
+fn type_name(ty: TypeName) -> &'static str {
+    match ty {
+        TypeName::Symbol => "symbol",
+        TypeName::String => "string",
+        TypeName::Int => "int",
+        TypeName::Float => "float",
+        TypeName::Bool => "bool",
+    }
+}
+
+/// A value as an untyped CSV cell: the raw text for strings, the canonical
+/// literal for everything else (so it lexes back to the same value).
+fn cell_text(value: &Value) -> String {
+    match value {
+        Value::String(s) => s.clone(),
+        other => datalog::print::print_value(other),
+    }
+}
+
+/// A value as an in-program Datalog literal (strings quoted).
+fn datalog_literal(value: &Value) -> String {
+    datalog::print::print_value(value)
+}
+
 // --- Generators ---
 
 /// Arbitrary cell text: printable-ish plus the RFC 4180 stress characters
@@ -253,6 +277,82 @@ proptest! {
         }
     }
 
+    /// F3 — the anchor property: a typed table imported with an explicit
+    /// schema evaluates to the same answers as the same facts written as
+    /// in-program literals. Runs the full pipeline twice and compares output.
+    #[test]
+    fn f3_import_equals_inline_facts(
+        (fields, rows) in (1usize..4, 0usize..8).prop_flat_map(|(width, height)| {
+            let fields: Vec<(String, TypeName)> = (0..width)
+                .map(|i| (format!("f{i}"), TypeName::String))
+                .collect();
+            let columns: Vec<BoxedStrategy<Vec<Value>>> =
+                (0..width).map(|_| arb_typed_column(height)).collect();
+            (Just(fields), columns).prop_map(move |(mut fields, columns)| {
+                for (i, col) in columns.iter().enumerate() {
+                    fields[i].1 = match col.first() {
+                        Some(Value::Int(_)) => TypeName::Int,
+                        Some(Value::Float(_)) => TypeName::Float,
+                        Some(Value::Bool(_)) => TypeName::Bool,
+                        _ => TypeName::String,
+                    };
+                }
+                let rows: Vec<Vec<Value>> = (0..height)
+                    .map(|r| columns.iter().map(|c| c[r].clone()).collect())
+                    .collect();
+                (fields, rows)
+            })
+        })
+    ) {
+        let names: Vec<String> = fields.iter().map(|(n, _)| n.clone()).collect();
+        // A headerless CSV under an explicit schema: skip the (astronomically
+        // unlikely) first-row-equals-field-names case, which is the header rule.
+        let csv_rows: Vec<Vec<String>> = rows
+            .iter()
+            .map(|r| r.iter().map(cell_text).collect())
+            .collect();
+        prop_assume!(csv_rows.first() != Some(&names));
+
+        let query = format!(
+            "?- p({}).\n",
+            (0..fields.len()).map(|i| format!("V{i}")).collect::<Vec<_>>().join(", ")
+        );
+
+        let dir = scratch_dir();
+        let path = dir.join("t.csv");
+        std::fs::write(&path, write_csv(&csv_rows)).expect("write csv");
+        let schema_text = fields
+            .iter()
+            .map(|(n, t)| format!("{n}: {}", type_name(*t)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let import_program = format!(
+            "import {:?} as p({schema_text}).\n{query}",
+            path.to_str().unwrap()
+        );
+
+        let inline_facts: String = rows
+            .iter()
+            .map(|r| {
+                let cells = r.iter().map(datalog_literal).collect::<Vec<_>>().join(", ");
+                format!("p({cells}).\n")
+            })
+            .collect();
+        // An empty import defines `p`, but an empty inline program leaves it
+        // undefined; a lone `declare` gives the inline side the same relation.
+        let inline_program = format!(
+            "declare p({schema_text}).\n{inline_facts}{query}"
+        );
+
+        let from_import = datalog::run(&import_program)
+            .unwrap_or_else(|e| panic!("import program: {e:?}"))
+            .output();
+        let from_inline = datalog::run(&inline_program)
+            .unwrap_or_else(|e| panic!("inline program: {e:?}"))
+            .output();
+        prop_assert_eq!(from_import, from_inline);
+    }
+
     /// F4 — JSONL round-trip: typed values survive the writer → DuckDB →
     /// finalize path exactly (JSON strings never re-inferred), up to import
     /// set semantics.
@@ -377,4 +477,51 @@ fn csv_header_fields_arrive_in_order() {
 
 fn duckdb_test_connection() -> datalog::duckdb::Connection {
     datalog::duckdb::Connection::open_in_memory().expect("open duckdb")
+}
+
+/// A schema-less import's header field names reach lowering, so named access
+/// to a wide imported relation works with no `declare` (§13; §16.7). This is
+/// the case that was a structured error before §13 landed.
+#[test]
+fn named_access_to_a_schema_less_import_works() {
+    let dir = scratch_dir();
+    let path = dir.join("employees.csv");
+    std::fs::write(
+        &path,
+        "id,name,age,dept,title\n\
+         1,alice,34,eng,manager\n\
+         2,bob,28,eng,engineer\n\
+         3,carol,45,sales,manager\n",
+    )
+    .expect("write");
+    let program = format!(
+        "import {:?} as employee.\n\
+         manager_name(N) :- employee(name: N, title: \"manager\").\n\
+         ?- manager_name(N).\n",
+        path.to_str().unwrap()
+    );
+    let result = datalog::run(&program).unwrap_or_else(|e| panic!("run: {e:?}"));
+    let answers: Vec<String> = result.answers.into_iter().flatten().collect();
+    assert_eq!(
+        answers,
+        vec!["manager_name(\"alice\").", "manager_name(\"carol\")."]
+    );
+}
+
+/// A source error names the offending file and row (§12/§13): a cell that will
+/// not coerce to the explicit column type.
+#[test]
+fn a_bad_cell_reports_file_row_and_column() {
+    let dir = scratch_dir();
+    let path = dir.join("ages.csv");
+    std::fs::write(&path, "30\nabc\n").expect("write");
+    let program = format!(
+        "import {:?} as p(age: int).\n?- p(A).\n",
+        path.to_str().unwrap()
+    );
+    let errors = datalog::run(&program).expect_err("bad cell");
+    let message = errors[0].to_string();
+    assert!(message.contains("ages.csv"), "got: {message}");
+    assert!(message.contains("row 2"), "got: {message}");
+    assert!(message.contains("`abc` is not an int"), "got: {message}");
 }

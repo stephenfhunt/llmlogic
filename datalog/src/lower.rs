@@ -43,12 +43,33 @@ use crate::error::{Error, Warning};
 use crate::ir;
 
 /// Lowers a surface program to the core IR, or reports every error found.
+///
+/// Data imports contribute no facts on this path: schema-less imports have no
+/// arity, and named access to them is an error. It is the entry for
+/// hand-constructed ASTs and tests; the pipeline uses
+/// [`lower_with_sources`].
 pub fn lower(program: &ast::Program) -> Result<ir::Program, Vec<Error>> {
+    lower_with_sources(program, &[])
+}
+
+/// Lowers a surface program with data imports already loaded (§13).
+///
+/// `tables` is aligned 1:1 with the program's **data-import statements** in
+/// source order (the same order [`crate::sources::load_imports`] produces).
+/// Each loaded table supplies a schema-less import's arity and header field
+/// names before any clause lowers — so named access to imported relations
+/// works — and its rows become base facts. An empty `tables` reproduces
+/// [`lower`]'s no-sources behavior exactly.
+pub fn lower_with_sources(
+    program: &ast::Program,
+    tables: &[crate::sources::LoadedTable],
+) -> Result<ir::Program, Vec<Error>> {
     let mut lowerer = Lowerer::default();
-    lowerer.collect_predicates(program);
+    lowerer.collect_predicates(program, tables);
     lowerer.attach_field_names();
     let mut out = ir::Program::default();
 
+    let mut data_import = 0usize;
     for statement in &program.statements {
         match &statement.kind {
             ast::StatementKind::Import(import) => match &import.kind {
@@ -66,6 +87,18 @@ pub fn lower(program: &ast::Program) -> Result<ir::Program, Vec<Error>> {
                         path: import.path.clone(),
                         span: statement.span,
                     });
+                    // Imported rows are ordinary base facts (§13): the leaves
+                    // of provenance, typed by the same facts-pin-columns rule
+                    // as in-program facts.
+                    if let Some(table) = tables.get(data_import) {
+                        for row in &table.rows {
+                            out.facts.push(ir::Fact {
+                                pred,
+                                tuple: ir::Tuple(row.clone()),
+                            });
+                        }
+                    }
+                    data_import += 1;
                 }
             },
             // Declarations contribute schema/arity only (collected above);
@@ -132,6 +165,8 @@ struct FieldSchema {
 enum SchemaOrigin {
     Declare,
     Import,
+    /// Field names inferred from a loaded source's header (§13).
+    SourceHeader,
 }
 
 impl SchemaOrigin {
@@ -139,6 +174,7 @@ impl SchemaOrigin {
         match self {
             SchemaOrigin::Declare => "`declare`",
             SchemaOrigin::Import => "the import schema",
+            SchemaOrigin::SourceHeader => "the source header",
         }
     }
 }
@@ -187,26 +223,42 @@ impl VarScope {
 
 impl Lowerer {
     /// Pass 1: intern every predicate in first-appearance order and check
-    /// arity consistency across declares, imports (explicit schemas), and use
-    /// sites.
-    fn collect_predicates(&mut self, program: &ast::Program) {
+    /// arity consistency across declares, imports, and use sites. `tables`
+    /// (aligned with data-import statements) supplies a schema-less import's
+    /// arity and header field names.
+    fn collect_predicates(
+        &mut self,
+        program: &ast::Program,
+        tables: &[crate::sources::LoadedTable],
+    ) {
+        let mut data_import = 0usize;
         for statement in &program.statements {
             match &statement.kind {
                 ast::StatementKind::Import(import) => {
-                    // Without an explicit schema the arity comes from the
-                    // source at load time; use sites will establish it below.
-                    // Field names likewise — so named access to a schema-less
-                    // import is an error until fact sources (§13) land.
-                    // Module imports contribute nothing here: resolution
-                    // splices them away before lowering.
+                    // Module imports are spliced away before lowering; only
+                    // data imports contribute schema/arity here.
                     if let ast::ImportKind::Data {
-                        relation,
-                        schema: Some(schema),
-                        ..
+                        relation, schema, ..
                     } = &import.kind
                     {
-                        self.intern_checked(&relation.name, schema.len() as u32);
-                        self.collect_schema(&relation.name, schema, SchemaOrigin::Import);
+                        match schema {
+                            // An explicit schema fixes arity and field names.
+                            Some(schema) => {
+                                self.intern_checked(&relation.name, schema.len() as u32);
+                                self.collect_schema(&relation.name, schema, SchemaOrigin::Import);
+                            }
+                            // A schema-less import takes both from its loaded
+                            // header (§13). Without a table (the no-sources
+                            // `lower`), arity is left to use sites and named
+                            // access stays an error.
+                            None => {
+                                if let Some(table) = tables.get(data_import) {
+                                    self.intern_checked(&relation.name, table.fields.len() as u32);
+                                    self.collect_schema_from_header(&relation.name, &table.fields);
+                                }
+                            }
+                        }
+                        data_import += 1;
                     }
                 }
                 ast::StatementKind::Declare(declaration) => {
@@ -278,16 +330,31 @@ impl Lowerer {
     /// Records the field names of `name`, reporting duplicates within the
     /// schema and conflicts with a schema already recorded for the predicate.
     fn collect_schema(&mut self, name: &str, fields: &[ast::FieldDecl], origin: SchemaOrigin) {
-        let mut positions = Vec::with_capacity(fields.len());
-        let mut field_types = Vec::with_capacity(fields.len());
-        let mut by_field = HashMap::with_capacity(fields.len());
-        for (position, field) in fields.iter().enumerate() {
-            positions.push(field.name.name.clone());
-            field_types.push(field.ty);
-            if by_field.insert(field.name.name.clone(), position).is_some() {
+        let names: Vec<String> = fields.iter().map(|f| f.name.name.clone()).collect();
+        let types: Vec<Option<ast::TypeName>> = fields.iter().map(|f| f.ty).collect();
+        self.collect_schema_parts(name, names, types, origin);
+    }
+
+    /// Records a source header's field names (§13): a header asserts names, not
+    /// types (those come from the loaded values as facts), so every declared
+    /// type is `None`.
+    fn collect_schema_from_header(&mut self, name: &str, header: &[String]) {
+        let types = vec![None; header.len()];
+        self.collect_schema_parts(name, header.to_vec(), types, SchemaOrigin::SourceHeader);
+    }
+
+    fn collect_schema_parts(
+        &mut self,
+        name: &str,
+        positions: Vec<String>,
+        field_types: Vec<Option<ast::TypeName>>,
+        origin: SchemaOrigin,
+    ) {
+        let mut by_field = HashMap::with_capacity(positions.len());
+        for (position, field_name) in positions.iter().enumerate() {
+            if by_field.insert(field_name.clone(), position).is_some() {
                 self.errors.push(Error::Semantic(format!(
-                    "duplicate field `{}` in the schema for `{name}`",
-                    field.name.name
+                    "duplicate field `{field_name}` in the schema for `{name}`"
                 )));
             }
         }
@@ -1807,7 +1874,7 @@ mod tests {
         };
 
         let mut lowerer = Lowerer::default();
-        lowerer.collect_predicates(&program);
+        lowerer.collect_predicates(&program, &[]);
         lowerer.attach_field_names();
 
         let person = &lowerer.predicates[0];

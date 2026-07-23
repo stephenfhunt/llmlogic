@@ -28,7 +28,7 @@ mod duckdb;
 pub use table::LoadedTable;
 pub(crate) use table::{RawTable, finalize};
 
-use crate::ast::FieldDecl;
+use crate::ast::{FieldDecl, ImportKind, Program, StatementKind};
 use crate::error::Error;
 
 /// A reader backend: turns a resolved path into a [`RawTable`]. I/O and
@@ -38,6 +38,35 @@ pub(crate) trait FactSource {
     #[allow(dead_code)] // used by error paths as backends grow
     fn format(&self) -> &'static str;
     fn read(&self, path: &str) -> Result<RawTable, Error>;
+}
+
+/// Loads every data import of a (module-resolved) program, in source order —
+/// the alignment [`crate::lower::lower_with_sources`] expects. Collects errors
+/// across all imports so one run surfaces every source problem (§12).
+pub fn load_imports(program: &Program) -> Result<Vec<LoadedTable>, Vec<Error>> {
+    let mut tables = Vec::new();
+    let mut errors = Vec::new();
+    for statement in &program.statements {
+        let StatementKind::Import(import) = &statement.kind else {
+            continue;
+        };
+        let ImportKind::Data { table, schema, .. } = &import.kind else {
+            continue; // module imports are already spliced away
+        };
+        match load_table(
+            &import.path,
+            table.as_ref().map(|(name, _)| name.as_str()),
+            schema.as_deref(),
+        ) {
+            Ok(loaded) => tables.push(loaded),
+            Err(mut source_errors) => errors.append(&mut source_errors),
+        }
+    }
+    if errors.is_empty() {
+        Ok(tables)
+    } else {
+        Err(errors)
+    }
 }
 
 /// Loads one data import end to end: dispatch on the path, read, then apply

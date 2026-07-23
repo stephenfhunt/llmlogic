@@ -183,13 +183,10 @@ pub fn eval(program: &Program) -> Result<Model> {
 /// Rejects program forms the step-2 evaluator does not support yet, and
 /// enforces the IR contract that `strata` covers every rule exactly once.
 fn validate(program: &Program) -> Result<()> {
-    if let Some(import) = program.imports.first() {
-        return Err(Error::Semantic(format!(
-            "imports not yet supported at evaluation: `import \"{}\" as {}`",
-            import.path,
-            program.pred_info(import.pred).name,
-        )));
-    }
+    // Imported facts are ordinary base facts by the time the engine runs
+    // (§13): the source layer materialized them into `program.facts` before
+    // lowering, and `ImportSpec` survives only as provenance/definedness
+    // metadata. Nothing import-specific to reject here.
     for rule in &program.rules {
         validate_body(&rule.body, &rule.var_names)?;
     }
@@ -958,17 +955,21 @@ mod tests {
         );
     }
 
+    /// An `ImportSpec` is inert metadata at eval time: the imported rows are
+    /// already base facts, so a program carrying one evaluates like any other
+    /// (§13). This replaces the pre-§13 "imports are rejected" pin.
     #[test]
-    fn imports_are_a_structured_error() {
+    fn an_import_spec_with_its_facts_evaluates() {
         let mut program = Program::default();
-        let pred = program.intern_pred("edge", 2);
+        let edge = program.intern_pred("edge", 2);
         program.imports.push(ImportSpec {
-            pred,
+            pred: edge,
             path: "edges.csv".to_string(),
             span: Span::DUMMY,
         });
-        let err = eval(&program).unwrap_err();
-        assert!(err.to_string().contains("imports not yet supported"));
+        program.facts.push(fact2(edge, "a", "b"));
+        let model = eval(&program).expect("a program with an import and its facts evaluates");
+        assert_eq!(model.relation(edge).len(), 1);
     }
 
     #[test]

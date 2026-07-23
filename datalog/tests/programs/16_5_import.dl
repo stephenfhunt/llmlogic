@@ -1,7 +1,9 @@
-% Spec §16.5 — external fact source. Imports do not yet evaluate (§13), so this
-% program parses and lowers but eval reports a structured not-yet-supported error.
+% Spec §16.5 — external fact source. The CSV (header: parent,child) binds to
+% the relation `parent`, whose tuples are base facts used exactly like
+% in-program facts.
 import "data/parents.csv" as parent.
 
 ancestor(X, Y) :- parent(X, Y).
+ancestor(X, Y) :- parent(X, Z), ancestor(Z, Y).
 
 ?- ancestor("alice", Who).

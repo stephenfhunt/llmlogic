@@ -33,10 +33,11 @@ use crate::ast::StatementKind;
 use crate::engine::{Model, eval};
 use crate::error::{Error, Warning};
 use crate::ir;
-use crate::lower::{check_program, lower};
+use crate::lower::{check_program, lower_with_sources};
 use crate::parser::parse;
 use crate::print::{print_atom, print_ground_fact};
 use crate::resolve::resolve_modules;
+use crate::sources::load_imports;
 use crate::typecheck::typecheck;
 
 /// The result of a successful [`run`]: the least model plus each query's
@@ -84,7 +85,8 @@ pub fn run(src: &str) -> Result<RunResult, Vec<Error>> {
 pub fn run_at(src: &str, source_path: Option<&Path>) -> Result<RunResult, Vec<Error>> {
     let ast = parse(src)?;
     let resolved = resolve_modules(ast, source_path)?;
-    let program = lower(&resolved.program)?;
+    let tables = load_imports(&resolved.program)?;
+    let program = lower_with_sources(&resolved.program, &tables)?;
     typecheck(&program)?;
     let warnings = check_program(&program);
     let model = eval(&program).map_err(|e| vec![e])?;

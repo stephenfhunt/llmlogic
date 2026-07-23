@@ -82,13 +82,36 @@ fn pathless_module_import_resolves_against_the_working_directory() {
     assert_eq!(answers.len(), 2);
 }
 
+/// §16.5 — a CSV import evaluates: its tuples are base facts feeding the
+/// recursive ancestry rules. Resolved relative to the program file, so the
+/// `data/parents.csv` path works from any working directory.
+#[cfg(feature = "duckdb")]
 #[test]
-fn imports_are_a_structured_eval_error_16_5() {
-    let errors = datalog::run(&corpus("16_5_import.dl")).expect_err("imports do not evaluate yet");
+fn csv_import_evaluates_16_5() {
+    let path = std::path::Path::new("tests/programs/16_5_import.dl");
+    let source = fs::read_to_string(path).expect("corpus file exists");
+    let result = datalog::run_at(&source, Some(path)).unwrap_or_else(|e| panic!("run: {e:?}"));
+    let answers: Vec<String> = result.answers.into_iter().flatten().collect();
+    assert_eq!(
+        answers,
+        vec![
+            "ancestor(\"alice\", \"bob\").",
+            "ancestor(\"alice\", \"carol\").",
+            "ancestor(\"alice\", \"dave\").",
+        ]
+    );
+}
+
+/// Under `--no-default-features` there is no reader, so a data import is a
+/// structured error naming the feature (not a silent empty result).
+#[cfg(not(feature = "duckdb"))]
+#[test]
+fn csv_import_without_the_reader_feature_is_a_structured_error() {
+    let path = std::path::Path::new("tests/programs/16_5_import.dl");
+    let source = fs::read_to_string(path).expect("corpus file exists");
+    let errors = datalog::run_at(&source, Some(path)).expect_err("no reader");
     assert!(
-        errors
-            .iter()
-            .any(|e| e.to_string().contains("imports not yet supported")),
+        errors.iter().any(|e| e.to_string().contains("duckdb")),
         "got {errors:?}"
     );
 }
