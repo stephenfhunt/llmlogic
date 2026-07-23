@@ -88,14 +88,17 @@ pub fn load_table(
     finalize(raw, schema, path)
 }
 
-/// Picks the reader for a path by extension/scheme (§13 format table).
+/// Picks the reader for a path by extension/scheme (§13 format table). URLs
+/// dispatch on the path portion's extension (query string stripped); the
+/// DuckDB backend fetches the bytes via httpfs and then reads them through the
+/// identical local path (one dialect + typing rulebook — §13).
 fn backend_for(path: &str) -> Result<Box<dyn FactSource>, Error> {
-    if is_url(path) {
-        return Err(Error::Source(format!(
-            "`{path}`: URL imports are not yet wired up (spec §13; local files only for now)"
-        )));
-    }
-    let extension = std::path::Path::new(path)
+    let for_extension = if is_url(path) {
+        url_path_part(path)
+    } else {
+        path
+    };
+    let extension = std::path::Path::new(for_extension)
         .extension()
         .and_then(|e| e.to_str())
         .map(str::to_ascii_lowercase);
@@ -114,6 +117,13 @@ fn backend_for(path: &str) -> Result<Box<dyn FactSource>, Error> {
     }
 }
 
+/// The path portion of a URL — everything before `?` (query) or `#`
+/// (fragment) — so the extension dispatch ignores query strings.
+fn url_path_part(url: &str) -> &str {
+    let end = url.find(['?', '#']).unwrap_or(url.len());
+    &url[..end]
+}
+
 /// The formats the DuckDB backend reads.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum DataFormat {
@@ -122,7 +132,7 @@ pub(crate) enum DataFormat {
     Parquet,
 }
 
-fn is_url(path: &str) -> bool {
+pub(crate) fn is_url(path: &str) -> bool {
     path.starts_with("http://") || path.starts_with("https://")
 }
 
@@ -172,10 +182,24 @@ mod tests {
     }
 
     #[test]
-    fn url_imports_are_not_yet_wired() {
-        let errors = load_table("https://example.com/data.csv", None, None).expect_err("url");
+    fn a_url_dispatches_on_its_path_extension_ignoring_the_query_string() {
+        // The path portion decides the format; a query string is ignored.
+        assert_eq!(
+            url_path_part("https://h.com/a.csv?token=x"),
+            "https://h.com/a.csv"
+        );
+        assert_eq!(
+            url_path_part("https://h.com/a.parquet#frag"),
+            "https://h.com/a.parquet"
+        );
+    }
+
+    #[test]
+    fn a_url_with_an_unsupported_extension_is_rejected_before_any_network() {
+        let errors =
+            load_table("https://example.com/data.xlsx", None, None).expect_err("unsupported url");
         assert!(
-            errors[0].to_string().contains("URL imports"),
+            errors[0].to_string().contains("unsupported import format"),
             "got: {errors:?}"
         );
     }

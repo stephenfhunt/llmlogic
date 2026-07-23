@@ -45,16 +45,61 @@ impl FactSource for DuckDbSource {
     }
 
     fn read(&self, path: &str) -> Result<RawTable, Error> {
-        if std::fs::metadata(path).is_err() {
-            return Err(Error::Source(format!("`{path}`: file not found")));
-        }
         let conn = Connection::open_in_memory()
             .map_err(|e| Error::Source(format!("`{path}`: cannot open DuckDB: {e}")))?;
+        // URLs are read directly over httpfs — DuckDB's `read_csv`/`read_json`/
+        // `read_parquet` all accept a URL, so no local file is ever written
+        // (a read-only environment can still import from a URL). CSV needs its
+        // column count up front, which comes from an in-memory blob fetch.
+        let is_url = super::is_url(path);
+        if is_url {
+            ensure_httpfs(&conn, path)?;
+        } else if std::fs::metadata(path).is_err() {
+            return Err(Error::Source(format!("`{path}`: file not found")));
+        }
         match self.format {
-            DataFormat::Csv => read_csv(&conn, path),
+            DataFormat::Csv => {
+                let shape_bytes = if is_url {
+                    fetch_bytes(&conn, path)?
+                } else {
+                    std::fs::read(path).map_err(|e| source_error(path, e))?
+                };
+                read_csv(&conn, path, &shape_bytes)
+            }
             DataFormat::Jsonl => read_jsonl(&conn, path),
             DataFormat::Parquet => read_parquet(&conn, path),
         }
+    }
+}
+
+/// Loads httpfs for URL reads (a runtime `INSTALL httpfs; LOAD httpfs;` on
+/// first use — a network fetch). Persists on the connection for later reads.
+fn ensure_httpfs(conn: &Connection, url: &str) -> Result<(), Error> {
+    conn.execute_batch("INSTALL httpfs; LOAD httpfs;")
+        .map_err(|e| {
+            Error::Source(format!(
+                "`{url}`: could not load the httpfs extension for URL imports \
+             (a network fetch on first use): {e}"
+            ))
+        })
+}
+
+/// Fetches a URL's whole content into memory via httpfs (used only to compute
+/// the CSV column count — the actual read streams from the URL directly).
+fn fetch_bytes(conn: &Connection, url: &str) -> Result<Vec<u8>, Error> {
+    let sql = format!("SELECT content FROM read_blob({})", sql_string(url));
+    let mut stmt = conn.prepare(&sql).map_err(|e| source_error(url, e))?;
+    let mut rows = stmt.query([]).map_err(|e| source_error(url, e))?;
+    match rows.next().map_err(|e| source_error(url, e))? {
+        Some(row) => match row.get_ref(0).map_err(|e| source_error(url, e))? {
+            ValueRef::Blob(bytes) => Ok(bytes.to_vec()),
+            other => Err(Error::Source(format!(
+                "`{url}`: unexpected fetch result {other:?}"
+            ))),
+        },
+        None => Err(Error::Source(format!(
+            "`{url}`: the URL returned no content"
+        ))),
     }
 }
 
@@ -74,10 +119,14 @@ fn source_error(path: &str, e: impl std::fmt::Display) -> Error {
 
 // --- CSV ---
 
-fn read_csv(conn: &Connection, path: &str) -> Result<RawTable, Error> {
-    // A zero-byte file is a legal (schema-required) empty table; DuckDB
-    // itself refuses to read it.
-    if std::fs::metadata(path).is_ok_and(|m| m.len() == 0) {
+/// Reads a CSV from `source` (a local path or an httpfs URL). `shape_bytes`
+/// is the file content used only to determine the column count and row
+/// terminator — the same bytes for a local file, or the fetched blob for a
+/// URL. The row data itself streams from `source`.
+fn read_csv(conn: &Connection, source: &str, shape_bytes: &[u8]) -> Result<RawTable, Error> {
+    // An empty file is a legal (schema-required) empty table; DuckDB itself
+    // refuses to read it.
+    if shape_bytes.is_empty() {
         return Ok(RawTable {
             columns: None,
             rows: Vec::new(),
@@ -89,7 +138,7 @@ fn read_csv(conn: &Connection, path: &str) -> Result<RawTable, Error> {
     // two facts `read_csv` cannot be told to figure out alone are the column
     // count and the row terminator, which one quote-aware scan of the first
     // record supplies.
-    let (width, new_line) = first_record_shape(path)?;
+    let (width, new_line) = first_record_shape(shape_bytes);
     let columns_spec = (0..width)
         .map(|i| format!("'c{i}': 'VARCHAR'"))
         .collect::<Vec<_>>()
@@ -98,22 +147,22 @@ fn read_csv(conn: &Connection, path: &str) -> Result<RawTable, Error> {
         "SELECT * FROM read_csv({}, header=false, all_varchar=true, \
          delim=',', quote='\"', escape='\"', auto_detect=false, \
          new_line='{new_line}', columns={{{columns_spec}}})",
-        sql_string(path)
+        sql_string(source)
     );
-    let mut stmt = conn.prepare(&sql).map_err(|e| source_error(path, e))?;
-    let mut rows = stmt.query([]).map_err(|e| source_error(path, e))?;
+    let mut stmt = conn.prepare(&sql).map_err(|e| source_error(source, e))?;
+    let mut rows = stmt.query([]).map_err(|e| source_error(source, e))?;
     let mut out = Vec::new();
-    while let Some(row) = rows.next().map_err(|e| source_error(path, e))? {
+    while let Some(row) = rows.next().map_err(|e| source_error(source, e))? {
         let mut cells = Vec::with_capacity(width);
         for col in 0..width {
-            match row.get_ref(col).map_err(|e| source_error(path, e))? {
-                ValueRef::Text(bytes) => cells.push(RawValue::Text(utf8(bytes, path)?)),
+            match row.get_ref(col).map_err(|e| source_error(source, e))? {
+                ValueRef::Text(bytes) => cells.push(RawValue::Text(utf8(bytes, source)?)),
                 // An empty cell (quoted or not) is a NULL to DuckDB; §13 says
                 // it is empty text (and will type its column string).
                 ValueRef::Null => cells.push(RawValue::Text(String::new())),
                 other => {
                     return Err(Error::Source(format!(
-                        "`{path}`: unexpected non-text CSV cell {other:?} (all_varchar read)"
+                        "`{source}`: unexpected non-text CSV cell {other:?} (all_varchar read)"
                     )));
                 }
             }
@@ -126,11 +175,10 @@ fn read_csv(conn: &Connection, path: &str) -> Result<RawTable, Error> {
     })
 }
 
-/// Scans the file's first logical record (quote-aware, so embedded newlines
-/// and `""` escapes don't fool it) for the column count and the row
-/// terminator (`\n` or `\r\n`; a single-record file defaults to `\n`).
-fn first_record_shape(path: &str) -> Result<(usize, &'static str), Error> {
-    let bytes = std::fs::read(path).map_err(|e| source_error(path, e))?;
+/// Scans the first logical record (quote-aware, so embedded newlines and `""`
+/// escapes don't fool it) for the column count and the row terminator (`\n`
+/// or `\r\n`; a single-record file defaults to `\n`).
+fn first_record_shape(bytes: &[u8]) -> (usize, &'static str) {
     let mut width = 1usize;
     let mut in_quotes = false;
     let mut i = 0usize;
@@ -142,13 +190,13 @@ fn first_record_shape(path: &str) -> Result<(usize, &'static str), Error> {
             b',' if !in_quotes => width += 1,
             b'\n' if !in_quotes => {
                 let crlf = i > 0 && bytes[i - 1] == b'\r';
-                return Ok((width, if crlf { "\\r\\n" } else { "\\n" }));
+                return (width, if crlf { "\\r\\n" } else { "\\n" });
             }
             _ => {}
         }
         i += 1;
     }
-    Ok((width, "\\n"))
+    (width, "\\n")
 }
 
 // --- JSONL ---

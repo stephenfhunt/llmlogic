@@ -542,9 +542,10 @@ sole typing authority. The engine-side seam is the `FactSource` trait
 applies every rule in this section. Imports are **eagerly materialized** into
 ordinary in-memory facts before lowering; the evaluator never touches DuckDB
 (lazy loading / filter pushdown is an explicit non-goal for v1 — §17 open
-question). The first URL import runs `INSTALL httpfs; LOAD httpfs;` (a runtime
-extension fetch; failure is a structured error explaining the network
-requirement).
+question). URL imports read **directly** over DuckDB httpfs — no local file is
+written, so a read-only environment can still import from a URL. The first URL
+import runs `INSTALL httpfs; LOAD httpfs;` (a runtime extension fetch; failure
+is a structured error explaining the network requirement).
 
 ### Module imports
 

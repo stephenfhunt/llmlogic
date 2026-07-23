@@ -479,6 +479,21 @@ fn duckdb_test_connection() -> datalog::duckdb::Connection {
     datalog::duckdb::Connection::open_in_memory().expect("open duckdb")
 }
 
+/// URL import happy path (§13): reads a small stable public CSV over httpfs.
+/// Ignored by default — it needs network and a runtime httpfs install; run
+/// with `cargo test -- --ignored` when online. `flights.csv` has a
+/// lowercase-identifier header (`year,month,passengers`), so schema inference
+/// applies with no explicit schema.
+#[test]
+#[ignore = "network + runtime httpfs extension install"]
+fn url_csv_import_reads_over_httpfs() {
+    let url = "https://raw.githubusercontent.com/mwaskom/seaborn-data/master/flights.csv";
+    let loaded = load_table(url, None, None).expect("url import over httpfs");
+    assert_eq!(loaded.fields, ["year", "month", "passengers"]);
+    // 12 years × 12 months in this well-known dataset.
+    assert_eq!(loaded.rows.len(), 144);
+}
+
 /// A schema-less import's header field names reach lowering, so named access
 /// to a wide imported relation works with no `declare` (§13; §16.7). This is
 /// the case that was a structured error before §13 landed.
