@@ -15,6 +15,9 @@ CRATE_DIR="$(cd "$SKILL_DIR/.." && pwd -P)" # → …/datalog
 BIN="$CRATE_DIR/target/release/datalog"
 
 if [[ ! -x "$BIN" ]]; then
+  # First use compiles the engine *and* its bundled DuckDB import backend
+  # (§13) — a one-time C++ build of a few minutes. Subsequent runs are instant.
+  echo "datalog: building the engine (first use; compiles DuckDB, ~a few minutes)…" >&2
   cargo build --release --manifest-path "$CRATE_DIR/Cargo.toml" >&2
 fi
 

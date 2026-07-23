@@ -16,6 +16,48 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-23 — §13 imports implemented (roadmap step 7, commits 7a–7f)
+
+**Done**
+- Shipped the full §13 import feature end to end, following the ratified design
+  (entry below). Six commits, each green on `cargo test` and
+  `cargo test --no-default-features`:
+  - **7a** — `ast::ImportKind` (Module vs Data with the deferred `table "…"`
+    selection); parser module short-circuit + contextual `table` keyword;
+    printer; golden/round-trip tests.
+  - **7b** — `src/sources/`: the `FactSource` seam + one shared `finalize`
+    layer owning §13 typing (each CSV cell classified by running it through the
+    existing lexer — no second classifier). DuckDB backend (default-on
+    feature): CSV read with sniffing fully disabled (pinned RFC 4180 dialect;
+    a quote-aware byte scan supplies column count + row terminator), two-phase
+    JSONL forcing JSON columns so values arrive verbatim, natively-typed
+    parquet. Properties F1/F2/F4/F7.
+  - **7c** — `src/resolve.rs`: module splicing, once-only by canonical path,
+    per-file relative resolution; `run_at`/`run_with_queries_at` thread the
+    program path. Properties F5/F6.
+  - **7d** — end-to-end wiring: `load_imports` → `lower_with_sources` (header
+    field names reach pass-1; rows become base facts) → engine stub removed.
+    Dissolves the 2026-07-20 schema-less-named-access limitation. F3 anchor
+    property (import ≡ inline facts).
+  - **7e** — URL imports over httpfs, **no temp file** (read directly; CSV
+    fetches bytes to memory only for the column count). Validated live.
+  - **7f** — README/AGENTS/SKILL/agent-skill import docs; wrapper notes the
+    one-time DuckDB build.
+- Toolchain: `.cargo/config.toml` pins CC/CXX=clang — GCC 15.3 ICEs on
+  DuckDB's unity build here.
+
+**Decided** (beyond the design entry below)
+- **No temp file for URLs** (user cost review): can't rely on writable temp
+  dirs (read-only sandboxes), and DuckDB reads URLs directly anyway.
+
+**Next up**
+- §9 aggregation (the paired expressivity pillar for source analysis).
+- A `skill/recipes/source-analysis.md` recipe now that imports exist.
+- Consider the `imports.proptest-regressions` seed hygiene and whether the
+  CI lane split (`--features` vs `--no-default-features`) wants documenting.
+
+---
+
 ## 2026-07-23 — §13 import deep-dive: design ratified (spec-first commit)
 
 **Done**

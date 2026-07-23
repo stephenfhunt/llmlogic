@@ -72,6 +72,37 @@ datalog people.dl -q 'adult(N) :- person(name: N, age: A), A >= 18.' \
 The first run materializes `adult/1` facts; the second reads them from stdin and
 filters. Or write an intermediate result to a file and query it again later.
 
+## Importing external data (§13)
+
+Instead of inlining a large fact base, **import** it. A data import binds a
+tabular file (or an `http(s)` URL) to a relation; a module import splices in
+another Datalog file:
+
+```datalog
+import "data/parents.csv" as parent.     % CSV → parent/2 (base facts)
+import "edges.jsonl" as calls.           % JSONL, Parquet, and http(s) URLs too
+import "lib/rules.dl".                    % no `as` = splice another .dl file
+```
+
+- **Schema inference.** Field names come from the source (a CSV header row, JSON
+  keys); column types come from the data, read by the *same* literal rules as
+  in-program values (all-int → int, int/float → float, `true`/`false` → bool,
+  else string; an empty CSV cell makes its column a string). So an import means
+  exactly the facts you'd get by typing those rows as literals.
+- **Explicit schema** overrides inference and is required for a headerless CSV:
+  `import "data/parents.csv" as parent(parent: string, child: string).` — the
+  types coerce each cell, and a cell that won't coerce is an error naming the
+  file, row, and column.
+- **Named access** works on a wide imported table with no `declare`:
+  `manager(N) :- employee(name: N, title: "manager").`
+- **Paths** resolve relative to the importing file's directory. A module import
+  (`import "lib.dl".`) is included once even through diamonds or cycles; queries
+  belong in the top-level program, not in imported modules.
+
+Imports need the engine's default `duckdb` feature (present in the packaged
+skill binary). A build without it reports a structured error for any data
+import.
+
 ## Errors
 
 Errors are **structured prose** with source spans and, for common mistakes,

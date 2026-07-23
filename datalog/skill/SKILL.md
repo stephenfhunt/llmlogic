@@ -90,6 +90,15 @@ sorted — and they round-trip as input, so runs compose over pipes:
 - **Negation**: `not covered(X)` (stratified — no recursion through negation).
 - **Comparisons/arithmetic**: `A >= 18`, `M = N + 1`; strict numeric types.
 - **Queries**: `?- ancestor("alice", Who).`
+- **Imports** load external data or split a program across files:
+  ```
+  import "data/parents.csv" as parent.   % CSV/JSONL/Parquet/http(s) → a relation
+  import "lib/rules.dl".                  % splice another Datalog file (no `as`)
+  ```
+  Field names and types come from the source; add an explicit schema
+  (`as parent(parent: string, child: string)`) for headerless files. Paths are
+  relative to the importing file. Bulk facts belong in a CSV/JSONL import rather
+  than thousands of inline `fact(...).` lines.
 
 ## Worked example
 

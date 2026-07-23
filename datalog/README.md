@@ -26,11 +26,17 @@ papers and notable implementations, grouped by topic) that guides the design.
 
 ## Status
 
-Working end-to-end for v1 core: lexer, recursive-descent parser, lowering, static
-type inference, stratified semi-naive evaluation with provenance, and a canonical
-printer are implemented, wired as `parse → lower → typecheck → eval`. The CLI runs
-programs and answers one-shot `-q` queries. Still pending: external imports (§13),
-aggregation (§9), and the provenance query surface (§11).
+Working end-to-end for v1 core: lexer, recursive-descent parser, module and data
+imports (§13), lowering, static type inference, stratified semi-naive evaluation
+with provenance, and a canonical printer, wired as
+`parse → resolve modules → load imports → lower → typecheck → eval`. The CLI runs
+programs and answers one-shot `-q` queries. Still pending: aggregation (§9) and
+the provenance query surface (§11).
+
+The core language engine is zero-dependency; **imports are powered by
+[DuckDB](https://duckdb.org)** (a default-on cargo feature). Building without it
+(`--no-default-features`) drops the import backend — a data import then reports a
+structured error naming the feature.
 
 ## CLI usage
 
@@ -53,6 +59,22 @@ datalog family.dl -q 'grandparent(X, Z) :- parent(X, Y), parent(Y, Z)'
 datalog people.dl -q 'adult(N) :- person(name: N, age: A), A >= 18.' \
   | datalog - -q 'adult(N), N != "bob"'
 ```
+
+### Imports (§13)
+
+A program can pull in external data and other Datalog files:
+
+```datalog
+import "data/parents.csv" as parent.        % CSV → the relation parent/2
+import "callgraph.jsonl" as calls.          % JSONL / Parquet / http(s) URLs too
+import "lib/family.dl".                      % splice another Datalog file (no `as`)
+```
+
+Field names and column types are inferred from the source (a CSV header, the
+data's own literals); an explicit schema
+(`import "x.csv" as parent(parent: string, child: string).`) overrides both and
+is required for headerless files. Paths resolve relative to the importing file.
+See [`spec.md`](spec.md) §13.
 
 The full agent-facing guide is [`docs/agent-skill.md`](docs/agent-skill.md).
 
