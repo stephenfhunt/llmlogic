@@ -510,6 +510,19 @@ impl Parser {
                 span,
             });
         }
+        // Grouping parens are not in the v1 grammar (`primary = [ "-" ] number |
+        // term`, §5). Catch them here with the decomposition workaround rather
+        // than letting `parse_term` report a bare "expected a term" — the reader
+        // is often an agent, and the actionable form is self-healing.
+        if matches!(self.kind(), TokenKind::LParen) {
+            let span = self.span();
+            self.error(
+                span,
+                "parentheses are not supported in expressions; introduce an intermediate \
+                 variable instead (e.g. `(A + B) * C` becomes `T = A + B, X = T * C`)",
+            );
+            return Err(());
+        }
         let term = self.parse_term()?;
         let span = term.span;
         Ok(Expr {
@@ -1080,6 +1093,23 @@ adult(N) :- person(name: N, age: A), A >= 18.
     #[test]
     fn compound_term_is_rejected() {
         asserts_message("p(f(1)).", "compound terms are not supported");
+    }
+
+    #[test]
+    fn grouped_expression_is_rejected_with_the_decomposition_hint() {
+        // Grouping parens aren't in the v1 expression grammar (`primary =
+        // [ "-" ] number | term`, §5). Both entry paths — a comparison operand
+        // and an inline atom argument — must surface the actionable hint, not a
+        // bare "expected a term".
+        asserts_message(
+            "r(X) :- n(Y), X = (Y + 1) * 2.",
+            "parentheses are not supported in expressions",
+        );
+        asserts_message("r(X) :- n(Y), X = (Y + 1) * 2.", "T = A + B, X = T * C");
+        asserts_message(
+            "double(N, (N + N)) :- n(N).",
+            "parentheses are not supported",
+        );
     }
 
     #[test]
