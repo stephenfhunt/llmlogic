@@ -16,6 +16,59 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-23 — Dogfood: §13 imports on USDA FoodData Central (no code)
+
+**Done**
+- First real-world exercise of §13 imports: pulled the FoodData Central
+  **Foundation Foods** dataset (2026-04-30 release; `food` 88k rows, a 170k-row
+  `food_nutrient` measurement table, `nutrient`/`food_category` dimensions) and
+  explored it through the release binary with header-inferred schemas, named
+  argument access, multi-table joins, arithmetic thresholds, and stratified
+  negation. Findings held up nutritionally (high-protein foods; the
+  high-protein∧high-iron set is dominated by dry legumes; ~70 foods carry
+  Vitamin B-12 and they're almost all animal products + fortified plant milks).
+
+**Found**
+- **Strict typing caught real data defects, up front, twice** — the
+  structured-errors pillar working on messy data:
+  - `food_nutrient.amount` has 33 **empty** cells → the whole column types
+    `string` (any empty cell does; the value space has no null), so arithmetic
+    on it is a pre-eval type error, not a silent empty result. Had to drop the
+    empty-amount rows before comparisons worked.
+  - `food.food_category_id` has empty values → `string`, so it won't join to
+    the integer `food_category.id`; the engine refused the join rather than
+    returning silent `0 rows`.
+- **Verified** (corrects a mid-session claim): scientific-notation cells like
+  `1.25E-4` import fine as floats — the lexer's number scanner handles `e`/`E`
+  exponents. Only the empty cells force the string typing.
+- **`input_food` provenance graph is one hop deep**: foods-with-inputs (the
+  ~468 foundation foods) and foods-used-as-inputs (~4,770 raw samples) are
+  disjoint, so there are no transitive lineage chains — the recursion feature
+  had nothing to close over in this dataset.
+
+**Decided**
+- **Missing values get a first-class, two-valued optional/absent value**
+  (direction; design + implementation deferred to their own session — spec §17
+  2026-07-23). The three backends handle absence inconsistently today (CSV empty
+  → `""`; JSONL/Parquet null → error), and the strict no-null rule makes sparse
+  real-world data unusable-for-arithmetic or unimportable. Representing absence
+  is the only response that doesn't lose data or corrupt a column's type. It is
+  **two-valued** (absent-vs-value is false/error, never SQL's propagating
+  "unknown" — 3VL would undercut the predictability pillar). Reopens the ratified
+  "value space has no null" (§4/§13). Design sub-questions live in §17 Open
+  questions.
+
+**Next up**
+- **Absence design session** — the deferred pillar-level task above (type
+  system, builtin truth tables, join/unification, set semantics, a round-tripping
+  surface literal, §9/§11 interaction). Treat like the §13 deep-dive.
+- Reinforces the **§9 aggregation** need: every analysis was a threshold or
+  existence check because there's no top-N / average / group-by yet.
+- **Join performance**: `foundation × 170k-measurement` joins run ~11–20 s in
+  release — correct but unoptimized for tables this size.
+
+---
+
 ## 2026-07-23 — §13 imports implemented (roadmap step 7, commits 7a–7f)
 
 **Done**

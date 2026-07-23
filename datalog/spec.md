@@ -497,7 +497,11 @@ import "data/parents.csv" as parent.
   carry types, which are coerced onto the five value types (a JSON `"42"` stays
   a string, never re-inferred; ints are range-checked into int; date/time-like
   types become their ISO text as strings; NULLs and nested values are structured
-  errors naming row and column — the value space has no null).
+  errors naming row and column — the value space has no null). *(Missing/null
+  handling is slated to change: an empty CSV cell currently becomes `""` while
+  a JSON/Parquet null is an error — three backends, three policies. §17
+  2026-07-23 decides a uniform first-class optional/absent value; until it
+  lands, the current per-backend behavior stands.)*
 - **Explicit schema** overrides inference, and is required for headerless CSV:
 
   ```datalog
@@ -828,6 +832,30 @@ when roadmap step 7 lands, since imports load before lowering.)*
 *Status: living*
 
 ### Decisions
+
+- **2026-07-23** — **Missing values → a first-class optional/absent value**
+  (direction decided; design + implementation deferred to their own session).
+  Dogfooding §13 imports on real USDA FoodData Central data (`docs/worklog.md`)
+  exposed two things: the three fact-source backends handle absence
+  **inconsistently** — a CSV empty cell becomes `""` (which forces the whole
+  column to `string`), a JSONL missing key / explicit null is an error, a
+  Parquet NULL is an error — and the strict "value space has no null" rule
+  makes ordinary sparse real-world data (nullable Parquet/DB columns, gapped
+  scientific CSVs) either unusable for arithmetic or unimportable.
+  - **Decided:** the robust response is to represent absence as a **first-class
+    value**, uniformly across every source, rather than error / string-coerce /
+    drop-row — each of which loses data or corrupts a column's type.
+  - **Decided:** the semantics are **two-valued, not SQL's three-valued
+    logic.** An operation against absent is *false* (or a structured error),
+    never a third "unknown" truth value that silently propagates through
+    comparisons, joins, and rules. 3VL is SQL's most-regretted design and would
+    undercut the predictability that is this engine's whole pitch (a logic
+    engine an LLM can trust over its own chain-of-thought).
+  - This **reopens the ratified "value space has no null"** statements (§4
+    value model, §13 typed sources). It is a pillar-level change touching the
+    type system, every builtin, unification/joins, set semantics, surface
+    syntax, and §9/§11 — hence a dedicated design session, not an inline patch.
+    Open sub-questions below.
 
 - **2026-07-23** — **§13 import deep-dive** (design session; implementation is
   roadmap step 7). Decisions ratified:
@@ -1323,6 +1351,18 @@ when roadmap step 7 lands, since imports load before lowering.)*
 
 ### Open questions
 
+- **Optional/absent value design** (direction decided 2026-07-23, Decisions
+  above — a first-class, two-valued absent value; this is the deferred design
+  session). To settle: `optional T` as a distinct column type (inference tracks
+  nullability, most columns stay provably total) vs. one `absent` value any
+  column may hold; the truth table for `absent`-vs-value comparisons and
+  arithmetic (2-valued — false or structured error, never a third truth value);
+  whether `absent` unifies/joins with `absent`; its `Eq`/`Ord`/`Hash` sort
+  position for set semantics; a printable literal that round-trips (D1 closure,
+  Datalog-out is Datalog-in — so the grammar gains a token); and how §9
+  aggregation and §11 provenance treat it. Per-source import policy (which
+  sources map absence to `absent` vs. still error) folds in here, replacing the
+  current three-backend inconsistency. — §4/§13/§9/§11.
 - **Database loading** (SQLite/DuckDB files via the reserved `table "…"`
   grammar; Postgres via DuckDB attach) and **TSV**: deferred until a real
   consumer appears; the format table and dispatch errors already name them. — §13.

@@ -9,10 +9,12 @@ better reasoning. It is a multi-project repo: each project lives in its own
 top-level directory and is self-contained (its own build system, tests, and docs).
 
 **Start here each session:** read [`docs/worklog.md`](docs/worklog.md) — the most
-recent entry's *Next up* tells you where the last session left off. End your session
-by adding a new worklog entry (Done / Decided / Next up). Raw session transcripts are
-auto-saved by Claude Code under `~/.claude/projects/<repo-slug>/*.jsonl` — don't
-commit transcripts into the repo.
+recent entry's *Next up* tells you where the last session left off — and, for a
+project, its `ROADMAP.md` (e.g. [`datalog/ROADMAP.md`](datalog/ROADMAP.md)) for
+the indexed backlog of open items. End your session by adding a new worklog entry
+(Done / Decided / Next up) and updating any item whose status changed in
+`ROADMAP.md`. Raw session transcripts are auto-saved by Claude Code under
+`~/.claude/projects/<repo-slug>/*.jsonl` — don't commit transcripts into the repo.
 
 Current projects:
 - **`datalog/`** — a Datalog engine in Rust, targeted at LLM/agent use, with
@@ -126,9 +128,10 @@ rationale in spec §17):
    guide: `docs/agent-skill.md`. **JSON output was deferred as low-value** — the
    data path is Datalog-native (`-q` over facts is the jq analog) and errors are
    already actionable prose; `--format json` stays a documented future edge only.
-   Post-v1 threads remain: §13 imports (+ imported inferred column types), §9
-   aggregation, §11 provenance-as-facts surface, §12 machine-readable error
-   taxonomy.
+   Post-v1 threads (§9 aggregation, a first-class optional/absent value, §11
+   provenance surface, §12 error taxonomy, §13 follow-ons, …) are tracked as a
+   single indexed backlog in [`datalog/ROADMAP.md`](datalog/ROADMAP.md) — the
+   *what's-open-and-what-state* view, with each item pointing to its §17 detail.
 
 ### Using `datalog` as an agent skill
 
