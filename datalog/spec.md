@@ -112,8 +112,10 @@ Candidate principles to ratify:
 (`src/lower.rs`), 2026-07-20; type inference implemented as a post-lowering pass
 (`src/typecheck.rs`), 2026-07-21; `declare`-signature verification implemented
 (declared types threaded onto `ir::PredicateInfo.field_types`, verified in
-`typecheck`), 2026-07-21. Source (2) imported *inferred* column types lands with
-§13.*
+`typecheck`), 2026-07-21. Source (2) imported *inferred* column types needs no
+separate inference channel: imports materialize as column-uniform facts before
+lowering, and source (1) types them — decided with §13, 2026-07-23; lands with
+roadmap step 7.*
 
 ### Values and terms
 
@@ -199,7 +201,10 @@ ancestor(X, Y) :- parent(X, Y).             % rule
 program     = { statement } ;
 statement   = import | declaration | clause | query ;
 
-import      = "import" string "as" ident [ "(" field { "," field } ")" ] "." ;
+import        = data_import | module_import ;
+module_import = "import" string "." ;
+data_import   = "import" string [ "table" string ] "as" ident
+                [ "(" field { "," field } ")" ] "." ;
 declaration = "declare" ident "(" field { "," field } ")" "." ;
 field       = ident [ ":" type ] ;
 type        = "int" | "float" | "string" | "symbol" | "bool" ;
@@ -252,6 +257,18 @@ Notes:
   get a targeted did-you-mean error (the strict-grammar pillar, §2).
 - Aggregate expressions (§9) are **not yet in the grammar** — their syntax is an
   open question (§17), in part because `:` now also delimits named arguments.
+- **`table` is a contextual keyword, not reserved** (§17, 2026-07-23): after
+  `import <string>` the only legal continuations are `.`, `as`, or
+  `table <string>`, so the parser matches an identifier spelled `table` there;
+  everywhere else `table` remains an ordinary identifier (relation/field name).
+- **Module vs data import is decided by shape, not file type**: no `as` clause =
+  module import (§13). The grammar stays context-free; extension/scheme
+  *semantics* (`.dl` vs data formats vs URLs) are checked during module
+  resolution with targeted errors either way (`import "x.csv".` → "importing
+  data requires `as`"; `import "lib.dl" as x.` → "a `.dl` file is a module
+  import; drop the `as` clause").
+- **URLs need no grammar**: a path is a plain string; a scheme (`http://`,
+  `https://`) makes it a URL at resolution time (§13).
 
 ## 6. Declarative semantics
 
@@ -443,9 +460,14 @@ source spans, severities, and suggested fixes — designed for LLM consumption.*
 
 ## 13. External data / fact sources
 
-*Status: Draft*
+*Status: Ratified 2026-07-23 (design deep-dive; decisions in §17) — implementation
+is roadmap step 7.*
 
-External tabular data is bound to a relation name with `import`:
+`import` has two forms, distinguished by shape: a **data import** binds external
+tabular data to one relation (`as` clause present), and a **module import**
+splices another Datalog file's statements into the program (no `as` clause).
+
+### Data imports
 
 ```datalog
 import "data/parents.csv" as parent.
@@ -453,23 +475,92 @@ import "data/parents.csv" as parent.
 
 - The imported relation is **extensional** (base facts): used in rules exactly like
   in-program facts, and its tuples anchor the leaves of provenance trees (§11).
-- **Schema inference:** field names come from the CSV header row; column types are
-  inferred from the data (all-int column → int; int/float mix → float;
-  `true`/`false` → bool; anything else → string). Imported text is typed string,
-  never symbol.
-- **Explicit schema** overrides inference, and is required for headerless sources:
+  Tuples are deduplicated at import time (set semantics); several imports may
+  target the same relation, and their facts union (schema/arity disagreements are
+  the usual conflict errors).
+- **Schema inference — field names** come from the source: the CSV header row, or
+  the keys/columns of self-describing sources (JSONL, Parquet, databases). Field
+  names must be legal identifiers (§3) and unique; otherwise the import is a
+  structured error suggesting an explicit schema — never silent sanitization.
+- **Schema inference — column types.** CSV cells are untyped text, so the
+  language's **own literal grammar** is the rulebook (decided 2026-07-23 over
+  delegating to a reader's type sniffer, §17): a cell is typed int, float, or
+  bool **iff the lexer reads it as exactly that literal** (as accepted in fact
+  positions, including a leading sign); anything else — including empty cells —
+  is a string. A column's type is the unification of its cells: all-int → int,
+  int/float mix → float, all-bool → bool, anything else (or any empty cell) →
+  string. Inferred types are never symbol. This makes the anchor property exact:
+  **an import means precisely the facts you would get by writing its cells as
+  in-program literals**, and inference is deterministic across engine and
+  dependency versions.
+- **Typed sources are their own authority**: JSON, Parquet, and database columns
+  carry types, which are coerced onto the five value types (a JSON `"42"` stays
+  a string, never re-inferred; ints are range-checked into int; date/time-like
+  types become their ISO text as strings; NULLs and nested values are structured
+  errors naming row and column — the value space has no null).
+- **Explicit schema** overrides inference, and is required for headerless CSV:
 
   ```datalog
   import "data/parents.csv" as parent(parent: string, child: string).
   ```
 
+  Binding is positional for CSV and by field name (set-equality, schema order
+  wins) for self-describing sources. Declared types coerce cells, and a cell
+  that will not coerce is a structured error naming row, column, and file.
+  `symbol` may be declared explicitly (useful for joining in-program symbol
+  facts). With an explicit schema the CSV first row is treated as a header and
+  skipped **iff** its cells exactly equal the schema's field names
+  (case-sensitive); otherwise it is data (decided 2026-07-23).
 - Named-argument access works on imported relations immediately, using the header
   (or explicit) field names.
-- Paths are resolved relative to the directory of the program source file.
-- **Formats:** CSV is specified first. TSV/JSON/JSONL, SQLite, DuckDB, Parquet/
-  Arrow, and Postgres are planned; priority order is an open question (§17) —
-  DuckDB is a strong early candidate since it also provides CSV/Parquet readers.
-  The engine-side abstraction is the `FactSource` trait (`src/sources.rs`).
+- Paths are resolved **relative to the directory of the importing file** (each
+  file resolves its own imports; a stdin/`-q`-only program resolves against the
+  working directory). A path with a URL scheme (`http://`, `https://`) is
+  fetched instead — URL imports are part of the format table below.
+- **Formats** (decided 2026-07-23; the reader is DuckDB, see below):
+
+  | source | notes |
+  |---|---|
+  | `*.csv` | untyped text; header + literal-grammar inference above |
+  | `*.jsonl`, `*.ndjson` | one object per non-blank line; field order = the first record's key order; every record must supply the same key set; scalar values only |
+  | `*.parquet` | natively typed |
+  | `http(s)://…` | fetched via DuckDB httpfs, then treated per its extension |
+  | `*.duckdb`, `*.db`, `*.sqlite*` + `table "…"` | **syntax reserved, loading deferred** — `import "analytics.duckdb" table "orders" as order.` |
+
+  Anything else is a structured "unsupported import format" error listing the
+  supported set.
+
+### The reader: DuckDB (default feature)
+
+The import layer is powered by **DuckDB** (`duckdb` crate, bundled), a
+**default-on cargo feature**: every normal build has imports; a
+`--no-default-features` build is the escape hatch, in which any data import is a
+structured error naming the feature. DuckDB does transport and dialect parsing
+only — CSV is read `all_varchar` so the literal-grammar inference above is the
+sole typing authority. The engine-side seam is the `FactSource` trait
+(`src/sources/`): backends read raw tables, and one shared `finalize` layer
+applies every rule in this section. Imports are **eagerly materialized** into
+ordinary in-memory facts before lowering; the evaluator never touches DuckDB
+(lazy loading / filter pushdown is an explicit non-goal for v1 — §17 open
+question). The first URL import runs `INSTALL httpfs; LOAD httpfs;` (a runtime
+extension fetch; failure is a structured error explaining the network
+requirement).
+
+### Module imports
+
+```datalog
+import "lib/family.dl".
+```
+
+- Splices the imported file's statements in place (textual-inclusion semantics),
+  depth-first, preserving source order.
+- **Once-only inclusion by canonical path**: a file is spliced the first time it
+  is reached; diamonds deduplicate and cycles terminate harmlessly.
+- No namespacing in v1: predicates, facts, rules, and `declare`s land in the one
+  global namespace exactly as if written in the importing file.
+- A query (`?- …`) in an imported file is a structured error naming the file —
+  libraries define, they don't ask. Root-file queries are unaffected.
+- Module imports are local files only in v1 (no URL modules).
 
 ## 14. Programmatic / agent API
 
@@ -683,8 +774,9 @@ ancestor(X, Y) :- parent(X, Z), ancestor(Z, Y).
 % import "data/parents.csv" as parent(parent: string, child: string).
 ```
 *Raised (resolved in §13):* declaration syntax; schema/column→arg mapping; column
-typing; imported tuples are base facts and anchor provenance leaves. *Still open:*
-backend priority beyond CSV (§17).
+typing (the language's literal grammar, 2026-07-23); imported tuples are base
+facts and anchor provenance leaves; formats and reader (DuckDB, default-on
+feature, 2026-07-23). *Still open:* database loading and filter pushdown (§17).
 
 ### 16.6 Provenance — "why?"
 
@@ -727,13 +819,68 @@ literal; partial selection (omitted fields bind to fresh anonymous variables);
 test. One adaptation in the fixture: the `employee` import is written with an
 explicit schema, because header-derived field names need fact sources (§13,
 not yet implemented). Until then, named access to a schema-less import is a
-structured error.
+structured error. *(§13 was ratified 2026-07-23 — the adaptation dissolves
+when roadmap step 7 lands, since imports load before lowering.)*
 
 ## 17. Decisions log & open questions
 
 *Status: living*
 
 ### Decisions
+
+- **2026-07-23** — **§13 import deep-dive** (design session; implementation is
+  roadmap step 7). Decisions ratified:
+  - **DuckDB is the single reader backend, on by default.** A **default-on cargo
+    feature** (`default = ["duckdb"]`, bundled): imports work in every normal
+    build with zero hoops; `--no-default-features` is the opt-out escape hatch
+    (fast CI lane, exotic targets) where data imports are a structured error.
+    No hand-rolled std CSV/JSONL readers — one reader path. *This amends the
+    same-week "feature-gated so the default build stays lightweight" decision
+    (below): availability was chosen over a lightweight default after explicit
+    cost review.* Accepted costs: ~5–15 min cold C++ compile (cached per target
+    dir/profile), a C++ toolchain required to build, a few seconds of extra link
+    time per test binary, a binary in the tens of MB, and DuckDB entering the
+    supply-chain trust base of a tool that runs LLM-generated programs.
+  - **CSV type inference is defined by the language's literal grammar**, not by
+    DuckDB's sniffer: a cell is int/float/bool iff the lexer reads it as that
+    literal; columns unify; everything else (and any empty cell) is string.
+    Considered and rejected: the full sniffer (types we can't represent get
+    detected then normalized through casts — e.g. `01/15/2024` → `2024-01-15`;
+    rules drift with dependency upgrades) and a restricted sniffer via
+    `auto_type_candidates` (empty cells become NULLs and fail sparse imports;
+    SQL's text-parsing rules ≠ the language's). Deciding factor: inferred types
+    change program meaning, and program meaning stays spec-defined and
+    reproducible; reusing the lexer also means no new classifier exists to
+    drift. DuckDB remains dialect-parsing authority (`all_varchar`).
+  - **Eager materialization; the evaluator never touches DuckDB.** Imports load
+    fully into `Program.facts` before lowering, behind the `FactSource` seam;
+    DuckDB's footprint is one leaf module. Loading before lowering lets
+    header-derived field names reach pass-1 schema collection, dissolving the
+    2026-07-20 "schema-less import has no schema" limitation as predicted, and
+    typecheck needs no new channel — imported rows are column-uniform facts and
+    the existing "facts pin columns" rule types them (resolves §4's source (2)
+    note).
+  - **Module imports** (`import "lib.dl".`, no `as`): splice-in-place statement
+    union, once-only by canonical path (diamonds dedup; cycles terminate), no
+    namespacing, queries in imported files are errors, local files only.
+    Chosen over a separate `include` keyword (no second concept/reserved word;
+    the missing `as` clause already distinguishes the forms grammatically) and
+    over a namespaced module system (deferred until a real consumer needs it).
+  - **Database grammar ratified, loading deferred**:
+    `import "analytics.duckdb" table "orders" as order.` — the table name as a
+    *string literal* accommodates arbitrary SQL identifiers, reads
+    left-to-right, and composes with the explicit-schema suffix; `table` is a
+    contextual keyword (§5). Rejected: URI fragments (`"file.duckdb#orders"` —
+    stringly, collides with legal filenames) and reordered `as … from …` forms.
+  - **URLs are ungated** (no `--allow-url` flag; user call, 2026-07-23) and ride
+    DuckDB httpfs with a lazy runtime `INSTALL httpfs` on first use.
+  - **Explicit-schema CSV header rule**: first row skipped iff it exactly equals
+    the schema's field names (case-sensitive); otherwise data.
+  - **API threading**: `run_at`/`run_with_queries_at` carry the program file's
+    path for per-file relative resolution; the pathless forms wrap them
+    (stdin/`-q` resolve against the working directory). Cross-file error
+    attribution keeps per-file spans plus a statement-origin side table — the
+    hook for §12's future file:offset rendering, not built out now.
 
 - **2026-07-23** — **Diagnostic warnings** (`Warning::UndefinedPredicate`, the
   first use of the §12 severity axis; `f7581ba`):
@@ -766,6 +913,10 @@ structured error.
     import layer on DuckDB from the outset rather than a throwaway std-only CSV
     reader. Downstream: the "zero runtime dependencies" wording in README/AGENTS.md
     becomes "zero-dependency core, optional import backends" once this lands.
+    *Amended by the same-week §13 deep-dive (above): the DuckDB-from-the-outset
+    lead was confirmed, but the feature is **default-on** — availability won
+    over the lightweight default, and the wording becomes "zero-dependency core
+    language engine; imports powered by DuckDB (default feature)".*
   - **§9 aggregation is the paired expressivity pillar** for source analysis
     (count/sum/min/max + grouping); deferred after §13, but confirmed important —
     every ranking/"how-many" in the dogfooding session was hand-done outside the
@@ -1056,6 +1207,9 @@ structured error.
   or an explicit import schema. This is a temporary consequence of fact
   sources being unimplemented, not a language rule — §16.7's spec text stays
   as written, and its fixture uses the explicit-schema import form meanwhile.
+  *Resolved as predicted by the 2026-07-23 §13 deep-dive: imports load before
+  lowering, so header-derived field names reach pass-1 schema collection and
+  named access on schema-less imports works once step 7 lands.*
 - **2026-07-20** — **Fact grounding is checked against the lowered head**, not
   against surface positional terms, so the named and positional paths behave
   identically and only the error *wording* differs (a named fact names the
@@ -1168,8 +1322,15 @@ structured error.
 
 ### Open questions
 
-- **Data sources beyond CSV** (TSV/JSON/JSONL, SQLite, DuckDB, Parquet/Arrow,
-  Postgres): priority order and per-backend declaration details. — §13.
+- **Database loading** (SQLite/DuckDB files via the reserved `table "…"`
+  grammar; Postgres via DuckDB attach) and **TSV**: deferred until a real
+  consumer appears; the format table and dispatch errors already name them. — §13.
+- **Filter pushdown for large sources:** v1 eagerly materializes every import;
+  a program touching ten rows of a 10 GB parquet file pays for all of it. The
+  ratified path/`table` syntax leaves room to push selections down into SQL if
+  a consumer hits the wall. — §13.
+- **Module namespacing:** v1 module imports share one global namespace;
+  qualified names/visibility deferred until a real consumer needs them. — §13.
 - **Aggregation vs recursion:** how far to go on recursive aggregation semantics. — §9.
 - **Aggregate expression syntax:** `count { Var : Goal }` is provisional — and `:`
   now also delimits named arguments, so the form will likely be revisited. — §9.
@@ -1190,6 +1351,6 @@ structured error.
   low-value 2026-07-23 with the data path staying Datalog-native. (`-q`
   semantics, multiple flags, stdin/`-`, optional source, and output ordering all
   resolved 2026-07-23; the agent skill definition is `docs/agent-skill.md`.) — §14.
-- **Dependency choices:** `serde` for the API and source backends — decide as
-  the relevant sections stabilize. (Lexer/parser + CLI: resolved 2026-07-22 /
-  2026-07-23 — hand-rolled, zero new deps.)
+- **Dependency choices:** `serde` for the API — decide as §14 stabilizes.
+  (Lexer/parser + CLI: resolved 2026-07-22 / 2026-07-23 — hand-rolled, zero new
+  deps. Source backends: resolved 2026-07-23 — DuckDB, default-on feature, §13.)

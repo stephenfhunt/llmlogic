@@ -340,3 +340,30 @@ loop that recorded the derivation. Only E5 waits on the step-6 surface design.
 - [x] **E4** A base fact's provenance is a leaf.
 - [ ] **E5** Once provenance-as-facts is designed (§17 open question),
   provenance output itself satisfies D1 closure.
+
+### Phase F — §13 imports (roadmap step 7) — generalizes §16.5, §16.7
+
+Ratified 2026-07-23 with the §13 deep-dive. The reader is DuckDB (default-on
+feature), so the default `cargo test` exercises it; a `--no-default-features`
+lane pins the structured feature-error path. Temp files via a small hand-rolled
+scratch-dir helper in tests (`std::env::temp_dir()` + pid + counter — no
+`tempfile` dep). The URL happy path is `#[ignore]` (network).
+
+- [ ] **F1** CSV round-trip: arbitrary cell strings (incl. quotes, commas,
+  newlines, CRLF) → test-side RFC 4180 writer → import ≡ the original table.
+  Doubles as a conformance check on the DuckDB read options (`all_varchar`,
+  `header=false`).
+- [ ] **F2** Inference oracle: generated text tables import with column types
+  matching an independent in-test implementation of the §13 literal-grammar
+  rules (lexer-classified cells, column unification).
+- [ ] **F3** **Import ≡ inline facts** (the anchor property): a generated typed
+  table, imported, evaluates to the same model and answers as the same facts
+  written as in-program literals — the full pipeline run twice.
+- [ ] **F4** JSONL round-trip: generated typed records → test-side writer →
+  import ≡ the original values (JSON strings never re-inferred).
+- [ ] **F5** Module diamond: root→{a,b}, a→c, b→c import graphs evaluate
+  identically to the flat concatenation of the four files (once-only splice).
+- [ ] **F6** Module cycles: mutually-importing files terminate and equal the
+  union of their statements.
+- [ ] **F7** Parquet round-trip: fixture written at test time via DuckDB `COPY`
+  (no binary files in the repo), imported, ≡ the original typed table.

@@ -16,6 +16,47 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-23 — §13 import deep-dive: design ratified (spec-first commit)
+
+**Done**
+- The planned scoped, design-first deep-dive for §13 imports. No engine code
+  this commit — spec §5/§13/§17, `testing.md` Phase F, and this entry land
+  first per the workflow; implementation is roadmap step 7 (commits 7a–7f).
+- Spec §13 rewritten and ratified: data imports (CSV/JSONL/Parquet/URLs),
+  **module imports** (`import "lib.dl".` — new concept: splice-in-place,
+  once-only by canonical path, no namespacing, no queries in libraries), and
+  database `table "…"` grammar reserved but deferred.
+
+**Decided** (full entries in spec §17, 2026-07-23)
+- **DuckDB, bundled, default-on feature** is the single reader backend —
+  *amends* this week's "feature-gated for a lightweight default" lean:
+  availability won over build lightness after explicit cost review (~10 min
+  cold C++ compile, C++ toolchain, tens-of-MB binary, heavier links).
+  `--no-default-features` stays as the escape hatch.
+- **CSV type inference = the language's literal grammar via the existing
+  lexer** (a cell is int/float/bool iff it lexes as that literal; columns
+  unify; empty cells → string). Chosen over DuckDB's sniffer (even restricted
+  via `auto_type_candidates`) after a dedicated debate: inferred types are
+  program meaning, so they stay spec-pinned and upgrade-stable; empty cells
+  must not become import-failing NULLs; import ≡ inline facts becomes exact
+  (property F3). DuckDB reads `all_varchar` — transport + dialect only.
+- **Eager materialization**: imports load before lowering (header schemas reach
+  pass-1; typecheck's existing facts-pin-columns rule types them — no new
+  channel). Evaluator never touches DuckDB. Filter pushdown = new §17 open
+  question.
+- **URLs ungated** in the first cut via httpfs (runtime `INSTALL httpfs` on
+  first use); explicit-schema CSV header skipped iff it equals the schema's
+  field names; `run_at`/`run_with_queries_at` thread the program path for
+  per-file relative resolution.
+
+**Next up**
+- Step 7a: `ImportKind` AST reshape + module/`table` parse forms.
+- Then 7b DuckDB reader + `finalize` inference core (F1/F2/F4/F7), 7c module
+  resolution + path threading (F5/F6), 7d end-to-end wiring (F3, flips the
+  three pinned imports-rejected tests), 7e URLs, 7f skill docs.
+
+---
+
 ## 2026-07-23 — Dogfooding: source-code analysis as a use case (+ two engine fixes)
 
 **Done**
