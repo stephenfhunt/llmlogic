@@ -70,9 +70,23 @@ The evaluation-first roadmap (decided 2026-07-10; rationale in `AGENTS.md` and
   syntax leaves room). _queued._ — §13.
 - **Module namespacing** — v1 module imports share one global namespace;
   qualified names / visibility deferred until needed. _queued._ — §13.
-- **Join performance** — `foundation × 170k-measurement` joins run ~11–20 s in
-  release; correct but unoptimized for tables this size (surfaced by the USDA
-  dogfood). _queued._ — engine.
+
+### Performance (after §9 + optional/absent)
+
+Deliberately sequenced **after** aggregation and the optional/absent value: tune
+a feature-complete surface rather than re-profiling as core semantics change
+(both add evaluation paths that would move the hotspots).
+
+- **Profile the engine** — it has never been profiled. The USDA dogfood put
+  `foundation × 170k-measurement` joins at ~11–20 s in release, but the cause is
+  unmeasured (join strategy? the semi-naive fixpoint? hashing? provenance
+  recording? import vs. eval split?). Stand up a repeatable benchmark and a
+  profile *before* optimizing anything. _queued (after feature-complete)._ — engine.
+- **Parallelism** — assess how much of semi-naive evaluation and joins can go
+  parallel (independent rules within a stratum, partitioned/hash joins) while
+  preserving the deterministic canonical output and full provenance recording,
+  which are load-bearing guarantees. Scope follows from the profile. _queued
+  (after profiling)._ — engine.
 
 ### Errors & API edges (§12/§14)
 
