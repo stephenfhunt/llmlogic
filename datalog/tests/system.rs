@@ -114,6 +114,10 @@ fn named_and_negation_programs_run() {
         run_file("16_3_arithmetic.dl").stdout,
         "adult(\"alice\").\nadult(\"carol\").\n"
     );
+    assert_eq!(
+        run_file("16_4_aggregation.dl").stdout,
+        "child_count(\"alice\", 2).\nchild_count(\"bob\", 1).\n"
+    );
 }
 
 /// §13 module imports through the real binary: `modules_import.dl` splices

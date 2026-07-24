@@ -322,6 +322,11 @@ fn monotype_expr(expr: &mut Expr) {
             monotype_expr(lhs);
             monotype_expr(rhs);
         }
+        ExprKind::Aggregate(agg) => {
+            monotype_expr(&mut agg.expr);
+            monotype_body(&mut agg.goal);
+            agg.params.iter_mut().for_each(monotype_expr);
+        }
     }
 }
 
@@ -837,7 +842,10 @@ pub(crate) fn negation_independent_preds(program: &ir::Program) -> Vec<ir::PredI
                     deps[rule.head.pred.0 as usize].push(atom.pred);
                     tainted_roots.push(atom.pred);
                 }
-                ir::BodyLiteralKind::Compare { .. } | ir::BodyLiteralKind::Presence { .. } => {}
+                // This generator emits no aggregates; nothing to walk here.
+                ir::BodyLiteralKind::Compare { .. }
+                | ir::BodyLiteralKind::Presence { .. }
+                | ir::BodyLiteralKind::Aggregate { .. } => {}
             }
         }
     }

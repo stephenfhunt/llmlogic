@@ -178,6 +178,14 @@ fn print_expr(expr: &Expr) -> String {
             crate::ast::arith_symbol(*op),
             print_expr(rhs)
         ),
+        // A set-builder aggregate `op { expr | goal }` (§9). `params` is empty for
+        // the v1 five; when parameterised reducers land they render before `{`.
+        ExprKind::Aggregate(agg) => format!(
+            "{} {{ {} | {} }}",
+            agg.op.keyword(),
+            print_expr(&agg.expr),
+            print_body(&agg.goal)
+        ),
     }
 }
 
@@ -334,6 +342,15 @@ mod tests {
         let fact = print_ground_fact("m", &[Value::String("bread".into()), Value::Absent]);
         assert_eq!(fact, "m(\"bread\", absent).");
         assert!(parse(&fact).is_ok());
+    }
+
+    #[test]
+    fn aggregate_rule_round_trips() {
+        // Datalog-out is Datalog-in for a set-builder aggregate (§9): the
+        // canonical print re-parses to the same text (D3 fixpoint).
+        let src = "cc(P, N) :- parent(P, _), N = count { C | parent(P, C) }.\n";
+        let program = parse(src).unwrap_or_else(|e| panic!("parse: {e:?}"));
+        assert_eq!(print_program(&program), src);
     }
 
     #[test]

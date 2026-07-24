@@ -21,7 +21,7 @@
 //! and declared-signature verification (§4) are additional sources that land
 //! once imports and IR-level declared types exist.
 
-use crate::ast::{CmpOp, TypeName};
+use crate::ast::{AggOp, CmpOp, TypeName};
 use crate::error::Error;
 use crate::ir;
 
@@ -285,6 +285,44 @@ impl<'a> TypeChecker<'a> {
                     // A presence test constrains no type — its operand may be any
                     // type (§4). Still type any arithmetic inside the operand.
                     let _ = self.expr_slot(expr, vars);
+                }
+                ir::BodyLiteralKind::Aggregate {
+                    result,
+                    op,
+                    params,
+                    expr,
+                    goal,
+                } => {
+                    // The goal is a sub-body over the same variable scope (§9);
+                    // its atoms constrain the group-key and goal-local variables.
+                    self.body_constraints(goal, vars);
+                    // Type the collected expression (and any parameters) so that
+                    // internal arithmetic errors surface even when the operator
+                    // ignores the value's type.
+                    let value = self.expr_slot(expr, vars);
+                    for param in params {
+                        let _ = self.expr_slot(param, vars);
+                    }
+                    let result_slot = vars[result.0 as usize];
+                    match op {
+                        // count : int, over any type (the collected value's type
+                        // is unconstrained — a binding is a binding, §9).
+                        AggOp::Count => self.set_type(result_slot, TypeName::Int),
+                        // sum : the same numeric type as the collected value.
+                        AggOp::Sum => {
+                            self.union(result_slot, value);
+                            self.numeric.push(value);
+                        }
+                        // avg : always float; the collected value must be numeric.
+                        AggOp::Avg => {
+                            self.set_type(result_slot, TypeName::Float);
+                            self.numeric.push(value);
+                        }
+                        // min / max : the same type as the collected value, which
+                        // may be any single ordered type (every primitive is
+                        // ordered, §8) — so no numeric constraint.
+                        AggOp::Min | AggOp::Max => self.union(result_slot, value),
+                    }
                 }
             }
         }

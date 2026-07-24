@@ -1,0 +1,9 @@
+% Spec §16.4 — aggregation & grouping (set-builder syntax, §9).
+parent("alice", "bob").
+parent("alice", "carol").
+parent("bob", "dave").
+
+% number of children per parent — grouping is implicit on P.
+child_count(P, N) :- parent(P, _), N = count { C | parent(P, C) }.
+
+?- child_count(P, N).

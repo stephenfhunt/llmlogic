@@ -1,0 +1,35 @@
+# Aggregation (§9): the set-builder form  op { Expr | Goal }.
+#
+# op is one of count / sum / min / max / avg. Grouping is implicit — one result
+# per binding of the rule's variables that appear OUTSIDE the aggregate.
+#
+# Here we tally a tiny orders table by customer, and note that sum/avg/min/max
+# skip the `absent` value (a missing amount) while count counts every binding.
+
+order("alice", 10).
+order("alice", 5).
+order("alice", absent).   # a recorded order whose amount is missing
+order("bob",   7).
+
+customer("alice").
+customer("bob").
+
+# grouped by the customer C:
+order_count(C, N) :- customer(C), N = count { A | order(C, A) }.               # all bindings, absent included
+spend(C, S)       :- customer(C), S = sum   { A | order(C, A) }.               # skips the absent amount
+average(C, M)     :- customer(C), M = avg   { A | order(C, A) }.               # mean of present amounts (float)
+biggest(C, H)     :- customer(C), H = max   { A | order(C, A) }.
+priced(C, N)      :- customer(C), N = count { A | order(C, A), A is not absent }.  # only the amounts that exist
+
+?- order_count(C, N).
+?- spend(C, S).
+?- average(C, M).
+?- biggest(C, H).
+?- priced(C, N).
+
+# expected:
+#   order_count("alice", 3).  order_count("bob", 1).
+#   spend("alice", 15).       spend("bob", 7).
+#   average("alice", 7.5).    average("bob", 7.0).
+#   biggest("alice", 10).     biggest("bob", 7).
+#   priced("alice", 2).       priced("bob", 1).

@@ -482,7 +482,16 @@ impl Lowerer {
         ) else {
             return;
         };
-        debug_assert!(discard.is_empty(), "fold mode never hoists");
+        // Fold mode constant-folds arithmetic rather than hoisting, so the only
+        // thing that can land in `discard` is an aggregate (§9) — which a ground
+        // fact has no body to compute over.
+        if !discard.is_empty() {
+            self.errors.push(Error::Semantic(format!(
+                "an aggregate cannot appear in a fact; `{}` has no body to aggregate over",
+                clause.head.predicate.name
+            )));
+            return;
+        }
 
         let mut values = Vec::with_capacity(head.args.len());
         let mut ground = true;
@@ -546,19 +555,28 @@ impl Lowerer {
                     });
                 }
                 ast::LiteralKind::Comparison(comparison) => {
+                    // An aggregate operand hoists to a preceding literal (§9), so
+                    // lower into a local buffer and place it before the comparison.
+                    let mut hoisted = Vec::new();
+                    let lhs = self.lower_expr(&comparison.lhs, scope, &mut hoisted);
+                    let rhs = self.lower_expr(&comparison.rhs, scope, &mut hoisted);
+                    lowered.extend(hoisted);
                     lowered.push(ir::BodyLiteral {
                         kind: ir::BodyLiteralKind::Compare {
                             op: comparison.op,
-                            lhs: self.lower_expr(&comparison.lhs, scope),
-                            rhs: self.lower_expr(&comparison.rhs, scope),
+                            lhs,
+                            rhs,
                         },
                         span: literal.span,
                     });
                 }
                 ast::LiteralKind::Presence { expr, negated } => {
+                    let mut hoisted = Vec::new();
+                    let expr = self.lower_expr(expr, scope, &mut hoisted);
+                    lowered.extend(hoisted);
                     lowered.push(ir::BodyLiteral {
                         kind: ir::BodyLiteralKind::Presence {
-                            expr: self.lower_expr(expr, scope),
+                            expr,
                             negated: *negated,
                         },
                         span: literal.span,
@@ -630,7 +648,7 @@ impl Lowerer {
             }
             return self.lower_term(term, scope);
         }
-        let ir_expr = self.lower_expr(expr, scope);
+        let ir_expr = self.lower_expr(expr, scope, hoisted);
         match mode {
             ArgMode::Hoist => {
                 // Fresh var V, plus `V = <expr>` for the caller to place. The
@@ -790,15 +808,67 @@ impl Lowerer {
         }
     }
 
-    fn lower_expr(&mut self, expr: &ast::Expr, scope: &mut VarScope) -> ir::Expr {
+    /// Lowers a surface expression to core [`ir::Expr`]. A [set-builder
+    /// aggregate](ast::ExprKind::Aggregate) has no `ir::Expr` form — it is hoisted
+    /// into `hoisted` as a dedicated [`ir::BodyLiteralKind::Aggregate`] literal and
+    /// replaced by the fresh result variable it binds, so callers must place
+    /// `hoisted` in the body ahead of where the value is used.
+    fn lower_expr(
+        &mut self,
+        expr: &ast::Expr,
+        scope: &mut VarScope,
+        hoisted: &mut Vec<ir::BodyLiteral>,
+    ) -> ir::Expr {
         match &expr.kind {
             ast::ExprKind::Term(term) => ir::Expr::Term(self.lower_term(term, scope)),
             ast::ExprKind::Binary { op, lhs, rhs } => ir::Expr::Binary {
                 op: *op,
-                lhs: Box::new(self.lower_expr(lhs, scope)),
-                rhs: Box::new(self.lower_expr(rhs, scope)),
+                lhs: Box::new(self.lower_expr(lhs, scope, hoisted)),
+                rhs: Box::new(self.lower_expr(rhs, scope, hoisted)),
             },
+            ast::ExprKind::Aggregate(agg) => self.lower_aggregate(agg, expr.span, scope, hoisted),
         }
+    }
+
+    /// Hoists a set-builder aggregate (§9): it becomes a dedicated
+    /// [`ir::BodyLiteralKind::Aggregate`] literal binding a fresh result slot
+    /// (appended to `hoisted`), and the enclosing expression is left referring to
+    /// that slot — exactly the shape a hand-written `V = op { … }` produces. The
+    /// goal shares the enclosing scope, so a variable also occurring outside the
+    /// aggregate resolves to the same slot (a group key) while a goal-only
+    /// variable takes a fresh slot (existential to the goal). Any inner hoist from
+    /// the collected expression (a nested aggregate) is placed at the end of the
+    /// goal, where the goal's bindings are in scope.
+    fn lower_aggregate(
+        &mut self,
+        agg: &ast::Aggregate,
+        span: ast::Span,
+        scope: &mut VarScope,
+        hoisted: &mut Vec<ir::BodyLiteral>,
+    ) -> ir::Expr {
+        let mut goal = self.lower_body(&agg.goal, scope);
+        // The collected expression is evaluated per witness of the goal, so a
+        // nested aggregate inside it hoists into the goal, not the outer body.
+        let expr = self.lower_expr(&agg.expr, scope, &mut goal);
+        // Parameters (none for the v1 five) are evaluated once per group in the
+        // outer scope.
+        let params = agg
+            .params
+            .iter()
+            .map(|param| self.lower_expr(param, scope, hoisted))
+            .collect();
+        let result = scope.fresh();
+        hoisted.push(ir::BodyLiteral {
+            kind: ir::BodyLiteralKind::Aggregate {
+                result,
+                op: agg.op,
+                params,
+                expr,
+                goal,
+            },
+            span,
+        });
+        ir::Expr::Term(ir::Term::Var(result))
     }
 
     /// Pass 4 for rules: head variables must be bound by a positive body atom
@@ -829,7 +899,23 @@ impl Lowerer {
         var_names: &[Option<String>],
         context: &str,
     ) {
-        let positive = positive_vars(body);
+        self.check_body_safety_seeded(body, var_names, &std::collections::HashSet::new(), context);
+    }
+
+    /// [`Self::check_body_safety`] with a `seed` of variables treated as already
+    /// positively bound — the group keys available to an aggregate's goal (§9):
+    /// the enclosing body's variables that are bound where the aggregate runs.
+    /// The top-level call seeds nothing, so ordinary rules and queries are
+    /// unaffected.
+    fn check_body_safety_seeded(
+        &mut self,
+        body: &[ir::BodyLiteral],
+        var_names: &[Option<String>],
+        seed: &std::collections::HashSet<u32>,
+        context: &str,
+    ) {
+        let mut positive = positive_vars(body);
+        positive.extend(seed.iter().copied());
         // Variables available at each point: positively bound, plus any bound
         // by a prior `=`-assignment in source order — the order the engine
         // evaluates comparisons in.
@@ -897,6 +983,52 @@ impl Lowerer {
                         }
                     }
                 }
+                ir::BodyLiteralKind::Aggregate {
+                    result,
+                    op: _,
+                    params,
+                    expr,
+                    goal,
+                } => {
+                    // The goal is a sub-body evaluated with the group keys (the
+                    // outer variables bound so far) available, so seed its check
+                    // with `bound`. Its own positive atoms bind the goal-local
+                    // (existential) variables (§9/§10).
+                    self.check_body_safety_seeded(goal, var_names, &bound, context);
+                    // The collected expression is evaluated per witness, so its
+                    // variables must be bound by the goal's positives or a group
+                    // key.
+                    let mut goal_bound = positive_vars(goal);
+                    goal_bound.extend(bound.iter().copied());
+                    for var in expr_vars(expr) {
+                        if !goal_bound.contains(&var.0) {
+                            push_unsafe(
+                                &mut self.errors,
+                                var.0,
+                                var_names,
+                                "aggregate expression",
+                                context,
+                            );
+                        }
+                    }
+                    // Parameters (none for the v1 five) evaluate once per group in
+                    // the outer scope.
+                    for param in params {
+                        for var in expr_vars(param) {
+                            if !bound.contains(&var.0) {
+                                push_unsafe(
+                                    &mut self.errors,
+                                    var.0,
+                                    var_names,
+                                    "aggregate parameter",
+                                    context,
+                                );
+                            }
+                        }
+                    }
+                    // The aggregate binds its result like an `=`-assignment.
+                    bound.insert(result.0);
+                }
             }
         }
     }
@@ -918,28 +1050,18 @@ fn stratify(
     rules: &[ir::Rule],
     predicates: &[ir::PredicateInfo],
 ) -> Result<Vec<Vec<ir::RuleId>>, Error> {
-    // Dependency edges: (head, body predicate, negated).
+    // Dependency edges: (head, body predicate, kind). A negated (§7) or
+    // aggregated (§9) dependency forces the body predicate strictly lower.
     let mut edges = Vec::new();
     for rule in rules {
-        for literal in &rule.body {
-            let (atom, negated) = match &literal.kind {
-                ir::BodyLiteralKind::Atom(atom) => (atom, false),
-                ir::BodyLiteralKind::NegAtom(atom) => (atom, true),
-                // Neither references a predicate, so neither adds a dependency
-                // edge or a stratum (§4/§8).
-                ir::BodyLiteralKind::Compare { .. } | ir::BodyLiteralKind::Presence { .. } => {
-                    continue;
-                }
-            };
-            edges.push((rule.head.pred, atom.pred, negated));
-        }
+        collect_stratum_edges(rule.head.pred, &rule.body, false, &mut edges);
     }
 
     let mut stratum = vec![0u32; predicates.len()];
     loop {
         let mut changed = false;
-        for &(head, body, negated) in &edges {
-            let required = stratum[body.0 as usize] + u32::from(negated);
+        for &(head, body, dep) in &edges {
+            let required = stratum[body.0 as usize] + u32::from(dep.strict());
             if stratum[head.0 as usize] < required {
                 if required as usize >= predicates.len() {
                     // With n predicates a stratifiable program needs at most
@@ -964,65 +1086,120 @@ fn stratify(
     Ok(buckets)
 }
 
+/// How a rule's head depends on a body predicate, for stratification (§7/§9).
+/// A `Positive` dependency may share a stratum; `Negated` and `Aggregated` both
+/// force the body predicate strictly lower, and a cycle through either is
+/// unstratifiable.
+#[derive(Clone, Copy, PartialEq)]
+enum Dep {
+    Positive,
+    Negated,
+    Aggregated,
+}
+
+impl Dep {
+    /// Does this dependency force a strictly-lower stratum?
+    fn strict(self) -> bool {
+        !matches!(self, Dep::Positive)
+    }
+
+    /// How the edge reads inside a cycle-error path.
+    fn prefix(self) -> &'static str {
+        match self {
+            Dep::Positive => "",
+            Dep::Negated => "not ",
+            Dep::Aggregated => "agg ",
+        }
+    }
+}
+
+/// Collects dependency edges `(head, body-predicate, kind)` for stratification,
+/// recursing into aggregate goals. A predicate reached under an aggregate is an
+/// `Aggregated` (strictly-lower) dependency — §9 reads the aggregated relation
+/// whole, exactly as negation does, so recursion through an aggregate is rejected
+/// the same way. Iterates in body order for a deterministic edge list (A7).
+fn collect_stratum_edges(
+    head: ir::PredId,
+    body: &[ir::BodyLiteral],
+    under_aggregate: bool,
+    edges: &mut Vec<(ir::PredId, ir::PredId, Dep)>,
+) {
+    let positive = if under_aggregate {
+        Dep::Aggregated
+    } else {
+        Dep::Positive
+    };
+    for literal in body {
+        match &literal.kind {
+            ir::BodyLiteralKind::Atom(atom) => edges.push((head, atom.pred, positive)),
+            ir::BodyLiteralKind::NegAtom(atom) => edges.push((head, atom.pred, Dep::Negated)),
+            // Neither references a predicate (§4/§8).
+            ir::BodyLiteralKind::Compare { .. } | ir::BodyLiteralKind::Presence { .. } => {}
+            ir::BodyLiteralKind::Aggregate { goal, .. } => {
+                collect_stratum_edges(head, goal, true, edges);
+            }
+        }
+    }
+}
+
 /// Recovers a concrete cycle through a negative edge, for the stratification
 /// error. Only called once relaxation has diverged, which proves such a cycle
 /// exists: some negative edge `head → not body` closes back from `body` to
 /// `head` through dependency edges.
 fn negative_cycle_error(
-    edges: &[(ir::PredId, ir::PredId, bool)],
+    edges: &[(ir::PredId, ir::PredId, Dep)],
     predicates: &[ir::PredicateInfo],
 ) -> Error {
     let name = |pred: ir::PredId| predicates[pred.0 as usize].name.as_str();
     // Adjacency in edge order, so the recovered cycle is deterministic.
-    let mut deps: Vec<Vec<(ir::PredId, bool)>> = vec![Vec::new(); predicates.len()];
-    for &(head, body, negated) in edges {
-        deps[head.0 as usize].push((body, negated));
+    let mut deps: Vec<Vec<(ir::PredId, Dep)>> = vec![Vec::new(); predicates.len()];
+    for &(head, body, dep) in edges {
+        deps[head.0 as usize].push((body, dep));
     }
-    for &(head, body, negated) in edges {
-        if !negated {
+    for &(head, body, dep) in edges {
+        if !dep.strict() {
             continue;
         }
         let Some(steps) = dependency_path(&deps, body, head) else {
             continue;
         };
-        let mut parts = vec![name(head).to_string(), format!("not {}", name(body))];
-        for (pred, step_negated) in steps {
-            if step_negated {
-                parts.push(format!("not {}", name(pred)));
-            } else {
-                parts.push(name(pred).to_string());
-            }
+        let mut parts = vec![
+            name(head).to_string(),
+            format!("{}{}", dep.prefix(), name(body)),
+        ];
+        for (pred, step_dep) in steps {
+            parts.push(format!("{}{}", step_dep.prefix(), name(pred)));
         }
         return Error::Semantic(format!(
-            "program is not stratifiable: recursion through negation: {}",
+            "program is not stratifiable: recursion through negation or aggregation: {}",
             parts.join(" -> ")
         ));
     }
-    unreachable!("stratification diverged, so a negative cycle must exist")
+    unreachable!("stratification diverged, so a strict cycle must exist")
 }
 
 /// BFS over dependency edges from `start` to `target`; returns the traversed
 /// predicates after `start`, each with the negation flag of the edge into it.
 /// `Some(vec![])` when `start == target` (a self-loop needs no steps).
 fn dependency_path(
-    deps: &[Vec<(ir::PredId, bool)>],
+    deps: &[Vec<(ir::PredId, Dep)>],
     start: ir::PredId,
     target: ir::PredId,
-) -> Option<Vec<(ir::PredId, bool)>> {
+) -> Option<Vec<(ir::PredId, Dep)>> {
     if start == target {
         return Some(Vec::new());
     }
-    let mut parent: Vec<Option<(ir::PredId, bool)>> = vec![None; deps.len()];
+    let mut parent: Vec<Option<(ir::PredId, Dep)>> = vec![None; deps.len()];
     let mut visited = vec![false; deps.len()];
     visited[start.0 as usize] = true;
     let mut queue = std::collections::VecDeque::from([start]);
     while let Some(pred) = queue.pop_front() {
-        for &(next, negated) in &deps[pred.0 as usize] {
+        for &(next, dep) in &deps[pred.0 as usize] {
             if visited[next.0 as usize] {
                 continue;
             }
             visited[next.0 as usize] = true;
-            parent[next.0 as usize] = Some((pred, negated));
+            parent[next.0 as usize] = Some((pred, dep));
             if next == target {
                 let mut steps = Vec::new();
                 let mut at = target;
@@ -1077,14 +1254,21 @@ fn push_unsafe(
 fn safe_bound_vars(body: &[ir::BodyLiteral]) -> std::collections::HashSet<u32> {
     let mut bound = positive_vars(body);
     for literal in body {
-        if let ir::BodyLiteralKind::Compare {
-            op: ast::CmpOp::Eq,
-            lhs,
-            rhs,
-        } = &literal.kind
-            && let Some(slot) = assignment_target(lhs, rhs, &bound)
-        {
-            bound.insert(slot);
+        match &literal.kind {
+            ir::BodyLiteralKind::Compare {
+                op: ast::CmpOp::Eq,
+                lhs,
+                rhs,
+            } => {
+                if let Some(slot) = assignment_target(lhs, rhs, &bound) {
+                    bound.insert(slot);
+                }
+            }
+            // An aggregate binds its result like an `=`-assignment (§9).
+            ir::BodyLiteralKind::Aggregate { result, .. } => {
+                bound.insert(result.0);
+            }
+            _ => {}
         }
     }
     bound
@@ -1188,6 +1372,11 @@ fn collect_body_refs(
         let atom = match &literal.kind {
             ir::BodyLiteralKind::Atom(atom) | ir::BodyLiteralKind::NegAtom(atom) => atom,
             ir::BodyLiteralKind::Compare { .. } | ir::BodyLiteralKind::Presence { .. } => continue,
+            // Predicates referenced only inside an aggregate goal still count (§9).
+            ir::BodyLiteralKind::Aggregate { goal, .. } => {
+                collect_body_refs(goal, referenced, seen);
+                continue;
+            }
         };
         if seen.insert(atom.pred.0) {
             referenced.push(atom.pred);
@@ -1369,9 +1558,9 @@ mod tests {
         };
         let errors = lower(&program).expect_err("negative self-loop");
         assert!(
-            errors.iter().any(|e| e
-                .to_string()
-                .contains("not stratifiable: recursion through negation: p -> not p")),
+            errors.iter().any(|e| e.to_string().contains(
+                "not stratifiable: recursion through negation or aggregation: p -> not p"
+            )),
             "unexpected errors: {errors:?}"
         );
     }
@@ -1408,7 +1597,7 @@ mod tests {
         assert!(
             errors.iter().any(|e| e
                 .to_string()
-                .contains("recursion through negation: a -> not b -> a")),
+                .contains("recursion through negation or aggregation: a -> not b -> a")),
             "unexpected errors: {errors:?}"
         );
     }
@@ -2252,7 +2441,10 @@ mod tests {
                     ir::BodyLiteralKind::Atom(atom) | ir::BodyLiteralKind::NegAtom(atom) => {
                         visit_atom(atom, &mut slots);
                     }
-                    ir::BodyLiteralKind::Compare { .. } | ir::BodyLiteralKind::Presence { .. } => {}
+                    // This generator emits no aggregates.
+                    ir::BodyLiteralKind::Compare { .. }
+                    | ir::BodyLiteralKind::Presence { .. }
+                    | ir::BodyLiteralKind::Aggregate { .. } => {}
                 }
             }
             slots
@@ -2320,9 +2512,11 @@ mod tests {
                             ir::BodyLiteralKind::Atom(_) => prop_assert!(!negated),
                             ir::BodyLiteralKind::NegAtom(_) => prop_assert!(*negated),
                             ir::BodyLiteralKind::Compare { .. }
-                            | ir::BodyLiteralKind::Presence { .. } => {
+                            | ir::BodyLiteralKind::Presence { .. }
+                            | ir::BodyLiteralKind::Aggregate { .. } => {
                                 return Err(TestCaseError::fail(
-                                    "unexpected comparison or presence test".to_string(),
+                                    "unexpected comparison, presence test, or aggregate"
+                                        .to_string(),
                                 ));
                             }
                         }
@@ -2492,8 +2686,10 @@ mod tests {
                                         "positive dependency above its reader"
                                     );
                                 }
+                                // This generator emits no aggregates.
                                 ir::BodyLiteralKind::Compare { .. }
-                                | ir::BodyLiteralKind::Presence { .. } => {}
+                                | ir::BodyLiteralKind::Presence { .. }
+                                | ir::BodyLiteralKind::Aggregate { .. } => {}
                             }
                         }
                     }

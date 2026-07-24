@@ -42,7 +42,7 @@ pub(crate) mod naive;
 use std::collections::{BTreeSet, HashMap};
 
 use crate::Result;
-use crate::ast::{ArithOp, CmpOp};
+use crate::ast::{AggOp, ArithOp, CmpOp};
 use crate::error::Error;
 use crate::ir::{
     Atom, BodyLiteral, BodyLiteralKind, Expr, F64, Fact, PredId, Program, Query, Rule, RuleId,
@@ -227,18 +227,58 @@ fn validate(program: &Program) -> Result<()> {
     }
     for (level, stratum) in program.strata.iter().enumerate() {
         for &rule_id in stratum {
-            for literal in &program.rules[rule_id.0 as usize].body {
-                if let BodyLiteralKind::NegAtom(atom) = &literal.kind
-                    && defining_stratum[atom.pred.0 as usize].is_some_and(|def| def >= level)
-                {
-                    return Err(Error::Semantic(format!(
-                        "malformed IR: rule {} negates `{}`, which is not defined in a \
-                         strictly lower stratum",
-                        rule_id.0,
-                        program.pred_info(atom.pred).name
-                    )));
-                }
+            check_stratum_contract(
+                &program.rules[rule_id.0 as usize].body,
+                level,
+                &defining_stratum,
+                program,
+                rule_id,
+                false,
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// The strict-lower-stratum contract (§7/§9): a negated atom's predicate, and
+/// *every* predicate an aggregate reads (`under_aggregate`), must be defined in a
+/// strictly lower stratum than the rule using it, so the relation is complete and
+/// frozen when read. Well-lowered IR satisfies this by construction; this guards
+/// hand-built IR. Recurses into aggregate goals.
+fn check_stratum_contract(
+    body: &[BodyLiteral],
+    level: usize,
+    defining_stratum: &[Option<usize>],
+    program: &Program,
+    rule_id: RuleId,
+    under_aggregate: bool,
+) -> Result<()> {
+    let too_high = |pred: PredId| defining_stratum[pred.0 as usize].is_some_and(|def| def >= level);
+    for literal in body {
+        match &literal.kind {
+            BodyLiteralKind::Atom(atom) if under_aggregate && too_high(atom.pred) => {
+                return Err(Error::Semantic(format!(
+                    "malformed IR: rule {} aggregates over `{}`, which is not defined in a \
+                     strictly lower stratum",
+                    rule_id.0,
+                    program.pred_info(atom.pred).name
+                )));
             }
+            BodyLiteralKind::NegAtom(atom) if too_high(atom.pred) => {
+                return Err(Error::Semantic(format!(
+                    "malformed IR: rule {} negates `{}`, which is not defined in a \
+                     strictly lower stratum",
+                    rule_id.0,
+                    program.pred_info(atom.pred).name
+                )));
+            }
+            BodyLiteralKind::Aggregate { goal, .. } => {
+                check_stratum_contract(goal, level, defining_stratum, program, rule_id, true)?;
+            }
+            BodyLiteralKind::Atom(_)
+            | BodyLiteralKind::NegAtom(_)
+            | BodyLiteralKind::Compare { .. }
+            | BodyLiteralKind::Presence { .. } => {}
         }
     }
     Ok(())
@@ -251,6 +291,16 @@ fn validate(program: &Program) -> Result<()> {
 /// enforced in lowering; a malformed comparison fed as hand-built IR surfaces as
 /// a structured error when its operand is evaluated.
 fn validate_body(body: &[BodyLiteral], var_names: &[Option<String>]) -> Result<()> {
+    validate_body_seeded(body, var_names, &std::collections::HashSet::new())
+}
+
+/// [`validate_body`] with a `seed` of variables treated as positively bound by an
+/// enclosing body — the group keys visible inside an aggregate's goal (§9).
+fn validate_body_seeded(
+    body: &[BodyLiteral],
+    var_names: &[Option<String>],
+    seed: &std::collections::HashSet<u32>,
+) -> Result<()> {
     for literal in body {
         match &literal.kind {
             BodyLiteralKind::Atom(_)
@@ -261,6 +311,7 @@ fn validate_body(body: &[BodyLiteral], var_names: &[Option<String>]) -> Result<(
                     if let Term::Var(var) = arg
                         && let Some(Some(name)) = var_names.get(var.0 as usize)
                         && !positively_bound(body, *var)
+                        && !seed.contains(&var.0)
                     {
                         return Err(Error::Semantic(format!(
                             "malformed IR: named variable `{name}` in negated atom is not \
@@ -268,6 +319,21 @@ fn validate_body(body: &[BodyLiteral], var_names: &[Option<String>]) -> Result<(
                         )));
                     }
                 }
+            }
+            BodyLiteralKind::Aggregate { goal, .. } => {
+                // The goal sees the group keys: this body's positive variables
+                // plus any inherited from an outer body.
+                let mut inner = seed.clone();
+                for literal in body {
+                    if let BodyLiteralKind::Atom(atom) = &literal.kind {
+                        for arg in &atom.args {
+                            if let Term::Var(var) = arg {
+                                inner.insert(var.0);
+                            }
+                        }
+                    }
+                }
+                validate_body_seeded(goal, var_names, &inner)?;
             }
         }
     }
@@ -426,32 +492,42 @@ type OnMatch<'a> = dyn FnMut(&[Option<Value>], &[Option<Premise>]) + 'a;
 /// are recorded at their true body index, so `BodyIdx` alignment is
 /// untouched. Calls `on_match` once per match of the whole body.
 fn enumerate_matches(cx: &JoinCx<'_>, num_vars: usize, on_match: &mut OnMatch<'_>) -> Result<()> {
-    // Positive atoms first (they bind variables), then negated atoms as
-    // anti-join filters, then comparison/assignment builtins in source order.
-    // Positives-first guarantees every non-assignment operand is bound; source
-    // order among comparisons preserves assignment chains (`N = A+1, M = N+1`).
-    let mut order: Vec<usize> = Vec::with_capacity(cx.body.len());
-    for (idx, literal) in cx.body.iter().enumerate() {
+    let order = literal_order(cx.body);
+    let mut bindings: Vec<Option<Value>> = vec![None; num_vars];
+    let mut premises: Vec<Option<Premise>> = vec![None; cx.body.len()];
+    enumerate_from(cx, &order, 0, &mut bindings, &mut premises, on_match)
+}
+
+/// Body-literal evaluation order: positive atoms first (they bind variables),
+/// then negated atoms as anti-join filters, then comparison / presence /
+/// aggregate builtins in source order. Positives-first guarantees every
+/// non-assignment operand is bound (including an aggregate's group keys, §9);
+/// source order among the builtins preserves assignment and aggregate chains
+/// (`N = A+1, M = N+1`; an aggregate result consumed by a later comparison).
+/// Shared by the top-level join and each aggregate's sub-join.
+fn literal_order(body: &[BodyLiteral]) -> Vec<usize> {
+    let mut order: Vec<usize> = Vec::with_capacity(body.len());
+    for (idx, literal) in body.iter().enumerate() {
         if matches!(literal.kind, BodyLiteralKind::Atom(_)) {
             order.push(idx);
         }
     }
-    for (idx, literal) in cx.body.iter().enumerate() {
+    for (idx, literal) in body.iter().enumerate() {
         if matches!(literal.kind, BodyLiteralKind::NegAtom(_)) {
             order.push(idx);
         }
     }
-    for (idx, literal) in cx.body.iter().enumerate() {
+    for (idx, literal) in body.iter().enumerate() {
         if matches!(
             literal.kind,
-            BodyLiteralKind::Compare { .. } | BodyLiteralKind::Presence { .. }
+            BodyLiteralKind::Compare { .. }
+                | BodyLiteralKind::Presence { .. }
+                | BodyLiteralKind::Aggregate { .. }
         ) {
             order.push(idx);
         }
     }
-    let mut bindings: Vec<Option<Value>> = vec![None; num_vars];
-    let mut premises: Vec<Option<Premise>> = vec![None; cx.body.len()];
-    enumerate_from(cx, &order, 0, &mut bindings, &mut premises, on_match)
+    order
 }
 
 fn enumerate_from(
@@ -574,8 +650,172 @@ fn enumerate_from(
                 result?;
             }
         }
+        BodyLiteralKind::Aggregate {
+            result,
+            op,
+            params: _,
+            expr,
+            goal,
+        } => {
+            // Evaluate the aggregate once per binding of the group keys — the
+            // outer variables in `goal`, already bound by the positive atoms
+            // scheduled before this builtin phase (§9). The goal's predicates are
+            // strictly lower stratum (validated), so they are complete and frozen
+            // in `model`: every goal atom reads the Full relation and the delta is
+            // irrelevant. The sub-join shares `bindings`, so the group keys stay
+            // fixed while the goal-local variables are enumerated and backtracked.
+            let empty_delta: HashMap<PredId, BTreeSet<Tuple>> = HashMap::new();
+            let goal_views = vec![AtomView::Full; goal.len()];
+            let sub_cx = JoinCx {
+                model: cx.model,
+                delta: &empty_delta,
+                body: goal,
+                views: &goal_views,
+            };
+            let sub_order = literal_order(goal);
+            let mut sub_premises: Vec<Option<Premise>> = vec![None; goal.len()];
+            // The multiset of the collected expression across the goal's witness
+            // tuples (§9: multiplicity follows distinct witnesses, not distinct
+            // projected values).
+            let mut values: Vec<Value> = Vec::new();
+            let mut sub_error: Option<Error> = None;
+            enumerate_from(
+                &sub_cx,
+                &sub_order,
+                0,
+                bindings,
+                &mut sub_premises,
+                &mut |witness, _| {
+                    if sub_error.is_some() {
+                        return;
+                    }
+                    match eval_expr(expr, witness) {
+                        Ok(value) => values.push(value),
+                        Err(error) => sub_error = Some(error),
+                    }
+                },
+            )?;
+            if let Some(error) = sub_error {
+                return Err(error);
+            }
+            let outcome = fold_aggregate(*op, &values)?;
+            premises[idx] = Some(Premise::Aggregate {
+                op: *op,
+                value: outcome.value.clone(),
+                present: outcome.present,
+                skipped: outcome.skipped,
+            });
+            bindings[result.0 as usize] = Some(outcome.value);
+            let cont = enumerate_from(cx, order, depth + 1, bindings, premises, on_match);
+            premises[idx] = None;
+            bindings[result.0 as usize] = None;
+            cont?;
+        }
     }
     Ok(())
+}
+
+/// The result of folding an aggregate over its collected multiset (§9): the
+/// value plus the counts that keep the absent-skip non-silent (recorded in
+/// provenance).
+#[derive(Debug)]
+pub(crate) struct AggregateOutcome {
+    pub(crate) value: Value,
+    /// Present (non-absent) values folded.
+    pub(crate) present: usize,
+    /// Absent inputs skipped — always `0` for `count`, which counts them.
+    pub(crate) skipped: usize,
+}
+
+/// Folds `values` (the collected expression over each witness tuple) per `op`,
+/// honouring the §9 absent rules. Shared by the semi-naive engine and the naive
+/// oracle so the two agree (testing.md B1).
+///
+/// - `count` counts every binding, absent ones included (skip `0`).
+/// - `sum`/`avg`/`min`/`max` skip absents; an empty present-set yields `absent`.
+/// - `sum` folds through the §8 arithmetic (same overflow/type rules); `avg` is
+///   the float mean of the present values; `min`/`max` take the natural-order
+///   extreme of a single ordered type.
+pub(crate) fn fold_aggregate(op: AggOp, values: &[Value]) -> Result<AggregateOutcome> {
+    let total = values.len();
+    let present: Vec<&Value> = values.iter().filter(|v| **v != Value::Absent).collect();
+    let skipped = total - present.len();
+    let value = match op {
+        // A binding is a binding (§9): absent-valued ones are counted, not skipped.
+        AggOp::Count => Value::Int(total as i64),
+        AggOp::Sum => sum_values(&present)?,
+        AggOp::Avg => avg_values(&present)?,
+        AggOp::Min => extreme_value(&present, false)?,
+        AggOp::Max => extreme_value(&present, true)?,
+    };
+    Ok(AggregateOutcome {
+        value,
+        present: present.len(),
+        skipped: if op == AggOp::Count { 0 } else { skipped },
+    })
+}
+
+/// Sums present values through the §8 arithmetic (`int+int`/`float+float`,
+/// checked overflow, type errors on a mix or a non-numeric). Empty → `absent`.
+fn sum_values(present: &[&Value]) -> Result<Value> {
+    let mut iter = present.iter();
+    let Some(first) = iter.next() else {
+        return Ok(Value::Absent);
+    };
+    let mut acc = (*first).clone();
+    for value in iter {
+        acc = apply_arith(ArithOp::Add, acc, (*value).clone())?;
+    }
+    Ok(acc)
+}
+
+/// The float mean of the present values (§9: `avg` is always `float`). Requires
+/// every present value numeric; empty → `absent`.
+fn avg_values(present: &[&Value]) -> Result<Value> {
+    if present.is_empty() {
+        return Ok(Value::Absent);
+    }
+    let mut sum = 0.0f64;
+    for value in present {
+        let x = match value {
+            Value::Int(i) => *i as f64,
+            Value::Float(f) => f.get(),
+            other => {
+                return Err(Error::Semantic(format!(
+                    "type error: avg requires numeric values, got {}",
+                    value_type_name(other)
+                )));
+            }
+        };
+        sum += x;
+    }
+    F64::new(sum / present.len() as f64).map(Value::Float)
+}
+
+/// The natural-order extreme (min or `max`) of the present values, which must
+/// share one ordered type (a cross-type mix is a §8 comparison error). Empty →
+/// `absent`.
+fn extreme_value(present: &[&Value], want_max: bool) -> Result<Value> {
+    let Some((first, rest)) = present.split_first() else {
+        return Ok(Value::Absent);
+    };
+    let mut acc: &Value = first;
+    for value in rest {
+        let value: &Value = value;
+        if std::mem::discriminant(acc) != std::mem::discriminant(value) {
+            return Err(Error::Semantic(format!(
+                "type error: min/max requires values of the same type, got {} and {}",
+                value_type_name(acc),
+                value_type_name(value),
+            )));
+        }
+        // Same-type non-absent values order by `Value`'s within-type `Ord` — the
+        // natural order §8 comparisons use (floats via `F64`'s total order).
+        if (want_max && value > acc) || (!want_max && value < acc) {
+            acc = value;
+        }
+    }
+    Ok(acc.clone())
 }
 
 /// The **semantic** sameness of two ground values (§4): structural equality,
@@ -1895,6 +2135,126 @@ mod tests {
         assert!(model.relation(q).is_empty());
     }
 
+    // --- Aggregation folds (§9) ---
+
+    fn int(n: i64) -> Value {
+        Value::Int(n)
+    }
+
+    fn float(x: f64) -> Value {
+        Value::Float(crate::ir::F64::new(x).unwrap())
+    }
+
+    #[test]
+    fn count_counts_every_binding_including_absent() {
+        // count { X | Goal } counts bindings, absent ones included (§9).
+        let values = vec![int(5), Value::Absent, int(3), Value::Absent];
+        let outcome = fold_aggregate(AggOp::Count, &values).unwrap();
+        assert_eq!(outcome.value, int(4));
+        // count never "skips" — the report is 0.
+        assert_eq!(outcome.skipped, 0);
+    }
+
+    #[test]
+    fn sum_skips_absent_and_reports_the_skip_count() {
+        // sum skips absents and folds the present values; the skip is reported.
+        let values = vec![int(5), Value::Absent, int(3)];
+        let outcome = fold_aggregate(AggOp::Sum, &values).unwrap();
+        assert_eq!(outcome.value, int(8));
+        assert_eq!(outcome.present, 2);
+        assert_eq!(outcome.skipped, 1);
+    }
+
+    #[test]
+    fn avg_is_the_float_mean_of_present_values() {
+        // avg is always float, over the present values only (never divided by
+        // the missing, §9).
+        let values = vec![int(5), Value::Absent, int(3)];
+        let outcome = fold_aggregate(AggOp::Avg, &values).unwrap();
+        assert_eq!(outcome.value, float(4.0));
+        assert_eq!(outcome.skipped, 1);
+    }
+
+    #[test]
+    fn min_and_max_skip_absent() {
+        let values = vec![int(5), Value::Absent, int(3), int(9)];
+        assert_eq!(fold_aggregate(AggOp::Min, &values).unwrap().value, int(3));
+        assert_eq!(fold_aggregate(AggOp::Max, &values).unwrap().value, int(9));
+    }
+
+    #[test]
+    fn min_and_max_work_over_non_numeric_ordered_values() {
+        // min/max extend to any single ordered type (§9): strings lexicographic.
+        let names = vec![
+            string_value("bob"),
+            string_value("alice"),
+            string_value("zoe"),
+        ];
+        assert_eq!(
+            fold_aggregate(AggOp::Min, &names).unwrap().value,
+            string_value("alice")
+        );
+        assert_eq!(
+            fold_aggregate(AggOp::Max, &names).unwrap().value,
+            string_value("zoe")
+        );
+    }
+
+    #[test]
+    fn an_empty_present_set_yields_absent_for_all_but_count() {
+        // An empty group, or one whose values are all absent: count = 0, the
+        // others = absent (§9 — no value to report).
+        for values in [vec![], vec![Value::Absent, Value::Absent]] {
+            assert_eq!(
+                fold_aggregate(AggOp::Count, &values).unwrap().value,
+                int(values.len() as i64)
+            );
+            for op in [AggOp::Sum, AggOp::Avg, AggOp::Min, AggOp::Max] {
+                assert_eq!(
+                    fold_aggregate(op, &values).unwrap().value,
+                    Value::Absent,
+                    "{op:?} over an empty present-set must be absent"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn sum_counts_equal_values_from_distinct_witnesses() {
+        // The "duplicates and aggregates" rule (§9): the multiset carries one
+        // element per witness tuple, so two equal salaries both count.
+        let salaries = vec![int(100), int(100), int(50)];
+        assert_eq!(
+            fold_aggregate(AggOp::Sum, &salaries).unwrap().value,
+            int(250)
+        );
+        assert_eq!(
+            fold_aggregate(AggOp::Count, &salaries).unwrap().value,
+            int(3)
+        );
+    }
+
+    #[test]
+    fn sum_of_non_numeric_is_a_structured_error() {
+        let values = vec![string_value("a"), string_value("b")];
+        let err = fold_aggregate(AggOp::Sum, &values).unwrap_err();
+        assert!(
+            err.to_string().contains("type error"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn min_over_mixed_types_is_a_structured_error() {
+        // A cross-type comparison is a §8 error, never a silent result.
+        let values = vec![int(1), string_value("a")];
+        let err = fold_aggregate(AggOp::Min, &values).unwrap_err();
+        assert!(
+            err.to_string().contains("type error"),
+            "unexpected error: {err}"
+        );
+    }
+
     // --- Phase B (B1–B7) and Phase E (E1–E4) properties (testing.md) ---
 
     mod properties {
@@ -2015,10 +2375,12 @@ mod tests {
                         "absence leaf {pattern:?} is refuted by the model"
                     );
                 }
-                ProofTree::Builtin { .. } | ProofTree::Presence { .. } => {
-                    // A satisfied comparison/assignment/presence leaf carries its
-                    // own justification (the evaluated operands) — nothing to
-                    // check against the model.
+                ProofTree::Builtin { .. }
+                | ProofTree::Presence { .. }
+                | ProofTree::Aggregate { .. } => {
+                    // A satisfied comparison/assignment/presence/aggregate leaf
+                    // carries its own justification (the evaluated operands or the
+                    // fold) — nothing to check against the model.
                 }
                 ProofTree::Derived { children, .. } => {
                     for child in children {
@@ -2457,7 +2819,8 @@ mod tests {
                                     .is_some_and(|r| r < round),
                                 Premise::Absent(_)
                                 | Premise::Builtin { .. }
-                                | Premise::Presence { .. } => true,
+                                | Premise::Presence { .. }
+                                | Premise::Aggregate { .. } => true,
                             })
                         }),
                         "no well-founded derivation for {:?}", fact
@@ -2498,10 +2861,13 @@ mod tests {
                                         "absence premise {pattern:?} is refuted"
                                     );
                                 }
-                                Premise::Builtin { .. } | Premise::Presence { .. } => {
+                                Premise::Builtin { .. }
+                                | Premise::Presence { .. }
+                                | Premise::Aggregate { .. } => {
                                     // Self-justifying; `arb_program_with_edb`
-                                    // emits no comparisons or presence tests, so
-                                    // these are not yet exercised here.
+                                    // emits no comparisons, presence tests, or
+                                    // aggregates, so these are not yet exercised
+                                    // here.
                                 }
                             }
                         }
@@ -2523,6 +2889,105 @@ mod tests {
                         );
                     }
                 }
+            }
+        }
+
+        // --- Aggregation (§9) ---
+
+        /// Builds an aggregate program from generated edges: `op`-aggregate the
+        /// second column of `edge`, grouped by the first. Parsed and lowered
+        /// through the real front end (so the hoist/stratification path is
+        /// exercised too), then handed to both evaluators.
+        fn aggregate_ir(op: &str, edges: &[(u8, u8)]) -> Program {
+            let mut src = String::new();
+            for (a, b) in edges {
+                src.push_str(&format!("edge({a}, {b}).\n"));
+            }
+            src.push_str(&format!(
+                "result(K, N) :- edge(K, _), N = {op} {{ V | edge(K, V) }}.\n"
+            ));
+            let ast = crate::parser::parse(&src).expect("generated source parses");
+            lower(&ast).expect("generated aggregate program lowers")
+        }
+
+        proptest! {
+            /// count counts every binding, absent ones included (§9).
+            #[test]
+            fn count_equals_number_of_bindings(
+                values in prop::collection::vec(arb_value(), 0..8),
+                extra_absents in 0usize..4,
+            ) {
+                let mut vs = values;
+                for _ in 0..extra_absents {
+                    vs.push(Value::Absent);
+                }
+                prop_assert_eq!(
+                    fold_aggregate(AggOp::Count, &vs).unwrap().value,
+                    Value::Int(vs.len() as i64)
+                );
+            }
+
+            /// Absent inputs never change sum/avg/min/max — they are skipped, and
+            /// the skip count grows by exactly the number added (§9).
+            #[test]
+            fn absent_inputs_are_skipped_not_folded(
+                ints in prop::collection::vec(-1000i64..1000, 0..8),
+                extra_absents in 0usize..4,
+            ) {
+                let present: Vec<Value> = ints.iter().map(|n| Value::Int(*n)).collect();
+                let mut padded = present.clone();
+                for _ in 0..extra_absents {
+                    padded.push(Value::Absent);
+                }
+                for op in [AggOp::Sum, AggOp::Avg, AggOp::Min, AggOp::Max] {
+                    let base = fold_aggregate(op, &present).unwrap();
+                    let with_absent = fold_aggregate(op, &padded).unwrap();
+                    prop_assert_eq!(base.value.clone(), with_absent.value.clone());
+                    prop_assert_eq!(with_absent.skipped, base.skipped + extra_absents);
+                }
+            }
+
+            /// min and max bound every present value, over one ordered type (§9).
+            #[test]
+            fn min_and_max_bound_every_value(ints in prop::collection::vec(-1000i64..1000, 1..8)) {
+                let vs: Vec<Value> = ints.iter().map(|n| Value::Int(*n)).collect();
+                let lo = fold_aggregate(AggOp::Min, &vs).unwrap().value;
+                let hi = fold_aggregate(AggOp::Max, &vs).unwrap().value;
+                for v in &vs {
+                    prop_assert!(lo <= *v && *v <= hi);
+                }
+            }
+
+            /// sum matches an independent integer fold; empty → absent (§9).
+            #[test]
+            fn sum_matches_an_independent_fold(ints in prop::collection::vec(-1000i64..1000, 0..8)) {
+                let vs: Vec<Value> = ints.iter().map(|n| Value::Int(*n)).collect();
+                let got = fold_aggregate(AggOp::Sum, &vs).unwrap().value;
+                if vs.is_empty() {
+                    prop_assert_eq!(got, Value::Absent);
+                } else {
+                    let expected: i64 = ints.iter().sum();
+                    prop_assert_eq!(got, Value::Int(expected));
+                }
+            }
+        }
+
+        proptest! {
+            // Evaluator differentials are the expensive properties; keep the
+            // case count modest (testing.md, Tooling).
+            #![proptest_config(ProptestConfig::with_cases(64))]
+
+            /// B1 for aggregation: naive and semi-naive agree as fact sets over
+            /// generated grouped-aggregate programs. The fold is shared by both
+            /// evaluators, so this pins their witness enumeration and grouping.
+            #[test]
+            fn b1_aggregate_programs_agree(
+                edges in prop::collection::vec((0u8..4, 0u8..6), 0..12),
+                op in prop::sample::select(vec!["count", "sum", "min", "max", "avg"]),
+            ) {
+                let program = aggregate_ir(op, &edges);
+                let model = eval(&program).unwrap();
+                prop_assert_eq!(model_facts(&model), naive_eval(&program).unwrap());
             }
         }
     }

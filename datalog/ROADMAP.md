@@ -26,24 +26,21 @@ The evaluation-first roadmap (decided 2026-07-10; rationale in `AGENTS.md` and
 6. **Agent CLI** — one-shot `-q` queries; the Claude Code skill. ✅ 2026-07-23
 7. **§13 imports** — data (CSV/JSONL/Parquet/URL via DuckDB) + module imports. ✅ 2026-07-23
 8. **First-class absent value** — two-valued `absent`; `is [not] absent`; uniform null→absent imports (type-neutral). ✅ 2026-07-24
+9. **§9 aggregation** — the canonical five (`count`/`sum`/`min`/`max`/`avg`), set-builder `op { Expr | Goal }` syntax, implicit grouping, skip-but-report via provenance, stratified (recursion rejected). ✅ 2026-07-24
 
 ## Open backlog
 
-### Next up (highest-signal)
+### Aggregation follow-ons (§9)
 
-- **§9 aggregation** — count/sum/min/max + grouping. The paired expressivity
-  pillar for source analysis; every dogfood analysis so far was a threshold or
-  existence check for lack of it. The absent interaction is settled
-  (skip-but-report, §9/§17 2026-07-24) but **not yet built** — it lands with the
-  aggregates; the absent *value* itself shipped (milestone 8). Aggregate
-  syntax/grouping still open. _queued._ — §9.
-
-### Aggregation (§9)
-
-- **Aggregate expression syntax** — `count { Var : Goal }` is provisional, and
-  `:` now also delimits named args, so it will be revisited. _queued (with §9)._ — §9.
-- **Aggregation vs recursion** — how far to take recursive aggregation
-  semantics. _queued (with §9)._ — §9.
+- **Statistical reducers** — `median`/`stddev`/`variance`/`percentile`. The
+  aggregate node reserves a parameter slot for `percentile(p)`; each is a reducer
+  registration + a typecheck arm, no evaluator restructure. _queued._ — §9.
+- **Collection-valued reducers** — `collect`/`string_agg`. Blocked on a
+  first-class collection value (the value model is flat, §4); its own design
+  session. _queued (blocked)._ — §9/§4.
+- **Recursive/monotonic aggregation** — v1 rejects recursion through an aggregate
+  via stratification; how far to take a fixpoint semantics (Zaniolo et al.,
+  `references.md`) is open. _parked (research)._ — §9.
 
 ### Provenance surface (§11)
 
@@ -67,11 +64,12 @@ The evaluation-first roadmap (decided 2026-07-10; rationale in `AGENTS.md` and
 - **Module namespacing** — v1 module imports share one global namespace;
   qualified names / visibility deferred until needed. _queued._ — §13.
 
-### Performance (after §9 + optional/absent)
+### Performance (now unblocked)
 
-Deliberately sequenced **after** aggregation and the optional/absent value: tune
-a feature-complete surface rather than re-profiling as core semantics change
-(both add evaluation paths that would move the hotspots).
+Deliberately sequenced **after** aggregation and the absent value (both shipped
+2026-07-24): tune a feature-complete surface rather than re-profiling as core
+semantics change (both added evaluation paths that would move the hotspots). Now
+the highest-signal next item.
 
 - **Profile the engine** — it has never been profiled. The USDA dogfood put
   `foundation × 170k-measurement` joins at ~11–20 s in release, but the cause is

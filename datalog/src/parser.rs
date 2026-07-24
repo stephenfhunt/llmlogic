@@ -28,9 +28,9 @@
 //!   lexer.
 
 use crate::ast::{
-    Args, Atom, Clause, Comparison, Constant, Declaration, Expr, ExprKind, FieldDecl, Ident,
-    Import, ImportKind, Literal, LiteralKind, NamedArg, Program, Query, Span, Statement,
-    StatementKind, Term, TermKind, TypeName,
+    AggOp, Aggregate, Args, Atom, Clause, Comparison, Constant, Declaration, Expr, ExprKind,
+    FieldDecl, Ident, Import, ImportKind, Literal, LiteralKind, NamedArg, Program, Query, Span,
+    Statement, StatementKind, Term, TermKind, TypeName,
 };
 use crate::error::Error;
 use crate::lexer::{Token, TokenKind, lex};
@@ -566,6 +566,36 @@ impl Parser {
                 span,
             });
         }
+        // A set-builder aggregate `op { expr | goal }` (§9). Contextual dispatch:
+        // an operator name matters only immediately before `{`; everywhere else
+        // `count`/`sum`/… stay ordinary identifiers (symbols, relation and field
+        // names). `{` never appears outside an aggregate, so an identifier before
+        // it that is not one of the five is a targeted error, not a fall-through.
+        if let TokenKind::Ident(name) = self.kind()
+            && matches!(self.kind_at(1), TokenKind::LBrace)
+        {
+            if let Some(op) = AggOp::from_name(name) {
+                return self.parse_aggregate(op);
+            }
+            let span = self.span();
+            self.error(
+                span,
+                format!(
+                    "`{name}` is not an aggregate operator; expected one of \
+                     count, sum, min, max, avg before `{{`"
+                ),
+            );
+            return Err(());
+        }
+        if matches!(self.kind(), TokenKind::LBrace) {
+            let span = self.span();
+            self.error(
+                span,
+                "an aggregate needs an operator: write `count { X | goal(X) }` \
+                 (one of count, sum, min, max, avg) before the `{`",
+            );
+            return Err(());
+        }
         // Grouping parens are not in the v1 grammar (`primary = [ "-" ] number |
         // term`, §5). Catch them here with the decomposition workaround rather
         // than letting `parse_term` report a bare "expected a term" — the reader
@@ -583,6 +613,36 @@ impl Parser {
         let span = term.span;
         Ok(Expr {
             kind: ExprKind::Term(term),
+            span,
+        })
+    }
+
+    /// A set-builder aggregate `op { expr | goal }` (§9). The operator has been
+    /// identified from the identifier immediately before `{` (contextual
+    /// dispatch, `parse_primary`) but neither token is consumed yet. The goal is
+    /// a conjunction — disjunction is not allowed inside an aggregate (§5).
+    fn parse_aggregate(&mut self, op: AggOp) -> PResult<Expr> {
+        let start = self.span();
+        self.bump(); // the operator identifier
+        self.expect(&TokenKind::LBrace, "`{` opening the aggregate")?;
+        let expr = self.parse_expr()?;
+        if !self.eat(&TokenKind::Pipe) {
+            self.error_expected(
+                "`|` separating the aggregated expression from its goal \
+                 (`op { Expr | Goal }`)",
+            );
+            return Err(());
+        }
+        let goal = self.parse_conjunction()?;
+        let close = self.expect(&TokenKind::RBrace, "`}` closing the aggregate")?;
+        let span = join(start, close.span);
+        Ok(Expr {
+            kind: ExprKind::Aggregate(Aggregate {
+                op,
+                expr: Box::new(expr),
+                goal,
+                params: Vec::new(),
+            }),
             span,
         })
     }
@@ -912,6 +972,15 @@ mod tests {
                 zero_expr(lhs);
                 zero_expr(rhs);
             }
+            ExprKind::Aggregate(agg) => {
+                zero_expr(&mut agg.expr);
+                for literal in &mut agg.goal {
+                    zero_literal(literal);
+                }
+                for param in &mut agg.params {
+                    zero_expr(param);
+                }
+            }
         }
     }
 
@@ -1139,6 +1208,60 @@ adult(N) :- person(name: N, age: A), A >= 18.
     fn absent_is_reserved_and_cannot_name_a_relation() {
         // A keyword, not an identifier — `absent(...)` cannot be a head atom.
         assert!(!parse_err("absent(1).").is_empty());
+    }
+
+    #[test]
+    fn aggregate_parses_with_the_pipe_separator() {
+        // `N = count { C | parent(P, C) }` (§9): the RHS is an aggregate whose
+        // collected expression is `C` and whose goal is one positive atom.
+        let program =
+            parse_ok("child_count(P, N) :- parent(P, _), N = count { C | parent(P, C) }.");
+        let StatementKind::Clause(clause) = &program.statements[0].kind else {
+            panic!("clause");
+        };
+        let LiteralKind::Comparison(cmp) = &clause.body[1].kind else {
+            panic!("comparison");
+        };
+        let ExprKind::Aggregate(agg) = &cmp.rhs.kind else {
+            panic!("aggregate on the rhs");
+        };
+        assert_eq!(agg.op, AggOp::Count);
+        assert!(
+            matches!(&agg.expr.kind, ExprKind::Term(Term { kind: TermKind::Variable(name), .. }) if name == "C"),
+            "collected expression is the variable C"
+        );
+        assert_eq!(agg.goal.len(), 1);
+        assert!(matches!(
+            &agg.goal[0].kind,
+            LiteralKind::Atom { negated: false, .. }
+        ));
+        assert!(agg.params.is_empty(), "no parameters in the v1 five");
+    }
+
+    #[test]
+    fn aggregate_operator_names_stay_usable_as_relations() {
+        // Contextual dispatch (§9): `count`/… are aggregate operators only
+        // immediately before `{`; elsewhere they are ordinary identifiers.
+        let program = parse_ok("count(5).\n?- count(X).");
+        let StatementKind::Clause(clause) = &program.statements[0].kind else {
+            panic!("clause");
+        };
+        assert_eq!(clause.head.predicate.name, "count");
+    }
+
+    #[test]
+    fn aggregate_without_a_pipe_is_a_targeted_error() {
+        let errors = parse_err("p(N) :- N = count { C , parent(P, C) }.");
+        assert!(errors[0].to_string().contains('|'), "got: {errors:?}");
+    }
+
+    #[test]
+    fn a_non_operator_before_a_brace_is_a_targeted_error() {
+        let errors = parse_err("p(N) :- N = blah { C | q(C) }.");
+        assert!(
+            errors[0].to_string().contains("aggregate operator"),
+            "got: {errors:?}"
+        );
     }
 
     #[test]

@@ -47,6 +47,54 @@ fn arithmetic_16_3() {
 }
 
 #[test]
+fn aggregation_16_4() {
+    assert_eq!(
+        answers(&corpus("16_4_aggregation.dl")),
+        vec!["child_count(\"alice\", 2).", "child_count(\"bob\", 1)."]
+    );
+}
+
+#[test]
+fn aggregation_skips_absent_and_typechecks() {
+    // sum/avg skip absent inputs; min extends to strings; the whole program
+    // (including typecheck) accepts the aggregates (§9).
+    let src = "\
+        measure(\"iron\", 5). measure(\"iron\", 3). measure(\"iron\", absent).\n\
+        total(N, S) :- measure(N, _), S = sum { A | measure(N, A) }.\n\
+        mean(N, M)  :- measure(N, _), M = avg { A | measure(N, A) }.\n\
+        name(\"bob\"). name(\"alice\").\n\
+        first(F) :- F = min { X | name(X) }.\n\
+        ?- total(N, S).\n\
+        ?- mean(N, M).\n\
+        ?- first(F).";
+    assert_eq!(
+        answers(src),
+        vec![
+            "total(\"iron\", 8).",
+            "mean(\"iron\", 4.0).",
+            "first(\"alice\").",
+        ]
+    );
+}
+
+#[test]
+fn count_counts_bindings_present_written_explicitly() {
+    // count counts bindings (absent included); the present count is written
+    // out with an explicit `is not absent` filter (§9).
+    let src = "\
+        m(\"a\", 1). m(\"a\", absent). m(\"a\", 2).\n\
+        thing(\"a\").\n\
+        bindings(T, C) :- thing(T), C = count { A | m(T, A) }.\n\
+        present(T, C)  :- thing(T), C = count { A | m(T, A), A is not absent }.\n\
+        ?- bindings(T, C).\n\
+        ?- present(T, C).";
+    assert_eq!(
+        answers(src),
+        vec!["bindings(\"a\", 3).", "present(\"a\", 2)."]
+    );
+}
+
+#[test]
 fn named_arguments_16_7() {
     assert_eq!(
         answers(&corpus("16_7_named_args.dl")),

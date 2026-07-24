@@ -90,44 +90,69 @@ fn matches(
     });
     let mut out = Vec::new();
     for env in envs {
-        if let Some(env) = apply_comparisons(body, env)? {
+        if let Some(env) = apply_builtins(body, facts, env)? {
             out.push(env);
         }
     }
     Ok(out)
 }
 
-/// Folds every comparison literal (§8) over `env` in source order: a filter
-/// that fails discards the environment (`Ok(None)`); an `=`-assignment binds
-/// its target; a runtime error (overflow, division by zero, NaN, type mismatch)
-/// aborts.
-fn apply_comparisons(
+/// Folds every comparison (§8) and aggregate (§9) literal over `env` in source
+/// order: a comparison filter that fails discards the environment (`Ok(None)`);
+/// an `=`-assignment binds its target; an aggregate folds over its goal's
+/// witnesses and binds its result; a runtime error (overflow, division by zero,
+/// NaN, type mismatch) aborts. Source order lets a later builtin use an earlier
+/// one's binding (an aggregate result consumed by a comparison), mirroring the
+/// engine's scheduling.
+fn apply_builtins(
     body: &[BodyLiteral],
+    facts: &BTreeSet<Fact>,
     mut env: HashMap<Var, Value>,
 ) -> Result<Option<HashMap<Var, Value>>> {
     for literal in body {
-        let BodyLiteralKind::Compare { op, lhs, rhs } = &literal.kind else {
-            continue;
-        };
-        // Assignment: `=` where exactly one side is a bare, currently-unbound
-        // variable and the other side evaluates.
-        if *op == CmpOp::Eq {
-            match (unbound_var(lhs, &env), unbound_var(rhs, &env)) {
-                (Some(v), None) => {
-                    env.insert(v, eval_expr(rhs, &env)?);
-                    continue;
+        match &literal.kind {
+            BodyLiteralKind::Compare { op, lhs, rhs } => {
+                // Assignment: `=` where exactly one side is a bare, currently-
+                // unbound variable and the other side evaluates.
+                if *op == CmpOp::Eq {
+                    match (unbound_var(lhs, &env), unbound_var(rhs, &env)) {
+                        (Some(v), None) => {
+                            env.insert(v, eval_expr(rhs, &env)?);
+                            continue;
+                        }
+                        (None, Some(v)) => {
+                            env.insert(v, eval_expr(lhs, &env)?);
+                            continue;
+                        }
+                        _ => {}
+                    }
                 }
-                (None, Some(v)) => {
-                    env.insert(v, eval_expr(lhs, &env)?);
-                    continue;
+                let l = eval_expr(lhs, &env)?;
+                let r = eval_expr(rhs, &env)?;
+                if !compare(*op, &l, &r)? {
+                    return Ok(None);
                 }
-                _ => {}
             }
-        }
-        let l = eval_expr(lhs, &env)?;
-        let r = eval_expr(rhs, &env)?;
-        if !compare(*op, &l, &r)? {
-            return Ok(None);
+            BodyLiteralKind::Aggregate {
+                result,
+                op,
+                expr,
+                goal,
+                ..
+            } => {
+                // Evaluate the goal with the group keys (this env) fixed, collect
+                // the collected expression over every witness, and fold — the
+                // same fold the engine uses (`fold_aggregate`), so the two agree.
+                let mut values = Vec::new();
+                for witness in matches(goal, facts, &env)? {
+                    values.push(eval_expr(expr, &witness)?);
+                }
+                let outcome = crate::engine::fold_aggregate(*op, &values)?;
+                env.insert(*result, outcome.value);
+            }
+            // Atoms and negated atoms are handled in `matches`; a presence test
+            // (§4/§8) is outside the generated differential scope.
+            _ => {}
         }
     }
     Ok(Some(env))

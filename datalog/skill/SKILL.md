@@ -89,6 +89,12 @@ sorted — and they round-trip as input, so runs compose over pipes:
   ```
 - **Negation**: `not covered(X)` (stratified — no recursion through negation).
 - **Comparisons/arithmetic**: `A >= 18`, `M = N + 1`; strict numeric types.
+- **Aggregation**: `N = count { C | parent(P, C) }` — set-builder `op { Expr | Goal }`,
+  `op` one of `count`/`sum`/`min`/`max`/`avg`. Grouping is implicit: one result per
+  binding of the rule's *other* variables (here `P`, so it's children-per-parent).
+  `sum`/`avg`/`min`/`max` skip `absent` inputs (an all-absent or empty group →
+  `absent`); `count` counts bindings, so count only present values explicitly with
+  `count { A | m(A), A is not absent }`. `min`/`max` also work on strings/symbols.
 - **Missing data** is the value `absent` (an empty CSV cell, a JSON/DB null).
   Any comparison with it is *false* and any arithmetic yields `absent`, so test
   it explicitly: `A is absent` / `A is not absent` (never `A = absent`, which is

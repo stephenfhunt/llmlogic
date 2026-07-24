@@ -272,7 +272,10 @@ cmp         = "=" | "!=" | "<" | "<=" | ">" | ">=" ;
 expr        = add ;
 add         = mul { ( "+" | "-" ) mul } ;       (* left-assoc *)
 mul         = primary { ( "*" | "/" ) primary } ;  (* binds tighter, left-assoc *)
-primary     = [ "-" ] number | term ;           (* prefix "-" folds onto a literal *)
+primary     = [ "-" ] number | aggregate | term ;  (* prefix "-" folds onto a literal *)
+
+aggregate   = agg_op "{" expr "|" conjunction "}" ;  (* set-builder, §9 *)
+agg_op      = "count" | "sum" | "min" | "max" | "avg" ;  (* contextual: ident before "{" *)
 ```
 
 Notes:
@@ -298,8 +301,13 @@ Notes:
 - `not` applies to atoms only, not comparisons; semantics and safety are §7.
   Uppercase relation names, `not` before a comparison, and trailing commas each
   get a targeted did-you-mean error (the strict-grammar pillar, §2).
-- Aggregate expressions (§9) are **not yet in the grammar** — their syntax is an
-  open question (§17), in part because `:` now also delimits named arguments.
+- **Aggregate expressions** `op { Expr | Goal }` (§9) parse as a `primary`, so
+  they compose inside arithmetic and either side of a comparison. The separator is
+  `|` (set-builder), chosen over `:` because `:` now delimits named arguments. The
+  five operator names (`count`/`sum`/`min`/`max`/`avg`) are **contextual** —
+  recognised only as an identifier immediately followed by `{` in expression
+  position — so a relation or field may still be named `count` (§9, §17
+  2026-07-24).
 - **`absent` is a reserved value literal** (§4), joining `true`/`false` as a
   keyword that is not an identifier — a relation, field, or symbol may not be
   named `absent`. It may appear wherever a constant may (facts, heads, arithmetic
@@ -466,27 +474,78 @@ D); the AST already carries whatever grouping the parser chose.*
 
 ## 9. Aggregation
 
-*Status: TBD — aggregate syntax, grouping, and the recursion/stratification
-interaction remain open (§17); the interaction with the absent value (§4) is
-decided below (2026-07-24), since it must be settled before aggregation lands.*
+*Status: Ratified 2026-07-24 (design session, §17) — surface syntax, grouping,
+the five reducers and their result types, the skip-count report surface, and the
+recursion interaction are all decided below; the absent interaction (§4) was
+settled 2026-07-24 ahead of this. v1 ships `count`/`sum`/`min`/`max`/`avg`.*
 
-*To fill in: supported aggregates (count, sum, min, max, avg, …), grouping semantics,
-and interaction with recursion and stratification.*
+**Surface syntax — set-builder pipe.** An aggregate is an **expression** of the
+form `op { Expr | Goal }`, read as set-builder notation ("the `op` of `Expr`
+such that `Goal`"). `Goal` is a conjunction (a rule body without disjunction).
+The separator is `|`, not `:`, because `:` now delimits named arguments (§5) and
+would collide inside `Goal`; `|` is otherwise unused (disjunction is `;`).
+
+```datalog
+child_count(P, N) :- parent(P, _), N = count { C | parent(P, C) }.
+% expected: child_count("alice", 2), child_count("bob", 1)
+```
+
+Being an expression, an aggregate composes under §8: it may sit on either side of
+a comparison and inside arithmetic (`N = count { C | parent(P, C) } + 1`).
+Lowering hoists it to an `=`-assignment binding a fresh result variable, exactly
+as inline arithmetic is hoisted (§8) — so the surface is sugar and the core IR
+carries a single aggregate body literal. The five operators (`count`, `sum`,
+`min`, `max`, `avg`) are **contextual**: recognised only as an identifier
+immediately followed by `{` in expression position, so a relation or field may
+still be named `count`.
+
+**Grouping is implicit.** The aggregate is evaluated once per distinct binding of
+the enclosing rule's variables that occur **outside** it — in the example, `P`,
+bound by `parent(P, _)`. Variables occurring only inside `Goal` (there, `C`) are
+local to it. There is no separate `group by`: the rule's other body literals
+supply the group keys, and a bare `Avg = avg { A | m(_, A) }` (no outer
+variables) is a single global group.
+
+**Witnesses and duplicates.** For fixed group-key bindings, the aggregate folds
+the multiset `{ eval(Expr, w) : w ∈ W }`, where `W` is the set of **distinct
+satisfying assignments to all of `Goal`'s variables** (set semantics dedups
+facts, so `W` is a set of witness tuples). Two witnesses that agree on `Expr` but
+differ elsewhere are *two* multiset elements — so `sum { S | emp(N, S) }` counts
+two equal salaries twice (the "duplicates and aggregates" question, §17;
+`references.md`). Deduping the projected values instead is *not* what these
+aggregates do.
+
+**The five reducers and their result types** (inferred, §4):
+
+| op | over | result type | absent |
+|----|------|-------------|--------|
+| `count` | any type | `int` | counts absent bindings too |
+| `sum` | `int` or `float` | same numeric type | skips |
+| `avg` | `int` or `float` | `float` | skips |
+| `min` / `max` | any single ordered type | same type as `Expr` | skips |
+
+`sum`/`avg` require a numeric `Expr`; `min`/`max` accept any single type under
+its natural order (numeric, string/symbol lexicographic, `false < true`); `count`
+accepts anything. A cross-type or non-numeric misuse is a §4 type error before
+evaluation, never a silent result.
 
 ### Absent inputs — skip but report
 
-Whatever the final surface syntax, aggregates treat the absent value (§4)
-uniformly:
+Aggregates treat the absent value (§4) uniformly:
 
 - **`sum` / `avg` / `min` / `max` skip `absent` inputs** and aggregate the present
   values — so `avg` is the mean of the values that exist, never poisoned by
   annihilation (§8) and never divided by the missing. (`min`/`max` must skip
   regardless: `absent` has no order against values.) The engine **reports the
-  count of skipped absents** alongside the result, so the skip is never silent
-  (the report surface is tied to §9/§14 output and is left open, §17).
-- **`count { X : Goal }` counts bindings**, absent ones included (a binding is a
+  count of skipped absents** through **provenance** (§11): the skip is recorded in
+  the derivation and rendered by `?why` ("averaged 8 values, skipped 2 absent"),
+  keeping the aggregate a pure single value so it still composes under §8. A user
+  who wants the skip count *as data* writes it directly:
+  `S = count { A | Goal, A is absent }` (§17, 2026-07-24 — provenance-only chosen
+  over a two-place result that could not nest in arithmetic).
+- **`count { X | Goal }` counts bindings**, absent ones included (a binding is a
   binding); the count of *present* values is written explicitly as
-  `count { X : Goal, X is not absent }`. (SQL-parity `COUNT(col)` skipping is the
+  `count { X | Goal, X is not absent }`. (SQL-parity `COUNT(col)` skipping is the
   considered alternative, §17.)
 - **Over an empty present-set** — an empty group, or one whose values are all
   absent — `count` is `0` and `sum`/`avg`/`min`/`max` are **`absent`** (there is no
@@ -496,6 +555,22 @@ uniformly:
 
 Settling these two-valued rules is *why* the absent value is designed before
 aggregation (§17): they pin what every aggregate means on sparse data.
+
+### Recursion & stratification
+
+An aggregate reads a *complete* relation, so — like negation (§7) — the
+predicates in its `Goal` must be **fully evaluated before** the aggregate runs:
+lowering places them in a strictly lower stratum, and recursion through an
+aggregate is rejected by stratification with a structured error. Safety (§10)
+mirrors negation: a group-key variable used in `Goal` must be positively bound by
+the enclosing body; `Goal`-local variables are existential (like wildcard
+variables under negation). Recursive/monotonic aggregation (the Zaniolo et al.
+fixpoint semantics, `references.md`) is a deliberate future extension.
+
+*Deferred (§17):* statistical reducers (`median`, `stddev`, `variance`,
+`percentile` — the aggregate node reserves a parameter slot for the last);
+collection-valued reducers (`collect`/`string_agg`, blocked on a first-class
+collection value, §4); recursive aggregation.
 
 ## 10. Recursion & safety
 
@@ -508,10 +583,15 @@ atom; facts must be ground. Wildcard-fresh variables in negated atoms are
 exempt — they are existential under the negation and never exported (§7).
 Violations are structured semantic errors reported before evaluation.
 
-Recursion through negation is rejected by stratification (§7).
+Recursion through negation is rejected by stratification (§7). Recursion through
+an **aggregate** (§9) is likewise rejected: the predicates in an aggregate's
+`Goal` are stratified strictly below the enclosing rule. Aggregate safety mirrors
+negation — a group-key variable used in the `Goal` must be positively bound by
+the enclosing body, while variables occurring only inside the `Goal` are
+existential (like wildcard variables under negation) and never exported.
 
 *Still to fill in: termination guarantees; safety/mode conditions for arithmetic
-(§8); treatment of recursion through aggregation (§9).*
+(§8); recursive/monotonic aggregation semantics (§9).*
 
 ## 11. Provenance / explainability
 
@@ -862,14 +942,13 @@ parent("alice", "carol").
 parent("bob", "dave").
 
 % number of children per parent
-child_count(P, N) :- parent(P, _), N = count { C : parent(P, C) }.
+child_count(P, N) :- parent(P, _), N = count { C | parent(P, C) }.
 % expected: child_count("alice", 2), child_count("bob", 1)
 ```
-*Raises (§9, open):* aggregate expression syntax (`count { Var : Goal }` is
-provisional — and `:` now also delimits named arguments, so this form will likely
-be revisited); how grouping keys are determined (the head vars outside the
-aggregate); supported aggregates and their result types; interaction with
-recursion/stratification.
+*Ratified (§9, 2026-07-24):* set-builder syntax `op { Expr | Goal }`; grouping is
+implicit on the rule variables outside the aggregate (here `P`); the five reducers
+`count`/`sum`/`min`/`max`/`avg` with inferred result types; aggregated predicates
+are stratified strictly below (recursion through an aggregate is rejected).
 
 ### 16.5 External fact source — import
 
@@ -950,21 +1029,55 @@ has_amount(F, N)     :- measurement(food: F, nutrient: N, amount: A), A is not a
 missing_amount(F, N) :- measurement(food: F, nutrient: N, amount: A), A is absent.
 
 % aggregation skips absents (and reports how many); avg is over present values
-avg_iron(Avg) :- Avg = avg { A : measurement(nutrient: "iron", amount: A) }.
-% expected: mean over present iron amounts; the report notes N absent values skipped
+avg_iron(Avg) :- Avg = avg { A | measurement(nutrient: "iron", amount: A) }.
+% expected: mean over present iron amounts; ?why notes N absent values skipped
 ```
 *Resolved (§4/§8/§9/§13, 2026-07-24):* absence is a first-class, two-valued value —
 type-neutral at import (the `amount` column stays numeric despite gaps),
 annihilating in arithmetic, false in comparisons, tested with `is [not] absent`,
-skipped-but-reported by aggregates; the `absent` literal round-trips (Datalog-out
-is Datalog-in). *Still open:* aggregate surface syntax and grouping (§9/§17) — the
-`avg { … }` form here is provisional, as in §16.4.
+skipped-but-reported by aggregates (the skip count via provenance, §11); the
+`absent` literal round-trips (Datalog-out is Datalog-in). The aggregate surface is
+the ratified set-builder `avg { A | Goal }` (§9), grouped globally here.
 
 ## 17. Decisions log & open questions
 
 *Status: living*
 
 ### Decisions
+
+- **2026-07-24** — **Aggregation (§9): full design ratified** (design session;
+  implementation is a follow-on roadmap item). v1 ships the canonical five —
+  `count`, `sum`, `min`, `max`, `avg` — evaluated in the native engine over
+  materialized facts (DuckDB is import-only, never at query time).
+  - **Scope: the five, no more.** `count` is type-agnostic; `min`/`max` extend to
+    any single ordered type (string/symbol/bool as well as numeric) at no cost
+    because the value `Ord` already exists; `sum`/`avg` are numeric-only.
+    Statistical (`median`/`stddev`/`variance`/`percentile`) and collection-valued
+    (`collect`/`string_agg`) reducers are deferred (below). The reducer is
+    orthogonal to the evaluator — adding statistical ones later is a registration
+    + a typecheck arm, not a restructure — so the node reserves a **parameter
+    slot** (for `percentile(p)`) from day one.
+  - **Syntax: set-builder pipe** `op { Expr | Goal }`, an expression that composes
+    under §8 and lowers (hoists) to an `=`-assignment. `|` over `:` avoids the
+    named-argument colon collision; operator names are contextual (ident before
+    `{`), so `count`/… stay usable as relation names. Rejected: keeping `:`
+    (overloads named args in the same expression); a `where` keyword (verbose,
+    off house style).
+  - **Grouping is implicit** on the rule variables outside the aggregate — no
+    `group by`. The fold is over the multiset of `Expr` across the **distinct
+    witness tuples** of `Goal` (so equal projected values from distinct witnesses
+    both count — the "duplicates and aggregates" resolution, `references.md`).
+  - **Skip count via provenance, not the value** (resolves the open item below).
+    The aggregate stays a single value that nests in arithmetic; the skipped-absent
+    count is recorded in the derivation and shown by `?why`. Wanting it as data,
+    the user writes `count { A | Goal, A is absent }`. Rejected: a two-place
+    result (breaks expression composition).
+  - **Recursion through an aggregate is rejected via stratification** (like
+    negation, §7); safety mirrors negation (§10). Recursive/monotonic aggregation
+    is a deliberate future item.
+  - **Deferred:** statistical reducers (into the reserved param slot); collection
+    reducers (blocked on a first-class collection value, §4); recursive
+    aggregation (Zaniolo et al.).
 
 - **2026-07-24** — **Absent value: full design ratified** (design session;
   supersedes the 2026-07-23 direction below and resolves its open question;
@@ -1009,8 +1122,9 @@ is Datalog-in). *Still open:* aggregate surface syntax and grouping (§9/§17) �
     2026-07-23 CSV-inference clause "any empty cell → string" to "empty cell →
     absent, type-neutral" (below).
   - **Still open:** generalizing `is` to a full `X is Y` null-safe equality; the
-    surface for the aggregate skip-count report; the type of an all-absent import
-    column (currently: resolved by use-site flow, else unconstrained).
+    type of an all-absent import column (currently: resolved by use-site flow, else
+    unconstrained). (The aggregate skip-count report surface was resolved
+    2026-07-24 — provenance-only, §9.)
 
 - **2026-07-23** — **Missing values → a first-class optional/absent value**
   (direction decided; design + implementation deferred to their own session).
@@ -1539,8 +1653,8 @@ is Datalog-in). *Still open:* aggregate surface syntax and grouping (§9/§17) �
   the literal producible but not body-matchable; aggregates skip-but-report; a
   uniform null→absent, type-neutral import policy. Written into §4/§8/§9/§13/§16.8.
   Remaining open: the full `X is Y` null-safe-equality generalization of `is`; the
-  aggregate skip-count report surface; the all-absent import-column type (currently
-  resolved by use-site flow, else unconstrained). — §4/§8/§9/§13.
+  the all-absent import-column type (currently resolved by use-site flow, else
+  unconstrained). — §4/§8/§9/§13.
 - **Database loading** (SQLite/DuckDB files via the reserved `table "…"`
   grammar; Postgres via DuckDB attach) and **TSV**: deferred until a real
   consumer appears; the format table and dispatch errors already name them. — §13.
@@ -1550,9 +1664,15 @@ is Datalog-in). *Still open:* aggregate surface syntax and grouping (§9/§17) �
   a consumer hits the wall. — §13.
 - **Module namespacing:** v1 module imports share one global namespace;
   qualified names/visibility deferred until a real consumer needs them. — §13.
-- **Aggregation vs recursion:** how far to go on recursive aggregation semantics. — §9.
-- **Aggregate expression syntax:** `count { Var : Goal }` is provisional — and `:`
-  now also delimits named arguments, so the form will likely be revisited. — §9.
+- **Recursive/monotonic aggregation:** v1 rejects recursion through an aggregate
+  via stratification (§9, resolved 2026-07-24); how far to take a fixpoint
+  semantics for recursive aggregates (Zaniolo et al., `references.md`) is the
+  remaining open question. — §9.
+- **Statistical & collection reducers:** the five (`count`/`sum`/`min`/`max`/`avg`)
+  shipped 2026-07-24; `median`/`stddev`/`variance`/`percentile` (the node reserves
+  a param slot) and `collect`/`string_agg` (needs a first-class collection value,
+  §4) are deferred until a consumer needs them. — §9.
+  (Aggregate syntax `op { Expr | Goal }` and grouping resolved 2026-07-24, §9.)
 - **Provenance query syntax:** `?why <fact>` is provisional across CLI and API; also
   decide proof-tree JSON encoding. (§16.6) — §11/§14.
 - **Semiring provenance under negation:** parked research thread with a worked

@@ -43,7 +43,7 @@
 
 use std::hash::{Hash, Hasher};
 
-use crate::ast::{ArithOp, CmpOp, Span, TypeName};
+use crate::ast::{AggOp, ArithOp, CmpOp, Span, TypeName};
 use crate::error::Error;
 
 /// An interned predicate identity: index into [`Program::predicates`].
@@ -237,6 +237,22 @@ pub enum BodyLiteralKind {
     /// absent), and distinct from [`Self::NegAtom`] because its `not` is the
     /// operator's, not atom-negation.
     Presence { expr: Expr, negated: bool },
+    /// A set-builder aggregate (§9), the lowered form of `result = op { expr |
+    /// goal }`. Evaluated once per binding of the group keys — the enclosing
+    /// rule's variables that occur in `goal` and are already bound when this
+    /// literal is reached — it folds `op` over the multiset of `expr` across the
+    /// distinct witness tuples of `goal`, honouring the absent rules (§9: skip
+    /// for sum/avg/min/max, count includes absent bindings, empty → absent), and
+    /// binds `result` like an `=`-assignment. Its `goal` predicates sit in a
+    /// strictly lower stratum (like negation), so the inputs are complete when it
+    /// runs. `params` is empty for the v1 five (reserved for `percentile(p)`).
+    Aggregate {
+        result: Var,
+        op: AggOp,
+        params: Vec<Expr>,
+        expr: Expr,
+        goal: Vec<BodyLiteral>,
+    },
 }
 
 /// An arithmetic expression over resolved terms.

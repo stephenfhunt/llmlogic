@@ -15,7 +15,7 @@
 //! over a wide relation in named form — `employee(name: "alice", title:
 //! "manager")` rather than eight positional columns (§17, 2026-07-20).
 
-use crate::ast::CmpOp;
+use crate::ast::{AggOp, CmpOp};
 use crate::engine::Model;
 use crate::ir::{Fact, PredId, RuleId, Tuple, Value};
 
@@ -71,6 +71,18 @@ pub enum Premise {
     /// [`Premise::Builtin`]: it holds on its evaluated operand and recurses into
     /// nothing.
     Presence { value: Value, negated: bool },
+    /// A satisfied aggregate (§9): the operator, the produced value, and the
+    /// counts that keep the absent-skip non-silent — `present` values folded and
+    /// `skipped` absent inputs (the §9 skip-count report surface). Self-justifying
+    /// like [`Premise::Builtin`]: it summarises the fold over the goal's witnesses
+    /// and recurses into nothing (the aggregated relation is lower-stratum and
+    /// complete when it runs).
+    Aggregate {
+        op: AggOp,
+        value: Value,
+        present: usize,
+        skipped: usize,
+    },
 }
 
 /// One way a fact was derived: a ground rule instance.
@@ -104,6 +116,16 @@ pub enum ProofTree {
     /// A satisfied presence test `expr is [not] absent` (§4/§8). Terminates its
     /// branch — it holds on its evaluated operand and needs no sub-proof.
     Presence { value: Value, negated: bool },
+    /// A satisfied aggregate (§9): the operator, the folded value, and the
+    /// present/skipped counts (the skip is never silent — §9). Terminates its
+    /// branch: the aggregated relation is lower-stratum and complete, so the fold
+    /// needs no sub-proof in v1.
+    Aggregate {
+        op: AggOp,
+        value: Value,
+        present: usize,
+        skipped: usize,
+    },
     /// A derived fact with one supporting rule instance; `children[i]` proves
     /// the instance's `premises[i]`.
     Derived {
@@ -137,7 +159,10 @@ impl ProofTree {
         let derivation = model.derivations_of(fact).find(|d| {
             d.premises.iter().all(|premise| match premise {
                 Premise::Fact(f) => model.first_round(f).is_some_and(|r| r < round),
-                Premise::Absent(_) | Premise::Builtin { .. } | Premise::Presence { .. } => true,
+                Premise::Absent(_)
+                | Premise::Builtin { .. }
+                | Premise::Presence { .. }
+                | Premise::Aggregate { .. } => true,
             })
         })?;
         let children = derivation
@@ -154,6 +179,17 @@ impl ProofTree {
                 Premise::Presence { value, negated } => Some(ProofTree::Presence {
                     value: value.clone(),
                     negated: *negated,
+                }),
+                Premise::Aggregate {
+                    op,
+                    value,
+                    present,
+                    skipped,
+                } => Some(ProofTree::Aggregate {
+                    op: *op,
+                    value: value.clone(),
+                    present: *present,
+                    skipped: *skipped,
                 }),
             })
             .collect::<Option<Vec<ProofTree>>>()?;
@@ -172,7 +208,10 @@ impl ProofTree {
         match self {
             ProofTree::Leaf(fact) => Some(fact),
             ProofTree::Derived { fact, .. } => Some(fact),
-            ProofTree::Absent(_) | ProofTree::Builtin { .. } | ProofTree::Presence { .. } => None,
+            ProofTree::Absent(_)
+            | ProofTree::Builtin { .. }
+            | ProofTree::Presence { .. }
+            | ProofTree::Aggregate { .. } => None,
         }
     }
 }

@@ -12,9 +12,9 @@
 //! construction (never mixed, §4), and [`TermKind::Wildcard`] survives until
 //! lowering eliminates it.
 //!
-//! Provisional grammar is *not* represented: aggregate expressions (§9) will
-//! land as a new [`LiteralKind`] variant, and provenance queries (`?why`, §11)
-//! as a new [`StatementKind`] variant, once their syntax is ratified. Operator
+//! Provenance queries (`?why`, §11) are the remaining provisional grammar — they
+//! will land as a new [`StatementKind`] variant once ratified. Aggregate
+//! expressions (§9) are represented as [`ExprKind::Aggregate`]. Operator
 //! precedence (§8) is a parser concern; [`Expr`] represents any parse.
 
 /// A half-open byte range `[start, end)` into the program source.
@@ -180,10 +180,6 @@ pub struct Literal {
 }
 
 /// The body literal forms of §5.
-///
-/// A future aggregate expression (§9) will become a new variant here once its
-/// syntax is ratified (the provisional `count { V : Goal }` form collides with
-/// the named-argument `:` and is being revisited).
 #[derive(Debug, Clone, PartialEq)]
 pub enum LiteralKind {
     /// A possibly negated atom; `not` applies to atoms only (§5).
@@ -278,6 +274,69 @@ pub enum ExprKind {
         lhs: Box<Expr>,
         rhs: Box<Expr>,
     },
+    /// A set-builder aggregate `op { expr | goal }` (§9). Being an expression it
+    /// composes under §8 — either side of a comparison, inside arithmetic. It has
+    /// no core-IR `Expr` counterpart: lowering hoists it to a fresh
+    /// `=`-assignment binding an [`crate::ir::BodyLiteralKind::Aggregate`] literal,
+    /// so the engine only ever sees the resolved result variable.
+    Aggregate(Aggregate),
+}
+
+/// A set-builder aggregate expression `op { expr | goal }` (§9, ratified
+/// 2026-07-24). `op` is one of the canonical five; `goal` is a conjunction of
+/// body literals; grouping is implicit on the enclosing rule's variables that
+/// occur outside the aggregate.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Aggregate {
+    pub op: AggOp,
+    /// The collected/projected expression (the `expr` in `op { expr | goal }`).
+    pub expr: Box<Expr>,
+    /// The subgoal — a conjunction (a body without disjunction).
+    pub goal: Vec<Literal>,
+    /// Reserved parameter slot (§9): empty for the v1 five. Kept from day one so
+    /// a parameterised reducer (`percentile(p)`) is a later registration, not an
+    /// AST/IR schema change (§17, 2026-07-24).
+    pub params: Vec<Expr>,
+}
+
+/// Aggregate operators (§9). v1 ships the canonical five; statistical
+/// (`median`/`stddev`/`variance`/`percentile`) and collection-valued
+/// (`collect`/`string_agg`) reducers are deferred (§17, 2026-07-24).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum AggOp {
+    Count,
+    Sum,
+    Min,
+    Max,
+    Avg,
+}
+
+impl AggOp {
+    /// The source keyword for this operator.
+    pub fn keyword(self) -> &'static str {
+        match self {
+            AggOp::Count => "count",
+            AggOp::Sum => "sum",
+            AggOp::Min => "min",
+            AggOp::Max => "max",
+            AggOp::Avg => "avg",
+        }
+    }
+
+    /// The aggregate operator named by `name`, or `None` if it is an ordinary
+    /// identifier. Drives the parser's contextual dispatch (an aggregate is an
+    /// identifier immediately followed by `{`, §5): `count`/… stay usable as
+    /// relation and field names everywhere else.
+    pub fn from_name(name: &str) -> Option<AggOp> {
+        match name {
+            "count" => Some(AggOp::Count),
+            "sum" => Some(AggOp::Sum),
+            "min" => Some(AggOp::Min),
+            "max" => Some(AggOp::Max),
+            "avg" => Some(AggOp::Avg),
+            _ => None,
+        }
+    }
 }
 
 /// A term with its span. Terms are flat (§4): constant or variable, no

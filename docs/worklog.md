@@ -16,6 +16,59 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-24 — §9 aggregation: design + implementation (milestone 9)
+
+**Done**
+- Designed §9 in a dedicated session, then built it end to end. `datalog/ROADMAP.md`
+  milestone 9. All 337 tests pass; clippy + fmt clean; `--no-default-features` green.
+  - **Spec** (`spec.md`): filled §9 (five reducers + result types, witness-set
+    fold, skip-but-report, stratified recursion), added the `aggregate` production
+    to §5, updated §16.4/§16.8 to pipe syntax, added the §10 aggregate safety
+    clause, and logged the decision + resolved open questions in §17.
+  - **Surface** (`lexer.rs`, `ast.rs`, `parser.rs`, `print.rs`): `{ } |` tokens;
+    `ExprKind::Aggregate` + `AggOp`; contextual dispatch (an operator name matters
+    only immediately before `{`, so `count`/… stay usable as relation names);
+    round-trips.
+  - **Lowering** (`lower.rs`): aggregates hoist to a fresh result var bound by
+    `BodyLiteralKind::Aggregate` (like inline arithmetic); goal shares the scope
+    (implicit grouping); stratification treats every goal predicate as a strict
+    (`Dep::Aggregated`) edge — the cycle error now says "negation or aggregation";
+    seeded safety check lets a goal see the group keys.
+  - **Typecheck** (`typecheck.rs`): `count→int`, `sum→numeric of Expr`, `avg→float`,
+    `min`/`max→type of Expr` (any single ordered type).
+  - **Engine** (`engine/mod.rs`): a new `enumerate_from` arm runs the goal as a
+    sub-join over the frozen lower stratum (shared bindings keep the group keys
+    fixed), collects the witness multiset, and folds via `fold_aggregate` (skip
+    absent, empty→absent, count includes absent). `naive.rs` calls the *same*
+    `fold_aggregate`, so the B1 differential can't paper over a fold bug.
+  - **Provenance** (`provenance.rs`): self-justifying `Premise::Aggregate` /
+    `ProofTree::Aggregate` carrying op + present/skipped counts (the skip report).
+  - **Tests**: `16_4_aggregation.dl` corpus (pipeline + system); verbose fold unit
+    tests; fold property laws + a naive-vs-seminaive differential over generated
+    aggregate programs; parser + print round-trip tests. Skill: `aggregation.dl`
+    example + the "30 seconds" reference.
+
+**Decided (design session — full detail in `spec.md` §17, 2026-07-24)**
+- **Scope: the canonical five only** (`count`/`sum`/`min`/`max`/`avg`). min/max
+  extend to any single ordered type for free; statistical + collection reducers
+  deferred. The node reserves a **param slot** so `percentile(p)` is a later
+  registration, not a restructure.
+- **Syntax: set-builder pipe** `op { Expr | Goal }` — `|` over `:` to dodge the
+  named-arg colon; operator names contextual.
+- **Skip count via provenance, not the value** — keeps the aggregate a single
+  composable expression; want it as data → `count { A | Goal, A is absent }`.
+- **Implicit grouping** on the rule's outside variables; **witness-set fold**
+  (equal projected values from distinct witnesses both count).
+- **Recursion through an aggregate is rejected** via stratification (like §7).
+
+**Next up**
+- **Performance** is now the highest-signal item (§9 + absent both shipped, so the
+  surface is feature-complete): stand up a benchmark + profile the USDA
+  `foundation × 170k-measurement` join before optimizing (`ROADMAP.md`).
+- Smaller aggregation follow-ons: statistical reducers into the reserved param
+  slot; recursive-aggregation semantics (research); the `X is Y` null-safe
+  equality and all-absent import-column type (carried over from the absent work).
+
 ## 2026-07-24 — Implement the first-class absent value (code)
 
 **Done**

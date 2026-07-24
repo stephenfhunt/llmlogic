@@ -28,10 +28,11 @@ papers and notable implementations, grouped by topic) that guides the design.
 
 Working end-to-end for v1 core: lexer, recursive-descent parser, module and data
 imports (§13), lowering, static type inference, stratified semi-naive evaluation
-with provenance, and a canonical printer, wired as
+with provenance, aggregation (§9 — `count`/`sum`/`min`/`max`/`avg`), and a
+canonical printer, wired as
 `parse → resolve modules → load imports → lower → typecheck → eval`. The CLI runs
-programs and answers one-shot `-q` queries. Still pending: aggregation (§9) and
-the provenance query surface (§11).
+programs and answers one-shot `-q` queries. Still pending: the provenance query
+surface (§11).
 
 The core language engine is zero-dependency; **imports are powered by
 [DuckDB](https://duckdb.org)** (a default-on cargo feature). Building without it

@@ -103,6 +103,12 @@ pub enum TokenKind {
     Star,
     /// `/`
     Slash,
+    /// `{` — opens an aggregate (§9).
+    LBrace,
+    /// `}` — closes an aggregate (§9).
+    RBrace,
+    /// `|` — the set-builder separator in an aggregate `op { expr | goal }` (§9).
+    Pipe,
 
     /// End of input — always the final token, so the parser can peek without
     /// bounds checks.
@@ -144,6 +150,9 @@ impl TokenKind {
             TokenKind::Minus => "`-`".to_string(),
             TokenKind::Star => "`*`".to_string(),
             TokenKind::Slash => "`/`".to_string(),
+            TokenKind::LBrace => "`{`".to_string(),
+            TokenKind::RBrace => "`}`".to_string(),
+            TokenKind::Pipe => "`|`".to_string(),
             TokenKind::Eof => "end of input".to_string(),
         }
     }
@@ -243,6 +252,9 @@ impl<'a> Lexer<'a> {
             b'+' => self.punct(TokenKind::Plus, 1),
             b'-' => self.punct(TokenKind::Minus, 1),
             b'*' => self.punct(TokenKind::Star, 1),
+            b'{' => self.punct(TokenKind::LBrace, 1),
+            b'}' => self.punct(TokenKind::RBrace, 1),
+            b'|' => self.punct(TokenKind::Pipe, 1),
             b':' => {
                 if self.peek_at(1) == Some(b'-') {
                     self.punct(TokenKind::ColonDash, 2);

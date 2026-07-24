@@ -130,7 +130,7 @@ it. A future audit starts here.
 | Ad-hoc queries (incl. negated) | `QuerySpec` bodies | **B8**; §16.1/§16.2 hand tests |
 | Set semantics | duplication mutators | A5, B3 |
 | Comparisons / arithmetic (§8) | `arb_comparison_program` (filter/assign/join) | B1 extended (incl. error path); §16.3 hand test |
-| Aggregation | — pending §9 | future phase |
+| Aggregation (§9) | `aggregate_ir` (grouped count/sum/min/max/avg over generated edges) | B1 aggregate differential (`b1_aggregate_programs_agree`); fold laws (absent-skip, empty→absent, count=witnesses, sum oracle, min/max bounds); §16.4 hand test |
 
 ## Property catalog
 
