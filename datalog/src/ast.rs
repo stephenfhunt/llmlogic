@@ -190,6 +190,11 @@ pub enum LiteralKind {
     Atom { negated: bool, atom: Atom },
     /// A comparison between two arithmetic expressions.
     Comparison(Comparison),
+    /// A presence test `expr is [not] absent` (§4/§8). Parses as a comparison
+    /// but is its own literal because it has no [`CmpOp`]: the operand is a full
+    /// expression, and `negated` is the `not` of the *operator* (`is not`), not
+    /// §5 atom-negation, so it adds no stratum and binds nothing.
+    Presence { expr: Expr, negated: bool },
 }
 
 /// A comparison literal: `expr cmp expr`.
@@ -307,6 +312,10 @@ pub enum Constant {
     Int(i64),
     Float(f64),
     Bool(bool),
+    /// The missing-data value (§4). Producible in a fact, a rule head, or an
+    /// arithmetic operand; matching it in a body atom argument is a structured
+    /// error (lowering) steering to `is absent`.
+    Absent,
 }
 
 #[cfg(test)]

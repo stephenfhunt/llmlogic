@@ -89,6 +89,10 @@ sorted — and they round-trip as input, so runs compose over pipes:
   ```
 - **Negation**: `not covered(X)` (stratified — no recursion through negation).
 - **Comparisons/arithmetic**: `A >= 18`, `M = N + 1`; strict numeric types.
+- **Missing data** is the value `absent` (an empty CSV cell, a JSON/DB null).
+  Any comparison with it is *false* and any arithmetic yields `absent`, so test
+  it explicitly: `A is absent` / `A is not absent` (never `A = absent`, which is
+  false). A numeric column with gaps still counts as numeric.
 - **Queries**: `?- ancestor("alice", Who).`
 - **Imports** load external data or split a program across files:
   ```

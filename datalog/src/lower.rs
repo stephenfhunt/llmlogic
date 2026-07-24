@@ -555,6 +555,15 @@ impl Lowerer {
                         span: literal.span,
                     });
                 }
+                ast::LiteralKind::Presence { expr, negated } => {
+                    lowered.push(ir::BodyLiteral {
+                        kind: ir::BodyLiteralKind::Presence {
+                            expr: self.lower_expr(expr, scope),
+                            negated: *negated,
+                        },
+                        span: literal.span,
+                    });
+                }
             }
         }
         lowered
@@ -578,7 +587,7 @@ impl Lowerer {
                 let pred = self.pred_id(&atom.predicate.name);
                 let args = exprs
                     .iter()
-                    .map(|expr| self.lower_arg_expr(expr, scope, mode, hoisted))
+                    .map(|expr| self.lower_arg_expr(expr, scope, pos, mode, hoisted))
                     .collect();
                 Some(ir::Atom { pred, args })
             }
@@ -596,10 +605,29 @@ impl Lowerer {
         &mut self,
         expr: &ast::Expr,
         scope: &mut VarScope,
+        pos: AtomPos,
         mode: ArgMode,
         hoisted: &mut Vec<ir::BodyLiteral>,
     ) -> ir::Term {
         if let ast::ExprKind::Term(term) = &expr.kind {
+            // A bare `absent` literal cannot be *matched* in a body atom
+            // argument (§4): unification fails on absent, so this is a mistake —
+            // steer to the presence test. Producing absent (a fact, a rule head,
+            // an arithmetic operand, an `=` right-hand side) is fine; only a
+            // literal in a body match position is an error.
+            if pos == AtomPos::Body
+                && matches!(term.kind, ast::TermKind::Constant(ast::Constant::Absent))
+            {
+                self.errors.push(Error::Semantic(
+                    "`absent` cannot be matched in a body atom argument (a value never \
+                     unifies with absent); test presence with `X is absent` / \
+                     `X is not absent` instead"
+                        .to_string(),
+                ));
+                // Recover with a fresh slot so the rest of the clause still
+                // lowers (lowering already failed; this is never emitted).
+                return ir::Term::Var(scope.fresh());
+            }
             return self.lower_term(term, scope);
         }
         let ir_expr = self.lower_expr(expr, scope);
@@ -714,7 +742,7 @@ impl Lowerer {
         let args = assigned
             .into_iter()
             .map(|supplied| match supplied {
-                Some(index) => self.lower_arg_expr(&named[index].value, scope, mode, hoisted),
+                Some(index) => self.lower_arg_expr(&named[index].value, scope, pos, mode, hoisted),
                 // Partial selection: an omitted field binds a fresh anonymous
                 // variable, exactly as a positional `_` would.
                 None => ir::Term::Var(scope.fresh()),
@@ -749,6 +777,7 @@ impl Lowerer {
             ast::Constant::String(s) => ir::Value::String(s.clone()),
             ast::Constant::Int(i) => ir::Value::Int(*i),
             ast::Constant::Bool(b) => ir::Value::Bool(*b),
+            ast::Constant::Absent => ir::Value::Absent,
             ast::Constant::Float(f) => match ir::F64::new(*f) {
                 Ok(v) => ir::Value::Float(v),
                 Err(e) => {
@@ -852,6 +881,22 @@ impl Lowerer {
                         bound.insert(slot);
                     }
                 }
+                ir::BodyLiteralKind::Presence { expr, .. } => {
+                    // A presence test is a filter (§8/§10): its operand must be
+                    // bound (positively, or by a prior assignment), and it binds
+                    // nothing — there is no assignment-target exemption.
+                    for var in expr_vars(expr) {
+                        if !bound.contains(&var.0) {
+                            push_unsafe(
+                                &mut self.errors,
+                                var.0,
+                                var_names,
+                                "presence test",
+                                context,
+                            );
+                        }
+                    }
+                }
             }
         }
     }
@@ -880,7 +925,11 @@ fn stratify(
             let (atom, negated) = match &literal.kind {
                 ir::BodyLiteralKind::Atom(atom) => (atom, false),
                 ir::BodyLiteralKind::NegAtom(atom) => (atom, true),
-                ir::BodyLiteralKind::Compare { .. } => continue,
+                // Neither references a predicate, so neither adds a dependency
+                // edge or a stratum (§4/§8).
+                ir::BodyLiteralKind::Compare { .. } | ir::BodyLiteralKind::Presence { .. } => {
+                    continue;
+                }
             };
             edges.push((rule.head.pred, atom.pred, negated));
         }
@@ -1138,7 +1187,7 @@ fn collect_body_refs(
     for literal in body {
         let atom = match &literal.kind {
             ir::BodyLiteralKind::Atom(atom) | ir::BodyLiteralKind::NegAtom(atom) => atom,
-            ir::BodyLiteralKind::Compare { .. } => continue,
+            ir::BodyLiteralKind::Compare { .. } | ir::BodyLiteralKind::Presence { .. } => continue,
         };
         if seen.insert(atom.pred.0) {
             referenced.push(atom.pred);
@@ -2203,7 +2252,7 @@ mod tests {
                     ir::BodyLiteralKind::Atom(atom) | ir::BodyLiteralKind::NegAtom(atom) => {
                         visit_atom(atom, &mut slots);
                     }
-                    ir::BodyLiteralKind::Compare { .. } => {}
+                    ir::BodyLiteralKind::Compare { .. } | ir::BodyLiteralKind::Presence { .. } => {}
                 }
             }
             slots
@@ -2270,9 +2319,10 @@ mod tests {
                         match &literal.kind {
                             ir::BodyLiteralKind::Atom(_) => prop_assert!(!negated),
                             ir::BodyLiteralKind::NegAtom(_) => prop_assert!(*negated),
-                            ir::BodyLiteralKind::Compare { .. } => {
+                            ir::BodyLiteralKind::Compare { .. }
+                            | ir::BodyLiteralKind::Presence { .. } => {
                                 return Err(TestCaseError::fail(
-                                    "unexpected comparison".to_string(),
+                                    "unexpected comparison or presence test".to_string(),
                                 ));
                             }
                         }
@@ -2442,7 +2492,8 @@ mod tests {
                                         "positive dependency above its reader"
                                     );
                                 }
-                                ir::BodyLiteralKind::Compare { .. } => {}
+                                ir::BodyLiteralKind::Compare { .. }
+                                | ir::BodyLiteralKind::Presence { .. } => {}
                             }
                         }
                     }

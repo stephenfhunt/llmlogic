@@ -126,6 +126,48 @@ see §17).
 
 A relation has a fixed arity, and every column has exactly one type.
 
+### Absent — the missing-data value
+
+A distinguished value, **`absent`**, marks missing data (an empty CSV cell, a
+JSON/Parquet null; §13). It is a *value, not a sixth type*: the five static types
+above are unchanged, and `absent` may inhabit **any** column regardless of that
+column's type (an `int` column may hold `absent`, exactly as a SQL `INT` column
+may be `NULL`). Inference treats `absent` as **type-neutral** — it does not
+participate in a column's type unification, so a numeric column with some missing
+cells still infers `int`/`float` (this is what makes sparse imports usable; §13).
+
+Its behavior is **two-valued, never SQL's three-valued logic** (§17) — there is no
+propagating "unknown" truth value:
+
+- **In value space (arithmetic, §8), `absent` annihilates** — any arithmetic with
+  an absent operand yields `absent`, flowing through computed columns. This is
+  value-propagation, not a third truth value.
+- **In truth space (comparisons and atom matching, §8), `absent` is false** — any
+  comparison with an absent operand is false (not a type error), and a value never
+  unifies with `absent`.
+
+Because a value never equals `absent`, presence is tested only with the operator
+**`X is absent` / `X is not absent`** (§8); `X = absent` would itself be false.
+The literal `absent` may be *produced* (in a fact or rule head, or as an
+arithmetic result) but **not matched** in a body atom — matching relies on
+unification, which `absent` fails, so a literal `absent` in a body match position
+is a structured error suggesting `is absent`.
+
+Two notions of "same" coexist, exactly as in SQL (`NULL ≠ NULL` under `=`, yet
+equal under `DISTINCT`/`GROUP BY`):
+
+- **Semantic** (unification, joins, `=`/`!=`/ordered comparisons): `absent`
+  matches/equals nothing, including another `absent`. This keeps missing foreign
+  keys from joining each other into a cartesian blowup.
+- **Structural** (set membership/dedup, and the canonical `Ord` for deterministic
+  output, §14): a ground fact `p(absent)` is identical to itself, so a relation
+  holds a single copy; `absent` sorts **first** in the value order (an output
+  ordering only, distinct from the `<` operator).
+
+`absent` (the missing-data value) is unrelated to the **absence pattern** of
+negation-as-failure (§7/§11), which is a provenance record for a satisfied
+negated goal; the two share a word, not a concept.
+
 ### Static typing via inference
 
 The language is statically typed **with full type inference** — annotations are
@@ -221,10 +263,11 @@ positional  = expr { "," expr } ;               (* args are expressions, §17 *)
 named       = ident ":" expr { "," ident ":" expr } ;
 
 term        = constant | variable ;
-constant    = integer | float | string | bool | ident ;    (* bare ident = symbol *)
+constant    = integer | float | string | bool | "absent" | ident ;  (* bare ident = symbol; `absent` = the missing-data value, §4 *)
 variable    = VARIABLE ;                        (* uppercase- or "_"-initial, §3 *)
 
-comparison  = expr cmp expr ;                   (* non-associative; no chaining *)
+comparison  = expr cmp expr
+            | expr "is" [ "not" ] "absent" ;    (* presence test, §4/§8 *)
 cmp         = "=" | "!=" | "<" | "<=" | ">" | ">=" ;
 expr        = add ;
 add         = mul { ( "+" | "-" ) mul } ;       (* left-assoc *)
@@ -257,6 +300,15 @@ Notes:
   get a targeted did-you-mean error (the strict-grammar pillar, §2).
 - Aggregate expressions (§9) are **not yet in the grammar** — their syntax is an
   open question (§17), in part because `:` now also delimits named arguments.
+- **`absent` is a reserved value literal** (§4), joining `true`/`false` as a
+  keyword that is not an identifier — a relation, field, or symbol may not be
+  named `absent`. It may appear wherever a constant may (facts, heads, arithmetic
+  operands), but matching it in a body atom argument is a structured error (it
+  cannot unify) suggesting `X is absent`.
+- **`is` / `is not absent`** is the presence test (§4/§8) and parses as a
+  comparison: the `not` here is part of the operator, unrelated to atom-negation
+  (§7). `X = absent` is *not* the test — it is false for absent, as every
+  comparison with an absent operand is.
 - **`table` is a contextual keyword, not reserved** (§17, 2026-07-23): after
   `import <string>` the only legal continuations are `.`, `as`, or
   `table <string>`, so the parser matches an identifier spelled `table` there;
@@ -386,6 +438,23 @@ they are structured runtime errors — same error channel either way.
 division truncates toward zero, division by zero and integer overflow error, and
 a NaN-producing float operation (`0.0 / 0.0`) errors via `F64::new`.
 
+**Absent (§4)** is exempt from the strict-type rules above, two-valuedly. An
+**arithmetic** operand that is `absent` yields `absent` (annihilation) rather than
+a type error, and this **takes precedence over the edge cases above** — `5 /
+absent` and `absent / 0` are both `absent`, never a division-by-zero. A
+**comparison** with an `absent` operand is **false** — not a cross-type error, and
+this is the one intended exception to "never a silent `false`": it is the
+two-valued semantics, not a masked type mismatch. Consequently `X = 5` and `X !=
+5` are *both* false when `X` is absent, which is why presence has its own operator:
+
+**`is` / `is not absent`.** `X is absent` is true iff `X` is `absent`; `X is not
+absent` is its negation. Unlike `=`/`!=` (both false for absent) these **partition
+every row**, and unlike `=` the right-hand `absent` is exempt from the same-type
+requirement. It is a comparison/filter — the `not` is part of the operator, not
+§7 atom-negation — so its operand must be positively bound like any comparison
+(§10) and it adds no stratum. (A general `X is Y` null-safe equality is a possible
+extension, §17.)
+
 **Mode / safety (§10).** Every comparison operand variable must be bound by a
 positive atom, *except* an `=`-assignment target, which the assignment binds.
 Assignments are evaluated in source order (after positives and negations), so a
@@ -397,10 +466,36 @@ D); the AST already carries whatever grouping the parser chose.*
 
 ## 9. Aggregation
 
-*Status: TBD*
+*Status: TBD — aggregate syntax, grouping, and the recursion/stratification
+interaction remain open (§17); the interaction with the absent value (§4) is
+decided below (2026-07-24), since it must be settled before aggregation lands.*
 
 *To fill in: supported aggregates (count, sum, min, max, avg, …), grouping semantics,
 and interaction with recursion and stratification.*
+
+### Absent inputs — skip but report
+
+Whatever the final surface syntax, aggregates treat the absent value (§4)
+uniformly:
+
+- **`sum` / `avg` / `min` / `max` skip `absent` inputs** and aggregate the present
+  values — so `avg` is the mean of the values that exist, never poisoned by
+  annihilation (§8) and never divided by the missing. (`min`/`max` must skip
+  regardless: `absent` has no order against values.) The engine **reports the
+  count of skipped absents** alongside the result, so the skip is never silent
+  (the report surface is tied to §9/§14 output and is left open, §17).
+- **`count { X : Goal }` counts bindings**, absent ones included (a binding is a
+  binding); the count of *present* values is written explicitly as
+  `count { X : Goal, X is not absent }`. (SQL-parity `COUNT(col)` skipping is the
+  considered alternative, §17.)
+- **Over an empty present-set** — an empty group, or one whose values are all
+  absent — `count` is `0` and `sum`/`avg`/`min`/`max` are **`absent`** (there is no
+  value to report; chosen over `sum = 0`, which would mask "no data" as "zero
+  total", and it sidesteps an `avg` division-by-zero). That `absent` then flows on
+  under the §8 rules.
+
+Settling these two-valued rules is *why* the absent value is designed before
+aggregation (§17): they pin what every aggregate means on sparse data.
 
 ## 10. Recursion & safety
 
@@ -448,6 +543,11 @@ fixpoint):
   matters for wide imported tables, where the positional rendering is mostly
   noise.
 
+An **absent value** (§4) appearing in a fact is provenance-anchored like any other
+value, and `X is absent` succeeding is an ordinary positive premise. This is
+distinct from the **absence pattern** above — the why-not record for a *negated*
+literal — which shares the word "absence" but not the mechanism.
+
 *Still open (§17): the `?why` query form across CLI and API, the proof-tree
 JSON encoding, and the provenance-as-facts closure question.*
 
@@ -486,22 +586,28 @@ import "data/parents.csv" as parent.
   language's **own literal grammar** is the rulebook (decided 2026-07-23 over
   delegating to a reader's type sniffer, §17): a cell is typed int, float, or
   bool **iff the lexer reads it as exactly that literal** (as accepted in fact
-  positions, including a leading sign); anything else — including empty cells —
-  is a string. A column's type is the unification of its cells: all-int → int,
-  int/float mix → float, all-bool → bool, anything else (or any empty cell) →
-  string. Inferred types are never symbol. This makes the anchor property exact:
+  positions, including a leading sign); anything else is a string, and an **empty
+  cell is the absent value** (§4). A column's type is the unification of its
+  **non-absent** cells: all-int → int, int/float mix → float, all-bool → bool,
+  anything else → string; missing cells become `absent` and do **not** force the
+  column's type (an int column with gaps stays `int` — this unbroke the USDA
+  `amount`/`food_category_id` columns, §17 2026-07-24). A column whose cells are
+  *all* absent has no inferable type: it is resolved by use-site variable flow
+  (§4), else left unconstrained. Inferred types are never symbol. This makes the
+  anchor property exact:
   **an import means precisely the facts you would get by writing its cells as
   in-program literals**, and inference is deterministic across engine and
   dependency versions.
 - **Typed sources are their own authority**: JSON, Parquet, and database columns
-  carry types, which are coerced onto the five value types (a JSON `"42"` stays
-  a string, never re-inferred; ints are range-checked into int; date/time-like
-  types become their ISO text as strings; NULLs and nested values are structured
-  errors naming row and column — the value space has no null). *(Missing/null
-  handling is slated to change: an empty CSV cell currently becomes `""` while
-  a JSON/Parquet null is an error — three backends, three policies. §17
-  2026-07-23 decides a uniform first-class optional/absent value; until it
-  lands, the current per-backend behavior stands.)*
+  carry types, coerced onto the five value types (a JSON `"42"` stays a string,
+  never re-inferred; ints are range-checked into int; date/time-like types become
+  their ISO text as strings). A **null / missing value from any source becomes the
+  absent value** (§4), uniformly — an empty CSV cell, a missing JSON key or
+  explicit `null`, a Parquet/DB `NULL`; nested/compound values remain structured
+  errors naming row and column. This replaces the former three-backend split (CSV
+  empty → `""`, JSON/Parquet null → error) and retires the "value space has no
+  null" rule (§17 2026-07-24). One table still binds to **one relation** — absence
+  is a value in a cell, not a change to the import's shape.
 - **Explicit schema** overrides inference, and is required for headerless CSV:
 
   ```datalog
@@ -827,11 +933,84 @@ not yet implemented). Until then, named access to a schema-less import is a
 structured error. *(§13 was ratified 2026-07-23 — the adaptation dissolves
 when roadmap step 7 lands, since imports load before lowering.)*
 
+### 16.8 Absent — missing data through import, filter, aggregate, provenance
+
+```datalog
+% a sparse nutrient table (header: food, nutrient, amount); some amounts empty
+import "data/food_nutrient.csv" as measurement.
+
+% naming `amount` only DISPLAYS it — every row returns, missing ones as `absent`
+recorded(F, N, A) :- measurement(food: F, nutrient: N, amount: A).
+
+% a threshold silently excludes absents (a comparison with absent is false)
+high_iron(F) :- measurement(food: F, nutrient: "iron", amount: A), A >= 5.
+
+% explicit presence — the rows that HAVE an amount, and those that don't
+has_amount(F, N)     :- measurement(food: F, nutrient: N, amount: A), A is not absent.
+missing_amount(F, N) :- measurement(food: F, nutrient: N, amount: A), A is absent.
+
+% aggregation skips absents (and reports how many); avg is over present values
+avg_iron(Avg) :- Avg = avg { A : measurement(nutrient: "iron", amount: A) }.
+% expected: mean over present iron amounts; the report notes N absent values skipped
+```
+*Resolved (§4/§8/§9/§13, 2026-07-24):* absence is a first-class, two-valued value —
+type-neutral at import (the `amount` column stays numeric despite gaps),
+annihilating in arithmetic, false in comparisons, tested with `is [not] absent`,
+skipped-but-reported by aggregates; the `absent` literal round-trips (Datalog-out
+is Datalog-in). *Still open:* aggregate surface syntax and grouping (§9/§17) — the
+`avg { … }` form here is provisional, as in §16.4.
+
 ## 17. Decisions log & open questions
 
 *Status: living*
 
 ### Decisions
+
+- **2026-07-24** — **Absent value: full design ratified** (design session;
+  supersedes the 2026-07-23 direction below and resolves its open question;
+  implementation is a follow-on roadmap item). The missing-data value is a
+  **single first-class `absent`** — a *value that inhabits any column*, not a sixth
+  static type and not a nullable-column type system. `optional T` was rejected:
+  sparse data is common, so "most columns provably total" buys little; a single
+  value keeps the engine value-oriented and stays reversible (`optional T` could be
+  layered on later as static analysis, not vice-versa).
+  - **Two-valued** (§4/§8): annihilates in arithmetic (`absent + x = absent`, ahead
+    of the div-by-zero/overflow checks), false in every comparison, and never
+    unifies with a value or with another `absent`.
+  - **`absent ≠ absent` semantically** (joins, `=`/`!=`) so missing foreign keys
+    don't cartesian-blow-up; **structurally identical** for set dedup and the
+    canonical `Ord` (sorts first). Two notions of "same", as in SQL.
+  - **Presence via `X is absent` / `X is not absent`** — a new comparison operator
+    (SQL's `IS [NOT] NULL`), chosen over an `is_absent(X)` builtin for ergonomics
+    and because `=`/`!=` are both false for absent and so cannot partition rows.
+    The literal `absent` is producible (facts/heads/arithmetic) but **not matchable**
+    in a body (unification fails); a body-match `absent` is a structured error
+    steering to `is absent`.
+  - **Aggregates skip-but-report** (§9): sum/avg/min/max skip absents and report
+    the skip count; `count` counts bindings; an empty present-set gives `count = 0`
+    and the others `absent`.
+  - **Uniform import** (§13): every source's null/missing → `absent`, type-neutral
+    in inference. This fixes the USDA dogfood failures — 33 empty `amount` cells no
+    longer force the column to `string` and kill arithmetic, and an empty
+    `food_category_id` stays an int that joins its dimension. One table still →
+    one relation.
+  - **Why a first-class value over the alternatives** (session; worklog 2026-07-24):
+    the *import-decomposition* model (nullable columns → present-only companion
+    relations, missing = absence-of-tuple — the Datomic/Soufflé-native path) was
+    stress-tested and rejected *for an exploration tool*: it breaks the "one table,
+    all named columns, all rows" model an agent expects, turns naming a column to
+    *see* it into a silent row-dropping *filter*, and any virtual wide view
+    collapses back into needing a fill value. Zero-fill/sentinels were rejected
+    outright (silently corrupt aggregates and joins; no system, DuckDB included,
+    does it). Research: DuckDB carries NULL into query time with 3VL +
+    `IS NOT DISTINCT FROM`; Datomic and Soufflé have no null (missing = no fact, or
+    an explicit `Option` ADT); DDlog uses `Option<T>` — the rejected `optional T`.
+  - This **retires the ratified "value space has no null"** (§4/§13) and amends the
+    2026-07-23 CSV-inference clause "any empty cell → string" to "empty cell →
+    absent, type-neutral" (below).
+  - **Still open:** generalizing `is` to a full `X is Y` null-safe equality; the
+    surface for the aggregate skip-count report; the type of an all-absent import
+    column (currently: resolved by use-site flow, else unconstrained).
 
 - **2026-07-23** — **Missing values → a first-class optional/absent value**
   (direction decided; design + implementation deferred to their own session).
@@ -855,7 +1034,8 @@ when roadmap step 7 lands, since imports load before lowering.)*
     value model, §13 typed sources). It is a pillar-level change touching the
     type system, every builtin, unification/joins, set semantics, surface
     syntax, and §9/§11 — hence a dedicated design session, not an inline patch.
-    Open sub-questions below.
+    Open sub-questions below. *(Superseded by the 2026-07-24 full design above,
+    which resolved the sub-questions.)*
 
 - **2026-07-23** — **§13 import deep-dive** (design session; implementation is
   roadmap step 7). Decisions ratified:
@@ -873,6 +1053,8 @@ when roadmap step 7 lands, since imports load before lowering.)*
   - **CSV type inference is defined by the language's literal grammar**, not by
     DuckDB's sniffer: a cell is int/float/bool iff the lexer reads it as that
     literal; columns unify; everything else (and any empty cell) is string.
+    *(Amended 2026-07-24: an empty cell is the absent value — type-neutral, not
+    string — see the absent-value decision above.)*
     Considered and rejected: the full sniffer (types we can't represent get
     detected then normalized through casts — e.g. `01/15/2024` → `2024-01-15`;
     rules drift with dependency upgrades) and a restricted sniffer via
@@ -1351,18 +1533,14 @@ when roadmap step 7 lands, since imports load before lowering.)*
 
 ### Open questions
 
-- **Optional/absent value design** (direction decided 2026-07-23, Decisions
-  above — a first-class, two-valued absent value; this is the deferred design
-  session). To settle: `optional T` as a distinct column type (inference tracks
-  nullability, most columns stay provably total) vs. one `absent` value any
-  column may hold; the truth table for `absent`-vs-value comparisons and
-  arithmetic (2-valued — false or structured error, never a third truth value);
-  whether `absent` unifies/joins with `absent`; its `Eq`/`Ord`/`Hash` sort
-  position for set semantics; a printable literal that round-trips (D1 closure,
-  Datalog-out is Datalog-in — so the grammar gains a token); and how §9
-  aggregation and §11 provenance treat it. Per-source import policy (which
-  sources map absence to `absent` vs. still error) folds in here, replacing the
-  current three-backend inconsistency. — §4/§13/§9/§11.
+- **Optional/absent value design** — **resolved 2026-07-24** (Decisions above): a
+  single first-class, two-valued `absent` value; `absent ≠ absent` semantically but
+  structurally identical for sets (sorts first); `is [not] absent` presence test;
+  the literal producible but not body-matchable; aggregates skip-but-report; a
+  uniform null→absent, type-neutral import policy. Written into §4/§8/§9/§13/§16.8.
+  Remaining open: the full `X is Y` null-safe-equality generalization of `is`; the
+  aggregate skip-count report surface; the all-absent import-column type (currently
+  resolved by use-site flow, else unconstrained). — §4/§8/§9/§13.
 - **Database loading** (SQLite/DuckDB files via the reserved `table "…"`
   grammar; Postgres via DuckDB attach) and **TSV**: deferred until a real
   consumer appears; the format table and dispatch errors already name them. — §13.

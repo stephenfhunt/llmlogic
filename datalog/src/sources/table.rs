@@ -47,6 +47,10 @@ pub(crate) enum RawValue {
     /// Always finite: backends reject NaN/±inf at read.
     Float(f64),
     Bool(bool),
+    /// A missing value from any source (§4/§13): an empty (unquoted) CSV cell, a
+    /// missing JSON key or explicit `null`, a Parquet/DB `NULL`. Type-neutral in
+    /// inference and coerced to [`Value::Absent`] under any column type.
+    Absent,
 }
 
 /// What the literal grammar says one cell denotes (the §13 classification).
@@ -252,6 +256,9 @@ fn raw_text(value: &RawValue) -> String {
         RawValue::Int(n) => n.to_string(),
         RawValue::Float(f) => f.to_string(),
         RawValue::Bool(b) => b.to_string(),
+        // A header/name position that is missing has no text — the empty string,
+        // which is not a legal field name (caught by `validate_field_names`).
+        RawValue::Absent => String::new(),
     }
 }
 
@@ -326,6 +333,9 @@ fn infer_column(
     let mut inferred: Option<TypeName> = None;
     for (index, row) in data.iter().enumerate() {
         let cell_ty = match &row[col] {
+            // Absent is type-neutral (§4): it does not participate in the
+            // column's type, so a numeric column with gaps still infers int/float.
+            RawValue::Absent => continue,
             RawValue::Text(t) => match classify_cell(t) {
                 CellClass::Int(_) => TypeName::Int,
                 CellClass::Float(_) => TypeName::Float,
@@ -359,8 +369,11 @@ fn infer_column(
             }
         });
     }
-    // An empty table types every column string; the type never matters (no
-    // facts), and string is the bottom of the §13 inference order.
+    // A column with no non-absent cell (an empty table, or an all-absent
+    // column) has no inferable type. The fallback string never reaches a value:
+    // every cell coerces to `absent` regardless (`coerce`), and imports pin no
+    // declared field type, so a use site — else nothing — resolves the column
+    // (§4/§13, 2026-07-24).
     Ok(inferred.unwrap_or(TypeName::String))
 }
 
@@ -368,6 +381,12 @@ fn infer_column(
 /// (rendered for the error message).
 fn coerce(value: &RawValue, ty: TypeName) -> Result<Value, String> {
     let fail = |value: &RawValue| Err(render(value));
+    // A missing value inhabits any column (§4): it is coerced to `absent`
+    // regardless of the column's type, and is never a type violation. Real
+    // cross-type cells (a `"abc"` in an int column) still fail below.
+    if matches!(value, RawValue::Absent) {
+        return Ok(Value::Absent);
+    }
     match ty {
         TypeName::Int => match value {
             RawValue::Text(t) => match classify_cell(t) {
@@ -419,6 +438,9 @@ fn render(value: &RawValue) -> String {
         RawValue::Int(n) => format!("`{n}`"),
         RawValue::Float(f) => format!("`{f}`"),
         RawValue::Bool(b) => format!("`{b}`"),
+        // Absent never reaches `render` (it coerces to a value, never fails),
+        // but name it for completeness.
+        RawValue::Absent => "absent".to_string(),
     }
 }
 
@@ -517,7 +539,36 @@ mod tests {
     }
 
     #[test]
-    fn any_empty_cell_makes_the_column_string() {
+    fn absent_cell_is_type_neutral_and_keeps_the_column_typed() {
+        // An empty (unquoted) cell reaches `finalize` as `RawValue::Absent`
+        // (§4/§13): it does not force the column to string — the other cells
+        // still type it int, and the gap materializes as `absent`.
+        let table = ok(
+            RawTable {
+                columns: None,
+                rows: vec![
+                    text_row(&["n"]),
+                    text_row(&["1"]),
+                    vec![RawValue::Absent],
+                    text_row(&["3"]),
+                ],
+            },
+            None,
+        );
+        assert_eq!(
+            table.rows,
+            vec![
+                vec![Value::Absent],
+                vec![Value::Int(1)],
+                vec![Value::Int(3)],
+            ]
+        );
+    }
+
+    #[test]
+    fn a_quoted_empty_string_cell_stays_a_string() {
+        // A quoted `""` arrives as `RawValue::Text("")` (distinct from absent);
+        // an empty string is a string, so the column is string.
         let table = ok(csv(&[&["n"], &["1"], &[""]]), None);
         assert_eq!(
             table.rows,
@@ -526,6 +577,24 @@ mod tests {
                 vec![Value::String("1".to_string())],
             ]
         );
+    }
+
+    #[test]
+    fn an_all_absent_column_materializes_all_absent() {
+        // No non-absent cell ⇒ no inferable type; every cell is absent, and the
+        // predicate's column is left to use-site flow (unpinned here).
+        let table = ok(
+            RawTable {
+                columns: None,
+                rows: vec![
+                    text_row(&["c"]),
+                    vec![RawValue::Absent],
+                    vec![RawValue::Absent],
+                ],
+            },
+            None,
+        );
+        assert_eq!(table.rows, vec![vec![Value::Absent]]);
     }
 
     #[test]
@@ -593,6 +662,26 @@ mod tests {
         let errors = err(csv(&[&["Red"]]), Some(&schema));
         assert!(
             errors[0].to_string().contains("not a symbol"),
+            "got: {errors:?}"
+        );
+    }
+
+    #[test]
+    fn absent_is_exempt_from_a_declared_type_but_real_violations_still_error() {
+        let schema = [field("age", Some(TypeName::Int))];
+        // An absent cell under `int` coerces to absent, not a type error…
+        let table = ok(
+            RawTable {
+                columns: None,
+                rows: vec![vec![RawValue::Int(30)], vec![RawValue::Absent]],
+            },
+            Some(&schema),
+        );
+        assert_eq!(table.rows, vec![vec![Value::Absent], vec![Value::Int(30)]]);
+        // …but a genuinely non-int cell still fails.
+        let errors = err(csv(&[&["30"], &["abc"]]), Some(&schema));
+        assert!(
+            errors[0].to_string().contains("not an int"),
             "got: {errors:?}"
         );
     }

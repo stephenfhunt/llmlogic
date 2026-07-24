@@ -35,7 +35,7 @@ pub struct Token {
 
 /// The lexical categories of §3.
 ///
-/// Keywords (`import as declare not true false`) are distinguished from
+/// Keywords (`import as declare not true false absent is`) are distinguished from
 /// [`Ident`](TokenKind::Ident) here so the parser never string-matches; the
 /// five type names are *not* keywords (they stay `Ident`, recognized in
 /// context).
@@ -61,6 +61,10 @@ pub enum TokenKind {
     Not,
     True,
     False,
+    /// The missing-data value literal (§4). Reserved: not an identifier.
+    Absent,
+    /// The presence-test operator head, `is` in `is [not] absent` (§4/§8).
+    Is,
 
     // Punctuation / operators (§3).
     /// `:-`
@@ -120,6 +124,8 @@ impl TokenKind {
             TokenKind::Not => "`not`".to_string(),
             TokenKind::True => "`true`".to_string(),
             TokenKind::False => "`false`".to_string(),
+            TokenKind::Absent => "`absent`".to_string(),
+            TokenKind::Is => "`is`".to_string(),
             TokenKind::ColonDash => "`:-`".to_string(),
             TokenKind::QuestionDash => "`?-`".to_string(),
             TokenKind::Dot => "`.`".to_string(),
@@ -467,6 +473,8 @@ impl<'a> Lexer<'a> {
             "not" => TokenKind::Not,
             "true" => TokenKind::True,
             "false" => TokenKind::False,
+            "absent" => TokenKind::Absent,
+            "is" => TokenKind::Is,
             _ => TokenKind::Ident(text.to_string()),
         };
         self.push(kind, start);
@@ -570,13 +578,15 @@ mod tests {
     #[test]
     fn keywords_and_wildcard() {
         assert_eq!(
-            kinds("import declare not true false _ _X"),
+            kinds("import declare not true false absent is _ _X"),
             vec![
                 TokenKind::Import,
                 TokenKind::Declare,
                 TokenKind::Not,
                 TokenKind::True,
                 TokenKind::False,
+                TokenKind::Absent,
+                TokenKind::Is,
                 TokenKind::Variable("_".into()),
                 TokenKind::Variable("_X".into()),
             ]

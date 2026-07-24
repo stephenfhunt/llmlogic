@@ -127,6 +127,14 @@ fn print_literal(literal: &Literal) -> String {
             }
         }
         LiteralKind::Comparison(comparison) => print_comparison(comparison),
+        LiteralKind::Presence { expr, negated } => {
+            let op = if *negated {
+                "is not absent"
+            } else {
+                "is absent"
+            };
+            format!("{} {op}", print_expr(expr))
+        }
     }
 }
 
@@ -188,6 +196,7 @@ fn print_constant(constant: &Constant) -> String {
         Constant::Int(n) => n.to_string(),
         Constant::Float(f) => print_f64(*f),
         Constant::Bool(b) => b.to_string(),
+        Constant::Absent => "absent".to_string(),
     }
 }
 
@@ -220,6 +229,9 @@ pub fn print_fact_lines<'a>(
 /// Prints a ground [`Value`] in canonical form.
 pub fn print_value(value: &Value) -> String {
     match value {
+        // The missing-data value round-trips as the reserved literal `absent`
+        // (§4): Datalog-out is Datalog-in.
+        Value::Absent => "absent".to_string(),
         Value::Symbol(s) => s.clone(),
         Value::String(s) => print_string_literal(s),
         Value::Int(n) => n.to_string(),
@@ -312,6 +324,15 @@ mod tests {
         );
         assert_eq!(fact, "ancestor(\"alice\", \"bob\").");
         // …and it parses straight back.
+        assert!(parse(&fact).is_ok());
+    }
+
+    #[test]
+    fn absent_prints_and_reparses_as_the_reserved_literal() {
+        assert_eq!(print_value(&Value::Absent), "absent");
+        // Datalog-out is Datalog-in: a fact carrying absent parses straight back.
+        let fact = print_ground_fact("m", &[Value::String("bread".into()), Value::Absent]);
+        assert_eq!(fact, "m(\"bread\", absent).");
         assert!(parse(&fact).is_ok());
     }
 

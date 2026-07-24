@@ -430,24 +430,44 @@ impl Parser {
             });
         }
 
-        let comparison = self.parse_comparison()?;
-        let span = join(comparison.lhs.span, comparison.rhs.span);
-        Ok(Literal {
-            kind: LiteralKind::Comparison(comparison),
-            span,
-        })
+        let (kind, span) = self.parse_comparison_or_presence()?;
+        Ok(Literal { kind, span })
     }
 
-    fn parse_comparison(&mut self) -> PResult<Comparison> {
+    /// A comparison `expr cmp expr` or a presence test `expr is [not] absent`
+    /// (§4/§8) — the two share a left operand, so they are parsed together.
+    fn parse_comparison_or_presence(&mut self) -> PResult<(LiteralKind, Span)> {
         let lhs = self.parse_expr()?;
+
+        // Presence test: `expr is [not] absent`. The `not` is part of the
+        // operator, not §5 atom-negation.
+        if matches!(self.kind(), TokenKind::Is) {
+            self.bump();
+            let negated = matches!(self.kind(), TokenKind::Not);
+            if negated {
+                self.bump();
+            }
+            let absent_span = self.span();
+            if !matches!(self.kind(), TokenKind::Absent) {
+                self.error_expected(
+                    "`absent` (the only presence test is `is absent` / `is not absent`)",
+                );
+                return Err(());
+            }
+            self.bump();
+            let span = join(lhs.span, absent_span);
+            return Ok((LiteralKind::Presence { expr: lhs, negated }, span));
+        }
+
         let Some(op) = self.comparison_op() else {
-            self.error_expected("a comparison operator (=, !=, <, <=, >, >=)");
+            self.error_expected("a comparison operator (=, !=, <, <=, >, >=) or `is [not] absent`");
             return Err(());
         };
         self.bump();
         let rhs = self.parse_expr()?;
-        // Comparisons do not chain (decision 2).
-        if self.comparison_op().is_some() {
+        // Comparisons do not chain (decision 2), and a presence test cannot be
+        // chained onto a comparison either.
+        if self.comparison_op().is_some() || matches!(self.kind(), TokenKind::Is) {
             let span = self.span();
             self.error(
                 span,
@@ -455,7 +475,8 @@ impl Parser {
             );
             return Err(());
         }
-        Ok(Comparison { op, lhs, rhs })
+        let span = join(lhs.span, rhs.span);
+        Ok((LiteralKind::Comparison(Comparison { op, lhs, rhs }), span))
     }
 
     fn comparison_op(&self) -> Option<crate::ast::CmpOp> {
@@ -591,6 +612,10 @@ impl Parser {
             TokenKind::False => {
                 self.bump();
                 TermKind::Constant(Constant::Bool(false))
+            }
+            TokenKind::Absent => {
+                self.bump();
+                TermKind::Constant(Constant::Absent)
             }
             TokenKind::Ident(name) => {
                 // A bare identifier is a symbol constant. `ident (` would be a
@@ -875,6 +900,7 @@ mod tests {
                 zero_expr(&mut cmp.lhs);
                 zero_expr(&mut cmp.rhs);
             }
+            LiteralKind::Presence { expr, .. } => zero_expr(expr),
         }
     }
 
@@ -1059,6 +1085,60 @@ adult(N) :- person(name: N, age: A), A >= 18.
                 span: Span::DUMMY,
             })
         );
+    }
+
+    #[test]
+    fn presence_test_parses_both_polarities() {
+        for (src, want_negated) in [
+            ("p(X) :- q(X), X is absent.", false),
+            ("p(X) :- q(X), X is not absent.", true),
+        ] {
+            let program = parse_ok(src);
+            let StatementKind::Clause(clause) = &program.statements[0].kind else {
+                panic!("clause");
+            };
+            let LiteralKind::Presence { expr, negated } = &clause.body[1].kind else {
+                panic!("expected a presence test, got {:?}", clause.body[1].kind);
+            };
+            assert_eq!(*negated, want_negated);
+            assert!(matches!(
+                expr.kind,
+                ExprKind::Term(Term {
+                    kind: TermKind::Variable(_),
+                    ..
+                })
+            ));
+        }
+    }
+
+    #[test]
+    fn absent_parses_as_a_constant_in_term_position() {
+        let program = parse_ok("p(absent).");
+        let StatementKind::Clause(clause) = &program.statements[0].kind else {
+            panic!("clause");
+        };
+        let Args::Positional(args) = &clause.head.args else {
+            panic!("positional");
+        };
+        assert_eq!(
+            args[0].kind,
+            ExprKind::Term(Term {
+                kind: TermKind::Constant(Constant::Absent),
+                span: Span::DUMMY,
+            })
+        );
+    }
+
+    #[test]
+    fn is_without_absent_is_a_targeted_error() {
+        let errors = parse_err("p(X) :- q(X), X is 5.");
+        assert!(errors[0].to_string().contains("absent"), "got: {errors:?}");
+    }
+
+    #[test]
+    fn absent_is_reserved_and_cannot_name_a_relation() {
+        // A keyword, not an identifier — `absent(...)` cannot be a head atom.
+        assert!(!parse_err("absent(1).").is_empty());
     }
 
     #[test]

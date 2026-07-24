@@ -41,11 +41,15 @@ impl AbsentPattern {
     /// asserts no model tuple satisfies it.
     pub fn matches(&self, tuple: &Tuple) -> bool {
         self.args.len() == tuple.0.len()
-            && self
-                .args
-                .iter()
-                .zip(&tuple.0)
-                .all(|(pattern, value)| pattern.as_ref().is_none_or(|expected| expected == value))
+            && self.args.iter().zip(&tuple.0).all(|(pattern, value)| {
+                // A closed slot must *semantically* unify with the cell (§4):
+                // `absent` closes nothing, so a negated literal never matches an
+                // absent cell and a slot bound to `absent` refutes no tuple —
+                // the same absent-matches-nothing rule the positive join uses.
+                pattern
+                    .as_ref()
+                    .is_none_or(|expected| crate::engine::values_unify(expected, value))
+            })
     }
 }
 
@@ -62,6 +66,11 @@ pub enum Premise {
     /// values are the assigned value). Self-justifying — like [`Premise::Absent`]
     /// it carries no fixpoint round and recurses into nothing.
     Builtin { op: CmpOp, lhs: Value, rhs: Value },
+    /// A satisfied presence test `expr is [not] absent` (§4/§8), carrying the
+    /// evaluated operand and the operator's `negated` flag. Self-justifying like
+    /// [`Premise::Builtin`]: it holds on its evaluated operand and recurses into
+    /// nothing.
+    Presence { value: Value, negated: bool },
 }
 
 /// One way a fact was derived: a ground rule instance.
@@ -92,6 +101,9 @@ pub enum ProofTree {
     /// A satisfied comparison/assignment builtin (§8). Terminates its branch —
     /// a builtin holds on its evaluated operands and needs no sub-proof.
     Builtin { op: CmpOp, lhs: Value, rhs: Value },
+    /// A satisfied presence test `expr is [not] absent` (§4/§8). Terminates its
+    /// branch — it holds on its evaluated operand and needs no sub-proof.
+    Presence { value: Value, negated: bool },
     /// A derived fact with one supporting rule instance; `children[i]` proves
     /// the instance's `premises[i]`.
     Derived {
@@ -125,7 +137,7 @@ impl ProofTree {
         let derivation = model.derivations_of(fact).find(|d| {
             d.premises.iter().all(|premise| match premise {
                 Premise::Fact(f) => model.first_round(f).is_some_and(|r| r < round),
-                Premise::Absent(_) | Premise::Builtin { .. } => true,
+                Premise::Absent(_) | Premise::Builtin { .. } | Premise::Presence { .. } => true,
             })
         })?;
         let children = derivation
@@ -138,6 +150,10 @@ impl ProofTree {
                     op: *op,
                     lhs: lhs.clone(),
                     rhs: rhs.clone(),
+                }),
+                Premise::Presence { value, negated } => Some(ProofTree::Presence {
+                    value: value.clone(),
+                    negated: *negated,
                 }),
             })
             .collect::<Option<Vec<ProofTree>>>()?;
@@ -156,7 +172,7 @@ impl ProofTree {
         match self {
             ProofTree::Leaf(fact) => Some(fact),
             ProofTree::Derived { fact, .. } => Some(fact),
-            ProofTree::Absent(_) | ProofTree::Builtin { .. } => None,
+            ProofTree::Absent(_) | ProofTree::Builtin { .. } | ProofTree::Presence { .. } => None,
         }
     }
 }

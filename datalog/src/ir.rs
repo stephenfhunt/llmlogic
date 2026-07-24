@@ -155,14 +155,27 @@ impl Ord for F64 {
     }
 }
 
-/// A ground value of one of the five primitive types (§4).
+/// A ground value: the missing-data value [`absent`](Value::Absent), or one of
+/// the five primitive types (§4).
 ///
-/// The derived `Ord` fixes the canonical cross-type sort order — symbol <
-/// string < int < float < bool, then within-type — used for deterministic
-/// output (§14). Symbols are plain `String`s in v1; interning is a deferred
-/// drop-in behind this single choke point (§17).
+/// The derived `Ord` fixes the canonical cross-type sort order — absent <
+/// symbol < string < int < float < bool, then within-type — used for
+/// deterministic output (§14). Symbols are plain `String`s in v1; interning is
+/// a deferred drop-in behind this single choke point (§17).
+///
+/// The derived `Eq`/`Ord`/`Hash` are the **structural** notion of sameness
+/// (§4): `Absent == Absent`, so a relation holds a single copy of `p(absent)`
+/// and `absent` has a fixed sort position. The **semantic** notion — `absent`
+/// matches/equals *nothing*, including another `absent` — is *not* these
+/// derives; it lives explicitly in the join/compare paths ([`crate::engine`]
+/// `try_match`/`apply_compare`, and [`crate::provenance::AbsentPattern`]), so a
+/// missing foreign key never joins another into a cartesian blowup.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Value {
+    /// The missing-data value (§4): type-neutral, inhabits any column,
+    /// two-valued (annihilates in arithmetic, false in comparisons). First
+    /// variant so the derived `Ord` sorts it before every typed value.
+    Absent,
     Symbol(String),
     String(String),
     Int(i64),
@@ -216,6 +229,14 @@ pub enum BodyLiteralKind {
     NegAtom(Atom),
     /// A comparison between arithmetic expressions.
     Compare { op: CmpOp, lhs: Expr, rhs: Expr },
+    /// A presence test `expr is [not] absent` (§4/§8): a filter that holds iff
+    /// `expr` evaluates to [`Value::Absent`] (`negated` flips it). Like a
+    /// comparison it binds nothing and adds no stratum; its operand must be
+    /// bound by a positive atom (§10). Distinct from [`Self::Compare`] because
+    /// it has no [`CmpOp`] and partitions rows (both `=`/`!=` are false on
+    /// absent), and distinct from [`Self::NegAtom`] because its `not` is the
+    /// operator's, not atom-negation.
+    Presence { expr: Expr, negated: bool },
 }
 
 /// An arithmetic expression over resolved terms.
@@ -734,14 +755,16 @@ mod tests {
             hasher.finish()
         }
 
-        /// Rank of a value's type in the canonical cross-type order (§14).
+        /// Rank of a value's type in the canonical cross-type order (§14):
+        /// absent sorts before every typed value.
         fn type_rank(value: &Value) -> u8 {
             match value {
-                Value::Symbol(_) => 0,
-                Value::String(_) => 1,
-                Value::Int(_) => 2,
-                Value::Float(_) => 3,
-                Value::Bool(_) => 4,
+                Value::Absent => 0,
+                Value::Symbol(_) => 1,
+                Value::String(_) => 2,
+                Value::Int(_) => 3,
+                Value::Float(_) => 4,
+                Value::Bool(_) => 5,
             }
         }
 

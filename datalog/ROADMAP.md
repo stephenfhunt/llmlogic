@@ -25,6 +25,7 @@ The evaluation-first roadmap (decided 2026-07-10; rationale in `AGENTS.md` and
 5. **Lexer + parser** — hand-rolled, zero-dep; canonical printer; `parse→lower→typecheck→eval`. ✅ 2026-07-22
 6. **Agent CLI** — one-shot `-q` queries; the Claude Code skill. ✅ 2026-07-23
 7. **§13 imports** — data (CSV/JSONL/Parquet/URL via DuckDB) + module imports. ✅ 2026-07-23
+8. **First-class absent value** — two-valued `absent`; `is [not] absent`; uniform null→absent imports (type-neutral). ✅ 2026-07-24
 
 ## Open backlog
 
@@ -32,15 +33,10 @@ The evaluation-first roadmap (decided 2026-07-10; rationale in `AGENTS.md` and
 
 - **§9 aggregation** — count/sum/min/max + grouping. The paired expressivity
   pillar for source analysis; every dogfood analysis so far was a threshold or
-  existence check for lack of it. _queued._ — §9; also blocks the aggregate
-  open questions below.
-- **First-class optional/absent value** — represent missing data as a
-  first-class, **two-valued** value (absent-vs-value is false/error, never
-  SQL's propagating "unknown"). Direction decided 2026-07-23; a pillar-level
-  design session (type system, builtin truth tables, join/unification, set
-  ordering, a round-tripping literal, §9/§11 interaction) before any code.
-  Reopens "value space has no null". _designing._ — §17 Decisions + Open
-  questions (§4/§13/§9/§11).
+  existence check for lack of it. The absent interaction is settled
+  (skip-but-report, §9/§17 2026-07-24) but **not yet built** — it lands with the
+  aggregates; the absent *value* itself shipped (milestone 8). Aggregate
+  syntax/grouping still open. _queued._ — §9.
 
 ### Aggregation (§9)
 

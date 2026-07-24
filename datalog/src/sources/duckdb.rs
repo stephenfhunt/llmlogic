@@ -5,18 +5,20 @@
 //!
 //! - **CSV** is read `all_varchar` with the RFC 4180 dialect pinned, so every
 //!   cell arrives as untyped [`RawValue::Text`] and the literal-grammar
-//!   inference is the sole authority. Empty cells (DuckDB NULLs) are empty
-//!   text.
+//!   inference is the sole authority. An unquoted empty cell (a DuckDB NULL) is
+//!   the absent value (§4); `allow_quoted_nulls=false` keeps a quoted `""` an
+//!   empty string, distinct from absence.
 //! - **JSONL** is read in two phases: a full-scan `DESCRIBE` fixes the key
 //!   set and order (the first record's keys, in order), then the data read
 //!   forces every column to the `JSON` type so each value's own JSON text
 //!   reaches us verbatim — numbers stay numbers, strings stay strings
 //!   byte-exactly, and DuckDB's date/timestamp detection never rewrites
-//!   anything. A record missing a key surfaces as a NULL, which is a
-//!   structured error (the value space has no null).
+//!   anything. A missing key or an explicit `null` is the absent value (§4);
+//!   arrays and objects remain structured errors.
 //! - **Parquet** columns are natively typed (the file is the authority) and
-//!   are mapped onto [`RawValue`]; date/time-like columns are cast to their
-//!   ISO text as strings; nested types are structured errors.
+//!   are mapped onto [`RawValue`]; a NULL is the absent value (§4); date/
+//!   time-like columns are cast to their ISO text as strings; nested types are
+//!   structured errors.
 
 use duckdb::Connection;
 use duckdb::types::ValueRef;
@@ -146,7 +148,7 @@ fn read_csv(conn: &Connection, source: &str, shape_bytes: &[u8]) -> Result<RawTa
     let sql = format!(
         "SELECT * FROM read_csv({}, header=false, all_varchar=true, \
          delim=',', quote='\"', escape='\"', auto_detect=false, \
-         new_line='{new_line}', columns={{{columns_spec}}})",
+         allow_quoted_nulls=false, new_line='{new_line}', columns={{{columns_spec}}})",
         sql_string(source)
     );
     let mut stmt = conn.prepare(&sql).map_err(|e| source_error(source, e))?;
@@ -157,9 +159,11 @@ fn read_csv(conn: &Connection, source: &str, shape_bytes: &[u8]) -> Result<RawTa
         for col in 0..width {
             match row.get_ref(col).map_err(|e| source_error(source, e))? {
                 ValueRef::Text(bytes) => cells.push(RawValue::Text(utf8(bytes, source)?)),
-                // An empty cell (quoted or not) is a NULL to DuckDB; §13 says
-                // it is empty text (and will type its column string).
-                ValueRef::Null => cells.push(RawValue::Text(String::new())),
+                // An unquoted empty cell is a DuckDB NULL → the absent value
+                // (§4/§13). `allow_quoted_nulls=false` keeps a quoted `""` as an
+                // empty-string `Text`, so absence and the empty string stay
+                // distinct.
+                ValueRef::Null => cells.push(RawValue::Absent),
                 other => {
                     return Err(Error::Source(format!(
                         "`{source}`: unexpected non-text CSV cell {other:?} (all_varchar read)"
@@ -237,12 +241,9 @@ fn read_jsonl(conn: &Connection, path: &str) -> Result<RawTable, Error> {
         let mut cells = Vec::with_capacity(columns.len());
         for (col, name) in columns.iter().enumerate() {
             match row.get_ref(col).map_err(|e| source_error(path, e))? {
-                ValueRef::Null => {
-                    return Err(Error::Source(format!(
-                        "`{path}`: record {row_number} is missing key `{name}` (every \
-                         record must supply the same keys; the value space has no null)"
-                    )));
-                }
+                // A missing key surfaces as a NULL → the absent value (§4/§13);
+                // an explicit JSON `null` is classified in `json_scalar`.
+                ValueRef::Null => cells.push(RawValue::Absent),
                 ValueRef::Text(bytes) => {
                     cells.push(json_scalar(&utf8(bytes, path)?, path, row_number, name)?)
                 }
@@ -263,7 +264,8 @@ fn read_jsonl(conn: &Connection, path: &str) -> Result<RawTable, Error> {
 
 /// Classifies one raw JSON value text per §13: strings stay strings (never
 /// re-inferred), fraction/exponent-free numbers are i64-checked ints, other
-/// numbers are floats; null, arrays, and objects are structured errors.
+/// numbers are floats; `null` is the absent value (§4); arrays and objects are
+/// structured errors.
 fn json_scalar(text: &str, path: &str, row: usize, key: &str) -> Result<RawValue, Error> {
     let scalar_error = |what: &str| {
         Error::Source(format!(
@@ -277,7 +279,8 @@ fn json_scalar(text: &str, path: &str, row: usize, key: &str) -> Result<RawValue
         })?)),
         Some(b't') if text == "true" => Ok(RawValue::Bool(true)),
         Some(b'f') if text == "false" => Ok(RawValue::Bool(false)),
-        Some(b'n') if text == "null" => Err(scalar_error("the value is null")),
+        // An explicit JSON `null` is the absent value (§4/§13), like a missing key.
+        Some(b'n') if text == "null" => Ok(RawValue::Absent),
         Some(b'[') => Err(scalar_error("the value is an array")),
         Some(b'{') => Err(scalar_error("the value is a nested object")),
         Some(_) if !text.contains(['.', 'e', 'E']) => text
@@ -417,9 +420,8 @@ fn map_typed_value(
             .map_err(|_| cell_error(format!("`{n}` does not fit a 64-bit int")))
     };
     match value {
-        ValueRef::Null => Err(cell_error(
-            "the value is NULL (the value space has no null)".to_string(),
-        )),
+        // A Parquet/DB NULL is the absent value (§4/§13).
+        ValueRef::Null => Ok(RawValue::Absent),
         ValueRef::Boolean(b) => Ok(RawValue::Bool(b)),
         ValueRef::TinyInt(n) => Ok(RawValue::Int(n as i64)),
         ValueRef::SmallInt(n) => Ok(RawValue::Int(n as i64)),
@@ -534,7 +536,8 @@ mod tests {
         assert_eq!(ok("1e3"), RawValue::Float(1000.0));
         assert_eq!(ok("true"), RawValue::Bool(true));
         assert_eq!(ok("false"), RawValue::Bool(false));
-        assert!(fails("null").to_string().contains("null"));
+        // A JSON null is the absent value (§4/§13), not an error.
+        assert_eq!(ok("null"), RawValue::Absent);
         assert!(fails("[1]").to_string().contains("array"));
         assert!(fails("{\"a\":1}").to_string().contains("nested"));
         assert!(

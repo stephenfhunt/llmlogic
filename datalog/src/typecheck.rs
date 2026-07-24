@@ -51,19 +51,31 @@ pub fn typecheck(program: &ir::Program) -> std::result::Result<TypeEnv, Vec<Erro
     checker.finish()
 }
 
-/// The concrete type of a ground value.
-fn type_of(value: &ir::Value) -> TypeName {
-    match value {
+/// The concrete type of a ground value, or `None` for [`absent`](ir::Value::Absent),
+/// which is **type-neutral** (§4): it inhabits any column without joining that
+/// column's type unification, so a numeric column with some missing cells still
+/// infers `int`/`float`. Every caller skips constraint generation on `None`.
+fn type_of(value: &ir::Value) -> Option<TypeName> {
+    Some(match value {
+        ir::Value::Absent => return None,
         ir::Value::Symbol(_) => TypeName::Symbol,
         ir::Value::String(_) => TypeName::String,
         ir::Value::Int(_) => TypeName::Int,
         ir::Value::Float(_) => TypeName::Float,
         ir::Value::Bool(_) => TypeName::Bool,
-    }
+    })
 }
 
 fn is_numeric(ty: TypeName) -> bool {
     matches!(ty, TypeName::Int | TypeName::Float)
+}
+
+/// Whether an expression is a bare `absent` literal (§4) — the operand form that
+/// makes a comparison unconditionally false and so exempt from type constraints.
+/// Arithmetic that merely *produces* absent at runtime (`X + absent`) is not this
+/// — it still types by its numeric operand.
+fn is_absent_literal(expr: &ir::Expr) -> bool {
+    matches!(expr, ir::Expr::Term(ir::Term::Const(ir::Value::Absent)))
 }
 
 fn type_label(ty: TypeName) -> &'static str {
@@ -195,7 +207,10 @@ impl<'a> TypeChecker<'a> {
         for fact in &self.program.facts {
             let base = self.col_base[fact.pred.0 as usize];
             for (col, value) in fact.tuple.0.iter().enumerate() {
-                self.set_type(base + col, type_of(value));
+                // `absent` is type-neutral: it pins no column type (§4).
+                if let Some(ty) = type_of(value) {
+                    self.set_type(base + col, ty);
+                }
             }
         }
         for (rule_id, rule) in self.program.rules.iter().enumerate() {
@@ -228,7 +243,13 @@ impl<'a> TypeChecker<'a> {
         let base = self.col_base[atom.pred.0 as usize];
         for (col, arg) in atom.args.iter().enumerate() {
             match arg {
-                ir::Term::Const(value) => self.set_type(base + col, type_of(value)),
+                // `absent` pins no column type (§4); a use-site `p(absent)` in a
+                // head/fact leaves the column to be typed by its other rows.
+                ir::Term::Const(value) => {
+                    if let Some(ty) = type_of(value) {
+                        self.set_type(base + col, ty);
+                    }
+                }
                 ir::Term::Var(var) => self.union(vars[var.0 as usize], base + col),
             }
         }
@@ -243,6 +264,15 @@ impl<'a> TypeChecker<'a> {
                 ir::BodyLiteralKind::Compare { op, lhs, rhs } => {
                     let l = self.expr_slot(lhs, vars);
                     let r = self.expr_slot(rhs, vars);
+                    // A comparison with a bare `absent` operand is
+                    // unconditionally false (§8), so it constrains nothing — the
+                    // operands need not share a type, and `<`/`<=`/`>`/`>=`
+                    // against absent is *false*, not a numeric-type error. Any
+                    // arithmetic *inside* the other operand is still typed by
+                    // `expr_slot` above.
+                    if is_absent_literal(lhs) || is_absent_literal(rhs) {
+                        continue;
+                    }
                     // Every comparison unifies its operands' types (§8): `=`
                     // assignment gives the target the other side's type, and any
                     // filter requires both operands the same type.
@@ -250,6 +280,11 @@ impl<'a> TypeChecker<'a> {
                     if matches!(op, CmpOp::Lt | CmpOp::Le | CmpOp::Gt | CmpOp::Ge) {
                         self.numeric.push(l);
                     }
+                }
+                ir::BodyLiteralKind::Presence { expr, .. } => {
+                    // A presence test constrains no type — its operand may be any
+                    // type (§4). Still type any arithmetic inside the operand.
+                    let _ = self.expr_slot(expr, vars);
                 }
             }
         }
@@ -259,11 +294,17 @@ impl<'a> TypeChecker<'a> {
     /// operands and the result into one numeric class.
     fn expr_slot(&mut self, expr: &ir::Expr, vars: &[usize]) -> usize {
         match expr {
-            ir::Expr::Term(ir::Term::Const(value)) => {
-                let node = self.fresh(format!("literal {}", type_label(type_of(value))));
-                self.set_type(node, type_of(value));
-                node
-            }
+            ir::Expr::Term(ir::Term::Const(value)) => match type_of(value) {
+                Some(ty) => {
+                    let node = self.fresh(format!("literal {}", type_label(ty)));
+                    self.set_type(node, ty);
+                    node
+                }
+                // A bare `absent` literal is type-neutral (§4): a fresh
+                // unconstrained node. Comparisons against it are skipped in
+                // `body_constraints`, so this node never forces a type.
+                None => self.fresh("literal absent".to_string()),
+            },
             ir::Expr::Term(ir::Term::Var(var)) => vars[var.0 as usize],
             ir::Expr::Binary { lhs, rhs, .. } => {
                 let l = self.expr_slot(lhs, vars);

@@ -297,6 +297,116 @@ age(\"bob\", 15).
         );
     }
 
+    // --- Absent value, end-to-end through the pipeline (§4/§8) ---
+
+    /// A `measurement` fixture with one present and one missing amount. The
+    /// missing cell is the `absent` literal in a fact — the same value an empty
+    /// import cell will produce (§13).
+    const SPARSE: &str = "m(\"a\", 5).\nm(\"b\", absent).\n";
+
+    #[test]
+    fn presence_test_partitions_rows() {
+        // `is not absent` and `is absent` each select exactly one row; together
+        // they cover both (unlike `=`/`!=`, which are both false on absent).
+        let present = run(&format!(
+            "{SPARSE}has(F) :- m(F, A), A is not absent.\n?- has(F)."
+        ))
+        .expect("runs");
+        assert_eq!(present.answers, vec![vec!["has(\"a\").".to_string()]]);
+
+        let missing = run(&format!(
+            "{SPARSE}mis(F) :- m(F, A), A is absent.\n?- mis(F)."
+        ))
+        .expect("runs");
+        assert_eq!(missing.answers, vec![vec!["mis(\"b\").".to_string()]]);
+    }
+
+    #[test]
+    fn threshold_silently_excludes_absent() {
+        // A comparison with an absent operand is false, so the missing row drops
+        // out — no type error despite the column being int.
+        let result =
+            run(&format!("{SPARSE}high(F) :- m(F, A), A >= 5.\n?- high(F).")).expect("runs");
+        assert_eq!(result.answers, vec![vec!["high(\"a\").".to_string()]]);
+    }
+
+    #[test]
+    fn both_eq_and_ne_are_false_on_absent() {
+        // The footgun the presence operator exists to avoid: `A = absent` (A
+        // bound) is a false filter, and so is `A != 5`.
+        let eq = run(&format!("{SPARSE}q(F) :- m(F, A), A = absent.\n?- q(F).")).expect("runs");
+        assert_eq!(eq.answers, vec![Vec::<String>::new()]);
+        let ne = run(&format!("{SPARSE}q(F) :- m(F, A), A != 5.\n?- q(F).")).expect("runs");
+        assert_eq!(ne.answers, vec![Vec::<String>::new()]);
+    }
+
+    #[test]
+    fn absent_flows_to_the_head_and_round_trips() {
+        // Naming a column returns every row; the missing one prints as the
+        // reserved literal `absent` (Datalog-out is Datalog-in).
+        let result = run(&format!("{SPARSE}rec(F, A) :- m(F, A).\n?- rec(F, A).")).expect("runs");
+        assert_eq!(
+            result.answers,
+            vec![vec![
+                "rec(\"a\", 5).".to_string(),
+                "rec(\"b\", absent).".to_string(),
+            ]]
+        );
+    }
+
+    #[test]
+    fn arithmetic_annihilates_through_a_computed_column() {
+        let result = run(&format!(
+            "{SPARSE}plus(F, A) :- m(F, X), A = X + 10.\n?- plus(F, A)."
+        ))
+        .expect("runs");
+        assert_eq!(
+            result.answers,
+            vec![vec![
+                "plus(\"a\", 15).".to_string(),
+                "plus(\"b\", absent).".to_string(),
+            ]]
+        );
+    }
+
+    #[test]
+    fn absent_keys_do_not_join() {
+        // Missing foreign keys must not cartesian-blow-up: absent unifies with
+        // nothing, including another absent.
+        let src = "a(\"x\", absent).\nb(\"y\", absent).\nj(P, Q) :- a(P, K), b(Q, K).\n?- j(P, Q).";
+        let result = run(src).expect("runs");
+        assert_eq!(result.answers, vec![Vec::<String>::new()]);
+    }
+
+    #[test]
+    fn a_literal_absent_in_a_body_atom_is_an_error_steering_to_is_absent() {
+        let errors =
+            run(&format!("{SPARSE}q(F) :- m(F, absent).\n?- q(F).")).expect_err("rejected");
+        let joined = errors
+            .iter()
+            .map(|e| e.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("is absent"), "got: {joined}");
+        assert!(joined.contains("cannot be matched"), "got: {joined}");
+    }
+
+    #[test]
+    fn a_literal_absent_in_a_head_or_fact_is_allowed() {
+        // Production sites accept the literal: the fact above, plus a rule head.
+        let result = run(&format!(
+            "{SPARSE}tag(F, absent) :- m(F, _).\n?- tag(F, A)."
+        ))
+        .expect("runs");
+        assert_eq!(
+            result.answers,
+            vec![vec![
+                "tag(\"a\", absent).".to_string(),
+                "tag(\"b\", absent).".to_string(),
+            ]]
+        );
+    }
+
     #[test]
     fn disjunction_is_equivalent_to_separate_rules() {
         let disjunctive = run("a(1).\nb(2).\np(X) :- a(X) ; b(X).\n?- p(X).").expect("runs");

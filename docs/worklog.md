@@ -16,6 +16,91 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-24 — Implement the first-class absent value (code)
+
+**Done**
+- Built the absent value ratified in the design session below, end to end.
+  Milestone 8 (`datalog/ROADMAP.md`). All 315 tests pass; clippy + fmt clean.
+  - **Core** (`ir.rs`, `engine/mod.rs`): `Value::Absent` as the first variant, so
+    the derived `Ord` sorts it first. The **two notions of "same"** are split by
+    mechanism: the derived `Eq`/`Hash`/`Ord` are *structural* (`absent == absent`
+    — set dedup, output order); the *semantic* notion (`absent` unifies/equals
+    nothing) lives in `values_unify` (new, used by `try_match` and
+    `AbsentPattern::matches`) and `apply_compare`. `apply_arith` annihilates ahead
+    of every div-by-zero/overflow/type check.
+  - **Surface** (`lexer.rs`, `ast.rs`, `parser.rs`, `print.rs`): `absent` and `is`
+    keywords; `Constant::Absent`; `expr is [not] absent` → `LiteralKind::Presence`;
+    `absent` round-trips (Datalog-out is Datalog-in).
+  - **Lowering/typecheck** (`lower.rs`, `typecheck.rs`, `ir.rs`): IR
+    `BodyLiteralKind::Presence`; `type_of` type-neutral for absent; comparison
+    constraints skipped when an operand is a bare `absent` (so `X < absent` is
+    false, not a type error); the body-match error (a literal `absent` in a body
+    atom arg steers to `is absent`); presence range-restriction (operand bound,
+    binds nothing, no stratum).
+  - **Provenance** (`provenance.rs`): self-justifying `Premise::Presence` /
+    `ProofTree::Presence`.
+  - **Imports** (`sources/table.rs`, `sources/duckdb.rs`): `RawValue::Absent`;
+    every backend's null/missing → absent, type-neutral in inference; coerced to
+    `Value::Absent` under any column type. Fixes the USDA dogfood failures (empty
+    numeric cell stays numeric). `allow_quoted_nulls=false` keeps a quoted `""` an
+    empty string, distinct from absence (verified against DuckDB).
+
+**Decided (during build)**
+- **`X = absent` uses uniform `=` semantics** (no special case): a false filter
+  when `X` is bound, an assignment binding `X:=absent` when unbound. Consistent
+  with the spec's "would itself be false" (the filter case) and every other value.
+- **Quoted `""` is the empty string, unquoted empty is absent** — DuckDB
+  `allow_quoted_nulls=false` distinguishes them; CSV can still express an empty
+  string.
+
+**Next up**
+- **§9 aggregation** on the settled skip-but-report semantics (the one absent
+  rule not yet built — no aggregates exist yet). Then the aggregate skip-count
+  report surface, the `X is Y` null-safe-equality generalization, and the
+  all-absent import-column type (currently use-site flow, else unconstrained).
+
+---
+
+## 2026-07-24 — Design session: first-class absent value (no code)
+
+**Done**
+- Ran the deferred absent-value design session and wrote it into the spec (§17
+  Decisions 2026-07-24; §4 value model, §8 truth tables, §9 aggregation, §13
+  imports, new §16.8 worked example) and `datalog/ROADMAP.md`. Stress-tested two
+  directions against the USDA dogfood and the agent-exploration use case;
+  researched DuckDB / Datomic / Soufflé / DDlog missing-value handling.
+
+**Decided**
+- **A single first-class, two-valued `absent` value** (not `optional T`). A value
+  that inhabits any column, type-neutral in inference. Annihilates in arithmetic,
+  false in comparisons, `absent ≠ absent` semantically (no FK cartesian blowup) but
+  structurally identical for set dedup/`Ord` (sorts first). Presence via a new
+  **`X is absent` / `X is not absent`** operator (over an `is_absent` builtin —
+  ergonomics; `=`/`!=` can't partition absent). The literal is producible but not
+  body-matchable (a match steers to `is absent` via a structured error). Aggregates
+  **skip-but-report**; `count` counts bindings; empty present-set → `count = 0`,
+  else `absent`. Imports map every source's null/missing → `absent`, type-neutral —
+  this fixes the two 2026-07-23 failures (empty `amount` no longer forces `string`;
+  empty `food_category_id` stays int and joins). One table still → one relation.
+  Retires "value space has no null".
+- **Rejected the import-decomposition model** (nullable columns → present-only
+  companion relations; missing = absence-of-tuple; Datomic/Soufflé-native): elegant
+  for known analytics and makes aggregation absence-free, but breaks the "one table,
+  all columns, all rows" model an agent expects while exploring, and silently drops
+  rows when you name a column merely to see it. Zero-fill/sentinels rejected outright
+  (silently corrupt aggregates/joins).
+
+**Next up**
+- **Implement the absent value** (follow-on): `Value::Absent`; the §8 truth-table
+  arms (`apply_arith` / `apply_compare` / `try_match`); the `absent` literal and
+  `is` / `is not` operator in lexer/parser; the body-match error; type-neutral
+  import inference in `sources/duckdb.rs`. Then **§9 aggregation** on the settled
+  semantics.
+- Open: the `X is Y` null-safe-equality generalization; the aggregate skip-count
+  report surface; the all-absent import-column type.
+
+---
+
 ## 2026-07-23 — Dogfood: §13 imports on USDA FoodData Central (no code)
 
 **Done**

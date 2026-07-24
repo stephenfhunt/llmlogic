@@ -253,7 +253,9 @@ fn validate(program: &Program) -> Result<()> {
 fn validate_body(body: &[BodyLiteral], var_names: &[Option<String>]) -> Result<()> {
     for literal in body {
         match &literal.kind {
-            BodyLiteralKind::Atom(_) | BodyLiteralKind::Compare { .. } => {}
+            BodyLiteralKind::Atom(_)
+            | BodyLiteralKind::Compare { .. }
+            | BodyLiteralKind::Presence { .. } => {}
             BodyLiteralKind::NegAtom(atom) => {
                 for arg in &atom.args {
                     if let Term::Var(var) = arg
@@ -440,7 +442,10 @@ fn enumerate_matches(cx: &JoinCx<'_>, num_vars: usize, on_match: &mut OnMatch<'_
         }
     }
     for (idx, literal) in cx.body.iter().enumerate() {
-        if matches!(literal.kind, BodyLiteralKind::Compare { .. }) {
+        if matches!(
+            literal.kind,
+            BodyLiteralKind::Compare { .. } | BodyLiteralKind::Presence { .. }
+        ) {
             order.push(idx);
         }
     }
@@ -552,8 +557,34 @@ fn enumerate_from(
                 }
             }
         }
+        BodyLiteralKind::Presence { expr, negated } => {
+            // A presence filter (§8): holds iff the operand is absent, flipped by
+            // `negated`. Binds nothing. Range restriction guarantees the operand
+            // is bound, so a runtime error here is only a malformed-IR unbound
+            // operand, which short-circuits like any comparison error.
+            let value = eval_expr(expr, bindings)?;
+            let is_absent = value == Value::Absent;
+            if is_absent != *negated {
+                premises[idx] = Some(Premise::Presence {
+                    value,
+                    negated: *negated,
+                });
+                let result = enumerate_from(cx, order, depth + 1, bindings, premises, on_match);
+                premises[idx] = None;
+                result?;
+            }
+        }
     }
     Ok(())
+}
+
+/// The **semantic** sameness of two ground values (§4): structural equality,
+/// except `absent` unifies with nothing — not with a value, and not with
+/// another `absent`. This is the join/anti-join notion (keeping missing foreign
+/// keys from matching each other); the *structural* notion (`Value`'s derived
+/// `Eq`, where `absent == absent`) is reserved for set dedup and output order.
+pub(crate) fn values_unify(a: &Value, b: &Value) -> bool {
+    *a != Value::Absent && a == b
 }
 
 /// Unifies an atom against a ground tuple under the current bindings.
@@ -563,11 +594,19 @@ fn try_match(atom: &Atom, tuple: &Tuple, bindings: &mut [Option<Value>]) -> Opti
     let mut bound: Vec<usize> = Vec::new();
     for (term, value) in atom.args.iter().zip(&tuple.0) {
         let matches = match term {
-            Term::Const(constant) => constant == value,
+            Term::Const(constant) => values_unify(constant, value),
             Term::Var(var) => {
                 let slot = var.0 as usize;
                 match &bindings[slot] {
-                    Some(existing) => existing == value,
+                    // An already-bound value must semantically unify with the
+                    // cell — `absent` unifies with nothing, so a slot bound to
+                    // `absent` (or a cell that is `absent`) never re-matches.
+                    Some(existing) => values_unify(existing, value),
+                    // A fresh slot binds to *whatever* is here, `absent`
+                    // included — this is how a missing cell flows to the head
+                    // (`recorded(F, N, A) :- measurement(…, amount: A)`). The
+                    // binding is a value, so any *later* use of it unifies under
+                    // the `absent`-matches-nothing rule above.
                     None => {
                         bindings[slot] = Some(value.clone());
                         bound.push(slot);
@@ -648,6 +687,14 @@ fn unbound_slot(expr: &Expr, bindings: &[Option<Value>]) -> Option<usize> {
 /// ordering used is the operand type's natural order (`Value`'s within-type
 /// `Ord`).
 fn apply_compare(op: CmpOp, lhs: &Value, rhs: &Value) -> Result<bool> {
+    // Absent is two-valued (§8): a comparison with an absent operand is *false*
+    // for every operator — not a cross-type error — so `X = 5` and `X != 5` are
+    // both false when `X` is absent (which is why presence has its own operator,
+    // `is [not] absent`). This precedes the same-type check below: `absent`
+    // never reaches it.
+    if *lhs == Value::Absent || *rhs == Value::Absent {
+        return Ok(false);
+    }
     if std::mem::discriminant(lhs) != std::mem::discriminant(rhs) {
         return Err(Error::Semantic(format!(
             "type error: comparison `{}` requires operands of the same type, got {} and {}",
@@ -693,6 +740,12 @@ pub(crate) fn eval_expr(expr: &Expr, bindings: &[Option<Value>]) -> Result<Value
 /// int -> int` and `float op float -> float`; any mixed or non-numeric operand
 /// is a structured type error.
 fn apply_arith(op: ArithOp, lhs: Value, rhs: Value) -> Result<Value> {
+    // Absent annihilates (§8), *ahead* of the type/div-by-zero/overflow checks:
+    // `absent / 0` and `5 / absent` are both `absent`, never an error. This is
+    // value-propagation, not a third truth value.
+    if lhs == Value::Absent || rhs == Value::Absent {
+        return Ok(Value::Absent);
+    }
     match (&lhs, &rhs) {
         (Value::Int(a), Value::Int(b)) => arith_int(op, *a, *b),
         (Value::Float(a), Value::Float(b)) => arith_float(op, *a, *b),
@@ -746,6 +799,9 @@ fn arith_float(op: ArithOp, a: F64, b: F64) -> Result<Value> {
 /// The name of a value's type, for error messages.
 fn value_type_name(value: &Value) -> &'static str {
     match value {
+        // Absent short-circuits ahead of every arithmetic/comparison type
+        // error, so this arm is only reachable defensively.
+        Value::Absent => "absent",
         Value::Symbol(_) => "symbol",
         Value::String(_) => "string",
         Value::Int(_) => "int",
@@ -784,6 +840,104 @@ mod tests {
     use crate::ast::{CmpOp, Span};
     use crate::ir::fixtures::{example_16_1, fact2, string_value};
     use crate::ir::{Expr, ImportSpec, PredicateInfo, Var};
+
+    // --- Absent value semantics (§4/§8) ---
+
+    #[test]
+    fn absent_annihilates_in_arithmetic_ahead_of_every_check() {
+        use crate::ir::F64;
+        let a = Value::Absent;
+        // Annihilation over each operator, on either side.
+        for op in [ArithOp::Add, ArithOp::Sub, ArithOp::Mul, ArithOp::Div] {
+            assert_eq!(apply_arith(op, a.clone(), Value::Int(3)).unwrap(), a);
+            assert_eq!(apply_arith(op, Value::Int(3), a.clone()).unwrap(), a);
+        }
+        // Precedence over the edge cases: no division-by-zero, no overflow, no
+        // NaN, no cross-type error — all yield absent.
+        assert_eq!(
+            apply_arith(ArithOp::Div, Value::Int(5), a.clone()).unwrap(),
+            a
+        );
+        assert_eq!(
+            apply_arith(ArithOp::Div, a.clone(), Value::Int(0)).unwrap(),
+            a
+        );
+        assert_eq!(apply_arith(ArithOp::Add, a.clone(), a.clone()).unwrap(), a);
+        assert_eq!(
+            apply_arith(ArithOp::Mul, a.clone(), Value::String("x".into())).unwrap(),
+            a
+        );
+        assert_eq!(
+            apply_arith(
+                ArithOp::Add,
+                a.clone(),
+                Value::Float(F64::new(1.0).unwrap())
+            )
+            .unwrap(),
+            a
+        );
+    }
+
+    #[test]
+    fn every_comparison_with_absent_is_false_never_an_error() {
+        let a = Value::Absent;
+        for op in [
+            CmpOp::Eq,
+            CmpOp::Ne,
+            CmpOp::Lt,
+            CmpOp::Le,
+            CmpOp::Gt,
+            CmpOp::Ge,
+        ] {
+            // Against a value, either side — including `!=`, which is *not* the
+            // negation of `=` here: both are false.
+            assert!(!apply_compare(op, &a, &Value::Int(5)).unwrap());
+            assert!(!apply_compare(op, &Value::Int(5), &a).unwrap());
+            // Against a cross-type operand: still false, not a type error.
+            assert!(!apply_compare(op, &a, &Value::String("s".into())).unwrap());
+            // Against another absent: still false (semantic absent ≠ absent).
+            assert!(!apply_compare(op, &a, &a).unwrap());
+        }
+    }
+
+    #[test]
+    fn values_unify_is_structural_equality_minus_absent() {
+        // Equal values unify; unequal do not.
+        assert!(values_unify(&Value::Int(1), &Value::Int(1)));
+        assert!(!values_unify(&Value::Int(1), &Value::Int(2)));
+        // Absent unifies with nothing — not a value, not another absent — even
+        // though it is *structurally* equal to itself (set dedup relies on that).
+        assert!(!values_unify(&Value::Absent, &Value::Int(1)));
+        assert!(!values_unify(&Value::Int(1), &Value::Absent));
+        assert!(!values_unify(&Value::Absent, &Value::Absent));
+        assert_eq!(Value::Absent, Value::Absent); // structural: still equal
+    }
+
+    #[test]
+    fn try_match_binds_a_var_to_a_stored_absent_but_never_rematches_it() {
+        // A fresh slot binds to a stored absent cell (missing value flows on).
+        let pred = PredId(0);
+        let atom = Atom {
+            pred,
+            args: vec![Term::Var(Var(0))],
+        };
+        let tuple = Tuple(vec![Value::Absent]);
+        let mut bindings = vec![None];
+        let bound = try_match(&atom, &tuple, &mut bindings).expect("binds");
+        assert_eq!(bindings[0], Some(Value::Absent));
+        assert_eq!(bound, vec![0]);
+
+        // But `p(X, X)` on `(absent, absent)` does not match: the second X,
+        // already bound to absent, unifies with nothing.
+        let atom_xx = Atom {
+            pred,
+            args: vec![Term::Var(Var(0)), Term::Var(Var(0))],
+        };
+        let tuple_xx = Tuple(vec![Value::Absent, Value::Absent]);
+        let mut bindings = vec![None];
+        assert!(try_match(&atom_xx, &tuple_xx, &mut bindings).is_none());
+        assert_eq!(bindings[0], None, "partial binding is undone on mismatch");
+    }
 
     /// Spec §16.1 end-to-end: full extents and the query's answers.
     #[test]
@@ -1761,9 +1915,12 @@ mod tests {
         };
         use crate::typecheck::typecheck;
 
-        /// The primitive type of a ground value (for C4).
+        /// The primitive type of a ground value (for C4). Generated programs
+        /// (`arb_value`) carry no `absent`, so the type-neutral value never
+        /// reaches this column-type check.
         fn value_type(value: &Value) -> TypeName {
             match value {
+                Value::Absent => unreachable!("arb_value generates no absent"),
                 Value::Symbol(_) => TypeName::Symbol,
                 Value::String(_) => TypeName::String,
                 Value::Int(_) => TypeName::Int,
@@ -1858,10 +2015,10 @@ mod tests {
                         "absence leaf {pattern:?} is refuted by the model"
                     );
                 }
-                ProofTree::Builtin { .. } => {
-                    // A satisfied comparison/assignment leaf carries its own
-                    // justification (the evaluated operands) — nothing to check
-                    // against the model.
+                ProofTree::Builtin { .. } | ProofTree::Presence { .. } => {
+                    // A satisfied comparison/assignment/presence leaf carries its
+                    // own justification (the evaluated operands) — nothing to
+                    // check against the model.
                 }
                 ProofTree::Derived { children, .. } => {
                     for child in children {
@@ -1870,6 +2027,51 @@ mod tests {
                 }
             }
             Ok(())
+        }
+
+        proptest! {
+            /// The absent value laws (§4/§8), over the typed value pool.
+
+            /// Arithmetic annihilation: absent on either side of any operator
+            /// yields absent, no matter the other operand.
+            #[test]
+            fn absent_annihilates_over_any_operand(v in arb_value()) {
+                for op in [ArithOp::Add, ArithOp::Sub, ArithOp::Mul, ArithOp::Div] {
+                    prop_assert_eq!(
+                        apply_arith(op, Value::Absent, v.clone()).unwrap(),
+                        Value::Absent
+                    );
+                    prop_assert_eq!(
+                        apply_arith(op, v.clone(), Value::Absent).unwrap(),
+                        Value::Absent
+                    );
+                }
+            }
+
+            /// Every comparison with an absent operand is false — never an error,
+            /// whatever the other operand's type.
+            #[test]
+            fn absent_comparison_is_always_false(v in arb_value()) {
+                for op in [CmpOp::Eq, CmpOp::Ne, CmpOp::Lt, CmpOp::Le, CmpOp::Gt, CmpOp::Ge] {
+                    prop_assert!(!apply_compare(op, &Value::Absent, &v).unwrap());
+                    prop_assert!(!apply_compare(op, &v, &Value::Absent).unwrap());
+                }
+            }
+
+            /// Semantic unify agrees with structural equality on typed values,
+            /// but absent unifies with nothing.
+            #[test]
+            fn values_unify_matches_eq_off_absent(a in arb_value(), b in arb_value()) {
+                prop_assert_eq!(values_unify(&a, &b), a == b);
+                prop_assert!(!values_unify(&a, &Value::Absent));
+                prop_assert!(!values_unify(&Value::Absent, &a));
+            }
+
+            /// `absent` sorts before every typed value under the canonical `Ord`.
+            #[test]
+            fn absent_sorts_first(v in arb_value()) {
+                prop_assert!(Value::Absent < v);
+            }
         }
 
         proptest! {
@@ -2253,7 +2455,9 @@ mod tests {
                                 Premise::Fact(f) => model
                                     .first_round(f)
                                     .is_some_and(|r| r < round),
-                                Premise::Absent(_) | Premise::Builtin { .. } => true,
+                                Premise::Absent(_)
+                                | Premise::Builtin { .. }
+                                | Premise::Presence { .. } => true,
                             })
                         }),
                         "no well-founded derivation for {:?}", fact
@@ -2294,10 +2498,10 @@ mod tests {
                                         "absence premise {pattern:?} is refuted"
                                     );
                                 }
-                                Premise::Builtin { .. } => {
+                                Premise::Builtin { .. } | Premise::Presence { .. } => {
                                     // Self-justifying; `arb_program_with_edb`
-                                    // emits no comparisons, so this is not yet
-                                    // exercised here.
+                                    // emits no comparisons or presence tests, so
+                                    // these are not yet exercised here.
                                 }
                             }
                         }

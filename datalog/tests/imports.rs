@@ -75,6 +75,8 @@ fn json_value(value: &Value) -> String {
         // `{:?}` is the shortest round-tripping form and is JSON-legal.
         Value::Float(f) => format!("{:?}", f.get()),
         Value::Bool(b) => b.to_string(),
+        // A missing value serializes back to a JSON null (§13).
+        Value::Absent => "null".to_string(),
         Value::Symbol(_) => unreachable!("JSONL carries no symbols"),
     }
 }
@@ -271,6 +273,7 @@ proptest! {
                     Value::Bool(_) => "bool",
                     Value::String(_) => "string",
                     Value::Symbol(_) => "symbol",
+                    Value::Absent => "absent",
                 };
                 prop_assert_eq!(actual, expected, "column {}", col);
             }
@@ -435,15 +438,105 @@ fn f7_parquet_round_trip() {
 }
 
 /// JSONL records must supply the same key set: a missing key is a structured
-/// error naming the record and key, not a silent null.
+/// A missing JSONL key is the absent value (§4/§13), not an error: the key set
+/// comes from the first record, and a later record lacking `b` yields absent —
+/// without forcing `b`'s type (it stays int from the present records).
 #[test]
-fn jsonl_missing_key_is_a_structured_error() {
+fn jsonl_missing_key_becomes_absent() {
     let path = scratch_dir().join("t.jsonl");
     std::fs::write(&path, "{\"a\": 1, \"b\": 2}\n{\"a\": 3}\n").expect("write");
-    let errors = load_table(path.to_str().unwrap(), None, None).expect_err("missing key");
-    let message = errors[0].to_string();
-    assert!(message.contains("record 2"), "got: {message}");
-    assert!(message.contains("`b`"), "got: {message}");
+    let loaded = load_table(path.to_str().unwrap(), None, None).expect("loads");
+    assert_eq!(loaded.fields, ["a", "b"]);
+    assert_eq!(
+        loaded.rows,
+        vec![
+            vec![Value::Int(1), Value::Int(2)],
+            vec![Value::Int(3), Value::Absent],
+        ]
+    );
+}
+
+/// An explicit JSON `null` is absent too (§4/§13) — same as a missing key.
+#[test]
+fn jsonl_explicit_null_becomes_absent() {
+    let path = scratch_dir().join("t.jsonl");
+    std::fs::write(&path, "{\"a\": 1, \"b\": 2}\n{\"a\": 3, \"b\": null}\n").expect("write");
+    let loaded = load_table(path.to_str().unwrap(), None, None).expect("loads");
+    assert_eq!(
+        loaded.rows,
+        vec![
+            vec![Value::Int(1), Value::Int(2)],
+            vec![Value::Int(3), Value::Absent],
+        ]
+    );
+}
+
+/// The USDA dogfood failure (§17, 2026-07-24): an empty numeric cell no longer
+/// forces the column to string — it stays int, the gap becoming absent.
+#[test]
+fn csv_empty_cell_is_absent_and_keeps_the_column_numeric() {
+    let path = scratch_dir().join("t.csv");
+    std::fs::write(&path, "food,amount\napple,5\nbanana,\ncherry,7\n").expect("write");
+    let loaded = load_table(path.to_str().unwrap(), None, None).expect("loads");
+    assert_eq!(loaded.fields, ["food", "amount"]);
+    assert_eq!(
+        loaded.rows,
+        vec![
+            vec![Value::String("apple".into()), Value::Int(5)],
+            vec![Value::String("banana".into()), Value::Absent],
+            vec![Value::String("cherry".into()), Value::Int(7)],
+        ]
+    );
+}
+
+/// §16.8 end-to-end: a sparse CSV imports with a gap in a numeric column, and
+/// the absent value flows through named access, a threshold (silently
+/// excluding the gap), and a presence test — the full pipeline, imports → eval.
+#[test]
+fn worked_example_16_8_sparse_nutrient_table() {
+    let dir = scratch_dir();
+    let csv = dir.join("food_nutrient.csv");
+    std::fs::write(
+        &csv,
+        "food,nutrient,amount\nbread,iron,3\nspinach,iron,\nbeef,iron,8\n",
+    )
+    .expect("write csv");
+    let src = format!(
+        "import \"{}\" as measurement.\n\
+         high_iron(F) :- measurement(food: F, nutrient: \"iron\", amount: A), A >= 5.\n\
+         missing(F) :- measurement(food: F, amount: A), A is absent.\n\
+         recorded(F, A) :- measurement(food: F, nutrient: \"iron\", amount: A).\n\
+         ?- high_iron(F).\n?- missing(F).\n?- recorded(F, A).\n",
+        csv.to_str().unwrap()
+    );
+    let result = datalog::run(&src).unwrap_or_else(|e| panic!("run: {e:?}"));
+    assert_eq!(result.answers[0], vec!["high_iron(\"beef\").".to_string()]);
+    assert_eq!(result.answers[1], vec!["missing(\"spinach\").".to_string()]);
+    // Every row returns; the gap round-trips as `absent`.
+    assert_eq!(
+        result.answers[2],
+        vec![
+            "recorded(\"beef\", 8).".to_string(),
+            "recorded(\"bread\", 3).".to_string(),
+            "recorded(\"spinach\", absent).".to_string(),
+        ]
+    );
+}
+
+/// `allow_quoted_nulls=false`: an unquoted empty cell is absent, but a quoted
+/// `""` is the empty string — the two stay distinct (§13, 2026-07-24).
+#[test]
+fn csv_quoted_empty_is_a_string_unquoted_empty_is_absent() {
+    let path = scratch_dir().join("t.csv");
+    std::fs::write(&path, "k,note\napple,\"\"\nbanana,\n").expect("write");
+    let loaded = load_table(path.to_str().unwrap(), None, None).expect("loads");
+    assert_eq!(
+        loaded.rows,
+        vec![
+            vec![Value::String("apple".into()), Value::String(String::new())],
+            vec![Value::String("banana".into()), Value::Absent],
+        ]
+    );
 }
 
 /// The wide-table shape of §16.7: header-derived field names come back in

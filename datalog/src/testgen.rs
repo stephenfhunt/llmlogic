@@ -58,6 +58,9 @@ pub(crate) fn arb_value() -> impl Strategy<Value = ir::Value> {
         Constant::Int(i) => ir::Value::Int(i),
         Constant::Float(f) => ir::Value::Float(ir::F64::new(f).expect("pool floats are not NaN")),
         Constant::Bool(b) => ir::Value::Bool(b),
+        // `arb_constant` never produces absent — generated programs stay in the
+        // typed value space (absent has its own targeted tests).
+        Constant::Absent => unreachable!("arb_constant generates no absent"),
     })
 }
 
@@ -298,6 +301,7 @@ fn monotype_body(body: &mut [Literal]) {
                 monotype_expr(&mut cmp.lhs);
                 monotype_expr(&mut cmp.rhs);
             }
+            LiteralKind::Presence { expr, .. } => monotype_expr(expr),
         }
     }
 }
@@ -337,6 +341,9 @@ fn monotype_constant(constant: &Constant) -> Constant {
         Constant::Int(i) => format!("int_{i}"),
         Constant::Float(f) => format!("flt_{}", f.to_bits()),
         Constant::Bool(b) => format!("bool_{b}"),
+        // Never generated; absent has no monotype relabeling (it is
+        // type-neutral) and maps to itself.
+        Constant::Absent => return Constant::Absent,
     };
     Constant::Symbol(symbol)
 }
@@ -830,7 +837,7 @@ pub(crate) fn negation_independent_preds(program: &ir::Program) -> Vec<ir::PredI
                     deps[rule.head.pred.0 as usize].push(atom.pred);
                     tainted_roots.push(atom.pred);
                 }
-                ir::BodyLiteralKind::Compare { .. } => {}
+                ir::BodyLiteralKind::Compare { .. } | ir::BodyLiteralKind::Presence { .. } => {}
             }
         }
     }
@@ -1200,7 +1207,7 @@ pub(crate) fn positionalize(program: &Program) -> Program {
                     },
                     span: literal.span,
                 },
-                LiteralKind::Comparison(_) => literal.clone(),
+                LiteralKind::Comparison(_) | LiteralKind::Presence { .. } => literal.clone(),
             })
             .collect()
     };
@@ -1369,7 +1376,7 @@ mod tests {
                     std::iter::once(&clause.head).chain(clause.body.iter().filter_map(|literal| {
                         match &literal.kind {
                             LiteralKind::Atom { atom, .. } => Some(atom),
-                            LiteralKind::Comparison(_) => None,
+                            LiteralKind::Comparison(_) | LiteralKind::Presence { .. } => None,
                         }
                     }))
                 {
