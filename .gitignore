@@ -1,2 +1,7 @@
 # Claude Code per-project tooling state (local settings, saved plans, etc.)
 .claude/
+
+# Editor swap/backup files
+*.swp
+*.swo
+*~
