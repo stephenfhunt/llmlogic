@@ -14,10 +14,20 @@ project, its `ROADMAP.md` (e.g. [`datalog/ROADMAP.md`](datalog/ROADMAP.md)) for
 the indexed backlog of open items. Open **defects** are tracked separately, one
 file per defect, in the project's `bugs/` directory (`ls datalog/bugs/*.md` is the
 open set; conventions in [`datalog/bugs/README.md`](datalog/bugs/README.md)).
-ROADMAP holds what is *missing*; `bugs/` holds what is *wrong*. End your session by adding a new worklog entry
-(Done / Decided / Next up) and updating any item whose status changed in
-`ROADMAP.md`. Raw session transcripts are auto-saved by Claude Code under
-`~/.claude/projects/<repo-slug>/*.jsonl` — don't commit transcripts into the repo.
+ROADMAP holds what is *missing*; `bugs/` holds what is *wrong*.
+
+**End your session** by updating any item whose status changed in `ROADMAP.md`
+and adding a worklog entry with four fields:
+
+- **Done** / **Decided** / **Next up** — as before.
+- **Removed** — what you deleted, merged, or replaced. Docs and code both accrete
+  by default because every other field rewards adding; this one is the
+  counterweight. "Nothing" is a fine answer once you have actually looked.
+
+Then **annotate any `spec.md` §17 decision this session taught you something
+about** — see "Working style" below. Raw session transcripts are auto-saved by
+Claude Code under `~/.claude/projects/<repo-slug>/*.jsonl` — don't commit
+transcripts into the repo.
 
 Current projects:
 - **`datalog/`** — a Datalog engine in Rust, targeted at LLM/agent use, with
@@ -64,13 +74,52 @@ The starter is warning-free and rustfmt-clean; keep it that way.
 
 `datalog/spec.md` is a **living specification and the design workspace**. Before
 implementing a language feature:
-1. Read the relevant `spec.md` section and its status (`TBD → Draft → Stable`).
+1. Read the relevant `spec.md` section and its status.
 2. Prefer working from **canonical example programs** (spec §16) — let examples drive
    syntax/semantics rather than designing in the abstract.
 3. Record non-obvious design choices in the **decisions log** (spec §17) with a date
-   and rationale; track unresolved questions there too.
+   and rationale; track unresolved questions there too. When a decision's
+   correctness rests on an invariant, **name the test that fails if the invariant
+   does**. `bugs/001` is the cost of one without a guard: its §17 entry argued the
+   invariant in prose at the check site, and a feature two days later falsified it
+   with nothing to notice.
 4. Validate risky sections (grammar, negation, provenance) with small prototypes and
-   feed findings back into the spec before marking a section *Stable*.
+   feed findings back into the spec.
+5. **An equivalence claim ships as a property, not a unit test.** Any "these two
+   spellings mean the same thing" claim — surface sugar, a desugaring, an
+   IR-identity claim — gets a generated-input property. The record is exact: every
+   such claim carrying a property has held (named ≡ positional, body order); both
+   carrying only a unit test became defects (`bugs/001`, `bugs/002`).
+
+### Changing what already exists
+
+Most of the damage so far has come from editing, not building — three of the four
+2026-07-25 defects were caused by a doc claim that had quietly stopped being true.
+
+**Know which kind of document you are in.** They have opposite disciplines:
+
+| | current-state | append-only record |
+|---|---|---|
+| what | `spec.md` §1–§16, `README.md`, `SKILL.md`, code and doc comments | `spec.md` §17, `docs/worklog.md`, `bugs/resolved/` |
+| discipline | **rewrite** it to state present truth | **append**; never rewrite |
+| history | *point* to the decision; never narrate the change | history is the payload |
+
+The test for any sentence in a current-state document: *would this still be here
+if the feature had always worked this way?* If not, it is narration — cut it and
+leave the pointer. "See §17 2026-07-25" is fine; "relaxed from positively bound"
+is not.
+
+- **One normative home per rule.** State a rule in exactly one section; everywhere
+  else cross-references it. `bugs/003` names this as *the drift mechanism* — the
+  same safety rule lived in four sections, and updating three looked like done.
+- **Changing a rule means sweeping §17** for entries resting on it. Fixing
+  `bugs/001` turned up three needing amendment; that was diligence, not process.
+- **Annotate a decision when its consequences land, not only when it is
+  overturned.** The most valuable note has no change attached — that the
+  2026-07-19 wildcard entry's instinct was right and the entry overturning it was
+  wrong is something no diff can recover. Record what it actually cost, whether
+  the stated rationale held, and what the *rejected* alternative would have done;
+  the last is the part a later session cannot reconstruct.
 
 Design pillars for `datalog` (they drive decisions): provenance/explainability,
 LLM-friendly syntax + structured/actionable errors, and an agent-native CLI —
