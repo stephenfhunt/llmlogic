@@ -163,7 +163,23 @@ The test pyramid grows outward with the pipeline:
 
 ## Conventions
 - Match the style of surrounding code; keep modules documented with `//!` headers.
-- Commit only when asked. Use a branch off `main` if committing.
+
+### Git workflow — trunk-based, solo
+- **Commit only when asked**, and commit **directly on `trunk`**. There is no
+  `main` and no feature branch: this is a single-developer repository with no PR
+  or review gate, so a branch would only add ceremony. (Revisit if the project
+  gains other contributors or a CI review flow — feature branches are a fine
+  answer to a problem this repo does not have yet.) The remote is `vault`.
+- **Commit in small, self-contained steps as the work lands**, rather than
+  accumulating a session's worth of change into one commit. Each commit should
+  build, pass `cargo test`, and be one coherent idea — a fix, a property, a
+  refactor. A session that ships five things is usually five commits.
+  Reconstructing that split afterwards is not a cheap edit: the changes end up
+  interleaved within `spec.md`, `lower.rs` and `engine/mod.rs`, so separating
+  them means hunk-level surgery, and the intermediate states are no longer the
+  ones that were actually verified.
+- Design decisions still go to `spec.md` §17 and the worklog; a commit message
+  should say *what changed*, and point at §17 for *why*.
 - Don't introduce dependencies casually — dependency choices are tracked as decisions
   in `spec.md` §17 and made as the relevant section stabilizes. The core language
   engine (lexer/parser/lowering/eval) stays zero-dependency; §13 imports are powered
