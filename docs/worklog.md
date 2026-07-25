@@ -16,6 +16,73 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-25 — Practice: stop building on doc claims that stopped being true
+
+Same day, after `bugs/001`. Prompted by asking why this week's defects kept
+having the same shape. They do, and the diagnosis was already written down — four
+bug files independently prescribed the same fix and none of them promoted it to
+practice.
+
+**Done**
+- **The evidence.** Every "surface form A means the same as form B" claim carrying
+  a *property* has held (named ≡ positional, body order); both carrying only a
+  *unit test* became defects (`bugs/001`, `bugs/002`). `bugs/003` is the doc-side
+  variant — one rule stated in four sections, "updating three was enough to look
+  done". Fixing `bugs/001` meant editing that rule in nine places.
+- **`AGENTS.md` gained a "Changing what already exists" section**: the
+  current-state vs append-only document split, one normative home per rule, sweep
+  §17 when a rule moves, annotate a decision when its consequences land. Folded
+  into the existing list rather than bolted on.
+- **Session-end checkpoint** gained *Removed* and *annotate §17* — the annotation
+  rule needed a trigger that already fires, and every other worklog field rewards
+  adding.
+- **§17 preamble**: one amendment vocabulary (Falsified / Superseded / Amended /
+  **Consequences**) replacing the six in use. The fourth is new and is the only
+  marker that can record a decision working out *well*.
+- **Three §17 entries annotated** — §8 builtins, Phase D, the `-q` classifier —
+  each saying what it cost and whether the rationale held.
+- **testing.md C8**: `A15` (inline ≡ hand-hoisted, via `testgen::hoist_atom_args`
+  and a new `alpha_eq`), disjunction ≡ separate rules, and `-q` ≡ file program.
+  The last **fails and is `#[ignore]`d** as `bugs/002`'s acceptance criterion; it
+  shrinks to `d(K) :- n(K,V), V = 0 ; n(K,V), V = 0` and the seed is recorded.
+  Known failures are now three, each an open defect with a test saying what
+  correct looks like.
+
+**Decided**
+- **Widen the guard, don't just write the rule.** The prescription existed in four
+  places already; what was missing was anyone executing it. So the practice change
+  ships with the properties it calls for, and its first act is a *failing* test for
+  an open defect rather than another prose instruction.
+- **`alpha_eq` over `==` for A15.** The hand-written variable is named where
+  lowering mints an anonymous slot, and slot numbering differs. Comparing modulo
+  renaming is not a weakening — "engine-identical" is exactly the claim, since the
+  evaluator never reads `var_names`.
+- **The §17 split is a rewrite, not a move.** Sized as a move it will be done as
+  one, and the residue — §1–§16 narrating changes and restating rules — is the
+  actual problem. ROADMAP item restated with that acceptance criterion.
+
+**Removed**
+- Five lines of change-narration from `src/lower.rs`'s negation-safety comment, a
+  story already told in §17 *and* `bugs/resolved/001` — written three times,
+  needed once.
+- §16.2's "relaxed from *positively* bound" and §8's bare date parenthetical.
+- The `TBD → Draft → Stable` ladder and "before marking a section *Stable*" from
+  `AGENTS.md` — nothing has ever reached `Stable`, so the instruction was
+  unfollowable. The dead rung itself stays a queued ROADMAP item.
+- `engine::positively_bound` (earlier in the day, superseded by the shared
+  scheduler binding set).
+
+**Next up**
+- **`absent` × negation** (negation item 1) — the only open negation thread, and
+  unblocked. Two `#[ignore]`d tests are the acceptance criterion.
+- **`bugs/002`** is now the cheapest defect to close: the fix sketch is written,
+  and the property already exists and fails. Delete the `#[ignore]` to finish.
+- `bugs/003` (three false spec assertions) and `bugs/004` (blocked on the
+  termination design item).
+- **Known coverage gap, recorded not fixed:** E3's `replay` returns `None` on any
+  `Premise::Builtin`, so derivation replay has never covered §8 builtins at all.
+  Widening it means folding builtin premises into the replayed environment.
+
 ## 2026-07-25 — `bugs/001`: negated atoms join the dependency schedule
 
 First session working the `bugs/` queue. Took `001` (soundness) and fixed it by
