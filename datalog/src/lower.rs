@@ -2438,7 +2438,7 @@ mod tests {
         use super::super::lower;
         use crate::ast;
         use crate::ir;
-        use crate::testgen::{arb_defect, arb_safe_program, inject_defect};
+        use crate::testgen::{arb_ast_program, arb_defect, arb_safe_program, inject_defect};
 
         /// The AST rule statements, in source order (the generator emits
         /// facts first, then rules — mirrored by `ir::Program::rules`).
@@ -2640,6 +2640,41 @@ mod tests {
                     (a, b) => {
                         return Err(TestCaseError::fail(format!(
                             "named and positional forms disagreed: {a:?} vs {b:?}"
+                        )));
+                    }
+                }
+            }
+
+            /// A15 (testing.md C8): an **inline** compound atom argument lowers
+            /// to the same program as the `=`-assignment written by hand.
+            ///
+            /// The A13 analogue for the other surface-sugar claim, and the one
+            /// that was missing: §5 says the two spellings are one program, and
+            /// `lower_arg_expr` says the hoisted slot is "exactly what a
+            /// hand-written `V = <expr>` produces, so the IR is
+            /// engine-identical". That claim had a unit test over one positive
+            /// atom (`api::tests`) until `bugs/001` found a spelling where it
+            /// was false — under negation, where the two forms gave *different
+            /// answers* and one was silently wrong.
+            ///
+            /// Compared with `alpha_eq`, not `==`: the hand-written variable is
+            /// named where lowering mints an anonymous slot, and the two number
+            /// their slots differently. Neither is observable to the evaluator,
+            /// and "engine-identical" is precisely the claim being tested.
+            #[test]
+            fn a15_inline_and_hoisted_arguments_agree(program in arb_ast_program()) {
+                let inline = lower(&program);
+                let hoisted = lower(&crate::testgen::hoist_atom_args(&program));
+                match (inline, hoisted) {
+                    (Ok(a), Ok(b)) => prop_assert!(
+                        crate::testgen::alpha_eq(&a, &b),
+                        "inline and hand-hoisted forms lowered differently:\n{a:#?}\n{b:#?}"
+                    ),
+                    (Err(_), Err(_)) => {}
+                    (a, b) => {
+                        return Err(TestCaseError::fail(format!(
+                            "inline and hand-hoisted forms disagreed on acceptance: \
+                             {:?} vs {:?}", a.is_ok(), b.is_ok()
                         )));
                     }
                 }

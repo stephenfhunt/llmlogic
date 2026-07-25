@@ -1329,6 +1329,260 @@ pub(crate) fn positionalize(program: &Program) -> Program {
     Program { statements }
 }
 
+/// Rewrites every **compound** atom argument in a clause or query *body* into a
+/// preceding `=`-assignment over a fresh variable — the transformation lowering
+/// performs internally when it hoists inline arithmetic (`src/lower.rs`,
+/// `ArgMode::Hoist`), written out by hand.
+///
+/// `p(X + 1)` becomes `H0 = X + 1, p(H0)`. Facts are left alone: an empty-body
+/// clause constant-*folds* its arguments rather than hoisting them (`ArgMode::Fold`),
+/// and turning one into a rule would not be the same program. Head arguments are
+/// left alone too — lowering appends their assignments *after* the body, so the
+/// hand-written equivalent is a different edit and a separate claim.
+///
+/// The point of the rewrite is the §5 claim that the two spellings are the same
+/// program. Compare the results with [`alpha_eq`], not `==`: a hand-written `H0`
+/// is a *named* slot where lowering mints an anonymous one, and the two number
+/// their slots differently, neither of which the evaluator can observe.
+pub(crate) fn hoist_atom_args(program: &Program) -> Program {
+    use crate::ast::{Args, Atom, Clause, Literal, StatementKind};
+
+    // One counter per clause: slots are clause-scoped, so names need only be
+    // unique within one body.
+    fn rewrite_body(body: &[Literal]) -> Vec<Literal> {
+        let mut out = Vec::with_capacity(body.len());
+        let mut next = 0usize;
+        for literal in body {
+            let LiteralKind::Atom { negated, atom } = &literal.kind else {
+                out.push(literal.clone());
+                continue;
+            };
+            // Named arguments carry expressions too; both forms hoist alike.
+            let mut hoist_expr = |expr: &Expr, out: &mut Vec<Literal>| -> Expr {
+                if matches!(expr.kind, ExprKind::Term(_)) {
+                    return expr.clone();
+                }
+                let name = format!("Hoisted{next}");
+                next += 1;
+                out.push(comparison_literal(
+                    CmpOp::Eq,
+                    expr_of(var_term(&name)),
+                    expr.clone(),
+                ));
+                expr_of(var_term(&name))
+            };
+            let args = match &atom.args {
+                Args::Positional(exprs) => Args::Positional(
+                    exprs
+                        .iter()
+                        .map(|expr| hoist_expr(expr, &mut out))
+                        .collect(),
+                ),
+                Args::Named(named) => Args::Named(
+                    named
+                        .iter()
+                        .map(|arg| crate::ast::NamedArg {
+                            field: arg.field.clone(),
+                            value: hoist_expr(&arg.value, &mut out),
+                            span: arg.span,
+                        })
+                        .collect(),
+                ),
+            };
+            out.push(Literal {
+                kind: LiteralKind::Atom {
+                    negated: *negated,
+                    atom: Atom {
+                        predicate: atom.predicate.clone(),
+                        args,
+                        span: atom.span,
+                    },
+                },
+                span: literal.span,
+            });
+        }
+        out
+    }
+
+    let statements = program
+        .statements
+        .iter()
+        .map(|statement| match &statement.kind {
+            // An empty body is a fact: folded, not hoisted. Leave it.
+            StatementKind::Clause(clause) if !clause.body.is_empty() => Statement {
+                kind: StatementKind::Clause(Clause {
+                    head: clause.head.clone(),
+                    body: rewrite_body(&clause.body),
+                    span: clause.span,
+                }),
+                span: statement.span,
+            },
+            StatementKind::Query(query) => Statement {
+                kind: StatementKind::Query(crate::ast::Query {
+                    body: rewrite_body(&query.body),
+                    span: query.span,
+                }),
+                span: statement.span,
+            },
+            _ => statement.clone(),
+        })
+        .collect();
+    Program { statements }
+}
+
+/// Structural equality of two lowered programs **up to variable renaming** —
+/// what `src/lower.rs` means when it calls a hoisted argument "engine-identical"
+/// to the hand-written assignment.
+///
+/// Plain `==` is too strong for that claim and for the wrong reasons: variable
+/// slots are dense per-clause indices assigned in first-occurrence order, and
+/// `var_names` records a source name the evaluator never reads. Two programs
+/// that differ only there run identically. Everything else — predicates, facts,
+/// literal shapes and order, constants, strata — must match exactly.
+pub(crate) fn alpha_eq(a: &ir::Program, b: &ir::Program) -> bool {
+    a.predicates == b.predicates
+        && a.facts == b.facts
+        && a.imports == b.imports
+        && a.strata == b.strata
+        && a.rules.len() == b.rules.len()
+        && a.queries.len() == b.queries.len()
+        && a.rules.iter().zip(&b.rules).all(|(x, y)| {
+            let mut m = Renaming::default();
+            m.atom(&x.head, &y.head) && m.body(&x.body, &y.body)
+        })
+        && a.queries.iter().zip(&b.queries).all(|(x, y)| {
+            let mut m = Renaming::default();
+            m.body(&x.body, &y.body)
+                && x.projection.len() == y.projection.len()
+                && x.projection
+                    .iter()
+                    .zip(&y.projection)
+                    .all(|(p, q)| m.var(ir::Var(*p), ir::Var(*q)))
+        })
+}
+
+/// A partial bijection between the variable slots of two clauses, extended as
+/// [`alpha_eq`] walks them in parallel. Both directions are recorded so two
+/// distinct slots can never collapse onto one.
+#[derive(Default)]
+struct Renaming {
+    forward: std::collections::HashMap<u32, u32>,
+    backward: std::collections::HashMap<u32, u32>,
+}
+
+impl Renaming {
+    fn var(&mut self, x: ir::Var, y: ir::Var) -> bool {
+        let forward = *self.forward.entry(x.0).or_insert(y.0);
+        let backward = *self.backward.entry(y.0).or_insert(x.0);
+        forward == y.0 && backward == x.0
+    }
+
+    fn term(&mut self, x: &ir::Term, y: &ir::Term) -> bool {
+        match (x, y) {
+            (ir::Term::Const(a), ir::Term::Const(b)) => a == b,
+            (ir::Term::Var(a), ir::Term::Var(b)) => self.var(*a, *b),
+            _ => false,
+        }
+    }
+
+    fn expr(&mut self, x: &ir::Expr, y: &ir::Expr) -> bool {
+        match (x, y) {
+            (ir::Expr::Term(a), ir::Expr::Term(b)) => self.term(a, b),
+            (
+                ir::Expr::Binary {
+                    op: p,
+                    lhs: a,
+                    rhs: b,
+                },
+                ir::Expr::Binary {
+                    op: q,
+                    lhs: c,
+                    rhs: d,
+                },
+            ) => p == q && self.expr(a, c) && self.expr(b, d),
+            _ => false,
+        }
+    }
+
+    fn atom(&mut self, x: &ir::Atom, y: &ir::Atom) -> bool {
+        x.pred == y.pred
+            && x.args.len() == y.args.len()
+            && x.args
+                .iter()
+                .zip(&y.args)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .all(|(a, b)| self.term(a, b))
+    }
+
+    fn body(&mut self, x: &[ir::BodyLiteral], y: &[ir::BodyLiteral]) -> bool {
+        x.len() == y.len()
+            && x.iter()
+                .zip(y)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .all(|(a, b)| self.literal(a, b))
+    }
+
+    fn literal(&mut self, x: &ir::BodyLiteral, y: &ir::BodyLiteral) -> bool {
+        use ir::BodyLiteralKind as K;
+        match (&x.kind, &y.kind) {
+            (K::Atom(a), K::Atom(b)) | (K::NegAtom(a), K::NegAtom(b)) => self.atom(a, b),
+            (
+                K::Compare {
+                    op: p,
+                    lhs: a,
+                    rhs: b,
+                },
+                K::Compare {
+                    op: q,
+                    lhs: c,
+                    rhs: d,
+                },
+            ) => p == q && self.expr(a, c) && self.expr(b, d),
+            (
+                K::Presence {
+                    expr: a,
+                    negated: p,
+                },
+                K::Presence {
+                    expr: b,
+                    negated: q,
+                },
+            ) => p == q && self.expr(a, b),
+            (
+                K::Aggregate {
+                    op: p,
+                    result: r1,
+                    params: m1,
+                    expr: e1,
+                    goal: g1,
+                },
+                K::Aggregate {
+                    op: q,
+                    result: r2,
+                    params: m2,
+                    expr: e2,
+                    goal: g2,
+                },
+            ) => {
+                p == q
+                    && self.var(*r1, *r2)
+                    && m1.len() == m2.len()
+                    && m1
+                        .iter()
+                        .zip(m2)
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                        .all(|(a, b)| self.expr(a, b))
+                    && self.expr(e1, e2)
+                    && self.body(g1, g2)
+            }
+            _ => false,
+        }
+    }
+}
+
 /// The single-defect mutations [`inject_defect`] can apply, with the error
 /// substring lowering must report for each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1500,6 +1754,83 @@ mod tests {
         }
         assert!(named > 0, "generator never produced a named atom");
         assert!(positional > 0, "generator never produced a positional atom");
+    }
+
+    /// A15's generator must emit **compound** atom arguments, and
+    /// [`hoist_atom_args`] must actually rewrite them. A property that never
+    /// sees the shape it guards is the failure `bugs/001` was made of — the
+    /// inline/hoisted claim *had* a test, over one hand-written positive atom,
+    /// and the spelling that broke it was never generated.
+    #[test]
+    fn generator_emits_compound_atom_arguments_that_hoisting_rewrites() {
+        let mut runner = TestRunner::deterministic();
+        let strategy = arb_ast_program();
+        let (mut compound, mut under_negation, mut rewritten) = (0, 0, 0);
+        for _ in 0..200 {
+            let program = strategy
+                .new_tree(&mut runner)
+                .expect("strategy produces a value")
+                .current();
+            for statement in &program.statements {
+                let StatementKind::Clause(clause) = &statement.kind else {
+                    continue;
+                };
+                if clause.body.is_empty() {
+                    continue; // a fact folds rather than hoists
+                }
+                for literal in &clause.body {
+                    if let LiteralKind::Atom { atom, negated } = &literal.kind {
+                        let exprs: Vec<&Expr> = match &atom.args {
+                            Args::Positional(exprs) => exprs.iter().collect(),
+                            Args::Named(named) => named.iter().map(|a| &a.value).collect(),
+                        };
+                        let n = exprs
+                            .iter()
+                            .filter(|e| !matches!(e.kind, ExprKind::Term(_)))
+                            .count();
+                        compound += n;
+                        if *negated {
+                            under_negation += n;
+                        }
+                    }
+                }
+            }
+            // The rewrite must lengthen a body it touches: each hoisted
+            // argument adds one `=`-assignment literal.
+            let before: usize = body_literal_count(&program);
+            let after: usize = body_literal_count(&hoist_atom_args(&program));
+            rewritten += after - before;
+        }
+        assert!(
+            compound > 0,
+            "generator never produced a compound atom argument — A15 is vacuous"
+        );
+        assert!(
+            rewritten > 0,
+            "hoist_atom_args never rewrote anything — A15 is vacuous"
+        );
+        // `not q(X + 1)` is the exact `bugs/001` shape, and the reason A15
+        // would have caught it: pre-fix the inline form lowered (wrongly) while
+        // the hand-hoisted one was a semantic error, so A15's acceptance arm
+        // fails without needing to evaluate anything.
+        assert!(
+            under_negation > 0,
+            "generator never produced a compound argument under `not` — A15 \
+             would not have caught bugs/001"
+        );
+    }
+
+    /// Total body literals across a program's rules and queries.
+    fn body_literal_count(program: &Program) -> usize {
+        program
+            .statements
+            .iter()
+            .map(|statement| match &statement.kind {
+                StatementKind::Clause(clause) => clause.body.len(),
+                StatementKind::Query(query) => query.body.len(),
+                _ => 0,
+            })
+            .sum()
     }
 
     /// Partial selection must actually occur, or the omitted-field path (fresh
