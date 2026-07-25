@@ -1177,6 +1177,58 @@ the ratified set-builder `avg { A | Goal }` (§9), grouped globally here.
 
 ### Decisions
 
+- **2026-07-25** — **Spec design & style review** (no engine change; findings
+  queued in `bugs/` and `ROADMAP.md`). Read §1–§17 as a specification and probed
+  every candidate finding against the built binary rather than reasoning from the
+  prose. Three defects, several unqueued language gaps, and a document-hygiene
+  backlog. Decisions taken during the review:
+  - **Defects get their own tracker: `bugs/`, one file per defect.** `ROADMAP.md`
+    holds what is *missing*; `bugs/` holds what is *wrong*. **Location is the
+    status** — `bugs/*.md` is exactly the open set, resolving one is `git mv` to
+    `bugs/resolved/` — so there is no `status:` field and no index file, either of
+    which would be a second copy of what the directory already says. That matters
+    here specifically: stale cross-references are this project's demonstrated
+    failure mode (this review found five), so a scheme whose correctness depends on
+    hand-maintaining an index would repeat the mistake it is meant to catch. A
+    resolved file must carry a `## Resolution` note *appended* (never rewriting the
+    original diagnosis) saying which candidate fix was taken and why the others
+    were dropped — the part a later session cannot recover from the diff.
+    Conventions in `bugs/README.md`. Rejected: GitHub Issues (the remote is a
+    private SSH server), and `git-bug`/Fossil (both move issue text out of plain
+    files, backwards when the primary reader is an agent that greps markdown).
+  - **Strict numerics stay; `int + float` is not implicitly widened** (user call).
+    Verified that `int` and `float` never meet in-language and that the only
+    conversion escape hatch is the import boundary. Two reasons to keep it that
+    way: this is a data-analysis language, so an int column beside a float column
+    usually reflects a real distinction in the data model (a count vs. a
+    measurement, an identifier vs. an amount) that the engine should respect
+    rather than dissolve; and implicit widening would reintroduce in expressions
+    the precision hazard §13 closed at the import path the same day (`i64` → `f64`
+    above 2⁵³, where large integers are usually identifiers). The fix is therefore
+    an **explicit** conversion — `float(X)`, keeping the widening visible in the
+    source — which folds the numeric gap into the call-form question rather than
+    making it a separate item. Note `avg`'s `int → float` result type already shows
+    the language widens where a *declared result type* says so, as distinct from
+    coercing operands silently.
+  - **Parenthesized expressions were never a design decision** — an implementation
+    gap that acquired a good error message and read as intentional. §17 has no
+    entry on them; the "deliberately flat" claim exists only in commit a7d1ff1's
+    message, and the Phase D entry below that ratified precedence, signed literals,
+    and inline arithmetic never mentions grouping. Nothing semantic depends on it
+    (`ast::ExprKind::Binary` and `ir::Expr::Binary` are already general trees) and
+    there is no ambiguity (an atom must start with an identifier, so a body literal
+    beginning with `(` can only be a comparison). So they are queued as a **small
+    task, deliberately not bundled** with the scalar-call form — sharing a grammar
+    production is not a reason to make a parser-plus-printer fix wait on an
+    open-ended design question. The one real cost is that `print.rs` must become
+    precedence-aware; D2/D3 are already the properties that check it.
+  - **§6 is the largest substantive gap, and it belongs to the negation session.**
+    Declarative semantics still stops at positive programs — no model-theoretic
+    account of aggregation and none of `absent` — while §6's own note lists both as
+    "still to fill in". "What does `p(X), not p(X)` mean" is a §6 question wearing
+    an implementation costume, so the open absent × negation item should settle it
+    there rather than in the anti-join.
+
 - **2026-07-25** — **Correctness review of milestones 8–9** (the absent value and
   aggregation, both shipped 2026-07-24). Re-derived their semantics against
   §4/§8/§9/§10 and probed the built binary. The happy paths held; four things did
@@ -1813,6 +1865,20 @@ the ratified set-builder `avg { A | Goal }` (§9), grouped globally here.
   a `None`-named slot inside a negated atom was necessarily created there, and
   `var_names[slot].is_some()` coincides exactly with "named". No new lowering
   mechanism; the argument is recorded at the check site.
+
+  ***Falsified 2026-07-25 — see `bugs/001`.*** The load-bearing premise ("a fresh
+  slot occurs at exactly one term position in the whole rule") stopped holding two
+  days later, when **inline arithmetic in atom arguments** (2026-07-22, below)
+  began hoisting compound arguments to `=`-assignments: the hoist mints a
+  `None`-named slot occurring at *two* positions — the assignment target and the
+  atom argument. Inside a negated atom the safety check therefore skips it and the
+  anti-join treats it as an open wildcard, so `not q(X + 1)` silently degrades to
+  `not q(_)` and returns wrong rows, while the hand-hoisted spelling of the same
+  rule is correctly rejected. `var_names[slot].is_some()` no longer coincides with
+  "named"; it coincides with "not generated", which is a different predicate. The
+  entry is left standing rather than rewritten because the failure mode is the
+  point: a correctness argument resting on a global invariant, recorded only at its
+  own check site, with nothing to fail when a later feature invalidated it.
 - **2026-07-20** — **`AbsentPattern` is `PredId` plus `Vec<Option<Value>>`**:
   `Some` for constants and positively-bound variables, `None` for
   wildcard-fresh slots (existential under the negation). `Premise` and
@@ -1898,6 +1964,35 @@ the ratified set-builder `avg { A | Goal }` (§9), grouped globally here.
 
 ### Open questions
 
+> Open **defects** are not listed here — they live in [`bugs/`](bugs/), one file
+> each (`bugs/README.md` for the conventions). This section is for questions with
+> no settled answer; a defect has a known-wrong answer. Where a defect falsifies a
+> decision above, the decision carries the amendment inline.
+
+- **Does v1 have a scalar-function call form?** `expr` has no call production
+  (`primary = [ "-" ] number | aggregate | term`), so `float(A)` is rejected as a
+  compound term, and the absence of an explicit conversion is what makes the strict
+  `int`/`float` separation bite (decided 2026-07-25: the strictness stays, so the
+  conversion is the fix). Because it is a surface-syntax change rather than a
+  library addition, deferring it gets more expensive, not less. Sub-questions: do
+  call names share the relation namespace, and are they contextual or reserved —
+  `count` already had to be contextual (§9). Parenthesized grouping is *not* part
+  of this question: it is a small task, queued separately (2026-07-25). — §5/§8.
+- **Is the three-way body-grammar split deliberate?** Rule bodies are DNF; queries
+  and aggregate goals are conjunction-only. §5 states the query half as an aside
+  ("Queries stay conjunctive") and §9 the goal half in passing, but nothing says
+  *why* one body form admits `;` and two do not. Either extend `;` or state the
+  asymmetry as a decision. Lands on the agent surface, where the rule form is the
+  only workaround. — §5/§9/§14.
+- **How does an existence check answer?** `?- p("a"), q("b").` prints nothing and
+  exits 0 whether or not it holds, and §5's ban on 0-arity atoms removes the
+  obvious workaround. §14 records this as a closure gap; the sharper reading is
+  that a yes/no question has no answer. A single *ground atom* is distinguishable
+  (output vs. none), so the hole is specifically the conjunction. — §5/§14.
+- **Should `declare` define a predicate?** A `declare`d but factless relation
+  still warns "referenced but never defined" (§12, 2026-07-23), so there is no way
+  to say "intentionally empty" — even though `declare` is precisely the user
+  asserting the relation exists. — §10/§12.
 - **`absent` × negation and repeated occurrences — two logical laws currently
   fail.** _Needs a design session; do not patch ahead of it._ Found in the
   2026-07-25 review. §4 splits "same" into a *semantic* notion (unification:
@@ -1976,6 +2071,21 @@ the ratified set-builder `avg { A | Goal }` (§9), grouped globally here.
   negation-scheduling item below**: that one changes *when* a negated atom runs,
   and there is no sense implementing it against semantics about to be replaced.
   — §4/§7/§11.
+
+  **Scope note (2026-07-25 review): aggregate group keys are a fourth site, and
+  belong in this session.** A group key bound to `absent` matches nothing in its
+  own goal, so the group is real but empty — verified: with `k(absent).` and
+  `v(absent, 99).` stored, `g(K, N) :- k(K), N = count { C | v(K, C) }.` yields
+  `g(absent, 0)`. That is *not* a contradiction and it agrees with SQL (a
+  correlated subquery keyed on `NULL` counts nothing), so it is defensible — but it
+  is a fourth place where the §4 structural/semantic split is decided by
+  mechanism rather than by choice. Direction 1 above (negation goes structural,
+  joins stay semantic) leaves the language with **four** sites and three answers:
+  joins semantic, group keys semantic, negation structural, set dedup and
+  canonical `Ord` structural. §17 already flags that direction's cost as "negation
+  and joining then use different notions of 'same', which must be *stated* in §4
+  rather than discovered" — the same applies here, so the session should settle all
+  four in one table rather than three plus an omission.
 
 - **Negated atoms are outside the dependency schedule.** §10 requires a negated
   atom's named variables to be bound by a *positive* atom, so `not q(Y), Y = X+1`
