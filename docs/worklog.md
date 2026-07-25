@@ -80,6 +80,17 @@ raw transcripts (Claude Code auto-saves those under
   carries its own contract property since both evaluators share it and B1 cannot
   see a bug they share. Four helper functions in `lower.rs` fell out as dead.
 
+- Follow-up: checked the two failing laws against SQLite. SQL drops the `NULL`
+  from `p(X), p(X)` too, so **non-idempotence is not the anomaly** — it is the
+  price of `NULL ≠ NULL`, which is the FK-blowup protection `absent` was built
+  for. Only the negation cell differs, which promotes "anti-join tests structural
+  membership" to the leading candidate, on the structural grounds that a negated
+  atom binds nothing and so is not a join. Also corrected an overstatement:
+  negation being outside the dependency schedule is a *uniform* expressiveness
+  limit (both orderings refused alike), not a latent silent-wrongness bug like
+  the aggregate group key was. Both written up in §17 with a design sketch, and
+  sequenced in `ROADMAP.md`.
+
 **Next up**
 - **Design session: `absent` × negation** — `q(X) :- p(X), not p(X).` derives
   `q(absent)` (P ∧ ¬P), and `p(X), p(X)` selects less than `p(X)`. A variable

@@ -1248,7 +1248,11 @@ the ratified set-builder `avg { A | Goal }` (§9), grouped globally here.
     Negated atoms stay in their own phase, before every builtin: §10 requires
     their named variables to be bound *positively*, and folding them into the
     dependency order would widen negation safety — a §7/§10 decision, not a
-    consequence of scheduling. It is the one remaining phase-ordering artifact.
+    consequence of scheduling. It is the one remaining place where where-you-
+    write-it decides whether a program is accepted, though unlike the aggregate
+    case the restriction is **uniform** (both orderings are refused alike), so it
+    is an expressiveness limit rather than a silent mis-reading. Carried as an
+    open question below.
 
   - **The semantic sameness rule moved onto `Value`** as
     `Value::unifies_with` (with `Value::is_absent` for the structural absence
@@ -1924,18 +1928,43 @@ the ratified set-builder `avg { A | Goal }` (§9), grouped globally here.
   both evaluators implement the same semantics and agree: it is the semantics
   that is wrong, not one implementation of it.
 
+  **Only the negation cell is anomalous.** Checked against SQLite (2026-07-25),
+  which is three-valued where we are two-valued:
+
+  | | `p(X)` | `p(X), p(X)` | `p(X), not p(X)` |
+  |---|---|---|---|
+  | SQL | `1, NULL` | `1` | `∅` |
+  | datalog today | `1, absent` | `1` | **`absent`** |
+  | with structural negation | `1, absent` | `1` | `∅` |
+
+  So the failure of idempotence is *not* the outlier — SQL drops the `NULL` from
+  a self-join too, and no one calls that a bug, because it is the direct
+  consequence of `NULL ≠ NULL`, which is precisely the foreign-key-blowup
+  protection `absent` exists to give (§4). What is anomalous is deriving the
+  contradiction, and only we do it.
+
   Candidate directions, each moving a different part of the §4 split — the point
   of the session is to choose deliberately rather than let matching decide:
-  1. **Anti-join tests structural membership.** `not p(X)` with `X` bound to
-     absent asks "is the tuple `p(absent)` in the relation?" — it is, so the
-     negation fails. Kills non-contradiction directly; leaves joins alone (a
-     missing foreign key still joins nothing, the property absent was designed
-     for). Costs: negation and joining now use different notions of same, which
-     needs to be *stated* rather than discovered.
+  1. **Anti-join tests structural membership** — *the leading candidate.* `not
+     p(X)` with `X` bound to absent asks "is the tuple `p(absent)` in the
+     relation?" — it is, so the negation fails. The argument is structural, not
+     merely convenient: **a negated atom binds nothing, so it is a membership
+     test rather than a join.** The blowup concern is about positive joins that
+     bring in new bindings; membership is exactly what `Value`'s derived `Eq` is
+     for (§4). It reaches SQL's answer set on both laws while staying two-valued,
+     and costs nothing on the FK side because it never touches it. Costs: negation
+     and joining then use different notions of "same", which must be *stated* in
+     §4 rather than discovered; and "things with no …" changes behaviour on rows
+     whose key is absent — `food(F), not measurement(F, _)` would stop reporting a
+     food whose id is missing. That is SQL's answer and defensible, but it is a
+     real change on the motivating dataset and should be decided, not absorbed.
   2. **A bound slot re-matches structurally.** Once a variable holds a value,
      later occurrences compare structurally; only *unbound*-to-stored matching
-     applies the semantic rule. Restores both laws at once, but weakens
-     "missing keys never join each other" for self-joins (`p(X, X)`).
+     applies the semantic rule. Restores both laws at once — but it buys
+     idempotence by giving up `absent ≠ absent` in joins, i.e. the FK blowup
+     comes back, and it diverges from SQL in the opposite direction. Restoring a
+     law SQL also lacks looks like a poor trade for the property the value model
+     was built around.
   3. **Absent never reaches a negated or repeated position** — a safety error
      instead of a semantics. Cheapest to specify, but the front end cannot know
      which columns carry absent (it is a *value*, not a type, §4), so this is
@@ -1943,7 +1972,33 @@ the ratified set-builder `avg { A | Goal }` (§9), grouped globally here.
 
   Whatever is chosen must also say what `?- p(X), not p(X).` means for a
   *query*, and whether provenance's `AbsentPattern` follows the same rule (it
-  currently delegates to `values_unify`). — §4/§7/§11.
+  currently delegates to `Value::unifies_with`). **Sequence this before the
+  negation-scheduling item below**: that one changes *when* a negated atom runs,
+  and there is no sense implementing it against semantics about to be replaced.
+  — §4/§7/§11.
+
+- **Negated atoms are outside the dependency schedule.** §10 requires a negated
+  atom's named variables to be bound by a *positive* atom, so `not q(Y), Y = X+1`
+  is rejected — and so is `Y = X+1, not q(Y)`. Unlike the aggregate group-key
+  case this is **not** a silent-wrongness bug: the restriction is uniform, both
+  orderings are refused identically, and there is a clean workaround (hoist the
+  computation into a helper predicate). It is an expressiveness limit, and since
+  builtins became dependency-scheduled (§8, 2026-07-25) it is the last place in
+  the language where where-you-write-it decides whether a program is accepted.
+
+  The safety justification — a negated atom must be *ground* when tested — is met
+  by an assignment-binding just as well as by a positive atom; the old rationale
+  ("negations run before assignments, so an assignment cannot bind one's
+  variable") justified the rule by the phase order and the phase order by the
+  rule. A design sketch, if it is taken up: give a negated atom `reads` = its
+  variables that *something else in the body binds*, which keeps the scheduler
+  free of `var_names` — a wildcard-fresh slot is bound nowhere, so it is not a
+  dependency and stays existential, while a *named* variable bound nowhere is
+  still caught by lowering's separate check. Keep negations whose reads are all
+  positively bound in their current phase so cheap anti-joins still prune before
+  expensive aggregates; only the ones that are not yet ready fall through into
+  the dependency phase. Widening negation safety is a §7/§10 decision, not a
+  consequence of scheduling. — §7/§8/§10.
 
 - **Optional/absent value design** — **resolved 2026-07-24** (Decisions above): a
   single first-class, two-valued `absent` value; `absent ≠ absent` semantically but

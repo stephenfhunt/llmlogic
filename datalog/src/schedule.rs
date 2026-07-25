@@ -33,11 +33,15 @@
 //!   input, the way they already share `fold_aggregate`.
 //!
 //! Negated atoms stay in their own phase, before every builtin: §10 requires a
-//! negated atom's named variables to be bound *positively*, which this
-//! scheduler does not relax. That rule and the old phase ordering used to
-//! justify each other, so folding negation into the dependency order is a
-//! reasonable follow-on — but it widens negation safety, which is a §7/§10
-//! decision rather than a consequence of scheduling.
+//! negated atom's named variables to be bound *positively*, which this scheduler
+//! does not relax. Note what that restriction is and is not — it is **uniform**,
+//! so `not q(Y), Y = X+1` and `Y = X+1, not q(Y)` are rejected identically.
+//! There is no silent mis-reading to fix, as there was for aggregate group keys;
+//! it is an expressiveness limit with a working alternative (hoist the
+//! computation into a helper predicate). Folding negation into the dependency
+//! order is a reasonable follow-on and is sketched in §17, but it *widens*
+//! negation safety, which is a §7/§10 decision rather than a consequence of
+//! scheduling.
 
 use std::collections::HashSet;
 

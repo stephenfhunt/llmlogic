@@ -30,16 +30,38 @@ The evaluation-first roadmap (decided 2026-07-10; rationale in `AGENTS.md` and
 
 ## Open backlog
 
-### Soundness (§4/§7) — highest priority
+### Negation (§7) — the next two items, in this order
 
-- **`absent` × negation and repeated occurrences** — `q(X) :- p(X), not p(X).`
-  derives `q(absent)` (P ∧ ¬P), and `p(X), p(X)` selects less than `p(X)`.
-  A variable bound to `absent` is both matched and unmatchable: a fresh slot
-  binds to a stored absent, but every later use applies the semantic rule, which
-  absent fails. Found 2026-07-25; three candidate directions and the acceptance
-  criterion (two `#[ignore]`d tests) are in §17. **Needs a design session — do
-  not patch ahead of it**, every fix moves §4's structural/semantic split.
-  _designing._ — §4/§7/§11.
+These are sequenced deliberately: the first decides what a negated atom *means*,
+the second changes *when* it runs. Implementing the second first would build
+against semantics the first is about to replace.
+
+1. **`absent` × negation — a soundness bug.** `q(X) :- p(X), not p(X).` derives
+   `q(absent)`: P ∧ ¬P, in an engine that advertises consistency checking. A
+   variable bound to `absent` is both matched and unmatchable — a fresh slot
+   binds to a stored absent, but every later use applies the semantic rule, which
+   absent fails. Checked against SQLite: the companion symptom (`p(X), p(X)`
+   selecting less than `p(X)`) is **not** an anomaly — SQL does the same, as the
+   price of `NULL ≠ NULL`, which is the FK-blowup protection we want. Only the
+   negation cell differs, and the leading fix is to make the anti-join a
+   *structural membership test*, on the grounds that a negated atom binds nothing
+   and so is not a join at all. Three directions, the SQL comparison, and the one
+   behaviour change to decide (rows with an absent key drop out of "things with
+   no …") are in §17. Acceptance criterion: two `#[ignore]`d tests
+   (`a_fact_never_satisfies_its_own_negation`,
+   `repeating_a_body_literal_does_not_change_the_answer`) already assert the
+   sound behaviour. **Needs a design session — do not patch ahead of it**; every
+   direction moves §4's structural/semantic split. _designing._ — §4/§7/§11.
+
+2. **Negated atoms in the dependency schedule.** `not q(Y), Y = X+1` is rejected,
+   and so is the reverse — unlike the aggregate group-key case this is a uniform
+   expressiveness limit, not silent wrongness, and hoisting into a helper
+   predicate works today. But since builtins became dependency-scheduled
+   (2026-07-25) it is the last place where where-you-write-it decides whether a
+   program is accepted, and the safety rule it rests on ("bound *positively*")
+   was justified by the phase order it also justified. §17 carries a design
+   sketch that keeps the scheduler free of `var_names` and preserves early
+   pruning. _queued (after item 1)._ — §7/§8/§10.
 
 ### Aggregation follow-ons (§9)
 
