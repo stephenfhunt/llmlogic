@@ -35,9 +35,11 @@ The evaluation-first roadmap (decided 2026-07-10; rationale in `AGENTS.md` and
 
 > **Open defects live in [`bugs/`](bugs/)** — currently `001` (a compound argument
 > in a negated atom is silently misread as a wildcard; **soundness**), `002` (`-q`
-> rejects a disjunctive rule), `003` (three normative errors in `spec.md`). All
-> three were found by the 2026-07-25 spec review (§17). `001` should land before
-> negation item 2 below, whose rationale it falsifies.
+> rejects a disjunctive rule), `003` (three normative errors in `spec.md`), `004`
+> (§6 asserts a finiteness that arithmetic falsified). All four came out of the
+> 2026-07-25 spec review and the design session that followed it (§17). `001`
+> should land before negation item 2 below, whose rationale it falsifies; `004` is
+> blocked on "Termination & value-creating recursion" below.
 
 ### Negation (§7) — the next two items, in this order
 
@@ -110,13 +112,26 @@ on the question.
 
   _queued (small; good company for `bugs/001-003`)._ — §5/§14.
 
-- **A scalar-function call form — the actual design question.** `float(A)` parses
-  as a compound term and is rejected, and `expr` has no call production, so this
-  is a surface-syntax change rather than a library addition — it gets more
-  expensive to defer. The question is *whether v1 has calls at all*; which
-  functions ship first is downstream. Sub-questions: do call names share the
-  relation namespace, and are they contextual or reserved (`count` already had to
-  be contextual, §9)? _designing._ — §5/§8.
+- **Implement the `as` cast** — `Expr as type`, the conversion form (**design
+  ratified 2026-07-25**, §17; written into §4/§5/§8). Postfix, binds tighter than
+  `*` `/`, chains left-to-right; result type is the named type unconditionally;
+  `absent as T` is `absent`; a lossy `i64 → f64` widening above 2⁵³ is an error,
+  mirroring §13's import rule. Touches: the parser (a `cast` level between `mul`
+  and `primary` — `as` is already `TokenKind::As`, and `type` is an existing
+  production, so no lexer change), `ast::ExprKind::Cast`, `ir::Expr::Cast`, a
+  `typecheck` arm (`set_type(result, T)` without unioning the operand — §9's `Avg`
+  arm at `typecheck.rs:317` is the precedent), an `eval_expr` arm
+  (`engine/mod.rs:960`) plus the naive oracle, and a `print_expr` arm. **One
+  decision deferred to implementation time:** whether a failed conversion
+  (`"abc" as int`) errors or yields `absent` — see the §17 open question, which
+  states the trade-off. _queued._ — §4/§5/§8.
+
+  *Supersedes the former "scalar-function call form" item.* User-defined scalar
+  functions were **declined** 2026-07-25 (a rule already is one; §17), and what
+  remains open is only *builtin* scalars with no relational spelling (`abs`,
+  `length`, `lower`, `substr`), deferred until a consumer needs them — §17's open
+  questions. If those ever land they must solve the `ident (` atom-vs-call
+  ambiguity that ruled out `float(A)`; scan-ahead is the candidate.
 
 **Strict numerics stay; conversion is the motivating case for the call form**
 (user call, 2026-07-25). Verified: `int` and `float` never meet — `V = A + B`
@@ -143,6 +158,77 @@ division. (SQL parity is the one real argument the other way. Note `avg`'s
 result type* says so — as distinct from coercing operands silently.) Open
 sub-question: whether a rule this strict wants a diagnostic that names the
 conversion, since today's message only reports a type clash.
+
+### Termination & value-creating recursion (§6/§10) — a design session
+
+**The language does not terminate, and has not since milestone 4.** This is
+accepted today and runs forever — no output, no partial results, no cap:
+
+```datalog
+nat(0).
+nat(N) :- nat(M), N = M + 1.
+```
+
+`N` is bound by the `=`-assignment, which §10 accepts as a binder; `nat` depends on
+itself positively, which stratification allows. There is no iteration cap,
+fact-count cap, or wall-clock budget anywhere in the engine. Pure Datalog's
+guarantee rests on a finite Herbrand universe — no way to synthesise values absent
+from the input — and §8 arithmetic ended that. On the surface that runs
+LLM-generated programs this is a live denial-of-service vector, and it is why
+`bugs/004` (§6 still asserts the finiteness) is blocked on this item.
+
+**Direction chosen (user call, 2026-07-25): a static semantic error, not runtime
+fuel.** Fuel was considered and rejected as hacky — a budget is not a guarantee,
+and the point of this property is that it should be a theorem.
+
+**Rule sketch** — precise enough to start from, not settled:
+
+> Reject a program in which an **arithmetic-computed** value flows to the head of a
+> **positively recursive** predicate: a rule whose head contains a variable bound
+> by an `=`-assignment over arithmetic rather than by a positive body atom, where
+> the head predicate participates in a positive cycle of the dependency graph.
+
+**Where it lives.** `stratify` (`src/lower.rs`) already builds the graph with the
+edge kinds needed — `Dep::Positive` is a distinct variant (`lower.rs:1139`) and
+`strict()` separates it from `Negated`/`Aggregated`. One correction to the natural
+assumption: `dependency_path` walks *all* edges regardless of kind, since it exists
+to report a cycle after stratification diverges, so positive-cycle detection needs a
+kind-filtered variant — a small addition, not a verbatim reuse.
+`stratification_error` is the precedent for naming a concrete cycle in the message.
+
+**The sketch discriminates correctly on the cases that matter** (verified
+2026-07-25):
+
+| program | behaviour | verdict |
+|---|---|---|
+| `succ(M,N) :- nat(M), N = M+1.` + `nat(N) :- succ(M,N).` | **hangs** | rejected — the assignment-bound head var sits on a rule in the positive cycle `succ → nat → succ` |
+| `gen(M,N) :- base(M), N = M+1.` + `nat(N) :- nat(M), gen(M,N).` | terminates | accepted — `gen` is outside every positive cycle, and `nat`'s recursive rule binds `N` from a positive atom |
+
+Informal soundness argument to make rigorous or refute: unbounded growth requires
+arithmetic value creation, and if every value-creating assignment lies outside all
+positive cycles then its predicate's extent is bounded by strictly lower strata and
+is finite. Range restriction already helps — a pure generator
+(`succ(M,N) :- N = M+1.`) is rejected today because `M` is unbound, so value
+creation cannot occur without a positive atom supplying an input.
+
+**Cases to confirm:** `next_year(X,N) :- age(X,A), N = A+1.` accepted (not
+recursive); `Y = X as float` in a recursive rule accepted (casts map a finite set to
+a finite set with no accumulation, §8); aggregates and negation already covered by
+stratification, so the new rule need only cover arithmetic.
+
+**The main open question — and the real cost.**
+`path_cost(X,Z,C) :- path_cost(X,Y,C1), edge(Y,Z,C2), C = C1 + C2.` is **rejected**.
+Cost-accumulating transitive closure is a legitimate, common idiom and directly
+relevant to source analysis (call depth, cost propagation). The rejection is correct
+in general — a cyclic graph makes it diverge — but it also blocks the acyclic case
+users legitimately want. Whether that needs an escape hatch (an explicit bound, an
+opt-in annotation, or "hoist it out of the recursion") is what makes this a design
+session rather than a patch.
+
+The session must also **write §10's missing Termination section**, and then either
+ratify §2's "predictable evaluation" pillar in a form the implementation satisfies
+or soften it — including deciding what it promises about merely *slow* programs,
+which a static rule does not address at all. _designing._ — §2/§6/§8/§10.
 
 ### Aggregation follow-ons (§9)
 
