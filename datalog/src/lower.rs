@@ -23,8 +23,9 @@
 //!    variables get dense slots in first-occurrence order, each `_` becomes a
 //!    fresh slot; `var_names` records `Some(name)` / `None` accordingly.
 //! 4. **Safety / range restriction** (§10) — every variable in the head, in a
-//!    negated atom, or occurring only in comparisons must occur in a positive
-//!    body atom; facts must be ground.
+//!    negated atom, or occurring only in comparisons must be bound by the body:
+//!    a positive atom, an `=`-assignment, or an aggregate result. Facts must be
+//!    ground. Stated against the [`crate::schedule`], not source order.
 //! 5. **Stratification** (§7) — number predicates by Ullman relaxation over
 //!    the dependency graph (negative edges strictly up), bucket rules by their
 //!    head predicate's stratum. Recursion through negation is a structured
@@ -915,9 +916,9 @@ impl Lowerer {
     }
 
     /// Pass 4 shared by rules and queries: variables in negated atoms or
-    /// occurring only in comparisons must be bound by a positive body atom —
-    /// except an `=`-assignment target, which the assignment itself binds (spec
-    /// §17, 2026-07-21).
+    /// occurring only in comparisons must be bound by the body — a positive
+    /// atom, an `=`-assignment target, or an aggregate result (spec §17,
+    /// 2026-07-21; negated atoms relaxed from *positively* bound 2026-07-25).
     fn check_body_safety(
         &mut self,
         body: &[ir::BodyLiteral],
@@ -947,16 +948,17 @@ impl Lowerer {
     ) {
         let seed_vars: std::collections::HashSet<ir::Var> =
             seed.iter().map(|slot| ir::Var(*slot)).collect();
-        let bound = match schedule::schedule_body_with(body, &seed_vars) {
-            Ok((_, bound)) => bound.iter().map(|var| var.0).collect(),
-            Err(failure) => {
-                self.errors
-                    .push(schedule_error(&failure, body, var_names, context));
-                // Without a valid order the remaining checks would report
-                // cascading nonsense about variables that are simply unreachable.
-                return;
-            }
-        };
+        let bound: std::collections::HashSet<u32> =
+            match schedule::schedule_body_with(body, &seed_vars) {
+                Ok((_, bound)) => bound.iter().map(|var| var.0).collect(),
+                Err(failure) => {
+                    self.errors
+                        .push(schedule_error(&failure, body, var_names, context));
+                    // Without a valid order the remaining checks would report
+                    // cascading nonsense about variables that are simply unreachable.
+                    return;
+                }
+            };
         let positive = {
             let mut positive = positive_vars(body);
             positive.extend(seed.iter().copied());
@@ -967,21 +969,27 @@ impl Lowerer {
             match &literal.kind {
                 ir::BodyLiteralKind::Atom(_) => {}
                 ir::BodyLiteralKind::NegAtom(atom) => {
-                    // Only *named* variables need positive binding (§10):
-                    // wildcards under negation are existential (§7). A
-                    // `None`-named slot here is necessarily wildcard-fresh
-                    // inside this very literal — `VarScope::fresh` never enters
-                    // the name map, so a fresh slot occurs at exactly one term
-                    // position in the whole clause.
+                    // A negated atom's variables must be bound by *something* —
+                    // a positive atom, an `=`-assignment or an aggregate result
+                    // all make it ground before the anti-join runs, and the
+                    // scheduler places the negation after whichever it is
+                    // (§7/§10, 2026-07-25).
                     //
-                    // This is the one thing scheduling does not decide: negated
-                    // atoms are not part of the dependency phase, so §10's
-                    // "positively bound" rule still applies as written (see the
-                    // `crate::schedule` module docs).
+                    // The scheduler cannot make this call itself: a slot bound
+                    // nowhere is, to it, a wildcard — open and existential under
+                    // the negation (§7), which is right for `_` and wrong for a
+                    // named variable. `var_names` is what separates them, and
+                    // keeping it here is what keeps `crate::schedule` free of it.
+                    //
+                    // Before 2026-07-25 this read `!positive.contains(..)`, and
+                    // the wildcard test was `is_some()` on the name. Hoisting an
+                    // inline-arithmetic argument (`not q(X + 1)`) mints an
+                    // unnamed slot that is nonetheless bound, which that test
+                    // silently skipped — `bugs/001`.
                     for arg in &atom.args {
                         if let ir::Term::Var(var) = arg
                             && var_names[var.0 as usize].is_some()
-                            && !positive.contains(&var.0)
+                            && !bound.contains(&var.0)
                         {
                             push_unsafe(
                                 &mut self.errors,
@@ -1064,7 +1072,10 @@ fn schedule_error(
         ir::BodyLiteralKind::Compare { .. } => "comparison",
         ir::BodyLiteralKind::Presence { .. } => "presence test",
         ir::BodyLiteralKind::Aggregate { .. } => "aggregate",
-        ir::BodyLiteralKind::Atom(_) | ir::BodyLiteralKind::NegAtom(_) => "body literal",
+        // A negation can be the stuck literal now that it waits for its binders
+        // in the dependency phase (§7/§10, 2026-07-25).
+        ir::BodyLiteralKind::NegAtom(_) => "negated atom",
+        ir::BodyLiteralKind::Atom(_) => "body literal",
     };
     match failure.cause {
         schedule::ScheduleFailure::Unbound => Error::semantic(format!(
@@ -1277,8 +1288,8 @@ fn positive_vars(body: &[ir::BodyLiteral]) -> std::collections::HashSet<u32> {
     bound
 }
 
-/// Records an unsafe-variable error (a variable not bound by a positive body
-/// atom nor an `=`-assignment).
+/// Records an unsafe-variable error: nothing in the body binds the variable —
+/// no positive atom, no `=`-assignment, no aggregate result.
 fn push_unsafe(
     errors: &mut Vec<Error>,
     slot: u32,
@@ -1288,7 +1299,8 @@ fn push_unsafe(
 ) {
     let name = var_names[slot as usize].as_deref().unwrap_or("_");
     errors.push(Error::semantic(format!(
-        "unsafe {place} in `{context}`: variable `{name}` does not occur in a positive body atom"
+        "unsafe {place} in `{context}`: variable `{name}` is never bound — it must occur in a \
+         positive body atom, or be bound by an `=`-assignment or an aggregate result"
     )));
 }
 

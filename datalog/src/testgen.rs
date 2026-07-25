@@ -384,6 +384,13 @@ enum CompRule {
     Assign { op: u8, c: i64 },
     /// `d(K1, K2) :- n(K1, V1), n(K2, V2), V1 <cmp> V2.`
     Join { op: u8 },
+    /// A negation whose argument is *computed*, in one of three spellings
+    /// (`spelling`): inline `not n(_, V + c)`, or the assignment hoisted by
+    /// hand either before or after the negation. All three lower to the same
+    /// IR and the scheduler defers the anti-join until the assignment has run
+    /// (§7/§10, 2026-07-25) — the shape `bugs/001` was about, and the one the
+    /// naive oracle used to disagree with by filtering negations up front.
+    NegShift { c: i64, spelling: u8 },
 }
 
 /// A comparison/arithmetic program: a numeric EDB plus derived filter/assign/
@@ -397,12 +404,72 @@ pub(crate) fn arb_comparison_program() -> impl Strategy<Value = ir::Program> {
     })
 }
 
+/// The same negation-over-a-computed-argument program in all three spellings —
+/// inline, binder-first, binder-last — over one generated EDB.
+///
+/// A conjunction means the same thing however it is written, so the three must
+/// produce identical models. Before 2026-07-25 they produced three *different*
+/// results: the inline form silently degraded to `not n(_, _)` (`bugs/001`),
+/// binder-first was a safety error, and binder-last was too. Predicate
+/// first-appearance order is the same in all three (`n`, then `d0`), so their
+/// `PredId`s line up and models compare directly.
+pub(crate) fn arb_neg_shift_spellings() -> impl Strategy<Value = [ir::Program; 3]> {
+    let facts = proptest::collection::vec((0u8..3, -2i64..=2), 0..=8);
+    (facts, -3i64..=3).prop_map(|(facts, c)| {
+        [0u8, 1, 2].map(|spelling| {
+            let ast = build_comparison_ast(&facts, &[CompRule::NegShift { c, spelling }]);
+            crate::lower::lower(&ast).expect("every spelling is safe by construction")
+        })
+    })
+}
+
 fn arb_comp_rule() -> impl Strategy<Value = CompRule> {
     prop_oneof![
         (0u8..6, -3i64..=3).prop_map(|(op, c)| CompRule::Filter { op, c }),
         (0u8..4, -3i64..=3).prop_map(|(op, c)| CompRule::Assign { op, c }),
         (0u8..6).prop_map(|op| CompRule::Join { op }),
+        (-3i64..=3, 0u8..3).prop_map(|(c, spelling)| CompRule::NegShift { c, spelling }),
     ]
+}
+
+/// `V + c` as a surface expression.
+fn shifted(c: i64) -> Expr {
+    Expr {
+        kind: ExprKind::Binary {
+            op: ArithOp::Add,
+            lhs: Box::new(expr_of(var_term("V"))),
+            rhs: Box::new(expr_of(int_term(c))),
+        },
+        span: Span::DUMMY,
+    }
+}
+
+/// The body of a [`CompRule::NegShift`] in one of its three spellings. They are
+/// the same conjunction, so they must lower and evaluate identically.
+fn neg_shift_body(c: i64, spelling: u8) -> Vec<Literal> {
+    let seed = positive_literal(positional_atom("n", vec![var_term("K"), var_term("V")]));
+    let assign = comparison_literal(CmpOp::Eq, expr_of(var_term("W")), shifted(c));
+    let neg_computed = negated_literal(positional_atom("n", vec![wildcard_term(), var_term("W")]));
+    match spelling % 3 {
+        // not n(_, V + c) — the argument is an expression, which `lower_atom`
+        // hoists to exactly the `=`-assignment the other two write by hand.
+        0 => vec![
+            seed,
+            negated_literal(Atom {
+                predicate: crate::ast::Ident {
+                    name: "n".to_string(),
+                    span: Span::DUMMY,
+                },
+                args: Args::Positional(vec![expr_of(wildcard_term()), shifted(c)]),
+                span: Span::DUMMY,
+            }),
+        ],
+        // W = V + c, not n(_, W) — the binder written first.
+        1 => vec![seed, assign, neg_computed],
+        // not n(_, W), W = V + c — the binder written last; only scheduling
+        // makes this one run at all.
+        _ => vec![seed, neg_computed, assign],
+    }
 }
 
 fn cmp_from(i: u8) -> CmpOp {
@@ -474,6 +541,10 @@ fn build_comparison_ast(facts: &[(u8, i64)], rules: &[CompRule]) -> Program {
                         },
                     ),
                 ],
+            ),
+            CompRule::NegShift { c, spelling } => rule(
+                positional_atom(&name, vec![var_term("K")]),
+                neg_shift_body(*c, *spelling),
             ),
             CompRule::Join { op } => rule(
                 positional_atom(&name, vec![var_term("K1"), var_term("K2")]),

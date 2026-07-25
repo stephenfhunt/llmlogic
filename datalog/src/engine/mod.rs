@@ -299,12 +299,18 @@ fn check_stratum_contract(
     Ok(())
 }
 
-/// Enforces the negation IR contract: a negated atom's *named* variables must
-/// be bound by a positive atom of the same body. Well-lowered IR satisfies this
-/// via §10 safety; hand-built IR that violates it would otherwise silently
-/// evaluate the named variable as a wildcard. Comparison operand safety (§8) is
-/// enforced in lowering; a malformed comparison fed as hand-built IR surfaces as
-/// a structured error when its operand is evaluated.
+/// Enforces the negation IR contract: a negated atom's *named* variables must be
+/// bound by the same body — a positive atom, an `=`-assignment, or an aggregate
+/// result (§7/§10, 2026-07-25). Well-lowered IR satisfies this via §10 safety;
+/// hand-built IR that violates it would otherwise silently evaluate the named
+/// variable as a wildcard. Comparison operand safety (§8) is enforced in
+/// lowering; a malformed comparison fed as hand-built IR surfaces as a
+/// structured error when its operand is evaluated.
+///
+/// The binding set comes from [`crate::schedule`], the same function lowering
+/// checks against, so the two cannot drift — this used to be an independent
+/// "occurs in a positive atom" walk, which meant the rule was stated twice and
+/// had to be relaxed twice.
 fn validate_body(body: &[BodyLiteral], var_names: &[Option<String>]) -> Result<()> {
     validate_body_seeded(body, var_names, &std::collections::HashSet::new())
 }
@@ -316,6 +322,29 @@ fn validate_body_seeded(
     var_names: &[Option<String>],
     seed: &std::collections::HashSet<u32>,
 ) -> Result<()> {
+    // Unschedulable IR is reported by `literal_order` when the body runs; here
+    // an unschedulable body simply binds nothing this check can rely on, so fall
+    // back to the positive atoms rather than reporting the same fault twice.
+    let seed_vars: std::collections::HashSet<crate::ir::Var> =
+        seed.iter().map(|slot| crate::ir::Var(*slot)).collect();
+    let bound: std::collections::HashSet<u32> =
+        match crate::schedule::schedule_body_with(body, &seed_vars) {
+            Ok((_, bound)) => bound.iter().map(|var| var.0).collect(),
+            Err(_) => body
+                .iter()
+                .filter_map(|literal| match &literal.kind {
+                    BodyLiteralKind::Atom(atom) => Some(atom),
+                    _ => None,
+                })
+                .flat_map(|atom| atom.args.iter())
+                .filter_map(|arg| match arg {
+                    Term::Var(var) => Some(var.0),
+                    Term::Const(_) => None,
+                })
+                .chain(seed.iter().copied())
+                .collect(),
+        };
+
     for literal in body {
         match &literal.kind {
             BodyLiteralKind::Atom(_)
@@ -325,12 +354,11 @@ fn validate_body_seeded(
                 for arg in &atom.args {
                     if let Term::Var(var) = arg
                         && let Some(Some(name)) = var_names.get(var.0 as usize)
-                        && !positively_bound(body, *var)
-                        && !seed.contains(&var.0)
+                        && !bound.contains(&var.0)
                     {
                         return Err(Error::semantic(format!(
-                            "malformed IR: named variable `{name}` in negated atom is not \
-                             bound by a positive body atom"
+                            "malformed IR: named variable `{name}` in negated atom is never \
+                             bound by the body"
                         )));
                     }
                 }
@@ -353,14 +381,6 @@ fn validate_body_seeded(
         }
     }
     Ok(())
-}
-
-/// Does `var` occur in a positive atom of `body`?
-fn positively_bound(body: &[BodyLiteral], var: crate::ir::Var) -> bool {
-    body.iter().any(|literal| {
-        matches!(&literal.kind, BodyLiteralKind::Atom(atom)
-            if atom.args.iter().any(|arg| matches!(arg, Term::Var(v) if *v == var)))
-    })
 }
 
 /// Runs one stratum to fixpoint, semi-naively. Returns the updated round
@@ -1975,11 +1995,13 @@ mod tests {
     }
 
     /// The engine defends the negation contract on hand-built IR: a *named*
-    /// variable in a negated atom with no positive binder is malformed
-    /// (well-lowered IR is protected by §10 safety).
+    /// variable in a negated atom that nothing in the body binds is malformed
+    /// (well-lowered IR is protected by §10 safety). An *assignment*-bound one
+    /// is legal since 2026-07-25 — the scheduler defers the anti-join until it
+    /// is ground.
     #[test]
     fn unbound_named_var_in_negated_atom_is_malformed_ir() {
-        // q(X) :- p(X), not r(Y).   (Y named, never positively bound)
+        // q(X) :- p(X), not r(Y).   (Y named, bound by nothing at all)
         let mut program = Program::default();
         let p = program.intern_pred("p", 1);
         let q = program.intern_pred("q", 1);
@@ -2267,9 +2289,9 @@ mod tests {
         use crate::lower::lower;
         use crate::provenance::ProofTree;
         use crate::testgen::{
-            arb_comparison_program, arb_extension_pair, arb_parent_edges, arb_program_with_edb,
-            arb_value, arb_well_typed_program, with_duplicated_facts, with_extra_fact,
-            with_swapped_body, with_swapped_stratum_rules,
+            arb_comparison_program, arb_extension_pair, arb_neg_shift_spellings, arb_parent_edges,
+            arb_program_with_edb, arb_value, arb_well_typed_program, with_duplicated_facts,
+            with_extra_fact, with_swapped_body, with_swapped_stratum_rules,
         };
         use crate::typecheck::typecheck;
 
@@ -2514,6 +2536,29 @@ mod tests {
                     typecheck(&program).is_ok(),
                     "evaluation generator produced an ill-typed program: {:?}",
                     typecheck(&program).err()
+                );
+            }
+
+            /// A negation over a computed argument means the same thing in all
+            /// three spellings — inline `not n(_, V + c)`, the assignment
+            /// hoisted before it, and hoisted after it (`bugs/001`, §7/§10
+            /// 2026-07-25). This is the property the fix exists for: a
+            /// conjunction may not depend on where in it a literal is written.
+            #[test]
+            fn negation_over_a_computed_argument_is_spelling_independent(
+                spellings in arb_neg_shift_spellings()
+            ) {
+                let [inline, binder_first, binder_last] = spellings;
+                let inline = model_facts(&eval(&inline).unwrap());
+                prop_assert_eq!(
+                    &inline,
+                    &model_facts(&eval(&binder_first).unwrap()),
+                    "inline and binder-first disagree"
+                );
+                prop_assert_eq!(
+                    &inline,
+                    &model_facts(&eval(&binder_last).unwrap()),
+                    "inline and binder-last disagree"
                 );
             }
 

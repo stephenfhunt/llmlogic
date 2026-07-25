@@ -63,13 +63,15 @@ pub(crate) fn naive_eval(program: &Program) -> Result<BTreeSet<Fact>> {
 }
 
 /// All variable environments satisfying `body` against `facts`: enumerate the
-/// positive atoms first (in body order), then keep each environment only if no
-/// fact refutes any negated atom under it, then fold the comparison/assignment
-/// builtins in source order (filters prune, `=`-assignments extend the env).
-/// Positives-first mirrors §10 safety (named variables under negation are
-/// positively bound), so an unbound variable in a negated atom can only be
-/// wildcard-fresh — open, existential under the negation. Comparisons run last,
-/// matching the engine's scheduling.
+/// positive atoms first (in body order), then fold everything else —
+/// comparisons, assignments, presence tests, aggregates *and* negated atoms — in
+/// the scheduled order (filters prune, `=`-assignments extend the env).
+///
+/// Negations are **not** applied in bulk before the builtins. A negated atom
+/// waits for whatever binds its arguments, which may be an `=`-assignment
+/// (`not q(X + 1)` hoists to `V = X + 1, not q(V)`), so the anti-join has to run
+/// at the point the schedule puts it. An argument still unbound when it runs is
+/// wildcard-fresh — open, existential under the negation (§7).
 fn matches(
     body: &[BodyLiteral],
     facts: &BTreeSet<Fact>,
@@ -82,22 +84,7 @@ fn matches(
             _ => None,
         })
         .collect();
-    let negatives: Vec<&Atom> = body
-        .iter()
-        .filter_map(|literal| match &literal.kind {
-            BodyLiteralKind::NegAtom(atom) => Some(atom),
-            _ => None,
-        })
-        .collect();
-    let mut envs = match_positives(&positives, facts, env);
-    envs.retain(|env| {
-        negatives.iter().all(|atom| {
-            !facts
-                .iter()
-                .filter(|f| f.pred == atom.pred)
-                .any(|f| refutes(atom, &f.tuple, env))
-        })
-    });
+    let envs = match_positives(&positives, facts, env);
     let mut out = Vec::new();
     for env in envs {
         if let Some(env) = apply_builtins(body, facts, env)? {
@@ -107,11 +94,11 @@ fn matches(
     Ok(out)
 }
 
-/// Folds every comparison (§8), presence test (§4) and aggregate (§9) literal
-/// over `env` in **dependency order**: a filter that fails discards the
-/// environment (`Ok(None)`); an `=`-assignment binds its target; an aggregate
-/// folds over its goal's witnesses and binds its result; a runtime error
-/// (overflow, division by zero, NaN, type mismatch) aborts.
+/// Folds every comparison (§8), presence test (§4), aggregate (§9) and negated
+/// atom (§7) over `env` in **dependency order**: a filter that fails discards
+/// the environment (`Ok(None)`); an `=`-assignment binds its target; an
+/// aggregate folds over its goal's witnesses and binds its result; a runtime
+/// error (overflow, division by zero, NaN, type mismatch) aborts.
 ///
 /// The order comes from [`crate::schedule::schedule_body`], the same pure
 /// function lowering validates with and the engine evaluates by — shared like
@@ -179,8 +166,20 @@ fn apply_builtins(
                     return Ok(None);
                 }
             }
-            // Atoms and negated atoms are handled in `matches`.
-            BodyLiteralKind::Atom(_) | BodyLiteralKind::NegAtom(_) => {}
+            // An anti-join filter, run at its scheduled position so that an
+            // argument bound by an earlier `=` is closed rather than left open
+            // (§7/§10, 2026-07-25). It binds nothing.
+            BodyLiteralKind::NegAtom(atom) => {
+                if facts
+                    .iter()
+                    .filter(|fact| fact.pred == atom.pred)
+                    .any(|fact| refutes(atom, &fact.tuple, &env))
+                {
+                    return Ok(None);
+                }
+            }
+            // Positive atoms are handled in `matches`.
+            BodyLiteralKind::Atom(_) => {}
         }
     }
     Ok(Some(env))

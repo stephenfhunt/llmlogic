@@ -32,16 +32,30 @@
 //!   the errors) and both evaluators derive the same schedule from the same
 //!   input, the way they already share `fold_aggregate`.
 //!
-//! Negated atoms stay in their own phase, before every builtin: §10 requires a
-//! negated atom's named variables to be bound *positively*, which this scheduler
-//! does not relax. Note what that restriction is and is not — it is **uniform**,
-//! so `not q(Y), Y = X+1` and `Y = X+1, not q(Y)` are rejected identically.
-//! There is no silent mis-reading to fix, as there was for aggregate group keys;
-//! it is an expressiveness limit with a working alternative (hoist the
-//! computation into a helper predicate). Folding negation into the dependency
-//! order is a reasonable follow-on and is sketched in §17, but it *widens*
-//! negation safety, which is a §7/§10 decision rather than a consequence of
-//! scheduling.
+//! Negated atoms are scheduled too (§7/§10, 2026-07-25). A negated atom's
+//! **reads** are the argument variables that something *else* in the body binds
+//! ([`binder_vars`]) — so a wildcard-fresh slot, bound nowhere, is not a
+//! dependency and stays existential under the negation, exactly as §7 says.
+//! A negation whose reads are already satisfied by the positive atoms stays in
+//! its own early phase, so cheap anti-joins still prune before expensive
+//! aggregates; only the ones that are not yet ready fall through into the
+//! dependency phase:
+//!
+//! ```datalog
+//! r(X) :- p(X), not q(X + 1).        % hoists to `V = X + 1, not q(V)`
+//! r(X) :- p(X), Y = X + 1, not q(Y).
+//! r(X) :- p(X), not q(Y), Y = X + 1. % all three agree
+//! ```
+//!
+//! This replaces the older rule that a negated atom's named variables had to be
+//! bound *positively*. That rule justified itself by the phase order and the
+//! phase order by itself, and it was not the uniform expressiveness limit it
+//! claimed to be: the hand-hoisted spelling was rejected while the inline one
+//! was silently misread as `not q(_)` (`bugs/001`). The safety requirement it
+//! stood for — a negated atom must be ground when tested — is met by an
+//! `=`-assignment just as well as by a positive atom. A *named* variable bound
+//! nowhere at all is still unsafe, and lowering reports it (`check_body_safety`);
+//! the scheduler stays free of `var_names`.
 
 use std::collections::HashSet;
 
@@ -79,8 +93,9 @@ struct Effect {
     binds: Vec<Var>,
 }
 
-/// The evaluation order for `body`: positive atoms in source order, then
-/// negated atoms, then the builtins in dependency order.
+/// The evaluation order for `body`: positive atoms in source order, then the
+/// negated atoms whose reads the positives already bind, then the builtins and
+/// any remaining negations in dependency order.
 ///
 /// The returned vector is a permutation of `0..body.len()`. See the module
 /// docs for why source order is the tie-break.
@@ -115,20 +130,31 @@ pub fn schedule_body_with(
         }
     }
 
-    // Phase 2 — negated atoms are anti-join filters over positively-bound
-    // variables (§7/§10); they bind nothing.
+    // Phase 2 — negated atoms are anti-join filters (§7/§10); they bind nothing.
+    // The ones the positives already satisfy run here, so a cheap anti-join
+    // prunes before an expensive aggregate. The rest wait for their binders in
+    // the dependency phase.
+    let binders = binder_vars(body);
+    let mut deferred = Vec::new();
     for (index, literal) in body.iter().enumerate() {
-        if matches!(literal.kind, BodyLiteralKind::NegAtom(_)) {
-            order.push(index);
+        if let BodyLiteralKind::NegAtom(atom) = &literal.kind {
+            if neg_reads(atom, &binders)
+                .iter()
+                .all(|var| bound.contains(var))
+            {
+                order.push(index);
+            } else {
+                deferred.push(index);
+            }
         }
     }
 
-    // Phase 3 — the builtins, by dependency.
+    // Phase 3 — the builtins and the deferred negations, by dependency.
     let outside = outside_aggregate_vars(body);
     let mut pending: Vec<usize> = body
         .iter()
         .enumerate()
-        .filter(|(_, literal)| is_builtin(literal))
+        .filter(|(index, literal)| is_builtin(literal) || deferred.contains(index))
         .map(|(index, _)| index)
         .collect();
 
@@ -136,14 +162,14 @@ pub fn schedule_body_with(
         // Emit the earliest ready literal, then re-scan from the start: that is
         // what makes a body whose source order already works keep it exactly.
         let ready = pending.iter().position(|&index| {
-            effect_of(&body[index], &bound, &outside)
+            effect_of(&body[index], &bound, &outside, &binders)
                 .is_some_and(|effect| effect.reads.iter().all(|var| bound.contains(var)))
         });
         let Some(position) = ready else {
-            return Err(diagnose(body, &pending, &bound, &outside));
+            return Err(diagnose(body, &pending, &bound, &outside, &binders));
         };
         let index = pending.remove(position);
-        let effect = effect_of(&body[index], &bound, &outside).expect("just found ready");
+        let effect = effect_of(&body[index], &bound, &outside, &binders).expect("just found ready");
         bound.extend(effect.binds);
         order.push(index);
     }
@@ -151,7 +177,8 @@ pub fn schedule_body_with(
     Ok((order, bound))
 }
 
-/// Is this literal scheduled in the dependency phase?
+/// Is this literal always scheduled in the dependency phase? Negated atoms join
+/// it only when phase 2 could not satisfy them, so they are not listed here.
 fn is_builtin(literal: &BodyLiteral) -> bool {
     matches!(
         literal.kind,
@@ -159,6 +186,67 @@ fn is_builtin(literal: &BodyLiteral) -> bool {
             | BodyLiteralKind::Presence { .. }
             | BodyLiteralKind::Aggregate { .. }
     )
+}
+
+/// The variables a negated atom **waits for**: its argument variables that
+/// something else in the body binds.
+///
+/// A slot bound nowhere is not a dependency — it is wildcard-fresh, open under
+/// the negation and existential to it (§7). That is what keeps this function,
+/// and so the whole scheduler, free of `var_names`: "is this a wildcard" is
+/// answered by the body's structure rather than by whether the source gave the
+/// slot a name. A *named* variable bound nowhere reaches the same conclusion
+/// here and is caught instead by lowering's separate safety check.
+fn neg_reads(atom: &crate::ir::Atom, binders: &HashSet<Var>) -> Vec<Var> {
+    atom.args
+        .iter()
+        .filter_map(|arg| match arg {
+            Term::Var(var) if binders.contains(var) => Some(*var),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Every variable the body could bind: positive-atom arguments, the bare
+/// variable side of an `=` (a potential assignment target), and aggregate
+/// results.
+///
+/// A static over-approximation, computed once and independent of order — it
+/// cannot ask whether a given `=` will resolve as an assignment or a filter,
+/// since that is what scheduling decides. Over-approximating is safe: a variable
+/// counted here that nothing actually binds leaves its *binder* stuck, and
+/// [`diagnose`] reports that literal.
+fn binder_vars(body: &[BodyLiteral]) -> HashSet<Var> {
+    let mut binders = HashSet::new();
+    for literal in body {
+        match &literal.kind {
+            BodyLiteralKind::Atom(atom) => {
+                for arg in &atom.args {
+                    if let Term::Var(var) = arg {
+                        binders.insert(*var);
+                    }
+                }
+            }
+            BodyLiteralKind::Compare {
+                op: CmpOp::Eq,
+                lhs,
+                rhs,
+            } => {
+                for side in [lhs, rhs] {
+                    if let Expr::Term(Term::Var(var)) = side {
+                        binders.insert(*var);
+                    }
+                }
+            }
+            BodyLiteralKind::Aggregate { result, .. } => {
+                binders.insert(*result);
+            }
+            BodyLiteralKind::Compare { .. }
+            | BodyLiteralKind::Presence { .. }
+            | BodyLiteralKind::NegAtom(_) => {}
+        }
+    }
+    binders
 }
 
 /// What `literal` reads and binds, given what is bound so far.
@@ -171,6 +259,7 @@ fn effect_of(
     literal: &BodyLiteral,
     bound: &HashSet<Var>,
     outside: &HashSet<Var>,
+    binders: &HashSet<Var>,
 ) -> Option<Effect> {
     match &literal.kind {
         BodyLiteralKind::Compare { op, lhs, rhs } => {
@@ -225,7 +314,13 @@ fn effect_of(
                 binds: vec![*result],
             })
         }
-        BodyLiteralKind::Atom(_) | BodyLiteralKind::NegAtom(_) => None,
+        // An anti-join filter: it waits for whatever else binds its arguments
+        // and binds nothing itself.
+        BodyLiteralKind::NegAtom(atom) => Some(Effect {
+            reads: neg_reads(atom, binders),
+            binds: Vec::new(),
+        }),
+        BodyLiteralKind::Atom(_) => None,
     }
 }
 
@@ -236,6 +331,7 @@ fn diagnose(
     pending: &[usize],
     bound: &HashSet<Var>,
     outside: &HashSet<Var>,
+    binders: &HashSet<Var>,
 ) -> ScheduleError {
     // Everything the remaining literals could still bind. If a missing variable
     // is in here, the literals are waiting on each other — a cycle; otherwise
@@ -264,7 +360,7 @@ fn diagnose(
     }
 
     let index = pending[0];
-    let missing = effect_of(&body[index], bound, outside)
+    let missing = effect_of(&body[index], bound, outside, binders)
         .map(|effect| effect.reads)
         .unwrap_or_default()
         .into_iter()
@@ -384,6 +480,56 @@ mod tests {
         }
     }
 
+    fn neg_atom(pred: u32, args: Vec<Term>) -> BodyLiteral {
+        BodyLiteral {
+            kind: BodyLiteralKind::NegAtom(Atom {
+                pred: PredId(pred),
+                args,
+            }),
+            span: Span::DUMMY,
+        }
+    }
+
+    /// A negation whose argument an `=` binds waits for it, whichever side of
+    /// the negation that `=` is written on (`bugs/001`, §7/§10 2026-07-25).
+    #[test]
+    fn a_negation_waits_for_the_assignment_that_binds_it() {
+        // p(X), V = X + 1, not q(V)  — already in a workable order.
+        let binder_first = vec![
+            atom(0, vec![Term::Var(Var(0))]),
+            assign(1, plus_one(0)),
+            neg_atom(1, vec![Term::Var(Var(1))]),
+        ];
+        assert_eq!(schedule_body(&binder_first).unwrap(), vec![0, 1, 2]);
+
+        // p(X), not q(V), V = X + 1  — the negation is written before its
+        // binder, so only scheduling makes it run at all. It must still land
+        // *after* the assignment.
+        let binder_last = vec![
+            atom(0, vec![Term::Var(Var(0))]),
+            neg_atom(1, vec![Term::Var(Var(1))]),
+            assign(1, plus_one(0)),
+        ];
+        assert_eq!(schedule_body(&binder_last).unwrap(), vec![0, 2, 1]);
+    }
+
+    /// A negation nothing else binds keeps its early phase: its slot is
+    /// wildcard-fresh, open and existential under the negation (§7), so it has
+    /// no dependency to wait for and still prunes before the builtins.
+    #[test]
+    fn a_wildcard_negation_stays_in_the_early_phase() {
+        // p(X), not q(_), V = X + 1  — `_` is Var(2), bound nowhere.
+        let body = vec![
+            atom(0, vec![Term::Var(Var(0))]),
+            neg_atom(1, vec![Term::Var(Var(2))]),
+            assign(1, plus_one(0)),
+        ];
+        assert_eq!(schedule_body(&body).unwrap(), vec![0, 1, 2]);
+        // And it binds nothing, so the assignment target is the only new slot.
+        let (_, bound) = schedule_body_with(&body, &HashSet::new()).unwrap();
+        assert!(!bound.contains(&Var(2)));
+    }
+
     /// A body whose source order already works keeps it exactly — the tie-break
     /// that makes scheduling a widening rather than a change.
     #[test]
@@ -480,6 +626,7 @@ mod tests {
     /// together and they would agree on a wrong answer.
     fn assert_reads_precede_binds(body: &[BodyLiteral], order: &[usize]) {
         let outside = outside_aggregate_vars(body);
+        let binders = binder_vars(body);
         let mut bound: HashSet<Var> = HashSet::new();
         for &index in order {
             match &body[index].kind {
@@ -490,9 +637,11 @@ mod tests {
                         }
                     }
                 }
-                BodyLiteralKind::NegAtom(_) => {}
+                // Negations are checked too: a deferred one must not run before
+                // the `=` that closes its argument (§7/§10, 2026-07-25).
                 _ => {
-                    let effect = effect_of(&body[index], &bound, &outside).expect("a builtin");
+                    let effect = effect_of(&body[index], &bound, &outside, &binders)
+                        .expect("a scheduled literal");
                     for read in &effect.reads {
                         assert!(
                             bound.contains(read),

@@ -349,6 +349,77 @@ age(\"bob\", 15).
         );
     }
 
+    /// `bugs/001`: a computed argument under `not` used to be read as a
+    /// wildcard, so the rule silently degraded to `not q(_)` — "no `q` fact at
+    /// all" — and one unrelated `q(3)` suppressed every row.
+    ///
+    /// For `X = 1`, `not q(2)` holds; for `X = 2`, `not q(3)` fails; for
+    /// `X = 3`, `not q(4)` holds.
+    #[test]
+    fn a_computed_argument_under_negation_is_matched_not_wildcarded() {
+        let facts = "p(1).\np(2).\np(3).\nq(3).\n";
+        let expected = vec![vec!["r(1).".to_string(), "r(3).".to_string()]];
+        let inline = run(&format!("{facts}r(X) :- p(X), not q(X + 1).\n?- r(X).")).expect("runs");
+        assert_eq!(inline.answers, expected);
+    }
+
+    /// The §5 claim that inline arithmetic and a hand-written assignment lower
+    /// to the same IR, extended to negated atoms — where it used to fail three
+    /// different ways at once (`bugs/001`): the inline form returned the wrong
+    /// rows, and both hand-hoisted spellings were rejected outright.
+    #[test]
+    fn negated_inline_arithmetic_agrees_with_both_hoisted_spellings() {
+        let facts = "p(1).\np(2).\np(3).\nq(3).\n";
+        let inline =
+            run(&format!("{facts}r(X) :- p(X), not q(X + 1).\n?- r(X).")).expect("inline runs");
+        let binder_first = run(&format!(
+            "{facts}r(X) :- p(X), Y = X + 1, not q(Y).\n?- r(X)."
+        ))
+        .expect("binder-first runs");
+        let binder_last = run(&format!(
+            "{facts}r(X) :- p(X), not q(Y), Y = X + 1.\n?- r(X)."
+        ))
+        .expect("binder-last runs");
+        assert_eq!(inline.answers, binder_first.answers);
+        assert_eq!(inline.answers, binder_last.answers);
+    }
+
+    /// The same defect reached through an aggregate result rather than
+    /// arithmetic — also a lowering-generated slot, also hoisted (`bugs/001`).
+    /// `count { Y | p(Y) }` is 2, so `not q(2)` holds for every `X`.
+    #[test]
+    fn an_aggregate_argument_under_negation_is_matched_not_wildcarded() {
+        let program = "p(1).\np(2).\nq(3).\nr(X) :- p(X), not q(count { Y | p(Y) }).\n?- r(X).";
+        let result = run(program).expect("runs");
+        assert_eq!(
+            result.answers,
+            vec![vec!["r(1).".to_string(), "r(2).".to_string()]]
+        );
+    }
+
+    /// The widening does not reach genuine wildcards: `_` under a negation is
+    /// bound nowhere, so it stays open and existential (§7).
+    #[test]
+    fn a_wildcard_under_negation_stays_existential() {
+        let result =
+            run("p(1).\np(2).\nq(2, 9).\nr(X) :- p(X), not q(X, _).\n?- r(X).").expect("runs");
+        assert_eq!(result.answers, vec![vec!["r(1).".to_string()]]);
+    }
+
+    /// A *named* variable no literal binds is still unsafe — the one thing the
+    /// scheduler cannot decide, since to it an unbound slot is a wildcard.
+    #[test]
+    fn a_named_variable_bound_nowhere_is_still_unsafe_under_negation() {
+        let errors = run("p(1).\nr(X) :- p(X), not q(Y).\n?- r(X).").expect_err("Y is unsafe");
+        assert!(
+            errors.iter().any(|e| {
+                let msg = e.to_string();
+                msg.contains("negated atom") && msg.contains("`Y`")
+            }),
+            "unexpected errors: {errors:?}"
+        );
+    }
+
     // --- Absent value, end-to-end through the pipeline (§4/§8) ---
 
     /// A `measurement` fixture with one present and one missing amount. The
