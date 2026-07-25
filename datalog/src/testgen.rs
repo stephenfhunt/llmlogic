@@ -393,6 +393,71 @@ enum CompRule {
     NegShift { c: i64, spelling: u8 },
 }
 
+// --- Surface-spelling equivalence, as source text (testing.md C8) ---
+//
+// These generate *text*, not ASTs, because the claims are about surface
+// spellings: two ways of writing one program must answer identically. A small
+// `n(key, val)` EDB and rules that filter it keep every generated program safe
+// and well-typed by construction.
+
+/// One disjunct: a conjunction over `n(K, V)` that binds `K`.
+fn arb_disjunct() -> impl Strategy<Value = String> {
+    prop_oneof![
+        (0u8..6, -3i64..=3).prop_map(|(op, c)| {
+            format!("n(K, V), V {} {c}", crate::ast::cmp_symbol(cmp_from(op)))
+        }),
+        (0u8..3).prop_map(|k| format!("n(K, V), K = \"{}\"", key_name(k))),
+        Just("n(K, V)".to_string()),
+    ]
+}
+
+/// `n(…)` facts as source text, shared by the spelling generators.
+fn arb_edb_text() -> impl Strategy<Value = String> {
+    proptest::collection::vec((0u8..3, -2i64..=2), 0..=6).prop_map(|facts| {
+        facts
+            .iter()
+            .map(|(k, v)| format!("n(\"{}\", {v}).\n", key_name(*k)))
+            .collect()
+    })
+}
+
+/// A rule written **disjunctively** and as **separate rules** — the same
+/// program under §5's `;`, which the parser expands into one clause per
+/// disjunct (§17 2026-07-22). Both strings are complete programs ending in the
+/// same query.
+pub(crate) fn arb_disjunction_spellings() -> impl Strategy<Value = (String, String)> {
+    (
+        arb_edb_text(),
+        proptest::collection::vec(arb_disjunct(), 1..=3),
+    )
+        .prop_map(|(edb, disjuncts)| {
+            let joined = disjuncts.join(" ; ");
+            let disjunctive = format!("{edb}d(K) :- {joined}.\n?- d(K).\n");
+            let separate: String = disjuncts
+                .iter()
+                .map(|body| format!("d(K) :- {body}.\n"))
+                .collect();
+            (disjunctive, format!("{edb}{separate}?- d(K).\n"))
+        })
+}
+
+/// A base program plus one rule, for the `-q` ≡ file-program claim (§14: `-q`
+/// is sugar for appending to the loaded program). Returns
+/// `(base, rule_text, head_text)` so the property can build both spellings.
+///
+/// Includes disjunctive rules deliberately: `bugs/002` is exactly a disjunctive
+/// rule accepted in a file and rejected via `-q`.
+pub(crate) fn arb_dash_q_rule() -> impl Strategy<Value = (String, String, String)> {
+    (
+        arb_edb_text(),
+        proptest::collection::vec(arb_disjunct(), 1..=3),
+    )
+        .prop_map(|(edb, disjuncts)| {
+            let body = disjuncts.join(" ; ");
+            (edb, format!("d(K) :- {body}"), "d(K)".to_string())
+        })
+}
+
 /// A comparison/arithmetic program: a numeric EDB plus derived filter/assign/
 /// join rules, lowered to IR.
 pub(crate) fn arb_comparison_program() -> impl Strategy<Value = ir::Program> {

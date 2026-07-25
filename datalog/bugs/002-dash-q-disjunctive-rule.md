@@ -77,6 +77,10 @@ documents that rather than assuming it.
   form exactly.
 - A `-q` argument and the equivalent file program produce identical output for
   every §16 rule shape — the general property this bug is one instance of.
+  **This now exists**: `api::tests::dash_q_rule_equals_the_same_rule_in_a_file`
+  (testing.md C8), `#[ignore]`d against this defect and failing on the minimal
+  case `d(K) :- n(K, V), V = 0 ; n(K, V), V = 0`. Fixing the bug means deleting
+  the `#[ignore]`; the recorded proptest seed replays the shrunk case.
 - `-q 'a(X) :- p(X). b(X) :- p(X)'` still reports a *parse* error attributed to
   the argument, not a silent partial answer.
 - §14's `-q` prose stops implying a single-clause parse; state it as "one rule,

@@ -291,6 +291,7 @@ fn answer_lines(query: &ir::Query, rows: &[Vec<ir::Value>], program: &ir::Progra
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn single_atom_query_substitutes_bindings() {
@@ -576,6 +577,67 @@ age(\"bob\", 15).
             disjunctive.answers,
             vec![vec!["p(1).".to_string(), "p(2).".to_string(),]]
         );
+    }
+
+    // --- Surface-spelling equivalence (testing.md C8) ---
+    //
+    // Two ways of writing one program must answer identically. Both claims
+    // below were carried by the unit tests above them until this session; the
+    // record for such claims is that the ones with properties held and the ones
+    // without became `bugs/001` and `bugs/002`.
+
+    proptest! {
+        /// **C8** — `;` disjunction means the same as writing the disjuncts as
+        /// separate rules (§5; the parser expands one clause per disjunct,
+        /// §17 2026-07-22). Generalizes
+        /// `disjunction_is_equivalent_to_separate_rules` above.
+        #[test]
+        fn disjunction_equals_separate_rules(
+            (disjunctive, separate) in crate::testgen::arb_disjunction_spellings()
+        ) {
+            let a = run(&disjunctive).map(|r| r.answers);
+            let b = run(&separate).map(|r| r.answers);
+            match (a, b) {
+                (Ok(a), Ok(b)) => prop_assert_eq!(a, b),
+                (Err(_), Err(_)) => {}
+                (a, b) => prop_assert!(
+                    false,
+                    "the two spellings disagreed on acceptance: {:?} vs {:?}\n\
+                     --- disjunctive ---\n{}\n--- separate ---\n{}",
+                    a.is_ok(), b.is_ok(), &disjunctive, &separate
+                ),
+            }
+        }
+    }
+
+    proptest! {
+        /// **C8** — a `-q` rule answers exactly as the same rule written into
+        /// the file would (§14: `-q` "is sugar for appending `?- …` to the
+        /// loaded program").
+        ///
+        /// Fails today: `bugs/002` is precisely this divergence — a disjunctive
+        /// rule is accepted in a file and rejected via `-q`, because the
+        /// classifier matches a *single* statement and the parser expands one
+        /// disjunctive clause into several. Ignored rather than deleted, as the
+        /// executable acceptance criterion for that defect (the precedent is
+        /// the two absent × negation tests in `engine::tests`).
+        #[test]
+        #[ignore = "bugs/002: -q rejects a disjunctive rule the file form accepts"]
+        fn dash_q_rule_equals_the_same_rule_in_a_file(
+            (base, rule, head) in crate::testgen::arb_dash_q_rule()
+        ) {
+            let from_file = run(&format!("{base}{rule}.\n?- {head}.\n")).map(|r| r.answers);
+            let from_q = run_with_queries(&base, std::slice::from_ref(&rule)).map(|r| r.answers);
+            match (from_file, from_q) {
+                (Ok(a), Ok(b)) => prop_assert_eq!(a, b),
+                (Err(_), Err(_)) => {}
+                (a, b) => prop_assert!(
+                    false,
+                    "`-q` and the file form disagreed on acceptance ({:?} vs {:?}) \
+                     for rule `{}`", a.is_ok(), b.is_ok(), &rule
+                ),
+            }
+        }
     }
 
     #[test]

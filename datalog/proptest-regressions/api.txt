@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 41dcb8fae17903ebdad1a72f41a501fdae4e7c336722d79aee635204b8fc0339 # shrinks to (base, rule, head) = ("", "d(K) :- n(K, V), V = 0 ; n(K, V), V = 0", "d(K)")
