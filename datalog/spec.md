@@ -186,6 +186,38 @@ reported as a structured **type error before evaluation** (§12), never a silent
 empty result or a runtime surprise. This serves the structured-errors pillar and
 makes agent-generated programs safer.
 
+### Conversion — the `as` cast
+
+Types are **strict and never implicitly coerced** (§8): `int` and `float` do not
+mix in arithmetic or comparison. Conversion is therefore explicit, written
+`Expr as type` (§5 grammar; ratified 2026-07-25):
+
+```datalog
+% a ratio from two int columns — `1 / 3` is integer division, so cast first
+share(F, R) :- count(food: F, n: N), total(t: T), R = (N as float) / (T as float).
+```
+
+- **`X as T` has type `T` unconditionally** — the first expression form whose
+  result type is independent of its operand's. (§9's reducers are the precedent:
+  `avg` is `int → float` for the same reason.) So a cast both satisfies and
+  *terminates* inference for its subexpression: nothing about `T` flows back into
+  `X`'s column.
+- **`absent as T` is `absent`** — annihilation, exactly as in arithmetic (§8). A
+  cast never manufactures a value for missing data.
+- **Casting is not coercion.** The strictness is deliberate and stands (§17,
+  2026-07-25): when imported data carries both an int and a float column there is
+  usually a reason — a count versus a measurement, an identifier versus an amount —
+  and that distinction belongs to the data model rather than being dissolved
+  silently. Implicit widening would also reintroduce in expressions the >2⁵³
+  precision loss §13 rejects at the import boundary. The cast makes the widening
+  visible in the source text instead.
+- Whether a **failed** conversion (`"abc" as int`) is a structured error or yields
+  `absent` is deliberately still open (§8, §17).
+
+Conversion is also available at the **import boundary** — an explicit schema
+(`import "t.csv" as t(a: float)`) coerces cells as they load (§13) — and typed
+sources carry their own types. The cast is what was missing *in-language*.
+
 ### Declarations (`declare`) — optional
 
 `declare` is never required to run a program. It does two opt-in things:
@@ -271,7 +303,8 @@ comparison  = expr cmp expr
 cmp         = "=" | "!=" | "<" | "<=" | ">" | ">=" ;
 expr        = add ;
 add         = mul { ( "+" | "-" ) mul } ;       (* left-assoc *)
-mul         = primary { ( "*" | "/" ) primary } ;  (* binds tighter, left-assoc *)
+mul         = cast { ( "*" | "/" ) cast } ;     (* binds tighter, left-assoc *)
+cast        = primary { "as" type } ;           (* postfix conversion, §8; binds tightest *)
 primary     = [ "-" ] number | aggregate | term ;  (* prefix "-" folds onto a literal *)
 
 aggregate   = agg_op "{" expr "|" conjunction "}" ;  (* set-builder, §9 *)
@@ -308,6 +341,15 @@ Notes:
   recognised only as an identifier immediately followed by `{` in expression
   position — so a relation or field may still be named `count` (§9, §17
   2026-07-24).
+- **The `as` cast** `Expr as type` (§4/§8, ratified 2026-07-25) is the conversion
+  form — `V = (A as float) / (B as float)`. It is postfix, binds tighter than
+  `*` `/`, and chains left-to-right (`X as int as float`). The keyword is the
+  *same reserved word* as the import clause's `as`, disambiguated by position: an
+  import's `as` follows a path string at statement level, a cast's follows an
+  expression operand. No lookahead is needed either way, because `as` can never
+  begin a statement or a body literal. The right-hand side is the existing `type`
+  production, so no new vocabulary is introduced. Chosen over `float(A)` calls and
+  over juxtaposition (§17, 2026-07-25).
 - **`absent` is a reserved value literal** (§4), joining `true`/`false` as a
   keyword that is not an identifier — a relation, field, or symbol may not be
   named `absent`. It may appear wherever a constant may (facts, heads, arithmetic
@@ -418,7 +460,8 @@ semantics.
 *Status: Draft — evaluated in the engine and the naive oracle (`src/engine/`),
 lowered with the assignment-safety exception (`src/lower.rs`), 2026-07-21.*
 
-**Operators.** Comparison `= != < <= > >=`; arithmetic `+ - * /`. Both appear
+**Operators.** Comparison `= != < <= > >=`; arithmetic `+ - * /`; the postfix
+conversion `as type` (below). Both appear
 as body literals: a comparison is an anti-join *filter*; arithmetic appears
 inside a comparison's operands. **Precedence** (parser, §5, resolved
 2026-07-22): `*` `/` bind tighter than `+` `-`, both left-associative;
@@ -475,6 +518,34 @@ forbids could only ever be false. Two things stay legal — the **producer form*
 and `absent` reached through *arithmetic*, which is annihilation, not comparison.
 The runtime rule is unchanged: comparing a *variable* that happens to hold
 `absent` against a value is still silently false.
+
+**The `as` cast — explicit conversion** (ratified 2026-07-25; §4 for the type
+rules, §5 for the grammar). `Expr as type` converts a value between the five
+primitive types. It is the *only* way `int` and `float` meet, since the strict
+no-coercion rule above stands:
+
+```datalog
+r(V) :- p(A, B), V = (A as float) / (B as float).   % a real ratio, not A / B
+```
+
+- Postfix, binding tighter than `*` `/`, chaining left-to-right.
+- **Result type is the named type, unconditionally** — inference does not flow `T`
+  back into the operand (§4).
+- **`absent as T` is `absent`** — annihilation, at the same choke point as
+  arithmetic's, so it takes precedence over any conversion check.
+- **Numeric widening is exact or it is an error**, mirroring §13's import rule
+  (2026-07-25): `X as float` on an `i64` above 2⁵³ has no exact `f64`, and silently
+  rounding an identifier is the failure mode §13 already refuses.
+- **Governance.** A cast creates no new *reachable* values in the sense that
+  matters for termination: it maps a finite value set to a finite value set with no
+  accumulation, so casts are exempt from the value-creating-recursion restriction
+  (`bugs/004`, `ROADMAP.md`). This was checked before adopting the form.
+- **Still open (§17):** whether a conversion that *cannot* succeed — `"abc" as int`
+  — is a structured error (consistent with the div-by-zero rule above) or yields
+  `absent` (consistent with §4/§9, where aggregates skip absents and report the
+  count, so it would not be silent). The second answer only became available when
+  the absent value shipped; it did not exist when the edge-case rule above was
+  written. Decided with the implementation.
 
 **Mode / safety (§10).** Every comparison operand variable must be bound by a
 positive atom, *except* an `=`-assignment target, which the assignment binds. A
@@ -1176,6 +1247,82 @@ the ratified set-builder `avg { A | Goal }` (§9), grouped globally here.
 *Status: living*
 
 ### Decisions
+
+- **2026-07-25** — **Conversion is the `as` cast; user-defined scalar functions are
+  declined; and arithmetic already broke termination** (design session following the
+  spec review; no engine change — implementation is a ROADMAP item). The review had
+  left "does v1 have a scalar-function call form?" open, because the strict
+  `int`/`float` separation has no in-language fix without one. Workshopping the
+  syntax settled it and turned up something larger.
+  - **Conversion is `Expr as type`** (§4/§5/§8), not `float(A)`. Both halves already
+    existed — `as` is a reserved word and `type` is an existing production — so no
+    new vocabulary is introduced, and it is unambiguous everywhere because `as` can
+    begin neither a statement nor a body literal. It is familiar from two
+    directions models reproduce reliably (SQL `CAST(x AS type)`, Rust `x as f64`),
+    which serves the conventional-syntax pillar (§2) rather than straining it.
+    - **Rejected: `float(A)` calls.** The conventional Datalog spelling, and the
+      general answer, but at body-literal start `ident (` is ambiguous between an
+      atom and a call — `float(A) > 0.5` versus `p(X)` — so it needs scan-ahead past
+      the balanced paren group, costing LL(1). The §9 aggregate precedent does *not*
+      transfer: aggregates are unambiguous precisely because `{` appears nowhere
+      else, whereas `(` is the atom delimiter.
+    - **Rejected: `float A` juxtaposition** (Haskell-style), despite the real
+      attraction that it dissolves that ambiguity and keeps LL(1). Without currying,
+      `f X Y` is `f(X,Y)` or an error depending on arity, so the parser must consult
+      a signature table — adding a two-argument builtin would change how existing
+      text parses. It also makes `abs -1` ambiguous, hard-depends on parenthesised
+      grouping (which does not exist yet) for nesting, and is novel syntax no
+      Datalog uses, against the pillar that LLMs reproduce conventional syntax most
+      reliably.
+    - **Rejected: `float[A]`.** `[`/`]` are entirely unlexed, so it is
+      ambiguity-free, but equally novel without `as`'s familiarity.
+    - **Strict numerics stand** (reaffirming the earlier same-day call): no implicit
+      `int + float` widening. An int column beside a float column usually reflects a
+      real distinction in the data, and implicit widening would reintroduce in
+      expressions the >2⁵³ precision loss §13 refuses at the import boundary.
+    - **Deliberately left open:** whether a failed conversion errors or yields
+      `absent` (below). Decided with the implementation, not here.
+  - **User-defined scalar functions: declined — but not for the obvious reason.**
+    The question arose from a governance concern: functions might make the language
+    Turing-complete, losing the guaranteed bounds that make a logic engine safe to
+    point at LLM-generated programs. That reasoning does not hold. A *non-recursive*
+    user-defined scalar function is a definitional abbreviation — inlineable at
+    lowering, adding exactly zero power over the existing expression language — and
+    a recursive one would simply be forbidden, as stratification already forbids
+    recursion through negation (§7) and aggregation (§9). The real objection is
+    **redundancy: in Datalog a rule already *is* a user-defined function.**
+    `double(X, Y) :- Y = X * 2.` is a relation used functionally, and that is the
+    language's whole idiom; a scalar-function syntax would add only composability
+    inside an expression (`p(double(X))` over `double(X, Y), p(Y)`) — thin
+    ergonomics for a second way to do one thing. Precedent: the module-import
+    decision (2026-07-23) chose the `as`-shaped form over a separate `include`
+    keyword on exactly these grounds, "no second concept/reserved word". What stays
+    open is narrower: *builtin* scalars with no relational spelling (`abs`,
+    `length`, `lower`, `substr`), deferred until a consumer needs them.
+  - **The governance premise was already false, and arithmetic is why.** Pure
+    Datalog's guarantee comes from a finite Herbrand universe — no way to synthesise
+    values absent from the input, so the fixpoint is reached in finitely many steps
+    at PTIME data complexity. §8 arithmetic ended that at milestone 4: `nat(0).
+    nat(N) :- nat(M), N = M + 1.` is accepted (the `=`-assignment is a §10 binder,
+    the recursion is positive) and **runs forever**, with no iteration cap, fact cap,
+    or time budget anywhere in the engine. §6 still asserts the finite universe and
+    the finite-step fixpoint, so that is a doc defect (`bugs/004`); the behavioural
+    fix is a ROADMAP design item. Stated precisely: with `i64` and overflow-as-error
+    the state space is finite, so the language is not *literally* Turing-complete —
+    but "terminates after 2⁶³ iterations" is not a guarantee, and the finite-lattice
+    argument §6 actually makes is unavailable regardless.
+    - **Direction chosen (user call): a static semantic error, not runtime fuel.**
+      Reject an arithmetic-computed value flowing to the head of a positively
+      recursive predicate. Fuel was considered and rejected as hacky — a budget is
+      not a guarantee, and the point of this property is that it should be a
+      theorem. The sketch, the soundness argument, and its cost (it rejects
+      cost-accumulating transitive closure) are in `ROADMAP.md`; it needs its own
+      session and is explicitly not to be patched ahead of one.
+    - **Casts are exempt**, checked before `as` was adopted: a cast maps a finite
+      value set to a finite value set with no accumulation.
+    - Note the actual **exfiltration** surface is unrelated to any of this: URL
+      imports are ungated by explicit decision (2026-07-23), so an
+      LLM-generated program can reach the network through §13, not through §8.
 
 - **2026-07-25** — **Spec design & style review** (no engine change; findings
   queued in `bugs/` and `ROADMAP.md`). Read §1–§17 as a specification and probed
@@ -1969,15 +2116,26 @@ the ratified set-builder `avg { A | Goal }` (§9), grouped globally here.
 > no settled answer; a defect has a known-wrong answer. Where a defect falsifies a
 > decision above, the decision carries the amendment inline.
 
-- **Does v1 have a scalar-function call form?** `expr` has no call production
-  (`primary = [ "-" ] number | aggregate | term`), so `float(A)` is rejected as a
-  compound term, and the absence of an explicit conversion is what makes the strict
-  `int`/`float` separation bite (decided 2026-07-25: the strictness stays, so the
-  conversion is the fix). Because it is a surface-syntax change rather than a
-  library addition, deferring it gets more expensive, not less. Sub-questions: do
-  call names share the relation namespace, and are they contextual or reserved —
-  `count` already had to be contextual (§9). Parenthesized grouping is *not* part
-  of this question: it is a small task, queued separately (2026-07-25). — §5/§8.
+- **Does a failed `as` conversion error, or yield `absent`?** The one piece of the
+  cast left undecided (2026-07-25). `"abc" as int` can be a structured error,
+  consistent with §8's treatment of division by zero and overflow; or it can be
+  `absent`, consistent with §4/§9, where absent inputs are skipped *and reported*,
+  so the loss would not be silent. The second answer only became possible when the
+  absent value shipped (milestone 8) — it did not exist when §8's edge-case rule was
+  written, which is why the rule does not already settle it. The trade-off is real:
+  erroring means one unconvertible cell in a 170k-row import kills the whole query,
+  which is hostile to the exploratory analysis §13 is built for; yielding `absent`
+  makes dirty columns queryable but quietly reclassifies "malformed" as "missing". A
+  strict/`try_` pair is the third option and doubles the vocabulary. Decide with the
+  implementation. — §4/§8/§9.
+- **Builtin scalar functions with no relational spelling** — `abs`, `length`,
+  `lower`, `substr`. *User-defined* scalar functions were declined 2026-07-25 (a
+  rule already is one), and conversion is now the `as` cast, so what remains is the
+  narrow case of builtins a rule cannot express. Deferred until a consumer needs
+  them — the discipline used for statistical reducers, TSV, and database loading.
+  If they land, the `ident (` ambiguity above must be solved (scan-ahead is the
+  candidate), and note `min`/`max` would coexist harmlessly with the aggregates,
+  since `min { X | goal }` and `min(A, B)` differ by delimiter. — §5/§8.
 - **Is the three-way body-grammar split deliberate?** Rule bodies are DNF; queries
   and aggregate goals are conjunction-only. §5 states the query half as an aside
   ("Queries stay conjunctive") and §9 the goal half in passing, but nothing says
