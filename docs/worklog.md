@@ -16,6 +16,69 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-25 — Conversion syntax (`as`), and the termination hole it uncovered
+
+A design session on the open question the spec review left: does v1 have a scalar
+function call form? It does not — conversion is a cast — and asking *why* we wanted
+one turned up something bigger. **Documentation only; no code changed.**
+
+**Done**
+- Workshopped four conversion syntaxes against the actual grammar, then wrote the
+  winner into §4 (a new "Conversion — the `as` cast" subsection), §5 (a `cast`
+  level in the EBNF plus a note on the two `as` positions), §8 (the operator list
+  and a full cast subsection), and §17.
+- Filed **`bugs/004`** — §6 asserts the Herbrand universe is "the finite set of
+  constants appearing in the program" and the fixpoint is "reached in finitely many
+  steps". Arithmetic falsified both at milestone 4. A `doc` defect whose text fix is
+  *blocked* on the design item below, since what §6 should say depends on what the
+  language decides to guarantee. First deliberate `bugs/`↔ROADMAP split of one
+  phenomenon.
+- Added the **Termination & value-creating recursion** ROADMAP item, with a rule
+  sketch, the graph machinery it can reuse, two verified discriminating cases, and
+  the cost that makes it a session rather than a patch.
+- Retired the "scalar call form" open question; replaced by two narrower ones (the
+  cast's failure policy; builtin scalars with no relational spelling).
+
+**Decided (detail in `spec.md` §17, 2026-07-25)**
+- **Conversion is `Expr as type`.** Both halves already existed (`as` is reserved,
+  `type` is a production), it is unambiguous everywhere because `as` can begin
+  neither a statement nor a body literal, and SQL `CAST`/Rust `as` make it familiar
+  to models — so it serves §2's conventional-syntax pillar instead of straining it.
+  Rejected: `float(A)` calls (at literal start `ident (` is ambiguous between atom
+  and call, needing scan-ahead; the §9 aggregate trick does *not* transfer, because
+  aggregates are unambiguous precisely because `{` appears nowhere else);
+  Haskell-style `float A` (dissolves that ambiguity and keeps LL(1), but needs
+  arity-directed parsing, makes `abs -1` ambiguous, hard-depends on parens for
+  nesting, and is novel syntax no Datalog uses); `float[A]`.
+- **User-defined scalar functions declined — and the obvious reason is wrong.** The
+  Turing-completeness worry does not apply: a non-recursive one is a definitional
+  abbreviation adding zero power, and a recursive one would just be forbidden as
+  stratification already forbids recursion through negation and aggregation. The
+  real objection is redundancy — **in Datalog a rule already *is* a user-defined
+  function**, and a scalar syntax would buy only in-expression composability. Same
+  "no second concept" reasoning that chose the `as`-shaped module import over
+  `include`.
+- **Arithmetic already broke the governance property.** `nat(0). nat(N) :- nat(M),
+  N = M + 1.` is accepted and runs forever, with no cap of any kind in the engine.
+  Precisely: `i64` + overflow-as-error makes the state space finite, so not
+  *literally* Turing-complete — but "terminates after 2⁶³ iterations" is no
+  guarantee, and §6's finite-lattice argument is unavailable regardless. Also noted:
+  the real exfiltration surface is §13's ungated URL imports, not §8.
+- **Static semantic error, not runtime fuel** (user call) — a budget is not a
+  guarantee. Casts are exempt, checked before adopting `as`.
+
+**Next up**
+- Unchanged at the top: **`bugs/001`** (soundness, small, independent of the
+  negation design session), then `002`, `003`, and parenthesized expressions.
+- **Two design sessions now queued**, both needing their own sitting: absent ×
+  negation (with §6 and aggregate group keys in scope), and termination &
+  value-creating recursion. The latter's open question is whether rejecting
+  cost-accumulating transitive closure is acceptable.
+- Implementing the `as` cast is ready to start whenever wanted — design is settled
+  except the failure policy, which the §17 open question frames.
+
+---
+
 ## 2026-07-25 — Spec design & style review; a `bugs/` tracker
 
 No engine change this session — a review of `spec.md` as a *specification* (style,
