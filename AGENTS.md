@@ -11,7 +11,10 @@ top-level directory and is self-contained (its own build system, tests, and docs
 **Start here each session:** read [`docs/worklog.md`](docs/worklog.md) — the most
 recent entry's *Next up* tells you where the last session left off — and, for a
 project, its `ROADMAP.md` (e.g. [`datalog/ROADMAP.md`](datalog/ROADMAP.md)) for
-the indexed backlog of open items. End your session by adding a new worklog entry
+the indexed backlog of open items. Open **defects** are tracked separately, one
+file per defect, in the project's `bugs/` directory (`ls datalog/bugs/*.md` is the
+open set; conventions in [`datalog/bugs/README.md`](datalog/bugs/README.md)).
+ROADMAP holds what is *missing*; `bugs/` holds what is *wrong*. End your session by adding a new worklog entry
 (Done / Decided / Next up) and updating any item whose status changed in
 `ROADMAP.md`. Raw session transcripts are auto-saved by Claude Code under
 `~/.claude/projects/<repo-slug>/*.jsonl` — don't commit transcripts into the repo.
