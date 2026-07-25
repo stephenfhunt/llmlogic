@@ -344,6 +344,46 @@ compared keyed by predicate *name*, not `PredId`.
   never covered §8 builtins at all, and therefore does not cover a deferred
   negation, whose absence pattern depends on an assignment-bound value. Widening
   it means teaching `replay` to fold builtin premises into the environment.
+- [ ] **C8** **Surface-spelling equivalence** — the language's "form A means the
+  same as form B" claims, each as a property rather than a unit test. This group
+  exists because the record was unambiguous: every such claim carrying a property
+  held, and both carrying only a unit test became defects.
+
+  | claim | coverage before | outcome |
+  |---|---|---|
+  | named ≡ positional | property (A13) | never drifted |
+  | body order ≡ any order | property (B5) | held |
+  | inline arith ≡ hand-hoisted | unit test only | `bugs/001` |
+  | disjunction ≡ separate rules | unit test only | adjacent to `bugs/002` |
+  | `-q` ≡ equivalent file program | nothing | `bugs/002` |
+
+  - **A15** `a15_inline_and_hoisted_arguments_agree` — an inline compound atom
+    argument lowers to the same program as the hand-written `=`-assignment
+    (`testgen::hoist_atom_args`). Compared with `testgen::alpha_eq`, not `==`:
+    the hand-written variable is *named* where lowering mints an anonymous slot
+    and the two number slots differently, neither observable to the evaluator —
+    which is exactly what `lower_arg_expr`'s "engine-identical" asserts, so
+    alpha-equivalence formalizes the claim rather than weakening it.
+  - **Disjunction** `disjunction_equals_separate_rules` — green.
+  - **`-q`** `dash_q_rule_equals_the_same_rule_in_a_file` — **`#[ignore]`d and
+    failing**, as `bugs/002`'s executable acceptance criterion. It shrinks to
+    `d(K) :- n(K, V), V = 0 ; n(K, V), V = 0`; the seed is recorded, so fixing
+    the defect is "delete the `#[ignore]`".
+
+  Non-vacuity is guarded in `testgen::tests`, per the generator-coverage
+  convention above:
+  `generator_emits_compound_atom_arguments_that_hoisting_rewrites` asserts the
+  generator emits compound arguments, that the rewrite fires, and — the pointed
+  one — that a compound argument appears **under `not`**. That is the `bugs/001`
+  shape and the reason A15 would have caught it: pre-fix the inline form lowered
+  while the hoisted form was a semantic error, so the acceptance arm fails
+  without evaluating anything. The prior test of that same claim was a unit test
+  over one hand-written positive atom, and the spelling that broke it was simply
+  never written down.
+
+  **The rule this group encodes** (`AGENTS.md`, "Working style"): a new surface
+  form, desugaring, or IR-identity claim ships with a property here, in the same
+  sitting.
 
 ### Phase D — lexer + parser (roadmap step 5) — generalizes all §16 source texts
 

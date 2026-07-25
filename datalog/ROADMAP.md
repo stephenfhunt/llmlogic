@@ -355,12 +355,22 @@ kind of work.
 - **Normalize §17's chronology.** Reverse-chronological for 07-25/24/23/22, then it
   jumps to 07-03 and runs *forward* through 07-21, so a reader cannot tell which
   end is current. _queued._ — §17.
-- **Consider splitting §17 into `decisions.md`.** It is 43% of the file (875 of
-  2048 lines) and grows every session. `ROADMAP.md` already carved out the item
-  index and `worklog.md` the session history; this is the natural third step,
-  leaving `spec.md` as a spec someone could hand to a reimplementer. Revises the
-  preamble's "specification and design workspace" framing, which was set when the
-  doc was 400 lines. _queued (user call)._ — §17.
+- **Consider splitting §17 into `decisions.md`.** It is ~46% of the file and grows
+  every session. `ROADMAP.md` already carved out the item index and `worklog.md`
+  the session history; this is the natural third step, leaving `spec.md` as a spec
+  someone could hand to a reimplementer. Revises the preamble's "specification and
+  design workspace" framing, which was set when the doc was 400 lines.
+
+  **Not a move — a rewrite** (2026-07-25). Sized as "cut §17, paste it elsewhere"
+  this will be *done* as that, and the residue is the whole problem: §1–§16 are
+  written against a reader who has the decision log in the same file, so they
+  narrate changes ("relaxed from…", dated parentheticals, roadmap-step pointers)
+  and restate rules the log explains. The acceptance criterion is that **§1–§16
+  read as the best current understanding of the language** — no dates, no
+  "formerly", no residue of how we got here, every rule stated once with a pointer
+  for the why (`AGENTS.md`, "Changing what already exists"). Pairs naturally with
+  the status-vocabulary and stale-pointer items below; `bugs/003` is the same
+  cleanup for the assertions that are outright false. _queued (user call)._ — §17.
 - **Rename the provenance "absence pattern".** §4 and §11 each carry a footnote
   apologizing for the collision with the `absent` *value* ("the two share a word,
   not a concept"). Two standing disclaimers is the signal to rename the provenance
