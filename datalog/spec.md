@@ -1270,6 +1270,28 @@ the ratified set-builder `avg { A | Goal }` (§9), grouped globally here.
 
 *Status: living*
 
+This section is an **append-only record**: history is what it is for. Amend
+entries in place, never rewrite them — a rationale that turned out wrong is the
+most useful thing here, because it shows where the reasoning misleads. Everything
+outside §17 states present truth instead and merely *points* here (see
+`AGENTS.md`, "Changing what already exists").
+
+**Amendment markers.** One vocabulary, so the sweep after a rule changes is a
+grep and not a judgement call. Each goes in **bold italic** at the end of the
+entry it amends, with a date and a pointer:
+
+| marker | when |
+|---|---|
+| ***Falsified*** | a load-bearing premise turned out untrue (usually a `bugs/` file) |
+| ***Superseded by …*** | still-true reasoning, but a later decision replaced the outcome |
+| ***Amended …*** | the decision stands with its scope or detail changed |
+| ***Consequences …*** | nothing changed — what it cost, whether the rationale held, whether the rejected alternative still looks rejected |
+
+The last is the one that needs deliberate effort: it has no triggering change, so
+`AGENTS.md`'s session-end checkpoint prompts for it. It is also the only marker
+that records a decision working out *well*, which the log would otherwise never
+say.
+
 ### Decisions
 
 - **2026-07-25** — **Negated atoms join the dependency schedule** (§7/§10;

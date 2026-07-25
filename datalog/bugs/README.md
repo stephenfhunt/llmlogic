@@ -70,7 +70,11 @@ Whatever the defect needs, but a fixable bug wants four things:
 - **Root cause** — `file:line`, and *why* the code is wrong, not just where.
 - **Acceptance criteria** — the test that must pass. An `#[ignore]`d test
   asserting the sound behaviour is the strongest form (precedent: the two
-  absent × negation tests).
+  absent × negation tests). **If the defect is an instance of a general
+  property, say so and file the property** — as a test, in the same sitting.
+  `002` and `003` each identified theirs precisely ("the general property this
+  bug is one instance of"; "the only durable fix for this class") and neither
+  became one, which is how `001` was still reachable by a second spelling.
 - **Fallout** — other decisions this invalidates. A defect that falsifies a
   recorded §17 decision must say so, and §17 gets the amendment; one that
   undercuts a ROADMAP item's rationale must name the item.
