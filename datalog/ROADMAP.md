@@ -33,19 +33,21 @@ The evaluation-first roadmap (decided 2026-07-10; rationale in `AGENTS.md` and
 
 ## Open backlog
 
-> **Open defects live in [`bugs/`](bugs/)** — currently `001` (a compound argument
-> in a negated atom is silently misread as a wildcard; **soundness**), `002` (`-q`
-> rejects a disjunctive rule), `003` (three normative errors in `spec.md`), `004`
-> (§6 asserts a finiteness that arithmetic falsified). All four came out of the
-> 2026-07-25 spec review and the design session that followed it (§17). `001`
-> should land before negation item 2 below, whose rationale it falsifies; `004` is
-> blocked on "Termination & value-creating recursion" below.
+> **Open defects live in [`bugs/`](bugs/)** — currently `002` (`-q` rejects a
+> disjunctive rule), `003` (three normative errors in `spec.md`), `004` (§6
+> asserts a finiteness that arithmetic falsified). These came out of the
+> 2026-07-25 spec review and the design session that followed it (§17). `004` is
+> blocked on "Termination & value-creating recursion" below. `001` (a compound
+> argument in a negated atom silently misread as a wildcard) was **fixed
+> 2026-07-25** by negation item 2 below — see `bugs/resolved/`.
 
-### Negation (§7) — the next two items, in this order
+### Negation (§7)
 
-These are sequenced deliberately: the first decides what a negated atom *means*,
-the second changes *when* it runs. Implementing the second first would build
-against semantics the first is about to replace.
+Item 2 landed first, against the original sequencing. The reason is recorded in
+§17 and in `bugs/001`'s resolution: the interaction item 1 owns is reachable
+through an ordinary positive binding already, so item 2 added spellings that
+reach an already-broken cell rather than creating a new one — and item 2 was
+also the fix for a live soundness defect.
 
 1. **`absent` × negation — a soundness bug.** `q(X) :- p(X), not p(X).` derives
    `q(absent)`: P ∧ ¬P, in an engine that advertises consistency checking. A
@@ -64,22 +66,16 @@ against semantics the first is about to replace.
    sound behaviour. **Needs a design session — do not patch ahead of it**; every
    direction moves §4's structural/semantic split. _designing._ — §4/§7/§11.
 
-2. **Negated atoms in the dependency schedule.** `not q(Y), Y = X+1` is rejected,
-   and so is the reverse. Since builtins became dependency-scheduled (2026-07-25)
-   this is the last place where where-you-write-it decides whether a program is
-   accepted, and the safety rule it rests on ("bound *positively*") was justified
-   by the phase order it also justified. §17 carries a design sketch that keeps
-   the scheduler free of `var_names` and preserves early pruning.
-
-   **Premise corrected 2026-07-25:** this item previously argued the restriction
-   was a *uniform* expressiveness limit rather than silent wrongness, with a clean
-   workaround. `bugs/001` disproves that — the inline spelling `not q(X+1)` is
-   neither refused nor correct, it silently returns the wrong rows. The soundness
-   half is `bugs/001` and should be fixed first and independently; what remains
-   here is the widening (accepting the assignment-bound forms), which is still a
-   §7/§10 design decision. Fixing `001` via the schedule rather than by tagging
-   hoisted slots would do both at once — but `001` must not wait on this item.
-   _queued (after item 1)._ — §7/§8/§10.
+2. **Negated atoms in the dependency schedule.** ✅ **2026-07-25.** A negated
+   atom now reads the argument variables something else in the body binds, so
+   `not q(X+1)`, `Y = X+1, not q(Y)` and `not q(Y), Y = X+1` are one conjunction
+   with one answer; negations the positives already ground keep their early phase
+   so anti-joins still prune first. Safety relaxed from "bound *positively*" to
+   "bound by the body" in §7/§10. The rule had been stated in three places
+   (scheduler phases, lowering's check, the engine's hand-built-IR contract) and
+   the naive oracle hard-coded the old order — all four moved together. Closed
+   `bugs/001`. Detail in §17; property coverage is testing.md **C7** + B1.
+   — §7/§8/§10.
 
 ### Expressions (§5/§8)
 

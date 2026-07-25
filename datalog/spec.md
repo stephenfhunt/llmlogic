@@ -409,14 +409,27 @@ Abiteboul/Hull/Vianu ch. 15 and Ullman's *Principles* (groups 1–2).
 
 **Reading.** `not atom(…)` may appear as a body literal (`not` applies to
 atoms only, §5). The literal holds when *no* fact of the negated predicate
-matches the atom, where constants and positively-bound variables match
-positionally and wildcard slots are **existential under the negation** (§17
-2026-07-19): `not parent(_, X)` holds when no `parent` fact has `X` in its
-second column. Negated literals bind nothing.
+matches the atom, where constants and **bound** variables match positionally
+and wildcard slots are **existential under the negation** (§17 2026-07-19):
+`not parent(_, X)` holds when no `parent` fact has `X` in its second column.
+Negated literals bind nothing.
 
-**Safety.** Every *named* variable in a negated atom must occur in a positive
-body atom of the same clause; wildcard-fresh variables under negation are
-scoped to the negated literal and never exported (§10, §17 2026-07-19).
+**Safety.** Every *named* variable in a negated atom must be bound by the same
+clause — a positive body atom, an `=`-assignment, or an aggregate result (§17
+2026-07-25). Wildcard-fresh variables under negation are scoped to the negated
+literal and never exported (§10, §17 2026-07-19).
+
+An argument may therefore be **computed**, and the spelling does not matter:
+
+```datalog
+r(X) :- p(X), not q(X + 1).         % lowering hoists the argument
+r(X) :- p(X), Y = X + 1, not q(Y).
+r(X) :- p(X), not q(Y), Y = X + 1.  % all three are the same conjunction
+```
+
+The anti-join is scheduled after whatever binds its arguments (§8, §15), which
+is what keeps it a test against a *ground* atom. Negations the positive atoms
+already ground stay ahead of the builtins, so they still prune early.
 
 **Stratification.** The **predicate dependency graph** has an edge `q → p`
 for every rule with head predicate `p` and a body literal over `q`, marked
@@ -549,15 +562,17 @@ r(V) :- p(A, B), V = (A as float) / (B as float).   % a real ratio, not A / B
 
 **Mode / safety (§10).** Every comparison operand variable must be bound by a
 positive atom, *except* an `=`-assignment target, which the assignment binds. A
-negated atom's variables must be *positively* bound.
+negated atom's named variables must likewise be bound — by a positive atom, an
+assignment, or an aggregate result (2026-07-25); the scheduler places the
+anti-join after whichever it is.
 
 **Evaluation order is by dependency, not by source order** (2026-07-25). A body
 is a conjunction, so where a binder is *written* does not decide what the clause
-means: the engine schedules positives first, then negations, then the builtins in
-an order where every literal's inputs are already bound
-(`src/schedule.rs`). `M = N+1, N = A+1` is the same clause as `N = A+1,
-M = N+1` — previously the first was rejected. Two guarantees make this a
-widening rather than a change of meaning:
+means: the engine schedules positives first, then the negations those already
+ground, then the builtins **and any remaining negations** in an order where every
+literal's inputs are already bound (`src/schedule.rs`). `M = N+1, N = A+1` is the
+same clause as `N = A+1, M = N+1` — previously the first was rejected. Two
+guarantees make this a widening rather than a change of meaning:
 
 - among the literals that are ready, the **earliest in source order runs first**,
   so a body whose source order already worked keeps exactly that order, and `=`
@@ -708,9 +723,10 @@ An aggregate reads a *complete* relation, so — like negation (§7) — the
 predicates in its `Goal` must be **fully evaluated before** the aggregate runs:
 lowering places them in a strictly lower stratum, and recursion through an
 aggregate is rejected by stratification with a structured error. Safety (§10)
-mirrors negation: a group-key variable used in `Goal` must be positively bound by
-the enclosing body; `Goal`-local variables are existential (like wildcard
-variables under negation). Recursive/monotonic aggregation (the Zaniolo et al.
+mirrors negation: a group-key variable used in `Goal` must be bound by the
+enclosing body — in any position, since the aggregate is scheduled after its
+binder (§8); `Goal`-local variables are existential (like wildcard variables
+under negation). Recursive/monotonic aggregation (the Zaniolo et al.
 fixpoint semantics, `references.md`) is a deliberate future extension.
 
 *Deferred (§17):* statistical reducers (`median`, `stddev`, `variance`,
@@ -724,10 +740,18 @@ collection value, §4); recursive aggregation.
 
 **Range restriction** (enforced by front-end lowering, `src/lower.rs`): every
 variable in a rule head, every *named* variable in a negated atom, and every
-variable occurring only in comparisons must also occur in a positive body
-atom; facts must be ground. Wildcard-fresh variables in negated atoms are
-exempt — they are existential under the negation and never exported (§7).
-Violations are structured semantic errors reported before evaluation.
+variable occurring only in comparisons must be **bound by the body** — it must
+occur in a positive body atom, or be bound by an `=`-assignment or an aggregate
+result (§17 2026-07-25); facts must be ground. Wildcard-fresh variables in
+negated atoms are exempt — they are existential under the negation and never
+exported (§7). Violations are structured semantic errors reported before
+evaluation.
+
+Safety is stated against the **schedule** (§8, `src/schedule.rs`), not source
+order: a body is safe when there *exists* an order in which every literal's
+inputs are bound before it runs. Binding a negated atom's argument by
+assignment satisfies the requirement the rule stands for — the atom is ground
+when tested — just as a positive atom does.
 
 Recursion through negation is rejected by stratification (§7). Recursion through
 an **aggregate** (§9) is likewise rejected: the predicates in an aggregate's
@@ -1115,9 +1139,9 @@ root(X) :- person(X), not parent(_, X).
 ```
 *Raised:* `not` keyword and wildcard `_` (ratified, §3/§5); the safety rule and
 how stratification is computed and reported (ratified, §7/§10 — *named*
-variables in negated atoms must be positively bound, wildcards are existential
-under the negation, and stratification is predicate-level numbering with a
-structured cycle error).
+variables in negated atoms must be bound by the body (relaxed from *positively*
+bound, 2026-07-25), wildcards are existential under the negation, and
+stratification is predicate-level numbering with a structured cycle error).
 
 ### 16.3 Arithmetic & comparison builtins
 
@@ -1248,6 +1272,51 @@ the ratified set-builder `avg { A | Goal }` (§9), grouped globally here.
 
 ### Decisions
 
+- **2026-07-25** — **Negated atoms join the dependency schedule** (§7/§10;
+  `src/schedule.rs`, `src/lower.rs`, `src/engine/`; resolves the open question of
+  the same name below, and fixes `bugs/001`). A negated atom's named variables no
+  longer have to be bound *positively* — a positive atom, an `=`-assignment or an
+  aggregate result all satisfy the requirement the rule stood for, which is that
+  the atom be **ground when tested**. The scheduler places the anti-join after
+  whatever binds its arguments.
+  - **What the rule cost.** It was not the uniform expressiveness limit the open
+    question claimed. `not q(X + 1)` hoists its argument to a generated slot, and
+    the safety check tested `var_names[slot].is_some()` — "does this slot have a
+    name" standing in for "is this a wildcard". A hoisted slot has no name, so the
+    check skipped it and the anti-join read it as an open wildcard: the rule
+    silently became `not q(_)`, "no `q` fact at all". The hand-hoisted spelling of
+    the *same* conjunction was rejected. One conjunction, three spellings, three
+    different answers.
+  - **The scheduling rule.** A negated atom **reads** the argument variables that
+    something else in the body binds (`binder_vars`). A slot bound nowhere is not
+    a dependency — it stays open and existential under the negation (§7) — so the
+    scheduler needs no notion of "wildcard" and stays free of `var_names`. A
+    *named* variable bound nowhere reaches the same conclusion here, so lowering
+    keeps a separate check for it; that is the one thing scheduling cannot decide.
+  - **Early pruning is preserved.** Negations the positive atoms already ground
+    stay in their own phase ahead of the builtins, so a cheap anti-join still runs
+    before an expensive aggregate. Only the not-yet-ready ones defer.
+  - **Chosen over tagging hoist-generated slots**, which would have kept the
+    restriction and merely reported it honestly. Rejected because the restriction
+    had no justification left to enforce — it justified itself by the phase order
+    and the phase order by itself — and because naming the offending source
+    expression in the error would have required an IR-expression renderer built
+    solely to explain something we intended to delete.
+  - **Sequenced ahead of `absent` × negation** (ROADMAP negation item 1), which
+    the roadmap had put first. Verified that the interaction is not *created*
+    here: `m(K, X), not q(X)` with a stored `q(absent)` already returns every row
+    today, so the absent-under-negation hole is reachable through an ordinary
+    positive binding. This change adds spellings that reach an already-broken
+    cell. Item 1 still owns the anti-join's matching rule, and its two `#[ignore]`d
+    tests fail exactly as before.
+  - **Cost.** The rule was stated in three places — the scheduler's phase order,
+    lowering's safety check, and the engine's `validate_body` contract for
+    hand-built IR — and all three had to move together; `validate_body` now shares
+    the scheduler's binding set instead of walking positives itself. The naive
+    oracle filtered *every* negation before running any builtin, so it had to
+    interleave them too: a differential oracle that hard-codes the old order would
+    have agreed with a wrong engine. Covered by testing.md **C7** plus
+    `CompRule::NegShift` carrying the shape into B1.
 - **2026-07-25** — **Conversion is the `as` cast; user-defined scalar functions are
   declined; and arithmetic already broke termination** (design session following the
   spec review; no engine change — implementation is a ROADMAP item). The review had
@@ -1452,6 +1521,14 @@ the ratified set-builder `avg { A | Goal }` (§9), grouped globally here.
     case the restriction is **uniform** (both orderings are refused alike), so it
     is an expressiveness limit rather than a silent mis-reading. Carried as an
     open question below.
+
+    ***Superseded later the same day — see "Negated atoms join the dependency
+    schedule" above.*** The "uniform … expressiveness limit rather than a silent
+    mis-reading" claim was false when written: `not q(X + 1)` was already
+    silently returning the wrong rows (`bugs/001`). The restriction was checked
+    only for *named* slots, and the hoist that inline arithmetic performs mints
+    an unnamed one — so the two orderings were not refused alike, and one of them
+    was not refused at all.
 
   - **The semantic sameness rule moved onto `Value`** as
     `Value::unifies_with` (with `Value::is_absent` for the structural absence
@@ -1935,6 +2012,13 @@ the ratified set-builder `avg { A | Goal }` (§9), grouped globally here.
   fresh variables introduced under negation rather than treating them as
   ordinary rule variables.
 
+  *The existential reading of wildcards stands. The safety half — "must occur in
+  a positive body atom" — was relaxed 2026-07-25 to "must be bound by the body";
+  see "Negated atoms join the dependency schedule". Note that this entry's
+  instinct was right and the 2026-07-20 entry below overturned it: the wildcard
+  question does need a criterion of its own, and "is this slot bound anywhere"
+  is the one that survives — it just lives in the scheduler rather than in a tag.*
+
 - **2026-07-20** — **Named-argument resolution is IR-invisible.** A named
   literal and the positional literal it denotes lower to *structurally
   identical* IR — the correctness condition for pass 2, and a property
@@ -2027,8 +2111,9 @@ the ratified set-builder `avg { A | Goal }` (§9), grouped globally here.
   point: a correctness argument resting on a global invariant, recorded only at its
   own check site, with nothing to fail when a later feature invalidated it.
 - **2026-07-20** — **`AbsentPattern` is `PredId` plus `Vec<Option<Value>>`**:
-  `Some` for constants and positively-bound variables, `None` for
-  wildcard-fresh slots (existential under the negation). `Premise` and
+  `Some` for constants and bound variables (*positively* bound until 2026-07-25,
+  when an assignment-bound argument became legal and started closing its slot
+  too), `None` for wildcard-fresh slots (existential under the negation). `Premise` and
   `AbsentPattern` carry the full `Eq`/`Hash`/`Ord` derives — `Derivation`
   remains a dedup key. Proof trees terminate at `Absent` leaves; the
   first-round guard applies only to fact premises (absences carry no round
@@ -2245,28 +2330,16 @@ the ratified set-builder `avg { A | Goal }` (§9), grouped globally here.
   rather than discovered" — the same applies here, so the session should settle all
   four in one table rather than three plus an omission.
 
-- **Negated atoms are outside the dependency schedule.** §10 requires a negated
-  atom's named variables to be bound by a *positive* atom, so `not q(Y), Y = X+1`
-  is rejected — and so is `Y = X+1, not q(Y)`. Unlike the aggregate group-key
-  case this is **not** a silent-wrongness bug: the restriction is uniform, both
-  orderings are refused identically, and there is a clean workaround (hoist the
-  computation into a helper predicate). It is an expressiveness limit, and since
-  builtins became dependency-scheduled (§8, 2026-07-25) it is the last place in
-  the language where where-you-write-it decides whether a program is accepted.
-
-  The safety justification — a negated atom must be *ground* when tested — is met
-  by an assignment-binding just as well as by a positive atom; the old rationale
-  ("negations run before assignments, so an assignment cannot bind one's
-  variable") justified the rule by the phase order and the phase order by the
-  rule. A design sketch, if it is taken up: give a negated atom `reads` = its
-  variables that *something else in the body binds*, which keeps the scheduler
-  free of `var_names` — a wildcard-fresh slot is bound nowhere, so it is not a
-  dependency and stays existential, while a *named* variable bound nowhere is
-  still caught by lowering's separate check. Keep negations whose reads are all
-  positively bound in their current phase so cheap anti-joins still prune before
-  expensive aggregates; only the ones that are not yet ready fall through into
-  the dependency phase. Widening negation safety is a §7/§10 decision, not a
-  consequence of scheduling. — §7/§8/§10.
+- **Negated atoms are outside the dependency schedule** — **resolved 2026-07-25**
+  (Decisions above): negations join the schedule, reading the argument variables
+  that something else in the body binds, with the ready ones kept in an early
+  phase for pruning. The sketch recorded here was taken up essentially as
+  written. What this entry got *wrong* is worth keeping: it argued the
+  restriction was a uniform expressiveness limit with a clean workaround and
+  "**not** a silent-wrongness bug". `bugs/001` disproved that — `not q(X + 1)`
+  was neither refused nor correct — and the entry had already reasoned its way to
+  the conclusion that the rule justified itself circularly, which should have
+  been the louder signal. — §7/§8/§10.
 
 - **Optional/absent value design** — **resolved 2026-07-24** (Decisions above): a
   single first-class, two-valued `absent` value; `absent ≠ absent` semantically but

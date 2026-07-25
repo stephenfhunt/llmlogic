@@ -5,7 +5,7 @@ severity: soundness
 area: lower
 spec: ["§5", "§7", "§9", "§10"]
 found: 2026-07-25
-resolution:
+resolution: fixed 2026-07-25 — negated atoms joined the dependency schedule (§17)
 ---
 
 `not q(X + 1)` is accepted and returns wrong answers. The equivalent hand-hoisted
@@ -109,3 +109,51 @@ containing no `_`.
 - **Independent of the absent × negation session** (negation item 1). This is
   about safety-checking generated slots, not about what `absent` means under
   negation, so it can be fixed first and should be.
+
+## Resolution
+
+**fixed 2026-07-25** — `not q(X + 1)` now evaluates correctly (`r(1). r(3).`),
+as do both hand-hoisted spellings.
+
+**Candidate 2 (ask the schedule), taken further than sketched.** Fixing the
+*check* alone was not enough: `src/schedule.rs` ran every negation in phase 2,
+ahead of all builtins, so a corrected check would have flagged a slot the engine
+still could not have bound. Negated atoms therefore joined the dependency
+schedule outright (ROADMAP negation item 2, closed with this). A negation reads
+the argument variables something *else* in the body binds; ready ones keep the
+early phase so anti-joins still prune before aggregates. Safety relaxed to "bound
+by the body" in §7/§10; full entry in §17.
+
+**Candidate 1 (tag hoist-generated slots) dropped.** It would have kept the
+restriction and merely reported it honestly. Two reasons against: the restriction
+had no justification left — §17's own open question had already concluded it
+justified itself by the phase order and the phase order by itself — and naming
+the source expression in the error, which this file required, needed an
+IR-expression renderer (`print.rs` handles AST only) built solely to explain a
+rule we intended to delete. It would also have made `not q(1 + 1)` a semantic
+error.
+
+**The diagnosis held**, with one omission: the file located the fault in the
+check and named the phase order only in passing, as part of candidate 2. The
+phase order was the *second, independent* fault — either alone leaves the bug.
+Two further sites the file did not name also encode the rule: the engine's
+`validate_body` (hand-built-IR contract) and `src/engine/naive.rs`, whose
+`matches` filtered every negation before running any builtin. The oracle mattered
+most: left alone it would have agreed with a wrong engine.
+
+**Cost elsewhere.** §7/§10 wording relaxed; §17 gains a decision entry and closes
+the "negated atoms are outside the dependency schedule" open question (kept, with
+what it got wrong); `schedule.rs`'s module docs argued the removed restriction and
+were rewritten. Tests: testing.md **C7**
+(`negation_over_a_computed_argument_is_spelling_independent`), a
+`CompRule::NegShift` generator variant carrying the shape into B1's engine/oracle
+differential, two `schedule.rs` unit tests, and five end-to-end tests in
+`api::tests`. `schedules_bind_before_they_read` now covers negations too.
+
+**Sequencing overridden.** ROADMAP put `absent` × negation (item 1) first, on the
+grounds that it decides what a negated atom *means*. Checked before proceeding:
+`m(K, X), not q(X)` with a stored `q(absent)` already returns every row, so that
+hole is reachable through an ordinary positive binding — this change adds
+spellings reaching an already-broken cell rather than creating one. Both
+`#[ignore]`d tests still fail identically (`[[Absent]]`), so item 1 is untouched
+and still owns the anti-join's matching rule.

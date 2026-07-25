@@ -92,7 +92,10 @@ Design rules (Csmith lessons):
   positive fallback). The level function is a stratification witness, so no
   rejection sampling. Negated atoms come after the positives with named
   variables drawn only from positively-bound body variables; wildcards under
-  negation are emitted both explicitly and via named partial selection.
+  negation are emitted both explicitly and via named partial selection. This
+  generator keeps every column a symbol (`monotype`), so it cannot carry a
+  *computed* negated argument — `arb_comparison_program`'s `CompRule::NegShift`
+  covers that path over the int-valued EDB instead (C7).
 - **Queries are generated** from the same body machinery (`build_body`),
   positives-then-negations, over unrestricted predicate pools (queries read
   the finished model, §7). Queries binding no named variable are skipped —
@@ -316,6 +319,17 @@ compared keyed by predicate *name*, not `PredId`.
   pins the AST→IR threading and the "`field_types` is `Some` iff `fields` is
   `Some`, same length" invariant (A14's type-side companion). Deferred: imported
   *inferred* column types (need §13).
+- [x] **C7** Negation over a **computed argument** is spelling-independent
+  (`bugs/001`, §7/§10 2026-07-25): `not q(V + c)`, `W = V + c, not q(W)` and
+  `not q(W), W = V + c` are the same conjunction and must give the same model
+  (`negation_over_a_computed_argument_is_spelling_independent` over
+  `arb_neg_shift_spellings`). All three used to differ — the inline form
+  silently degraded to `not q(_)`, and both hoisted forms were rejected. The
+  `CompRule::NegShift` variant also carries the shape into **B1's** comparison
+  differential, which is what covers the *oracle* on the deferred-negation path:
+  the naive evaluator used to filter every negation before running any builtin,
+  so it would have agreed with a wrong engine. Its structural counterpart is
+  `schedules_bind_before_they_read`, now extended over negations.
 
 ### Phase D — lexer + parser (roadmap step 5) — generalizes all §16 source texts
 
