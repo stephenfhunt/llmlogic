@@ -330,6 +330,20 @@ compared keyed by predicate *name*, not `PredId`.
   the naive evaluator used to filter every negation before running any builtin,
   so it would have agreed with a wrong engine. Its structural counterpart is
   `schedules_bind_before_they_read`, now extended over negations.
+  **B5 over comparison programs** (`b5_comparison_body_order_is_irrelevant`)
+  carries the arbitrary-permutation half — `arb_program_with_edb` cannot, being
+  all-symbol — compared only when both orders evaluate, since pruning ahead of a
+  `/ 0` is the one way order is legitimately observable. And
+  `a_computed_negated_argument_is_recorded_as_a_closed_absence` pins the
+  **provenance** half: the absence pattern must record `Some(2)`, not an open
+  slot, or "why?" answers the far stronger "because no `q` fact exists".
+
+  *Known gap:* **E3** (`e3_derivations_replay`) runs over `arb_program_with_edb`
+  only, and its `replay` helper rebuilds the environment from *fact* premises
+  alone — it returns `None` on any `Premise::Builtin`. So derivation replay has
+  never covered §8 builtins at all, and therefore does not cover a deferred
+  negation, whose absence pattern depends on an assignment-bound value. Widening
+  it means teaching `replay` to fold builtin premises into the environment.
 
 ### Phase D — lexer + parser (roadmap step 5) — generalizes all §16 source texts
 

@@ -2275,6 +2275,63 @@ mod tests {
         );
     }
 
+    /// A negation over a *computed* argument records the argument's **value**
+    /// in its absence pattern, not an open slot (§7/§11, `bugs/001`).
+    ///
+    /// This is the provenance half of the fix and the half that is easiest to
+    /// get silently wrong: `AbsentPattern` uses `None` for a slot left open
+    /// (wildcard, existential) and `Some` for one the bindings closed. The bug
+    /// was exactly a slot that *should* have been closed being recorded — and
+    /// evaluated — as open, so "why does `r(1)` hold?" must answer "because no
+    /// `q(2)` exists", never the far stronger "because no `q` fact exists".
+    #[test]
+    fn a_computed_negated_argument_is_recorded_as_a_closed_absence() {
+        let src = "p(1).\np(2).\np(3).\nq(3).\nr(X) :- p(X), not q(X + 1).\n";
+        let ast = crate::parser::parse(src).expect("parses");
+        let program = crate::lower::lower(&ast).expect("lowers");
+        let model = eval(&program).expect("evaluates");
+        let q = program
+            .rules
+            .iter()
+            .find_map(|rule| {
+                rule.body.iter().find_map(|literal| match &literal.kind {
+                    BodyLiteralKind::NegAtom(atom) => Some(atom.pred),
+                    _ => None,
+                })
+            })
+            .expect("the rule negates q");
+
+        // r(1) holds because no q(2) exists; r(3) because no q(4) exists.
+        let mut absences: Vec<(i64, Vec<Option<Value>>)> = model
+            .facts()
+            .filter(|fact| program.pred_info(fact.pred).name == "r")
+            .flat_map(|fact| {
+                let Value::Int(x) = fact.tuple.0[0] else {
+                    panic!("r's argument is an int")
+                };
+                model
+                    .derivations_of(&fact)
+                    .flat_map(|d| d.premises.iter())
+                    .filter_map(move |premise| match premise {
+                        Premise::Absent(pattern) if pattern.pred == q => {
+                            Some((x, pattern.args.clone()))
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        absences.sort();
+        assert_eq!(
+            absences,
+            vec![
+                (1, vec![Some(Value::Int(2))]),
+                (3, vec![Some(Value::Int(4))]),
+            ],
+            "a computed negated argument must close its slot, not leave it open"
+        );
+    }
+
     // --- Phase B (B1–B7) and Phase E (E1–E4) properties (testing.md) ---
 
     mod properties {
@@ -2746,6 +2803,31 @@ mod tests {
                 let expected = model_facts(&eval(&program).unwrap());
                 let swapped = with_swapped_body(program, rule_sel, i, j);
                 prop_assert_eq!(model_facts(&eval(&swapped).unwrap()), expected);
+            }
+
+            /// B5 over §8 comparison/arithmetic programs, which — unlike
+            /// `arb_program_with_edb` (every column a symbol) — can carry a
+            /// *computed* negated argument (`CompRule::NegShift`). That is the
+            /// shape whose whole point is that body order stops mattering
+            /// (`bugs/001`), so it wants the order-permutation property and not
+            /// only the fixed three spellings of C7.
+            ///
+            /// Compared only when both orders evaluate: swapping literals
+            /// changes which of several *ready* literals runs first, and a
+            /// filter that prunes a row ahead of a `/ 0` is the one way order is
+            /// legitimately observable (see the `crate::schedule` module docs).
+            #[test]
+            fn b5_comparison_body_order_is_irrelevant(
+                program in arb_comparison_program(),
+                rule_sel in any::<u8>(),
+                i in any::<u8>(),
+                j in any::<u8>(),
+            ) {
+                let before = eval(&program);
+                let swapped = with_swapped_body(program, rule_sel, i, j);
+                if let (Ok(before), Ok(after)) = (before, eval(&swapped)) {
+                    prop_assert_eq!(model_facts(&after), model_facts(&before));
+                }
             }
 
             /// B6 — rule application order within a stratum does not matter.
