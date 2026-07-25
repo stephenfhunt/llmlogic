@@ -25,6 +25,7 @@ pub mod parser;
 pub mod print;
 pub mod provenance;
 pub mod resolve;
+pub mod schedule;
 pub mod sources;
 pub mod typecheck;
 

@@ -93,12 +93,18 @@ sorted — and they round-trip as input, so runs compose over pipes:
   `op` one of `count`/`sum`/`min`/`max`/`avg`. Grouping is implicit: one result per
   binding of the rule's *other* variables (here `P`, so it's children-per-parent).
   `sum`/`avg`/`min`/`max` skip `absent` inputs (an all-absent or empty group →
-  `absent`); `count` counts bindings, so count only present values explicitly with
-  `count { A | m(A), A is not absent }`. `min`/`max` also work on strings/symbols.
+  `absent`) and say so on stderr when they do; `count` counts bindings, so count
+  only present values explicitly with `count { A | m(A), A is not absent }`.
+  `min`/`max` also work on strings/symbols. A `_` inside the `{ … }` is a witness
+  dimension, not a "don't care": `count { P | parent(P, _) }` counts *edges*, not
+  distinct parents. In a `-q` query, bind the group key outside the aggregate —
+  `-q 'parent(P,_), N = count { C | parent(P,C) }'` groups by `P`, while
+  `-q 'N = count { C | parent(P,C) }'` is one global count.
 - **Missing data** is the value `absent` (an empty CSV cell, a JSON/DB null).
   Any comparison with it is *false* and any arithmetic yields `absent`, so test
-  it explicitly: `A is absent` / `A is not absent` (never `A = absent`, which is
-  false). A numeric column with gaps still counts as numeric.
+  it explicitly with `A is absent` / `A is not absent`. Writing `A = absent` or
+  `A != absent` is an error that says so — both would be always-false. A numeric
+  column with gaps still counts as numeric.
 - **Queries**: `?- ancestor("alice", Who).`
 - **Imports** load external data or split a program across files:
   ```

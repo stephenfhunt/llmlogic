@@ -48,7 +48,7 @@ impl AbsentPattern {
                 // the same absent-matches-nothing rule the positive join uses.
                 pattern
                     .as_ref()
-                    .is_none_or(|expected| crate::engine::values_unify(expected, value))
+                    .is_none_or(|expected| expected.unifies_with(value))
             })
     }
 }

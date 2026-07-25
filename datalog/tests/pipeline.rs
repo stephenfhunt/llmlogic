@@ -94,6 +94,93 @@ fn count_counts_bindings_present_written_explicitly() {
     );
 }
 
+/// An aggregate in a **query** answers over the variables the query body binds
+/// — not over every named slot. An aggregate's goal-local variables are named
+/// but exist only inside its sub-join (§9), so `?- N = count { C | m(T, C) }.`
+/// answers over `N` alone. (Projecting them used to leave an unbound slot in the
+/// answer row.)
+#[test]
+fn an_aggregate_in_a_query_projects_only_body_bound_variables() {
+    let facts = "m(\"a\", 1). m(\"a\", 2). m(\"b\", 9).\nthing(\"a\"). thing(\"b\").\n";
+
+    // Goal-local `T` and `C`: one global count, projected over `N` alone.
+    assert_eq!(
+        answers(&format!("{facts}?- N = count {{ C | m(T, C) }}.")),
+        vec!["answer(3)."]
+    );
+    // `T` bound outside the aggregate is a group key and *is* projected.
+    assert_eq!(
+        answers(&format!("{facts}?- thing(T), N = count {{ C | m(T, C) }}.")),
+        vec!["answer(\"a\", 2).", "answer(\"b\", 1)."]
+    );
+    // Composing under §8: the aggregate inside arithmetic, and as a filter.
+    assert_eq!(
+        answers(&format!("{facts}?- N = count {{ C | m(T, C) }} + 1.")),
+        vec!["answer(4)."]
+    );
+    assert_eq!(
+        answers(&format!("{facts}?- thing(T), count {{ C | m(T, C) }} > 1.")),
+        vec!["answer(\"a\")."]
+    );
+}
+
+/// An aggregate's goal is a body and binds like one: a variable bound inside it
+/// by an `=`-assignment or by a *nested* aggregate is available to the collected
+/// expression. Lowering hoists a nested aggregate into the goal for exactly this
+/// reason, so the safety check must use the same notion of "bound".
+#[test]
+fn an_aggregate_goal_binds_assignments_and_nested_aggregates() {
+    let facts = "s(\"a\", 1). s(\"a\", 2). s(\"b\", 10).\n";
+
+    // `T` bound by an `=`-assignment inside the goal.
+    assert_eq!(
+        answers(&format!(
+            "{facts}doubled(K, M) :- s(K, _), M = max {{ T | s(K, V), T = V * 2 }}.\n\
+             ?- doubled(K, M)."
+        )),
+        vec!["doubled(\"a\", 4).", "doubled(\"b\", 20)."]
+    );
+    // `T` bound by a nested aggregate: the largest per-key sum (a=3, b=10).
+    assert_eq!(
+        answers(&format!(
+            "{facts}?- M = max {{ T | s(K, _), T = sum {{ V | s(K, V) }} }}."
+        )),
+        vec!["answer(10)."]
+    );
+}
+
+/// §9's skip-but-report rule: `sum`/`avg`/`min`/`max` drop `absent` inputs, and
+/// the drop is *reported* — read back out of the recorded provenance, one
+/// warning per aggregate site. Until `?why` (§11) lands this is the only signal
+/// that an answer covers less data than it appears to.
+#[test]
+fn skipped_absents_are_reported_as_warnings() {
+    let result = datalog::run(
+        "m(\"a\", 5). m(\"a\", absent). m(\"b\", 7).\n\
+         thing(\"a\"). thing(\"b\").\n\
+         total(T, S) :- thing(T), S = sum { A | m(T, A) }.\n\
+         seen(T, N)  :- thing(T), N = count { A | m(T, A) }.\n\
+         ?- total(T, S).",
+    )
+    .expect("runs");
+    let warnings: Vec<String> = result.warnings.iter().map(|w| w.to_string()).collect();
+    assert_eq!(warnings.len(), 1, "one site skipped: {warnings:?}");
+    assert!(
+        warnings[0].contains("`sum` in `total/2`")
+            && warnings[0].contains("skipped 1 absent input(s)"),
+        "unexpected warning: {}",
+        warnings[0]
+    );
+
+    // No absent, no warning — and `count` never skips, so it never warns.
+    let clean = datalog::run(
+        "m(\"a\", 5).\nthing(\"a\").\n\
+         total(T, S) :- thing(T), S = sum { A | m(T, A) }.\n?- total(T, S).",
+    )
+    .expect("runs");
+    assert!(clean.warnings.is_empty(), "{:?}", clean.warnings);
+}
+
 #[test]
 fn named_arguments_16_7() {
     assert_eq!(

@@ -294,7 +294,74 @@ fn an_undefined_predicate_warns_on_stderr_but_still_succeeds() {
     );
 }
 
+#[test]
+fn an_aggregate_that_skips_absent_warns_on_stderr_but_still_succeeds() {
+    // §9's skip-but-report rule at the binary contract: the answer is the
+    // aggregate of the values that exist (exit 0, clean stdout), and the drop is
+    // reported on stderr so it is never silent.
+    let out = run_stdin(
+        "m(\"a\", 10). m(\"a\", absent). m(\"b\", 7).\n\
+         thing(\"a\"). thing(\"b\").\n\
+         mean(T, M) :- thing(T), M = avg { A | m(T, A) }.\n\
+         ?- mean(T, M).",
+    );
+    assert_eq!(out.code, 0);
+    assert_eq!(out.stdout, "mean(\"a\", 10.0).\nmean(\"b\", 7.0).\n");
+    assert!(
+        out.stderr.contains("`avg` in `mean/2` skipped 1 absent"),
+        "{}",
+        out.stderr
+    );
+}
+
 // --- `-q` one-shot queries (spec §14, step 6) ---
+
+/// An aggregate in a `-q` — the form the skill teaches — answers over the
+/// variables the query body binds and exits 0. It used to panic (exit 101) on
+/// every goal with a named variable, because the projection took every *named*
+/// slot and an aggregate's goal-local variables are named but bound only inside
+/// the sub-join (§9).
+#[test]
+fn dash_q_with_an_aggregate() {
+    // Goal-local `P`/`C`: one global count.
+    let out = run_file_args(
+        "16_4_aggregation.dl",
+        &["-q", "N = count { C | parent(P, C) }"],
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(out.stderr.is_empty(), "{}", out.stderr);
+    assert!(out.stdout.ends_with("answer(3).\n"), "{}", out.stdout);
+
+    // `P` bound outside the aggregate is a group key and is projected.
+    let grouped = run_file_args(
+        "16_4_aggregation.dl",
+        &["-q", "parent(P, _), N = count { C | parent(P, C) }"],
+    );
+    assert_eq!(grouped.code, 0, "stderr: {}", grouped.stderr);
+    assert!(
+        grouped
+            .stdout
+            .ends_with("answer(\"alice\", 2).\nanswer(\"bob\", 1).\n"),
+        "{}",
+        grouped.stdout
+    );
+
+    // The define-and-select form over an aggregate rule.
+    let rule = run_file_args(
+        "16_4_aggregation.dl",
+        &[
+            "-q",
+            "kids(P, N) :- parent(P, _), N = count { C | parent(P, C) }",
+        ],
+    );
+    assert_eq!(rule.code, 0, "stderr: {}", rule.stderr);
+    assert!(
+        rule.stdout
+            .ends_with("kids(\"alice\", 2).\nkids(\"bob\", 1).\n"),
+        "{}",
+        rule.stdout
+    );
+}
 
 #[test]
 fn dash_q_bare_atom_over_a_file() {

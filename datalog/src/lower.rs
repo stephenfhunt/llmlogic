@@ -41,6 +41,7 @@ use std::collections::HashMap;
 use crate::ast;
 use crate::error::{Error, Warning};
 use crate::ir;
+use crate::schedule;
 
 /// Lowers a surface program to the core IR, or reports every error found.
 ///
@@ -76,7 +77,7 @@ pub fn lower_with_sources(
                 // Module imports are spliced away by resolution before
                 // lowering; one reaching this point means the caller skipped
                 // that stage (§13).
-                ast::ImportKind::Module => lowerer.errors.push(Error::Semantic(format!(
+                ast::ImportKind::Module => lowerer.errors.push(Error::semantic(format!(
                     "module import \"{}\" must be resolved before lowering",
                     import.path
                 ))),
@@ -353,7 +354,7 @@ impl Lowerer {
         let mut by_field = HashMap::with_capacity(positions.len());
         for (position, field_name) in positions.iter().enumerate() {
             if by_field.insert(field_name.clone(), position).is_some() {
-                self.errors.push(Error::Semantic(format!(
+                self.errors.push(Error::semantic(format!(
                     "duplicate field `{field_name}` in the schema for `{name}`"
                 )));
             }
@@ -368,7 +369,7 @@ impl Lowerer {
                     origin.label(),
                     positions.join(", ")
                 );
-                self.errors.push(Error::Semantic(conflict));
+                self.errors.push(Error::semantic(conflict));
             } else if existing.field_types != field_types {
                 // Same field names, disagreeing declared types (§17): name both
                 // origins so the mismatch is traceable.
@@ -378,7 +379,7 @@ impl Lowerer {
                     existing.origin.label(),
                     origin.label(),
                 );
-                self.errors.push(Error::Semantic(conflict));
+                self.errors.push(Error::semantic(conflict));
             }
             return;
         }
@@ -400,7 +401,7 @@ impl Lowerer {
         if let Some(&id) = self.by_name.get(name) {
             let known = self.predicates[id.0 as usize].arity;
             if known != arity {
-                self.errors.push(Error::Semantic(format!(
+                self.errors.push(Error::semantic(format!(
                     "predicate `{name}` used with arity {arity}, but previously with arity {known}"
                 )));
             }
@@ -486,7 +487,7 @@ impl Lowerer {
         // thing that can land in `discard` is an aggregate (§9) — which a ground
         // fact has no body to compute over.
         if !discard.is_empty() {
-            self.errors.push(Error::Semantic(format!(
+            self.errors.push(Error::semantic(format!(
                 "an aggregate cannot appear in a fact; `{}` has no body to aggregate over",
                 clause.head.predicate.name
             )));
@@ -502,7 +503,7 @@ impl Lowerer {
                     ground = false;
                     let name = scope.names[var.0 as usize].as_deref().unwrap_or("_");
                     let place = self.describe_arg(&clause.head, position);
-                    self.errors.push(Error::Semantic(format!(
+                    self.errors.push(Error::semantic(format!(
                         "fact `{}` is not ground: variable `{name}` in {place}",
                         clause.head.predicate.name,
                     )));
@@ -520,9 +521,24 @@ impl Lowerer {
     fn lower_query(&mut self, query: &ast::Query, out: &mut ir::Program) {
         let mut scope = VarScope::default();
         let body = self.lower_body(&query.body, &mut scope);
+        // The answer variables are the *named* slots the body binds at the top
+        // level (§14). `safe_bound_vars` is the same notion the head of a rule is
+        // checked against, and it deliberately does not descend into aggregate
+        // goals: a goal-local variable is existential to the aggregate (§9) and
+        // has no value outside it, so projecting it would be meaningless — and
+        // used to leave the answer row with an unbound slot.
+        let bound = safe_bound_vars(&body);
+        let projection: Vec<u32> = scope
+            .names
+            .iter()
+            .enumerate()
+            .filter(|(slot, name)| name.is_some() && bound.contains(&(*slot as u32)))
+            .map(|(slot, _)| slot as u32)
+            .collect();
         let lowered = ir::Query {
             body,
             var_names: scope.names,
+            projection,
             span: query.span,
         };
         self.check_body_safety(&lowered.body, &lowered.var_names, "query");
@@ -636,7 +652,7 @@ impl Lowerer {
             if pos == AtomPos::Body
                 && matches!(term.kind, ast::TermKind::Constant(ast::Constant::Absent))
             {
-                self.errors.push(Error::Semantic(
+                self.errors.push(Error::semantic(
                     "`absent` cannot be matched in a body atom argument (a value never \
                      unifies with absent); test presence with `X is absent` / \
                      `X is not absent` instead"
@@ -703,7 +719,7 @@ impl Lowerer {
     ) -> Option<ir::Atom> {
         let predicate = &atom.predicate.name;
         let Some(schema) = self.schemas.get(predicate) else {
-            self.errors.push(Error::Semantic(format!(
+            self.errors.push(Error::semantic(format!(
                 "named arguments require known field names for `{predicate}`: add a \
                  `declare {predicate}(...)` or an explicit import schema"
             )));
@@ -715,7 +731,7 @@ impl Lowerer {
         let mut reported = Vec::new();
         for (index, arg) in named.iter().enumerate() {
             let Some(&position) = schema.by_field.get(&arg.field.name) else {
-                reported.push(Error::Semantic(format!(
+                reported.push(Error::semantic(format!(
                     "unknown field `{}` for predicate `{predicate}`; known fields: {}",
                     arg.field.name,
                     schema.fields.join(", ")
@@ -723,7 +739,7 @@ impl Lowerer {
                 continue;
             };
             if assigned[position].is_some() {
-                reported.push(Error::Semantic(format!(
+                reported.push(Error::semantic(format!(
                     "field `{}` is given twice in one `{predicate}` literal",
                     arg.field.name
                 )));
@@ -742,7 +758,7 @@ impl Lowerer {
                 .map(|(position, _)| schema.fields[position].as_str())
                 .collect();
             if !missing.is_empty() {
-                reported.push(Error::Semantic(format!(
+                reported.push(Error::semantic(format!(
                     "head `{predicate}` uses named arguments and must supply every field; \
                      missing: {}",
                     missing.join(", ")
@@ -871,19 +887,28 @@ impl Lowerer {
         ir::Expr::Term(ir::Term::Var(result))
     }
 
-    /// Pass 4 for rules: head variables must be bound by a positive body atom
-    /// (or by an `=`-assignment in the body — spec §17, 2026-07-21).
+    /// Pass 4 for rules: head variables must be bound by the body — a positive
+    /// atom, an `=`-assignment, or an aggregate result (spec §17, 2026-07-21;
+    /// scheduled rather than source-ordered since 2026-07-25).
     fn check_rule_safety(&mut self, rule: &ir::Rule, head_name: &str) {
-        let bound = safe_bound_vars(&rule.body);
-        for arg in &rule.head.args {
-            if let ir::Term::Var(var) = arg
-                && !bound.contains(&var.0)
-            {
-                let name = rule.var_names[var.0 as usize].as_deref().unwrap_or("_");
-                self.errors.push(Error::Semantic(format!(
-                    "unsafe rule for `{head_name}`: head variable `{name}` does not occur \
-                     in a positive body atom"
-                )));
+        // A body that cannot be scheduled binds nothing reliably, so every head
+        // variable would be reported unbound — cascading noise on top of the one
+        // error that matters. `check_body_safety` reports that one.
+        let schedulable =
+            schedule::schedule_body_with(&rule.body, &std::collections::HashSet::new()).is_ok();
+        if schedulable {
+            let bound = safe_bound_vars(&rule.body);
+            for arg in &rule.head.args {
+                if let ir::Term::Var(var) = arg
+                    && !bound.contains(&var.0)
+                {
+                    let name = rule.var_names[var.0 as usize].as_deref().unwrap_or("_");
+                    self.errors.push(Error::semantic(format!(
+                        "unsafe rule for `{head_name}`: head variable `{name}` is not bound \
+                         by the body — it must occur in a positive body atom, or be bound by \
+                         an `=`-assignment or an aggregate result"
+                    )));
+                }
             }
         }
         self.check_body_safety(&rule.body, &rule.var_names, head_name);
@@ -903,10 +928,16 @@ impl Lowerer {
     }
 
     /// [`Self::check_body_safety`] with a `seed` of variables treated as already
-    /// positively bound — the group keys available to an aggregate's goal (§9):
-    /// the enclosing body's variables that are bound where the aggregate runs.
-    /// The top-level call seeds nothing, so ordinary rules and queries are
+    /// bound — the group keys available to an aggregate's goal (§9). The
+    /// top-level call seeds nothing, so ordinary rules and queries are
     /// unaffected.
+    ///
+    /// Safety is now stated against the **schedule** (`crate::schedule`), not
+    /// source order: a body is safe when there *exists* an order in which every
+    /// literal's inputs are bound before it runs. That subsumes the old
+    /// per-literal "is it bound yet?" walk — the scheduler proves it for every
+    /// comparison, presence test and aggregate at once — and leaves three checks
+    /// that scheduling does not cover.
     fn check_body_safety_seeded(
         &mut self,
         body: &[ir::BodyLiteral],
@@ -914,12 +945,24 @@ impl Lowerer {
         seed: &std::collections::HashSet<u32>,
         context: &str,
     ) {
-        let mut positive = positive_vars(body);
-        positive.extend(seed.iter().copied());
-        // Variables available at each point: positively bound, plus any bound
-        // by a prior `=`-assignment in source order — the order the engine
-        // evaluates comparisons in.
-        let mut bound = positive.clone();
+        let seed_vars: std::collections::HashSet<ir::Var> =
+            seed.iter().map(|slot| ir::Var(*slot)).collect();
+        let bound = match schedule::schedule_body_with(body, &seed_vars) {
+            Ok((_, bound)) => bound.iter().map(|var| var.0).collect(),
+            Err(failure) => {
+                self.errors
+                    .push(schedule_error(&failure, body, var_names, context));
+                // Without a valid order the remaining checks would report
+                // cascading nonsense about variables that are simply unreachable.
+                return;
+            }
+        };
+        let positive = {
+            let mut positive = positive_vars(body);
+            positive.extend(seed.iter().copied());
+            positive
+        };
+
         for literal in body {
             match &literal.kind {
                 ir::BodyLiteralKind::Atom(_) => {}
@@ -927,11 +970,14 @@ impl Lowerer {
                     // Only *named* variables need positive binding (§10):
                     // wildcards under negation are existential (§7). A
                     // `None`-named slot here is necessarily wildcard-fresh
-                    // inside this very literal — `VarScope::fresh` never
-                    // enters the name map, so a fresh slot occurs at exactly
-                    // one term position in the whole clause. Negated atoms are
-                    // evaluated before comparisons, so an assignment cannot
-                    // bind one's variable — positive binding is required.
+                    // inside this very literal — `VarScope::fresh` never enters
+                    // the name map, so a fresh slot occurs at exactly one term
+                    // position in the whole clause.
+                    //
+                    // This is the one thing scheduling does not decide: negated
+                    // atoms are not part of the dependency phase, so §10's
+                    // "positively bound" rule still applies as written (see the
+                    // `crate::schedule` module docs).
                     for arg in &atom.args {
                         if let ir::Term::Var(var) = arg
                             && var_names[var.0 as usize].is_some()
@@ -948,57 +994,41 @@ impl Lowerer {
                     }
                 }
                 ir::BodyLiteralKind::Compare { op, lhs, rhs } => {
-                    // `=` with one bare, not-yet-bound variable side is an
-                    // assignment binding it; that target is exempt.
-                    let target = if *op == ast::CmpOp::Eq {
-                        assignment_target(lhs, rhs, &bound)
-                    } else {
-                        None
-                    };
-                    for var in expr_vars(lhs).into_iter().chain(expr_vars(rhs)) {
-                        if Some(var.0) == target {
-                            continue;
-                        }
-                        if !bound.contains(&var.0) {
-                            push_unsafe(&mut self.errors, var.0, var_names, "comparison", context);
-                        }
-                    }
-                    if let Some(slot) = target {
-                        bound.insert(slot);
-                    }
-                }
-                ir::BodyLiteralKind::Presence { expr, .. } => {
-                    // A presence test is a filter (§8/§10): its operand must be
-                    // bound (positively, or by a prior assignment), and it binds
-                    // nothing — there is no assignment-target exemption.
-                    for var in expr_vars(expr) {
-                        if !bound.contains(&var.0) {
-                            push_unsafe(
-                                &mut self.errors,
-                                var.0,
-                                var_names,
-                                "presence test",
-                                context,
-                            );
-                        }
+                    // A bare `absent` literal *compared* against anything is
+                    // false whatever the operator (§8) — `V = absent` and `V !=
+                    // absent` are *both* false — so writing one is always a
+                    // mistake. Steer to the presence test, the same way a literal
+                    // `absent` in a body atom argument does. Exempt: the producer
+                    // form `X = absent`, an assignment binding an unbound `X`,
+                    // which is how §4 says to produce the value.
+                    let produces = *op == ast::CmpOp::Eq
+                        && [lhs, rhs].iter().any(|side| {
+                            matches!(side, ir::Expr::Term(ir::Term::Var(var))
+                                if !positive.contains(&var.0))
+                        });
+                    if !produces && (is_literal_absent(lhs) || is_literal_absent(rhs)) {
+                        self.errors.push(Error::semantic(format!(
+                            "`{}` against the literal `absent` in `{context}` is always \
+                             false (every comparison with absent is false, so `=` and `!=` \
+                             are both false); test presence with `X is absent` / \
+                             `X is not absent` instead",
+                            cmp_symbol(*op),
+                        )));
                     }
                 }
-                ir::BodyLiteralKind::Aggregate {
-                    result,
-                    op: _,
-                    params,
-                    expr,
-                    goal,
-                } => {
-                    // The goal is a sub-body evaluated with the group keys (the
-                    // outer variables bound so far) available, so seed its check
-                    // with `bound`. Its own positive atoms bind the goal-local
+                ir::BodyLiteralKind::Presence { .. } => {}
+                ir::BodyLiteralKind::Aggregate { expr, goal, .. } => {
+                    // The goal is a sub-body evaluated with the group keys — the
+                    // enclosing body's bindings — available, so seed its check
+                    // with `bound`. Its own literals bind the goal-local
                     // (existential) variables (§9/§10).
                     self.check_body_safety_seeded(goal, var_names, &bound, context);
                     // The collected expression is evaluated per witness, so its
-                    // variables must be bound by the goal's positives or a group
-                    // key.
-                    let mut goal_bound = positive_vars(goal);
+                    // variables must be bound by the goal or be a group key. The
+                    // schedule covers the group keys (it treats them as the
+                    // aggregate's reads); this covers the goal-local ones, which
+                    // it does not see.
+                    let mut goal_bound = safe_bound_vars(goal);
                     goal_bound.extend(bound.iter().copied());
                     for var in expr_vars(expr) {
                         if !goal_bound.contains(&var.0) {
@@ -1011,26 +1041,41 @@ impl Lowerer {
                             );
                         }
                     }
-                    // Parameters (none for the v1 five) evaluate once per group in
-                    // the outer scope.
-                    for param in params {
-                        for var in expr_vars(param) {
-                            if !bound.contains(&var.0) {
-                                push_unsafe(
-                                    &mut self.errors,
-                                    var.0,
-                                    var_names,
-                                    "aggregate parameter",
-                                    context,
-                                );
-                            }
-                        }
-                    }
-                    // The aggregate binds its result like an `=`-assignment.
-                    bound.insert(result.0);
                 }
             }
         }
+    }
+}
+
+/// Renders a scheduling failure as a §12 error. The two causes want genuinely
+/// different advice: an unbound variable needs a binder added, while a cycle
+/// cannot be fixed by moving anything — there is no valid order at all.
+fn schedule_error(
+    failure: &schedule::ScheduleError,
+    body: &[ir::BodyLiteral],
+    var_names: &[Option<String>],
+    context: &str,
+) -> Error {
+    let name = var_names
+        .get(failure.variable.0 as usize)
+        .and_then(|name| name.as_deref())
+        .unwrap_or("_");
+    let place = match &body[failure.literal].kind {
+        ir::BodyLiteralKind::Compare { .. } => "comparison",
+        ir::BodyLiteralKind::Presence { .. } => "presence test",
+        ir::BodyLiteralKind::Aggregate { .. } => "aggregate",
+        ir::BodyLiteralKind::Atom(_) | ir::BodyLiteralKind::NegAtom(_) => "body literal",
+    };
+    match failure.cause {
+        schedule::ScheduleFailure::Unbound => Error::semantic(format!(
+            "unsafe {place} in `{context}`: variable `{name}` is never bound — it must \
+             occur in a positive body atom, or be bound by an `=`-assignment or an \
+             aggregate result"
+        )),
+        schedule::ScheduleFailure::Cycle => Error::semantic(format!(
+            "circular dependency in `{context}`: the {place} needs `{name}`, which is only \
+             bound by a literal that in turn needs this one; no order of the body can run"
+        )),
     }
 }
 
@@ -1170,7 +1215,7 @@ fn negative_cycle_error(
         for (pred, step_dep) in steps {
             parts.push(format!("{}{}", step_dep.prefix(), name(pred)));
         }
-        return Error::Semantic(format!(
+        return Error::semantic(format!(
             "program is not stratifiable: recursion through negation or aggregation: {}",
             parts.join(" -> ")
         ));
@@ -1242,60 +1287,43 @@ fn push_unsafe(
     context: &str,
 ) {
     let name = var_names[slot as usize].as_deref().unwrap_or("_");
-    errors.push(Error::Semantic(format!(
+    errors.push(Error::semantic(format!(
         "unsafe {place} in `{context}`: variable `{name}` does not occur in a positive body atom"
     )));
 }
 
 /// Every variable the body binds: positively bound (occurring in a positive
-/// atom), plus any bound by an `=`-assignment. Computed in source order so a
-/// later assignment can depend on an earlier one (`N = A+1, M = N+1`) — matching
-/// the engine's comparison evaluation order.
+/// atom), plus everything the scheduled builtins bind — `=`-assignment targets
+/// and aggregate results.
+///
+/// Delegates to [`schedule::schedule_body_with`] rather than walking source
+/// order, so a rule head may reference a variable whose binder is written *after*
+/// its use (`rev(X, M) :- a(X), M = N + 1, N = X + 1.`): the schedule finds the
+/// order, so head safety must agree that `M` is bound. An unschedulable body
+/// falls back to the positive variables — its own scheduling error is reported
+/// separately, and this keeps the head check from piling on.
 fn safe_bound_vars(body: &[ir::BodyLiteral]) -> std::collections::HashSet<u32> {
-    let mut bound = positive_vars(body);
-    for literal in body {
-        match &literal.kind {
-            ir::BodyLiteralKind::Compare {
-                op: ast::CmpOp::Eq,
-                lhs,
-                rhs,
-            } => {
-                if let Some(slot) = assignment_target(lhs, rhs, &bound) {
-                    bound.insert(slot);
-                }
-            }
-            // An aggregate binds its result like an `=`-assignment (§9).
-            ir::BodyLiteralKind::Aggregate { result, .. } => {
-                bound.insert(result.0);
-            }
-            _ => {}
-        }
-    }
-    bound
-}
-
-/// If this `=` comparison is an assignment — exactly one side a bare variable
-/// not yet in `bound`, with the other side's variables all already bound —
-/// returns that target variable's slot.
-fn assignment_target(
-    lhs: &ir::Expr,
-    rhs: &ir::Expr,
-    bound: &std::collections::HashSet<u32>,
-) -> Option<u32> {
-    let evaluable = |expr: &ir::Expr| expr_vars(expr).iter().all(|v| bound.contains(&v.0));
-    match (bare_var(lhs), bare_var(rhs)) {
-        (Some(v), _) if !bound.contains(&v) && evaluable(rhs) => Some(v),
-        (_, Some(v)) if !bound.contains(&v) && evaluable(lhs) => Some(v),
-        _ => None,
+    match schedule::schedule_body_with(body, &std::collections::HashSet::new()) {
+        Ok((_, bound)) => bound.iter().map(|var| var.0).collect(),
+        Err(_) => positive_vars(body),
     }
 }
 
-/// The slot of a bare variable expression (`Expr::Term(Term::Var)`), if that is
-/// what `expr` is.
-fn bare_var(expr: &ir::Expr) -> Option<u32> {
-    match expr {
-        ir::Expr::Term(ir::Term::Var(var)) => Some(var.0),
-        _ => None,
+/// Is `expr` the bare literal `absent`? Only a whole operand counts — `absent`
+/// inside arithmetic is annihilation (§8), not a comparison mistake.
+fn is_literal_absent(expr: &ir::Expr) -> bool {
+    matches!(expr, ir::Expr::Term(ir::Term::Const(ir::Value::Absent)))
+}
+
+/// The source symbol of a comparison operator, for error messages.
+fn cmp_symbol(op: ast::CmpOp) -> &'static str {
+    match op {
+        ast::CmpOp::Eq => "=",
+        ast::CmpOp::Ne => "!=",
+        ast::CmpOp::Lt => "<",
+        ast::CmpOp::Le => "<=",
+        ast::CmpOp::Gt => ">",
+        ast::CmpOp::Ge => ">=",
     }
 }
 
@@ -1663,6 +1691,7 @@ mod tests {
                     },
                 ],
                 var_names: vec![Some("X".to_string()), None],
+                projection: vec![0],
                 span: Span::DUMMY,
             }]
         );
@@ -2800,6 +2829,95 @@ mod tests {
         ]))
         .collect();
         assert_eq!(model.relation(next_year), &expected);
+    }
+
+    // --- Body scheduling (§8/§9/§10, `crate::schedule`) ---
+
+    /// Parses and lowers `src`, returning the lowering errors.
+    fn lower_errors(src: &str) -> Vec<Error> {
+        let ast = crate::parser::parse(src).expect("parses");
+        lower(&ast).expect_err("lowering should fail")
+    }
+
+    /// A body is a conjunction, so where a binder is *written* must not change
+    /// what the clause means. A variable used both inside an aggregate and
+    /// outside it is a group key; the scheduler runs whatever binds it first,
+    /// whether that sits before or after the aggregate in source order.
+    ///
+    /// Before scheduling, the second form silently enumerated `Y` as a
+    /// goal-local existential and counted everything.
+    #[test]
+    fn a_group_key_is_grouped_wherever_its_binder_is_written() {
+        let facts = "q(1). q(2).\nr(2, \"a\"). r(3, \"b\"). r(3, \"c\").\n";
+        let before =
+            format!("{facts}g(X, N) :- q(X), Y = X + 1, N = count {{ C | r(Y, C) }}.\n?- g(X, N).");
+        let after =
+            format!("{facts}g(X, N) :- q(X), N = count {{ C | r(Y, C) }}, Y = X + 1.\n?- g(X, N).");
+        let answers = |src: &str| {
+            crate::api::run(src)
+                .unwrap_or_else(|e| panic!("runs: {e:?}"))
+                .answers
+        };
+        assert_eq!(answers(&before), vec![vec!["g(1, 1).", "g(2, 2)."]]);
+        assert_eq!(answers(&before), answers(&after));
+    }
+
+    /// An `=`-chain likewise no longer depends on being written in dependency
+    /// order — the wart the group-key rule was originally made consistent with.
+    #[test]
+    fn an_assignment_chain_may_be_written_in_any_order() {
+        let ast = crate::parser::parse("a(1).\nrev(X, M) :- a(X), M = N + 1, N = X + 1.\n")
+            .expect("parses");
+        lower(&ast).expect("the scheduler finds the order");
+    }
+
+    /// A **cycle** is the case reordering cannot fix, and it gets its own
+    /// message: the aggregate needs `Y`, but `Y` comes from the aggregate's own
+    /// result. Telling the author to move the assignment earlier — which the
+    /// pre-scheduler error did — would have been impossible advice.
+    #[test]
+    fn a_circular_dependency_is_rejected_as_circular() {
+        let errors = lower_errors(
+            "a(1).\nr(1, \"x\").\n\
+             cyc(X, N) :- a(X), N = count { C | r(Y, C) }, Y = N.\n",
+        );
+        assert!(
+            errors.iter().any(|e| {
+                let msg = e.to_string();
+                msg.contains("circular dependency") && msg.contains("`Y`")
+            }),
+            "unexpected errors: {errors:?}"
+        );
+        // And only that error — no cascading head-safety noise.
+        assert_eq!(errors.len(), 1, "{errors:?}");
+    }
+
+    /// A variable nothing binds is still unsafe, and says so distinctly from a
+    /// cycle: no order exists because the binder does not exist.
+    #[test]
+    fn a_never_bound_variable_is_rejected_as_unbound() {
+        let errors = lower_errors("a(1).\nu(X) :- a(X), X > Z.\n");
+        assert!(
+            errors.iter().any(|e| {
+                let msg = e.to_string();
+                msg.contains("is never bound") && msg.contains("`Z`")
+            }),
+            "unexpected errors: {errors:?}"
+        );
+    }
+
+    /// Two aggregates in one body may each use the same *goal-local* name: they
+    /// share a slot, but each sub-join binds and backtracks it independently, so
+    /// neither is a group key of the other — and neither is a dependency of the
+    /// other for scheduling.
+    #[test]
+    fn goal_local_names_may_repeat_across_aggregates() {
+        let ast = crate::parser::parse(
+            "q(\"k\").\nr(1).\ns(7).\n\
+             both(K, N, M) :- q(K), N = count { C | r(C) }, M = count { C | s(C) }.\n",
+        )
+        .expect("parses");
+        lower(&ast).expect("goal-local names are local to each aggregate");
     }
 
     // --- check_program: referenced-but-undefined predicates ---

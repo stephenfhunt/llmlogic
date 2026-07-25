@@ -50,6 +50,18 @@ pub(crate) fn arb_constant() -> impl Strategy<Value = Constant> {
     ]
 }
 
+/// A constant for a **fact** argument, which is where `absent` realistically
+/// enters a program: an empty CSV cell or a JSON/DB null materializes as an
+/// absent-valued base fact (§13). About one value in ten.
+///
+/// Deliberately *not* [`arb_constant`], which feeds rule and query bodies: a
+/// literal `absent` in a body atom argument or as a comparison operand is a
+/// structured error (§4/§8), so generating one there would only ever produce
+/// programs that fail to lower. Absent belongs in the data, not the text.
+pub(crate) fn arb_fact_constant() -> impl Strategy<Value = Constant> {
+    prop_oneof![9 => arb_constant(), 1 => Just(Constant::Absent)]
+}
+
 /// A ground IR value, via the same constant pools.
 pub(crate) fn arb_value() -> impl Strategy<Value = ir::Value> {
     arb_constant().prop_map(|c| match c {
@@ -151,7 +163,7 @@ fn arb_program_spec(bounds: SpecBounds) -> impl Strategy<Value = ProgramSpec> {
     let facts = proptest::collection::vec(
         (
             any::<u8>(),
-            proptest::collection::vec(arb_constant(), MAX_ARITY),
+            proptest::collection::vec(arb_fact_constant(), MAX_ARITY),
         ),
         bounds.facts,
     );
@@ -1454,6 +1466,82 @@ mod tests {
             }
         }
         assert!(partial > 0, "generator never produced a partial selection");
+    }
+
+    /// Coverage guard for the **absent value** (§4). Until 2026-07-25 no
+    /// generator emitted `absent` at all, so every evaluator differential and
+    /// metamorphic property was blind to it — and the naive oracle, which had no
+    /// absent arms, would have disagreed with the engine the moment one
+    /// appeared. This pins that absent-valued facts really do reach the
+    /// generated programs (and so B1/B3/B4/E1–E4), and that they reach them only
+    /// through *data*: a literal `absent` in a rule or query body would not
+    /// lower (§4/§8), so `arb_constant` must never produce one.
+    #[test]
+    fn generator_emits_absent_in_facts_only() {
+        let mut runner = TestRunner::deterministic();
+        let strategy = arb_safe_program();
+        let (mut absent_facts, mut absent_in_bodies) = (0, 0);
+        for _ in 0..200 {
+            let program = strategy
+                .new_tree(&mut runner)
+                .expect("strategy produces a value")
+                .current();
+            for statement in &program.statements {
+                let StatementKind::Clause(clause) = &statement.kind else {
+                    continue;
+                };
+                let head_args = match &clause.head.args {
+                    Args::Positional(terms) => terms.clone(),
+                    Args::Named(pairs) => pairs.iter().map(|p| p.value.clone()).collect(),
+                };
+                let is_fact = clause.body.is_empty();
+                for arg in &head_args {
+                    if matches!(
+                        &arg.kind,
+                        ExprKind::Term(Term {
+                            kind: TermKind::Constant(Constant::Absent),
+                            ..
+                        })
+                    ) {
+                        if is_fact {
+                            absent_facts += 1;
+                        } else {
+                            absent_in_bodies += 1;
+                        }
+                    }
+                }
+                for literal in &clause.body {
+                    let LiteralKind::Atom { atom, .. } = &literal.kind else {
+                        continue;
+                    };
+                    let args: Vec<_> = match &atom.args {
+                        Args::Positional(terms) => terms.clone(),
+                        Args::Named(pairs) => pairs.iter().map(|p| p.value.clone()).collect(),
+                    };
+                    absent_in_bodies += args
+                        .iter()
+                        .filter(|arg| {
+                            matches!(
+                                &arg.kind,
+                                ExprKind::Term(Term {
+                                    kind: TermKind::Constant(Constant::Absent),
+                                    ..
+                                })
+                            )
+                        })
+                        .count();
+                }
+            }
+        }
+        assert!(
+            absent_facts > 0,
+            "generator never produced an absent-valued fact — the evaluator \
+             differentials would be blind to §4 again"
+        );
+        assert_eq!(
+            absent_in_bodies, 0,
+            "a literal `absent` reached a rule/query body, which cannot lower (§4/§8)"
+        );
     }
 
     /// Coverage guard for the negation paths (the A13 precedent): sampling

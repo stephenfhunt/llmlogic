@@ -16,6 +16,79 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-25 — Correctness review of milestones 8–9, and the fixes
+
+**Done**
+- Reviewed the absent value (§4/§8) and aggregation (§9) — both shipped
+  2026-07-24 — against the spec and by probing the built binary. Happy paths held
+  (implicit grouping, empty groups, named args in a goal, contextual operator
+  names, recursion-through-aggregate rejection, the CSV-with-gaps →
+  `sum`/`avg`/`count` pipeline). Four defects and several gaps did not. All fixed
+  except one, deliberately. 298 lib tests + 61 integration/system, clippy + fmt
+  clean, `--no-default-features` green.
+  - **Query-aggregate panic (P1).** `datalog f.dl -q 'N = count { C | p(P,C) }'`
+    panicked (exit 101) — `Model::answer` projected *every named* slot, and an
+    aggregate's goal-local variables are named but bound only in the sub-join.
+    Exactly the form `SKILL.md` teaches. Lowering now computes
+    `ir::Query::projection`; the residual case is a structured error.
+  - **Source-order grouping (P1).** `q(X), Y = X, N = count{C|r(Y,C)}` grouped by
+    `Y`; moving `Y = X` after the aggregate silently made it existential and
+    counted everything — two orderings of one conjunction, two answers. Group
+    keys are now identified syntactically and an unbound one is an error.
+  - **The oracle was blind to `absent` (P1).** `naive.rs` had *no* absent
+    semantics — plain `==`, no annihilation, presence ignored — so B1 could not
+    see the newest feature in the language; no generator emitted absent, which is
+    the only reason it was green. Oracle rewritten from the §4/§8 truth tables
+    (independently, not by calling `unifies_with`), absent added to generated
+    *facts*, and `absent_ir` builds the discriminating shapes — the general
+    generator alone never lands two absents in one joined position. Each of the
+    five absent rules verified by mutation.
+  - Nested aggregates and goal-local assignments were wrongly rejected;
+    `V != absent` (an always-false filter that reads as "where it exists") now
+    steers to `is not absent`; §9's "skip but report" reports, via a warning read
+    back out of the recorded provenance.
+  - **Aggregation had one generated shape** and no independent grouping oracle.
+    Added one (B7/C2 style, calling neither evaluator nor `fold_aggregate`) plus
+    multi-key/empty/cross-relation/negated-goal shapes and order invariance.
+  - **§12 is now Draft.** `Error` is a struct — category, message, span,
+    line/column, suggestion — with `Display` composed from the fields; parser
+    `Result<T, ()>` → `Result<T, Reported>` (no constructor outside the error
+    helpers). Lossy int→float widening on the import path is now an error.
+
+**Decided (detail in `spec.md` §17, 2026-07-25)**
+- Query **answer variables** are the ones the body *binds*, not every named slot.
+- A **group key must be bound where the aggregate runs**; reordering a body may
+  turn a program into an error, never into a different answer.
+- The **literal `absent` is not a comparison operand** (the producer form
+  `X = absent` stays).
+- **Rejected** moving the derived `Eq`/`Ord` off `Value` onto a storage-key
+  newtype: ~146 sites depend on the derive for legitimate structural uses, to
+  guard four semantic ones — and it would not have prevented the bug it was
+  proposed for. `Value::unifies_with` / `Value::is_absent` instead.
+
+- **Follow-on the same day: body scheduling.** Reviewing the group-key fix, the
+  user asked why an out-of-order aggregate should be an *error* rather than just
+  scheduled correctly — and was right. A blanket "aggregates last" does not work
+  (dependencies run both ways: `N = count{…}, M = N+1` needs the aggregate
+  *first*), but dependency scheduling does. New `src/schedule.rs`: each builtin
+  declares reads/binds, the body is scheduled to a fixpoint, source order breaks
+  ties so any body that already worked keeps its exact order. Rejection is now
+  reserved for bodies where no order works, split into **unbound** vs
+  **circular** — the cycle case is what the previous error advised impossibly
+  ("move its `=`-assignment before the aggregate"). Subsumes the `=`-chain wart
+  too: `M = N+1, N = A+1` is accepted. B5 became unconditional; the scheduler
+  carries its own contract property since both evaluators share it and B1 cannot
+  see a bug they share. Four helper functions in `lower.rs` fell out as dead.
+
+**Next up**
+- **Design session: `absent` × negation** — `q(X) :- p(X), not p(X).` derives
+  `q(absent)` (P ∧ ¬P), and `p(X), p(X)` selects less than `p(X)`. A variable
+  bound to absent is both matched and unmatchable. Three candidate directions and
+  an executable acceptance criterion (two `#[ignore]`d tests) are in §17; **not
+  patched** — every fix moves §4's structural/semantic split. Highest priority.
+- Then **performance** (profile the USDA join first), and the §12 follow-ons
+  (code vocabulary, spans on semantic errors).
+
 ## 2026-07-24 — §9 aggregation: design + implementation (milestone 9)
 
 **Done**

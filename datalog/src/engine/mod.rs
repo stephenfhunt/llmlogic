@@ -116,8 +116,13 @@ impl Model {
     }
 
     /// Answers a query as a projection over the model (spec §17): one row per
-    /// distinct binding of the query's named variables (`var_names` entries
-    /// that are `Some`, in slot order), sorted in canonical order.
+    /// distinct binding of the query's [answer variables]
+    /// ([`Query::projection`]), in slot order, sorted in canonical order.
+    ///
+    /// The projection is lowering's, not "every named slot": an aggregate's
+    /// goal-local variables are named but bound only inside the sub-join (§9).
+    /// A slot the match left unbound is malformed IR and surfaces as a
+    /// structured error rather than a panic.
     pub fn answer(&self, query: &Query) -> Result<Vec<Vec<Value>>> {
         validate_body(&query.body, &query.var_names)?;
         let views = vec![AtomView::Full; query.body.len()];
@@ -128,20 +133,30 @@ impl Model {
             views: &views,
         };
         let mut rows: BTreeSet<Vec<Value>> = BTreeSet::new();
+        let mut unbound: Option<u32> = None;
         enumerate_matches(&cx, query.var_names.len(), &mut |bindings, _premises| {
-            let row = query
-                .var_names
-                .iter()
-                .enumerate()
-                .filter(|(_, name)| name.is_some())
-                .map(|(slot, _)| {
-                    bindings[slot]
-                        .clone()
-                        .expect("query variables are bound by body atoms")
-                })
-                .collect();
+            let mut row = Vec::with_capacity(query.projection.len());
+            for &slot in &query.projection {
+                match bindings.get(slot as usize).and_then(|v| v.clone()) {
+                    Some(value) => row.push(value),
+                    None => {
+                        unbound.get_or_insert(slot);
+                        return;
+                    }
+                }
+            }
             rows.insert(row);
         })?;
+        if let Some(slot) = unbound {
+            let name = query
+                .var_names
+                .get(slot as usize)
+                .and_then(|name| name.as_deref())
+                .unwrap_or("_");
+            return Err(Error::semantic(format!(
+                "malformed IR: query answer variable `{name}` is not bound by the query body"
+            )));
+        }
         Ok(rows.into_iter().collect())
     }
 
@@ -200,14 +215,14 @@ fn validate(program: &Program) -> Result<()> {
             .filter(|covered| !**covered)
             .map(|covered| *covered = true);
         if covered.is_none() {
-            return Err(Error::Semantic(format!(
+            return Err(Error::semantic(format!(
                 "malformed IR: strata repeat rule {} or reference one out of range",
                 rule_id.0
             )));
         }
     }
     if let Some(missing) = seen.iter().position(|covered| !covered) {
-        return Err(Error::Semantic(format!(
+        return Err(Error::semantic(format!(
             "malformed IR: strata do not cover rule {missing}"
         )));
     }
@@ -257,7 +272,7 @@ fn check_stratum_contract(
     for literal in body {
         match &literal.kind {
             BodyLiteralKind::Atom(atom) if under_aggregate && too_high(atom.pred) => {
-                return Err(Error::Semantic(format!(
+                return Err(Error::semantic(format!(
                     "malformed IR: rule {} aggregates over `{}`, which is not defined in a \
                      strictly lower stratum",
                     rule_id.0,
@@ -265,7 +280,7 @@ fn check_stratum_contract(
                 )));
             }
             BodyLiteralKind::NegAtom(atom) if too_high(atom.pred) => {
-                return Err(Error::Semantic(format!(
+                return Err(Error::semantic(format!(
                     "malformed IR: rule {} negates `{}`, which is not defined in a \
                      strictly lower stratum",
                     rule_id.0,
@@ -313,7 +328,7 @@ fn validate_body_seeded(
                         && !positively_bound(body, *var)
                         && !seed.contains(&var.0)
                     {
-                        return Err(Error::Semantic(format!(
+                        return Err(Error::semantic(format!(
                             "malformed IR: named variable `{name}` in negated atom is not \
                              bound by a positive body atom"
                         )));
@@ -492,42 +507,33 @@ type OnMatch<'a> = dyn FnMut(&[Option<Value>], &[Option<Premise>]) + 'a;
 /// are recorded at their true body index, so `BodyIdx` alignment is
 /// untouched. Calls `on_match` once per match of the whole body.
 fn enumerate_matches(cx: &JoinCx<'_>, num_vars: usize, on_match: &mut OnMatch<'_>) -> Result<()> {
-    let order = literal_order(cx.body);
+    let order = literal_order(cx.body)?;
     let mut bindings: Vec<Option<Value>> = vec![None; num_vars];
     let mut premises: Vec<Option<Premise>> = vec![None; cx.body.len()];
     enumerate_from(cx, &order, 0, &mut bindings, &mut premises, on_match)
 }
 
-/// Body-literal evaluation order: positive atoms first (they bind variables),
-/// then negated atoms as anti-join filters, then comparison / presence /
-/// aggregate builtins in source order. Positives-first guarantees every
-/// non-assignment operand is bound (including an aggregate's group keys, §9);
-/// source order among the builtins preserves assignment and aggregate chains
-/// (`N = A+1, M = N+1`; an aggregate result consumed by a later comparison).
-/// Shared by the top-level join and each aggregate's sub-join.
-fn literal_order(body: &[BodyLiteral]) -> Vec<usize> {
-    let mut order: Vec<usize> = Vec::with_capacity(body.len());
-    for (idx, literal) in body.iter().enumerate() {
-        if matches!(literal.kind, BodyLiteralKind::Atom(_)) {
-            order.push(idx);
-        }
-    }
-    for (idx, literal) in body.iter().enumerate() {
-        if matches!(literal.kind, BodyLiteralKind::NegAtom(_)) {
-            order.push(idx);
-        }
-    }
-    for (idx, literal) in body.iter().enumerate() {
-        if matches!(
-            literal.kind,
-            BodyLiteralKind::Compare { .. }
-                | BodyLiteralKind::Presence { .. }
-                | BodyLiteralKind::Aggregate { .. }
-        ) {
-            order.push(idx);
-        }
-    }
-    order
+/// The body's evaluation order, from [`crate::schedule`]: positive atoms first
+/// (they bind variables), then negated atoms as anti-join filters, then the
+/// builtins in **dependency** order.
+///
+/// Lowering has already rejected any body that cannot be scheduled, so a failure
+/// here is malformed hand-built IR and surfaces as a structured error. The
+/// scheduler is a pure function of the body, so lowering and both evaluators
+/// derive the same order from the same input — shared the way `fold_aggregate`
+/// is. Used for the top-level join and for each aggregate's sub-join.
+fn literal_order(body: &[BodyLiteral]) -> Result<Vec<usize>> {
+    crate::schedule::schedule_body(body).map_err(|failure| {
+        Error::semantic(format!(
+            "malformed IR: body literal {} can never run — variable slot {} is {}",
+            failure.literal,
+            failure.variable.0,
+            match failure.cause {
+                crate::schedule::ScheduleFailure::Unbound => "never bound",
+                crate::schedule::ScheduleFailure::Cycle => "part of a circular dependency",
+            }
+        ))
+    })
 }
 
 fn enumerate_from(
@@ -639,7 +645,7 @@ fn enumerate_from(
             // is bound, so a runtime error here is only a malformed-IR unbound
             // operand, which short-circuits like any comparison error.
             let value = eval_expr(expr, bindings)?;
-            let is_absent = value == Value::Absent;
+            let is_absent = value.is_absent();
             if is_absent != *negated {
                 premises[idx] = Some(Premise::Presence {
                     value,
@@ -672,7 +678,7 @@ fn enumerate_from(
                 body: goal,
                 views: &goal_views,
             };
-            let sub_order = literal_order(goal);
+            let sub_order = literal_order(goal)?;
             let mut sub_premises: Vec<Option<Premise>> = vec![None; goal.len()];
             // The multiset of the collected expression across the goal's witness
             // tuples (§9: multiplicity follows distinct witnesses, not distinct
@@ -738,7 +744,7 @@ pub(crate) struct AggregateOutcome {
 ///   extreme of a single ordered type.
 pub(crate) fn fold_aggregate(op: AggOp, values: &[Value]) -> Result<AggregateOutcome> {
     let total = values.len();
-    let present: Vec<&Value> = values.iter().filter(|v| **v != Value::Absent).collect();
+    let present: Vec<&Value> = values.iter().filter(|v| !v.is_absent()).collect();
     let skipped = total - present.len();
     let value = match op {
         // A binding is a binding (§9): absent-valued ones are counted, not skipped.
@@ -781,7 +787,7 @@ fn avg_values(present: &[&Value]) -> Result<Value> {
             Value::Int(i) => *i as f64,
             Value::Float(f) => f.get(),
             other => {
-                return Err(Error::Semantic(format!(
+                return Err(Error::semantic(format!(
                     "type error: avg requires numeric values, got {}",
                     value_type_name(other)
                 )));
@@ -803,7 +809,7 @@ fn extreme_value(present: &[&Value], want_max: bool) -> Result<Value> {
     for value in rest {
         let value: &Value = value;
         if std::mem::discriminant(acc) != std::mem::discriminant(value) {
-            return Err(Error::Semantic(format!(
+            return Err(Error::semantic(format!(
                 "type error: min/max requires values of the same type, got {} and {}",
                 value_type_name(acc),
                 value_type_name(value),
@@ -818,15 +824,6 @@ fn extreme_value(present: &[&Value], want_max: bool) -> Result<Value> {
     Ok(acc.clone())
 }
 
-/// The **semantic** sameness of two ground values (§4): structural equality,
-/// except `absent` unifies with nothing — not with a value, and not with
-/// another `absent`. This is the join/anti-join notion (keeping missing foreign
-/// keys from matching each other); the *structural* notion (`Value`'s derived
-/// `Eq`, where `absent == absent`) is reserved for set dedup and output order.
-pub(crate) fn values_unify(a: &Value, b: &Value) -> bool {
-    *a != Value::Absent && a == b
-}
-
 /// Unifies an atom against a ground tuple under the current bindings.
 /// Returns the slots newly bound here (for backtracking), or `None` on
 /// mismatch (with any partial bindings already undone).
@@ -834,14 +831,14 @@ fn try_match(atom: &Atom, tuple: &Tuple, bindings: &mut [Option<Value>]) -> Opti
     let mut bound: Vec<usize> = Vec::new();
     for (term, value) in atom.args.iter().zip(&tuple.0) {
         let matches = match term {
-            Term::Const(constant) => values_unify(constant, value),
+            Term::Const(constant) => constant.unifies_with(value),
             Term::Var(var) => {
                 let slot = var.0 as usize;
                 match &bindings[slot] {
                     // An already-bound value must semantically unify with the
                     // cell — `absent` unifies with nothing, so a slot bound to
                     // `absent` (or a cell that is `absent`) never re-matches.
-                    Some(existing) => values_unify(existing, value),
+                    Some(existing) => existing.unifies_with(value),
                     // A fresh slot binds to *whatever* is here, `absent`
                     // included — this is how a missing cell flows to the head
                     // (`recorded(F, N, A) :- measurement(…, amount: A)`). The
@@ -932,11 +929,11 @@ fn apply_compare(op: CmpOp, lhs: &Value, rhs: &Value) -> Result<bool> {
     // both false when `X` is absent (which is why presence has its own operator,
     // `is [not] absent`). This precedes the same-type check below: `absent`
     // never reaches it.
-    if *lhs == Value::Absent || *rhs == Value::Absent {
+    if lhs.is_absent() || rhs.is_absent() {
         return Ok(false);
     }
     if std::mem::discriminant(lhs) != std::mem::discriminant(rhs) {
-        return Err(Error::Semantic(format!(
+        return Err(Error::semantic(format!(
             "type error: comparison `{}` requires operands of the same type, got {} and {}",
             cmp_symbol(op),
             value_type_name(lhs),
@@ -964,7 +961,7 @@ pub(crate) fn eval_expr(expr: &Expr, bindings: &[Option<Value>]) -> Result<Value
     match expr {
         Expr::Term(Term::Const(value)) => Ok(value.clone()),
         Expr::Term(Term::Var(var)) => bindings[var.0 as usize].clone().ok_or_else(|| {
-            Error::Semantic(
+            Error::semantic(
                 "malformed IR: arithmetic operand variable is not bound by the body".to_string(),
             )
         }),
@@ -983,13 +980,13 @@ fn apply_arith(op: ArithOp, lhs: Value, rhs: Value) -> Result<Value> {
     // Absent annihilates (§8), *ahead* of the type/div-by-zero/overflow checks:
     // `absent / 0` and `5 / absent` are both `absent`, never an error. This is
     // value-propagation, not a third truth value.
-    if lhs == Value::Absent || rhs == Value::Absent {
+    if lhs.is_absent() || rhs.is_absent() {
         return Ok(Value::Absent);
     }
     match (&lhs, &rhs) {
         (Value::Int(a), Value::Int(b)) => arith_int(op, *a, *b),
         (Value::Float(a), Value::Float(b)) => arith_float(op, *a, *b),
-        _ => Err(Error::Semantic(format!(
+        _ => Err(Error::semantic(format!(
             "type error: arithmetic `{}` requires two ints or two floats, got {} and {}",
             arith_symbol(op),
             value_type_name(&lhs),
@@ -1008,7 +1005,7 @@ fn arith_int(op: ArithOp, a: i64, b: i64) -> Result<Value> {
         ArithOp::Mul => a.checked_mul(b),
         ArithOp::Div => {
             if b == 0 {
-                return Err(Error::Semantic(format!(
+                return Err(Error::semantic(format!(
                     "arithmetic error: division by zero in `{a} / {b}`"
                 )));
             }
@@ -1016,7 +1013,7 @@ fn arith_int(op: ArithOp, a: i64, b: i64) -> Result<Value> {
         }
     };
     checked.map(Value::Int).ok_or_else(|| {
-        Error::Semantic(format!(
+        Error::semantic(format!(
             "arithmetic error: integer overflow in `{a} {} {b}`",
             arith_symbol(op)
         ))
@@ -1143,13 +1140,13 @@ mod tests {
     #[test]
     fn values_unify_is_structural_equality_minus_absent() {
         // Equal values unify; unequal do not.
-        assert!(values_unify(&Value::Int(1), &Value::Int(1)));
-        assert!(!values_unify(&Value::Int(1), &Value::Int(2)));
+        assert!(Value::Int(1).unifies_with(&Value::Int(1)));
+        assert!(!Value::Int(1).unifies_with(&Value::Int(2)));
         // Absent unifies with nothing — not a value, not another absent — even
         // though it is *structurally* equal to itself (set dedup relies on that).
-        assert!(!values_unify(&Value::Absent, &Value::Int(1)));
-        assert!(!values_unify(&Value::Int(1), &Value::Absent));
-        assert!(!values_unify(&Value::Absent, &Value::Absent));
+        assert!(!Value::Absent.unifies_with(&Value::Int(1)));
+        assert!(!Value::Int(1).unifies_with(&Value::Absent));
+        assert!(!Value::Absent.unifies_with(&Value::Absent));
         assert_eq!(Value::Absent, Value::Absent); // structural: still equal
     }
 
@@ -1881,6 +1878,7 @@ mod tests {
                 },
             ],
             var_names: vec![Some("X".to_string()), None],
+            projection: vec![0],
             span: Span::DUMMY,
         });
         let model = eval(&program).unwrap();
@@ -2424,9 +2422,9 @@ mod tests {
             /// but absent unifies with nothing.
             #[test]
             fn values_unify_matches_eq_off_absent(a in arb_value(), b in arb_value()) {
-                prop_assert_eq!(values_unify(&a, &b), a == b);
-                prop_assert!(!values_unify(&a, &Value::Absent));
-                prop_assert!(!values_unify(&Value::Absent, &a));
+                prop_assert_eq!(a.unifies_with(&b), a == b);
+                prop_assert!(!a.unifies_with(&Value::Absent));
+                prop_assert!(!Value::Absent.unifies_with(&a));
             }
 
             /// `absent` sorts before every typed value under the canonical `Ord`.
@@ -2434,6 +2432,64 @@ mod tests {
             fn absent_sorts_first(v in arb_value()) {
                 prop_assert!(Value::Absent < v);
             }
+        }
+
+        // --- Logical laws `absent` currently breaks (spec §17 open question) ---
+        //
+        // Both tests below assert what a *sound* engine must deliver and both
+        // currently FAIL, so they are `#[ignore]`d rather than deleted: they are
+        // the executable acceptance criterion for the absent × negation design
+        // session (§17, 2026-07-25). Run them with `cargo test -- --ignored`.
+        //
+        // Shared cause: `try_match` binds a *fresh* slot to a stored `absent`
+        // (that is how a missing cell flows to a head), but every *subsequent*
+        // use of that slot goes through `unifies_with`, which absent always
+        // fails. A variable bound to absent is therefore simultaneously matched
+        // and unmatchable — so a second occurrence of it cannot re-match, and an
+        // anti-join over it can never be refuted.
+
+        /// Answers of `?- <goal>.` against `facts`, as printed values.
+        fn answers_of(facts: &str, rule: &str, query_pred: &str) -> Vec<Vec<Value>> {
+            let src = format!("{facts}{rule}?- {query_pred}(X).\n");
+            let ast = crate::parser::parse(&src).expect("parses");
+            let program = lower(&ast).expect("lowers");
+            let model = eval(&program).expect("evaluates");
+            model.answer(&program.queries[0]).expect("answers")
+        }
+
+        /// **Non-contradiction**: no body can be satisfied by both `p(X)` and
+        /// `not p(X)`, for any `X`.
+        ///
+        /// Today `q(X) :- p(X), not p(X).` derives `q(absent)` when `p(absent)`
+        /// is stored — P ∧ ¬P, in an engine whose advertised uses include
+        /// consistency checking. SQL's analogue (`NOT IN` over a NULL) returns no
+        /// row, so this is further from sound than three-valued logic, not a
+        /// two-valued simplification of it.
+        #[test]
+        #[ignore = "absent x negation: open design question (spec §17, 2026-07-25)"]
+        fn a_fact_never_satisfies_its_own_negation() {
+            let answers = answers_of("p(1).\np(absent).\n", "q(X) :- p(X), not p(X).\n", "q");
+            assert!(
+                answers.is_empty(),
+                "P and not-P were both satisfied: {answers:?}"
+            );
+        }
+
+        /// **Idempotence of conjunction**: `p(X), p(X)` selects exactly what
+        /// `p(X)` selects.
+        ///
+        /// Today the doubled body drops every absent row, because the second
+        /// occurrence of `X` — by then bound to `absent` — unifies with nothing.
+        /// So repeating a literal, which is semantically a no-op in any logic,
+        /// changes the answer.
+        #[test]
+        #[ignore = "absent x repeated occurrence: open design question (spec §17, 2026-07-25)"]
+        fn repeating_a_body_literal_does_not_change_the_answer() {
+            let facts = "p(1).\np(absent).\n";
+            assert_eq!(
+                answers_of(facts, "one(X) :- p(X).\n", "one"),
+                answers_of(facts, "two(X) :- p(X), p(X).\n", "two"),
+            );
         }
 
         proptest! {
@@ -2892,6 +2948,78 @@ mod tests {
             }
         }
 
+        // --- The absent value (§4/§8) ---
+
+        /// Builds an absent-rich program from generated `p`/`q` edges over the
+        /// pool `{1, 2, absent}`, exercising every place §4's "absent unifies
+        /// with nothing" rule can bite:
+        ///
+        /// - `chain` joins two relations on a middle column that may be absent;
+        /// - `self_join` repeats a variable *within* one atom;
+        /// - `unmatched` anti-joins on a key that may be absent;
+        /// - `flows` just carries a column through, which must keep absent;
+        /// - `above` filters on a comparison whose operand may be absent (false,
+        ///   never a type error);
+        /// - `bumped` does arithmetic on one (annihilation);
+        /// - `present`/`missing` are the two halves of the presence filter, which
+        ///   the oracle used to ignore outright.
+        ///
+        /// A shape-targeted generator in the `aggregate_ir` style: the general
+        /// program generator does emit absent facts, but the odds that two of
+        /// them meet in a joined position of the same small program are slim, so
+        /// the discriminating cases need to be built deliberately.
+        fn absent_ir(p_rows: &[(u8, u8)], q_rows: &[(u8, u8)]) -> Program {
+            // 2 is the absent slot in the pool; 0 and 1 are ordinary ints.
+            let cell = |n: u8| match n % 3 {
+                0 => "0".to_string(),
+                1 => "1".to_string(),
+                _ => "absent".to_string(),
+            };
+            let mut src = String::new();
+            for (a, b) in p_rows {
+                src.push_str(&format!("p({}, {}).\n", cell(*a), cell(*b)));
+            }
+            for (a, b) in q_rows {
+                src.push_str(&format!("q({}, {}).\n", cell(*a), cell(*b)));
+            }
+            src.push_str(
+                "chain(X, Y) :- p(X, Z), q(Z, Y).\n\
+                 self_join(X) :- p(X, X).\n\
+                 unmatched(X) :- p(X, _), not q(X, _).\n\
+                 flows(X, Y) :- p(X, Y).\n\
+                 above(X) :- p(X, _), X > 0.\n\
+                 bumped(X, N) :- p(X, Y), N = Y + 1.\n\
+                 present(X) :- p(X, Y), Y is not absent.\n\
+                 missing(X) :- p(X, Y), Y is absent.\n",
+            );
+            let ast = crate::parser::parse(&src).expect("generated source parses");
+            lower(&ast).expect("generated absent program lowers")
+        }
+
+        proptest! {
+            // An evaluator differential; keep the case count modest.
+            #![proptest_config(ProptestConfig::with_cases(96))]
+
+            /// B1 for the absent value: naive and semi-naive agree over programs
+            /// that actually *join* on absent.
+            ///
+            /// This is the property that was missing. Before 2026-07-25 the
+            /// oracle had no absent semantics at all (plain `==`, no
+            /// annihilation), so it silently disagreed with the engine on every
+            /// absent value — and no generator emitted one, which is the only
+            /// reason B1 stayed green. Reverting either half (the oracle's
+            /// `same_value`, or `absent_ir`'s pool) must make this fail.
+            #[test]
+            fn b1_absent_programs_agree(
+                p_rows in prop::collection::vec((0u8..3, 0u8..3), 0..8),
+                q_rows in prop::collection::vec((0u8..3, 0u8..3), 0..8),
+            ) {
+                let program = absent_ir(&p_rows, &q_rows);
+                let model = eval(&program).unwrap();
+                prop_assert_eq!(model_facts(&model), naive_eval(&program).unwrap());
+            }
+        }
+
         // --- Aggregation (§9) ---
 
         /// Builds an aggregate program from generated edges: `op`-aggregate the
@@ -2908,6 +3036,270 @@ mod tests {
             ));
             let ast = crate::parser::parse(&src).expect("generated source parses");
             lower(&ast).expect("generated aggregate program lowers")
+        }
+
+        /// The §16.4 shape with the rule's three body literals in a chosen
+        /// order — two positive atoms supplying the group key and the aggregate.
+        /// Returns `None` if that order does not lower (see
+        /// `b5_aggregate_body_order_does_not_change_the_model`).
+        fn aggregate_ir_permuted(op: &str, edges: &[(u8, u8)], perm: usize) -> Option<Program> {
+            let mut src = String::new();
+            for (a, b) in edges {
+                src.push_str(&format!("edge({a}, {b}).\nnode({a}).\n"));
+            }
+            let literals = [
+                "edge(K, _)".to_string(),
+                "node(K)".to_string(),
+                format!("N = {op} {{ V | edge(K, V) }}"),
+            ];
+            // The `perm`-th of the 3! orderings, by Lehmer code.
+            let mut pool: Vec<&String> = literals.iter().collect();
+            let mut ordered: Vec<&String> = Vec::with_capacity(3);
+            let mut rest = perm;
+            for radix in (1..=3).rev() {
+                ordered.push(pool.remove(rest % radix));
+                rest /= radix;
+            }
+            let body: Vec<&str> = ordered.iter().map(|s| s.as_str()).collect();
+            src.push_str(&format!("result(K, N) :- {}.\n", body.join(", ")));
+            let ast = crate::parser::parse(&src).expect("generated source parses");
+            lower(&ast).ok()
+        }
+
+        proptest! {
+            /// B5 for aggregation: **every ordering lowers, and all agree**.
+            ///
+            /// A body is a conjunction, so where its literals are written must
+            /// not decide what it means. Since builtins are dependency-scheduled
+            /// (`crate::schedule`, 2026-07-25) this holds unconditionally for the
+            /// shapes here, rather than only for the permutations that happened
+            /// to be written in dependency order. Two earlier states this pins
+            /// against: before scheduling, moving a group key's binder past the
+            /// aggregate was rejected; before *that*, it silently turned the key
+            /// existential and aggregated over everything.
+            #[test]
+            fn b5_aggregate_body_order_does_not_change_the_model(
+                edges in prop::collection::vec((0u8..4, 0u8..6), 0..10),
+                op in prop::sample::select(vec!["count", "sum", "min", "max", "avg"]),
+            ) {
+                let baseline = aggregate_ir_permuted(op, &edges, 0)
+                    .map(|p| model_facts(&eval(&p).unwrap()));
+                prop_assert!(baseline.is_some(), "the source order must lower");
+                for perm in 1..6 {
+                    let program = aggregate_ir_permuted(op, &edges, perm);
+                    prop_assert!(program.is_some(), "perm {} failed to lower", perm);
+                    let facts = model_facts(&eval(&program.unwrap()).unwrap());
+                    prop_assert_eq!(&facts, baseline.as_ref().unwrap(), "perm {}", perm);
+                }
+            }
+
+            /// The same invariance where it used to fail hardest: the group key
+            /// is bound by an **`=`-assignment**, and every position of that
+            /// assignment relative to the aggregate must give one answer.
+            #[test]
+            fn b5_a_computed_group_key_is_order_independent(
+                edges in prop::collection::vec((0u8..5, 0u8..6), 0..10),
+                op in prop::sample::select(vec!["count", "sum", "min", "max", "avg"]),
+            ) {
+                let mut facts = String::new();
+                for (a, b) in &edges {
+                    facts.push_str(&format!("edge({a}, {b}).\nnode({a}).\n"));
+                }
+                // `Y = X + 1` binds the group key; try it before and after the
+                // aggregate that reads it.
+                let build = |body: &str| {
+                    let src = format!("{facts}result(X, N) :- {body}.\n");
+                    let ast = crate::parser::parse(&src).expect("parses");
+                    lower(&ast).expect("both orderings schedule")
+                };
+                let before = build(&format!(
+                    "node(X), Y = X + 1, N = {op} {{ V | edge(Y, V) }}"
+                ));
+                let after = build(&format!(
+                    "node(X), N = {op} {{ V | edge(Y, V) }}, Y = X + 1"
+                ));
+                prop_assert_eq!(
+                    model_facts(&eval(&before).unwrap()),
+                    model_facts(&eval(&after).unwrap())
+                );
+            }
+        }
+
+        /// The §9 grouping shape the original `aggregate_ir` could not express:
+        /// group keys come from a **different relation** than the goal, so a key
+        /// with no matching rows is a genuine **empty group**, and the values may
+        /// be `absent`.
+        ///
+        /// `nodes` are the group keys; `edges` are `(key, Some(value) | None)`
+        /// where `None` prints as `absent`.
+        fn grouped_ir(op: AggOp, nodes: &[u8], edges: &[(u8, Option<i8>)]) -> Program {
+            let mut src = String::new();
+            for k in nodes {
+                src.push_str(&format!("node({k}).\n"));
+            }
+            for (k, v) in edges {
+                match v {
+                    Some(v) => src.push_str(&format!("edge({k}, {v}).\n")),
+                    None => src.push_str(&format!("edge({k}, absent).\n")),
+                }
+            }
+            src.push_str(&format!(
+                "result(K, N) :- node(K), N = {} {{ V | edge(K, V) }}.\n",
+                op.keyword()
+            ));
+            let ast = crate::parser::parse(&src).expect("generated source parses");
+            lower(&ast).expect("generated grouped program lowers")
+        }
+
+        /// The expected `result` relation for [`grouped_ir`], computed by a plain
+        /// group-by fold that touches **neither evaluator** and does not call
+        /// `fold_aggregate` — the B7/C2 pattern applied to §9.
+        ///
+        /// Set semantics is applied first (facts are a set, so equal `edge` rows
+        /// collapse); with the group key fixed, the goal's only variable is `V`,
+        /// so the witnesses are exactly the *distinct* values stored for that key.
+        fn expected_groups(op: AggOp, nodes: &[u8], edges: &[(u8, Option<i8>)]) -> BTreeSet<Tuple> {
+            let rows: BTreeSet<(u8, Option<i8>)> = edges.iter().copied().collect();
+            nodes
+                .iter()
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .map(|k| {
+                    let witnesses: Vec<Option<i8>> = rows
+                        .iter()
+                        .filter(|(key, _)| key == k)
+                        .map(|(_, v)| *v)
+                        .collect();
+                    let present: Vec<i64> = witnesses.iter().flatten().map(|v| *v as i64).collect();
+                    let value = match op {
+                        // A binding is a binding: absent witnesses are counted.
+                        AggOp::Count => Value::Int(witnesses.len() as i64),
+                        // Everything else skips absent; an empty present-set is
+                        // absent, never zero.
+                        AggOp::Sum if present.is_empty() => Value::Absent,
+                        AggOp::Sum => Value::Int(present.iter().sum()),
+                        AggOp::Avg if present.is_empty() => Value::Absent,
+                        AggOp::Avg => Value::Float(
+                            F64::new(present.iter().sum::<i64>() as f64 / present.len() as f64)
+                                .expect("a finite mean of small ints"),
+                        ),
+                        AggOp::Min => present
+                            .iter()
+                            .min()
+                            .map_or(Value::Absent, |v| Value::Int(*v)),
+                        AggOp::Max => present
+                            .iter()
+                            .max()
+                            .map_or(Value::Absent, |v| Value::Int(*v)),
+                    };
+                    Tuple(vec![Value::Int(i64::from(*k)), value])
+                })
+                .collect()
+        }
+
+        /// A richer aggregate shape for the B1 differential: a **multi-atom
+        /// goal** with a **negated literal** inside it, and a group key joined
+        /// from a second relation. Differenced against the naive oracle rather
+        /// than a hand-rolled one, so no disputed semantics is baked into an
+        /// oracle (§17: absent × negation is open).
+        ///
+        /// `goal_order` permutes the goal's three literals. The goal is a body,
+        /// so the evaluator schedules its positives before its negation whatever
+        /// the source order (`literal_order`); writing `not blocked(V)` ahead of
+        /// the atom that binds `V` must therefore still mean the same thing, and
+        /// not silently read `V` as a wildcard.
+        fn aggregate_goal_ir(
+            op: &str,
+            edges: &[(u8, u8)],
+            blocked: &[u8],
+            goal_order: usize,
+        ) -> Program {
+            let mut src = String::new();
+            for (a, b) in edges {
+                src.push_str(&format!("edge({a}, {b}).\nnode({a}).\n"));
+            }
+            for b in blocked {
+                src.push_str(&format!("blocked({b}).\n"));
+            }
+            src.push_str("tag(0, 9).\ntag(1, 8).\n");
+            let literals = ["edge(K, V)", "tag(_, _)", "not blocked(V)"];
+            let mut pool: Vec<&str> = literals.to_vec();
+            let mut ordered: Vec<&str> = Vec::with_capacity(3);
+            let mut rest = goal_order;
+            for radix in (1..=3).rev() {
+                ordered.push(pool.remove(rest % radix));
+                rest /= radix;
+            }
+            src.push_str(&format!(
+                "result(K, N) :- node(K), N = {op} {{ V | {} }}.\n",
+                ordered.join(", ")
+            ));
+            let ast = crate::parser::parse(&src).expect("generated source parses");
+            lower(&ast).expect("generated aggregate-goal program lowers")
+        }
+
+        proptest! {
+            // Evaluator properties; keep the case count modest.
+            #![proptest_config(ProptestConfig::with_cases(96))]
+
+            /// An **independent grouping oracle** for §9 (the B7/C2 pattern):
+            /// random `node`/`edge` data through the canonical grouped aggregate
+            /// equals a plain HashMap-style group-by fold that touches neither
+            /// evaluator. The fold proptests pin `fold_aggregate` in isolation
+            /// and the B1 differential pins the two evaluators against each
+            /// other; this is the only check that the *grouping* — which keys
+            /// exist, which witnesses land in which group — is right at all.
+            ///
+            /// Covers what the original single shape could not: group keys drawn
+            /// from a different relation than the goal, keys with **no** matching
+            /// rows (empty groups → `count` 0, everything else `absent`), and
+            /// absent-valued witnesses.
+            #[test]
+            fn aggregation_matches_an_independent_group_by(
+                nodes in prop::collection::vec(0u8..4, 0..5),
+                edges in prop::collection::vec((0u8..4, prop::option::of(-9i8..9)), 0..10),
+                op in prop::sample::select(vec![
+                    AggOp::Count, AggOp::Sum, AggOp::Min, AggOp::Max, AggOp::Avg,
+                ]),
+            ) {
+                let program = grouped_ir(op, &nodes, &edges);
+                let model = eval(&program).unwrap();
+                let result = program
+                    .predicates
+                    .iter()
+                    .position(|p| p.name == "result")
+                    .expect("the generated program defines `result`");
+                prop_assert_eq!(
+                    model.relation(PredId(result as u32)),
+                    &expected_groups(op, &nodes, &edges)
+                );
+            }
+
+            /// B1 over a **multi-atom, negated goal** — the aggregate goal shapes
+            /// the original generator never produced — and, across the goal's
+            /// literal orderings, the B5 invariant *inside* a goal: a goal is a
+            /// body, so its positives are scheduled before its negation whatever
+            /// the source order.
+            #[test]
+            fn b1_aggregate_goal_shapes_agree(
+                edges in prop::collection::vec((0u8..4, 0u8..6), 0..10),
+                blocked in prop::collection::vec(0u8..6, 0..4),
+                op in prop::sample::select(vec!["count", "sum", "min", "max", "avg"]),
+            ) {
+                let mut baseline: Option<BTreeSet<Fact>> = None;
+                for goal_order in 0..6 {
+                    let program = aggregate_goal_ir(op, &edges, &blocked, goal_order);
+                    let model = eval(&program).unwrap();
+                    let facts = model_facts(&model);
+                    prop_assert_eq!(&facts, &naive_eval(&program).unwrap());
+                    match &baseline {
+                        Some(expected) => {
+                            prop_assert_eq!(&facts, expected, "goal order {}", goal_order);
+                        }
+                        None => baseline = Some(facts),
+                    }
+                }
+            }
         }
 
         proptest! {

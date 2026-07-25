@@ -1,40 +1,166 @@
-//! Crate-wide error types.
+//! Crate-wide error types (`spec.md` §12).
 //!
 //! Errors are a design pillar: they must be *structured* and *actionable* so an
-//! LLM/agent can react to them programmatically rather than scraping text. This is
-//! a skeleton — the concrete taxonomy is specified in `spec.md` §12 (Error model)
-//! and will expand as the lexer, parser, and engine land.
+//! LLM/agent can react to them programmatically rather than scraping text.
+//!
+//! [`Error`] is therefore **data with a rendering**, not a rendering with data
+//! attached (§12, 2026-07-25). It carries its category, its sentence, and —
+//! where the producing stage knew one — a source span resolved to a 1-based
+//! **line and column**. Before this, every error was a bare `String` with the
+//! location `format!`ed into it as `"(at byte 217)"`: nothing downstream could
+//! recover a position without parsing English, and a byte offset cannot be
+//! turned into a caret or a "file:line" an editor will jump to.
+//!
+//! Still to come (§12, tracked in `ROADMAP.md`): a stable machine-readable
+//! **code** vocabulary, and spans on the semantic/source errors — lowering
+//! reports many of its errors from places where the responsible span is not
+//! currently threaded, and picking the right one per error is a design pass, not
+//! a mechanical change.
 
 use std::fmt;
+
+use crate::ast::Span;
 
 /// Convenient result alias used throughout the crate.
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Which stage rejected the program, and so which vocabulary the message speaks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum ErrorKind {
+    /// A lexical error (bad token, unterminated literal, …).
+    Lex,
+    /// A syntax error (grammar violation).
+    Parse,
+    /// A semantic/safety error (unsafe rule, stratification violation, type
+    /// conflict, …).
+    Semantic,
+    /// An error while loading facts from an external source (§13).
+    Source,
+}
+
+impl ErrorKind {
+    /// The label this kind is rendered under.
+    pub fn label(self) -> &'static str {
+        match self {
+            ErrorKind::Lex => "lexical error",
+            ErrorKind::Parse => "syntax error",
+            ErrorKind::Semantic => "semantic error",
+            ErrorKind::Source => "source error",
+        }
+    }
+}
+
+/// A 1-based source position, as humans and editors count.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Position {
+    pub line: u32,
+    pub column: u32,
+}
+
+impl Position {
+    /// Resolves the position of byte offset `offset` in `source`.
+    ///
+    /// Columns count **characters**, not bytes, so a caret placed at the
+    /// reported column lands correctly under non-ASCII text. An offset past the
+    /// end clamps to the last position.
+    pub fn locate(source: &str, offset: u32) -> Position {
+        let offset = (offset as usize).min(source.len());
+        let consumed = &source[..offset];
+        let line = consumed.matches('\n').count() as u32 + 1;
+        let line_start = consumed.rfind('\n').map_or(0, |index| index + 1);
+        let column = source[line_start..offset].chars().count() as u32 + 1;
+        Position { line, column }
+    }
+}
+
+impl fmt::Display for Position {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}:{}", self.line, self.column)
+    }
+}
+
 /// A structured error produced by the engine.
 ///
-/// TODO(spec §12): flesh out variants with source spans, machine-readable codes,
-/// and suggested fixes suitable for agent consumption.
+/// Build with [`Error::lex`] / [`Error::parse`] / [`Error::semantic`] /
+/// [`Error::source`], then attach what is known: [`Error::at`] for a span whose
+/// position has been resolved, [`Error::suggest`] for a fix to offer. `Display`
+/// composes those fields; nothing is baked into `message`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum Error {
-    /// A lexical error (bad token, unterminated literal, …).
-    Lex(String),
-    /// A syntax error (grammar violation).
-    Parse(String),
-    /// A semantic/safety error (e.g. unsafe rule, stratification violation).
-    Semantic(String),
-    /// An error while loading facts from an external source.
-    Source(String),
+pub struct Error {
+    pub kind: ErrorKind,
+    /// The diagnostic sentence — no location, no suggestion, no category prefix.
+    pub message: String,
+    /// The byte range in the source this error is about, if the stage knew one.
+    pub span: Option<Span>,
+    /// `span.start` resolved against the source text, if it was in hand.
+    pub position: Option<Position>,
+    /// A concrete fix to offer, rendered as "(did you mean …?)"-style trailer.
+    pub suggestion: Option<String>,
+}
+
+impl Error {
+    fn new(kind: ErrorKind, message: impl Into<String>) -> Error {
+        Error {
+            kind,
+            message: message.into(),
+            span: None,
+            position: None,
+            suggestion: None,
+        }
+    }
+
+    /// A lexical error.
+    pub fn lex(message: impl Into<String>) -> Error {
+        Error::new(ErrorKind::Lex, message)
+    }
+
+    /// A syntax error.
+    pub fn parse(message: impl Into<String>) -> Error {
+        Error::new(ErrorKind::Parse, message)
+    }
+
+    /// A semantic/safety error.
+    pub fn semantic(message: impl Into<String>) -> Error {
+        Error::new(ErrorKind::Semantic, message)
+    }
+
+    /// An external-source error (§13).
+    pub fn source(message: impl Into<String>) -> Error {
+        Error::new(ErrorKind::Source, message)
+    }
+
+    /// Attaches `span`, resolving its start against `source` for display.
+    #[must_use]
+    pub fn at(mut self, span: Span, source: &str) -> Error {
+        self.position = Some(Position::locate(source, span.start));
+        self.span = Some(span);
+        self
+    }
+
+    /// Attaches a suggested fix.
+    #[must_use]
+    pub fn suggest(mut self, suggestion: impl Into<String>) -> Error {
+        self.suggestion = Some(suggestion.into());
+        self
+    }
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Error::Lex(msg) => write!(f, "lexical error: {msg}"),
-            Error::Parse(msg) => write!(f, "syntax error: {msg}"),
-            Error::Semantic(msg) => write!(f, "semantic error: {msg}"),
-            Error::Source(msg) => write!(f, "source error: {msg}"),
+        write!(f, "{}: {}", self.kind.label(), self.message)?;
+        // Position when it was resolvable, else the raw offset — better than
+        // nothing for a stage that has a span but never saw the source.
+        match (self.position, self.span) {
+            (Some(position), _) => write!(f, " (at {position})")?,
+            (None, Some(span)) => write!(f, " (at byte {})", span.start)?,
+            (None, None) => {}
         }
+        if let Some(suggestion) = &self.suggestion {
+            write!(f, " ({suggestion})")?;
+        }
+        Ok(())
     }
 }
 
@@ -56,6 +182,24 @@ pub enum Warning {
         arity: u32,
         suggestion: Option<String>,
     },
+    /// An aggregate (§9) skipped one or more `absent` inputs. `sum`/`avg`/`min`/
+    /// `max` aggregate the values that exist, which is the right default but is
+    /// invisible in the answer — `avg` over a half-empty column looks exactly
+    /// like `avg` over a full one. §9 promises the skip is reported; until the
+    /// `?why` surface (§11) lands, this warning is that report.
+    ///
+    /// Counted per aggregate *site* (one warning per aggregate literal that ever
+    /// skipped), summed over every group it produced.
+    AbsentSkippedInAggregate {
+        /// The reducer, as written (`sum`, `avg`, `min`, `max`).
+        op: &'static str,
+        /// The head predicate of the rule the aggregate appears in.
+        rule: String,
+        /// Total `absent` inputs skipped across every group.
+        skipped: usize,
+        /// How many groups skipped at least one.
+        groups: usize,
+    },
 }
 
 impl fmt::Display for Warning {
@@ -76,6 +220,92 @@ impl fmt::Display for Warning {
                 }
                 Ok(())
             }
+            Warning::AbsentSkippedInAggregate {
+                op,
+                rule,
+                skipped,
+                groups,
+            } => write!(
+                f,
+                "warning: `{op}` in `{rule}` skipped {skipped} absent input(s) across \
+                 {groups} group(s); the result covers only the values that exist"
+            ),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn positions_are_one_based_lines_and_columns() {
+        let src = "p(1).\nq(2).\n\nr(3).";
+        assert_eq!(Position::locate(src, 0), Position { line: 1, column: 1 });
+        assert_eq!(Position::locate(src, 3), Position { line: 1, column: 4 });
+        // First byte of line 2.
+        assert_eq!(Position::locate(src, 6), Position { line: 2, column: 1 });
+        // The blank line 3, then line 4.
+        assert_eq!(Position::locate(src, 12), Position { line: 3, column: 1 });
+        assert_eq!(Position::locate(src, 13), Position { line: 4, column: 1 });
+    }
+
+    /// Columns count characters, not bytes, so a caret placed at the reported
+    /// column lands under the right glyph in non-ASCII source.
+    #[test]
+    fn columns_count_characters_not_bytes() {
+        let src = "p(\"héllo\", X).";
+        let byte_of_x = src.find('X').expect("X is present") as u32;
+        // 'é' is two bytes but one column.
+        assert_eq!(byte_of_x, 12);
+        assert_eq!(
+            Position::locate(src, byte_of_x),
+            Position {
+                line: 1,
+                column: 12
+            }
+        );
+    }
+
+    #[test]
+    fn an_offset_past_the_end_clamps() {
+        let src = "p(1).";
+        assert_eq!(
+            Position::locate(src, 9_999),
+            Position { line: 1, column: 6 }
+        );
+    }
+
+    /// `Display` composes the fields; nothing is baked into `message`.
+    #[test]
+    fn display_is_built_from_the_fields() {
+        let src = "p(1).\nq(2).";
+        let span = Span { start: 6, end: 7 };
+        let plain = Error::semantic("something is wrong");
+        assert_eq!(plain.to_string(), "semantic error: something is wrong");
+
+        let located = Error::parse("expected `.`").at(span, src);
+        assert_eq!(located.position, Some(Position { line: 2, column: 1 }));
+        assert_eq!(located.to_string(), "syntax error: expected `.` (at 2:1)");
+
+        let full = Error::lex("`=<` is not an operator")
+            .at(span, src)
+            .suggest("did you mean `<=`?");
+        assert_eq!(
+            full.to_string(),
+            "lexical error: `=<` is not an operator (at 2:1) (did you mean `<=`?)"
+        );
+    }
+
+    /// A stage that has a span but never saw the source still reports something
+    /// better than nothing.
+    #[test]
+    fn a_span_without_a_source_falls_back_to_the_byte_offset() {
+        let mut error = Error::semantic("unsafe rule");
+        error.span = Some(Span { start: 42, end: 45 });
+        assert_eq!(
+            error.to_string(),
+            "semantic error: unsafe rule (at byte 42)"
+        );
     }
 }

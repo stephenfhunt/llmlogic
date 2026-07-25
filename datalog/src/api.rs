@@ -27,6 +27,7 @@
 //! roadmap step 6; JSON stays reserved for the machine-readable edges (§12
 //! errors, §11 provenance).
 
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use crate::ast::StatementKind;
@@ -88,8 +89,9 @@ pub fn run_at(src: &str, source_path: Option<&Path>) -> Result<RunResult, Vec<Er
     let tables = load_imports(&resolved.program)?;
     let program = lower_with_sources(&resolved.program, &tables)?;
     typecheck(&program)?;
-    let warnings = check_program(&program);
+    let mut warnings = check_program(&program);
     let model = eval(&program).map_err(|e| vec![e])?;
+    warnings.extend(absent_skip_warnings(&model, &program));
 
     let mut answers = Vec::with_capacity(program.queries.len());
     for query in &program.queries {
@@ -176,18 +178,74 @@ pub fn run_with_queries_at(
     run_at(&source, source_path)
 }
 
+/// Reports every aggregate that skipped an `absent` input (§9's skip-but-report
+/// rule), read back out of the recorded provenance rather than tracked
+/// separately — [`crate::provenance::Premise::Aggregate`] already carries the
+/// count, and this is what makes it visible before the `?why` surface (§11)
+/// exists.
+///
+/// One warning per aggregate *site* — a `(rule, body index)` pair — summed over
+/// every group that site produced. Sites are keyed in `BTreeMap` order so the
+/// warning stream is deterministic like everything else in §14.
+///
+/// Limitation, deliberate for the interim: `Model::answer` records no
+/// derivations, so an aggregate that appears only in a *query* is not covered.
+fn absent_skip_warnings(model: &Model, program: &ir::Program) -> Vec<Warning> {
+    // Only programs with an aggregate can skip; skipping the derivation scan
+    // keeps this free for everything else.
+    if !program.rules.iter().any(|rule| {
+        rule.body
+            .iter()
+            .any(|literal| matches!(literal.kind, ir::BodyLiteralKind::Aggregate { .. }))
+    }) {
+        return Vec::new();
+    }
+
+    // (rule, body index) → (op, total skipped, groups that skipped).
+    let mut sites: BTreeMap<(u32, usize), (&'static str, usize, usize)> = BTreeMap::new();
+    for fact in model.facts() {
+        for derivation in model.derivations_of(&fact) {
+            for (idx, premise) in derivation.premises.iter().enumerate() {
+                if let crate::provenance::Premise::Aggregate { op, skipped, .. } = premise
+                    && *skipped > 0
+                {
+                    let entry =
+                        sites
+                            .entry((derivation.rule.0, idx))
+                            .or_insert((op.keyword(), 0, 0));
+                    entry.1 += skipped;
+                    entry.2 += 1;
+                }
+            }
+        }
+    }
+
+    sites
+        .into_iter()
+        .map(|((rule_id, _), (op, skipped, groups))| {
+            let rule = &program.rules[rule_id as usize];
+            let info = program.pred_info(rule.head.pred);
+            Warning::AbsentSkippedInAggregate {
+                op,
+                rule: format!("{}/{}", info.name, info.arity),
+                skipped,
+                groups,
+            }
+        })
+        .collect()
+}
+
 /// Renders one query's answer rows to canonical fact lines per the §14 output
-/// shape. `rows` are the projected named-variable bindings (in named-slot
-/// order), as returned by [`Model::answer`].
+/// shape. `rows` are the projected answer-variable bindings (in
+/// [`ir::Query::projection`] order), as returned by [`Model::answer`].
 fn answer_lines(query: &ir::Query, rows: &[Vec<ir::Value>], program: &ir::Program) -> Vec<String> {
-    // Slots of the projected (named) variables, in order — this is the order
-    // `Model::answer` lays out each row.
-    let named_slots: Vec<usize> = query
-        .var_names
+    // Row position of each projected slot — this is the order `Model::answer`
+    // lays out each row.
+    let position_of: HashMap<u32, usize> = query
+        .projection
         .iter()
         .enumerate()
-        .filter(|(_, name)| name.is_some())
-        .map(|(slot, _)| slot)
+        .map(|(position, &slot)| (slot, position))
         .collect();
 
     // Substituted-atom form: a single positive atom whose every variable is a
@@ -196,7 +254,7 @@ fn answer_lines(query: &ir::Query, rows: &[Vec<ir::Value>], program: &ir::Progra
         && let ir::BodyLiteralKind::Atom(atom) = &literal.kind
         && atom.args.iter().all(|term| match term {
             ir::Term::Const(_) => true,
-            ir::Term::Var(var) => query.var_names[var.0 as usize].is_some(),
+            ir::Term::Var(var) => position_of.contains_key(&var.0),
         })
     {
         let name = &program.pred_info(atom.pred).name;
@@ -207,13 +265,7 @@ fn answer_lines(query: &ir::Query, rows: &[Vec<ir::Value>], program: &ir::Progra
                     .iter()
                     .map(|term| match term {
                         ir::Term::Const(value) => value.clone(),
-                        ir::Term::Var(var) => {
-                            let position = named_slots
-                                .iter()
-                                .position(|slot| *slot == var.0 as usize)
-                                .expect("a projected variable is in named_slots");
-                            row[position].clone()
-                        }
+                        ir::Term::Var(var) => row[position_of[&var.0]].clone(),
                     })
                     .collect()
             })
@@ -226,9 +278,9 @@ fn answer_lines(query: &ir::Query, rows: &[Vec<ir::Value>], program: &ir::Progra
             .collect();
     }
 
-    // Otherwise: synthesized `answer/N` facts over the named variables. With no
-    // named variables there is nothing fact-shaped to emit.
-    if named_slots.is_empty() {
+    // Otherwise: synthesized `answer/N` facts over the answer variables. With
+    // none there is nothing fact-shaped to emit.
+    if query.projection.is_empty() {
         return Vec::new();
     }
     rows.iter()
@@ -332,12 +384,49 @@ age(\"bob\", 15).
 
     #[test]
     fn both_eq_and_ne_are_false_on_absent() {
-        // The footgun the presence operator exists to avoid: `A = absent` (A
-        // bound) is a false filter, and so is `A != 5`.
-        let eq = run(&format!("{SPARSE}q(F) :- m(F, A), A = absent.\n?- q(F).")).expect("runs");
-        assert_eq!(eq.answers, vec![Vec::<String>::new()]);
-        let ne = run(&format!("{SPARSE}q(F) :- m(F, A), A != 5.\n?- q(F).")).expect("runs");
-        assert_eq!(ne.answers, vec![Vec::<String>::new()]);
+        // A comparison against a *value* is silently false when the operand is
+        // absent — the two-valued rule (§8), and the reason presence has its own
+        // operator. `m("b", absent)` is selected by neither `A = 9` nor `A != 9`,
+        // even though one of them holds for every ordinary value.
+        for (op, expected) in [("=", Vec::new()), ("!=", vec!["q(\"a\").".to_string()])] {
+            let result = run(&format!("{SPARSE}q(F) :- m(F, A), A {op} 9.\n?- q(F)."))
+                .unwrap_or_else(|e| panic!("runs: {e:?}"));
+            assert_eq!(
+                result.answers,
+                vec![expected],
+                "`A {op} 9` never selects the absent row"
+            );
+        }
+    }
+
+    #[test]
+    fn comparing_against_the_literal_absent_is_a_steered_error() {
+        // Writing the literal is the mistake the presence operator exists to
+        // prevent: `A = absent` and `A != absent` are *both* always false, so
+        // rather than silently answering nothing, lowering steers to `is absent`.
+        for op in ["=", "!=", "<", ">="] {
+            let errors = run(&format!(
+                "{SPARSE}q(F) :- m(F, A), A {op} absent.\n?- q(F)."
+            ))
+            .expect_err("comparing against the literal `absent` is rejected");
+            let message = errors[0].to_string();
+            assert!(
+                message.contains("is always false") && message.contains("X is not absent"),
+                "expected a presence-test steer for `{op}`, got: {message}"
+            );
+        }
+        // The producer form is untouched: `X = absent` binding an unbound `X`.
+        let produced = run(&format!(
+            "{SPARSE}z(F, X) :- m(F, _), X = absent.\n?- z(F, X)."
+        ))
+        .expect("the producer form still lowers");
+        assert_eq!(
+            produced.answers,
+            vec![vec![
+                "z(\"a\", absent).".to_string(),
+                "z(\"b\", absent).".to_string(),
+            ]]
+        );
     }
 
     #[test]

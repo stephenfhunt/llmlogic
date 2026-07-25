@@ -130,7 +130,8 @@ it. A future audit starts here.
 | Ad-hoc queries (incl. negated) | `QuerySpec` bodies | **B8**; §16.1/§16.2 hand tests |
 | Set semantics | duplication mutators | A5, B3 |
 | Comparisons / arithmetic (§8) | `arb_comparison_program` (filter/assign/join) | B1 extended (incl. error path); §16.3 hand test |
-| Aggregation (§9) | `aggregate_ir` (grouped count/sum/min/max/avg over generated edges) | B1 aggregate differential (`b1_aggregate_programs_agree`); fold laws (absent-skip, empty→absent, count=witnesses, sum oracle, min/max bounds); §16.4 hand test |
+| Aggregation (§9) | `aggregate_ir` (grouped, one relation); `grouped_ir` (group keys from a *second* relation, empty groups, absent witnesses); `aggregate_goal_ir` (multi-atom + negated goal, all 6 goal orderings) | **independent group-by oracle** (`aggregation_matches_an_independent_group_by`); B1 differentials (`b1_aggregate_programs_agree`, `b1_aggregate_goal_shapes_agree`); body-order invariance (`b5_aggregate_body_order_does_not_change_the_model`); fold laws (absent-skip, empty→absent, count=witnesses, sum oracle, min/max bounds); §16.4 hand test; query-position and nested/assignment-bound goals in `tests/pipeline.rs` |
+| Absent value (§4/§8) | `arb_fact_constant` (absent in *data*, ~1 in 10) + `absent_ir` (join / self-join / anti-join / comparison / arithmetic / presence over a `{0, 1, absent}` pool) | B1 absent differential (`b1_absent_programs_agree`); value laws (annihilation, comparison-false, unify-vs-eq, sorts-first); `generator_emits_absent_in_facts_only` |
 
 ## Property catalog
 
@@ -200,7 +201,35 @@ compared keyed by predicate *name*, not `PredId`.
   The anchor property — catches delta-bookkeeping bugs directly. Extended over
   §8 comparison/arithmetic programs (`arb_comparison_program`,
   `b1_comparison_programs_agree`): both evaluators agree as fact sets and agree
-  on the error path (a generated `/ 0` makes both reject).
+  on the error path (a generated `/ 0` makes both reject). Extended again over
+  the **absent value** (`absent_ir`, `b1_absent_programs_agree`, 2026-07-25) —
+  see the note below; and over aggregation (`aggregate_ir`).
+
+  **The absent gap, and why a shape-targeted generator was needed.** Until
+  2026-07-25 `naive.rs` had *no* absent semantics — plain `==` in `match_atom` /
+  `refutes`, no annihilation in `arith`, no absent arm in `compare`, and the
+  presence filter ignored outright — so it silently disagreed with the engine on
+  every absent value. B1 stayed green only because no generator emitted one. The
+  fix is in two halves, and **both** are load-bearing: the oracle now implements
+  §4/§8 independently (written from the truth tables, not by calling
+  `engine::values_unify`), and `arb_fact_constant` puts absent into generated
+  *facts*. The general generator alone was not enough — mutation-testing the
+  restored oracle showed the odds of two absent values meeting in a joined
+  position of one small program are too low to hit — so `absent_ir` builds the
+  discriminating shapes deliberately (join on an absent key, repeated variable
+  within an atom, anti-join, comparison, arithmetic, presence). Each of the five
+  absent rules in the oracle was verified by mutation: reverting any one fails
+  `b1_absent_programs_agree`. Absent stays out of `arb_constant` (rule/query
+  bodies): a literal `absent` in a body atom argument or as a comparison operand
+  does not lower (§4/§8), so it would only generate rejected programs.
+
+  **Two logical laws absent still breaks**, kept as `#[ignore]`d tests that
+  assert the *sound* behaviour rather than the current one
+  (`a_fact_never_satisfies_its_own_negation`,
+  `repeating_a_body_literal_does_not_change_the_answer`): they are the executable
+  acceptance criterion for the §17 absent × negation design session. B1 cannot
+  catch these — both evaluators implement the same semantics, so they agree; it
+  is the semantics that is wrong.
 - [x] **B2** Fixpoint idempotence: re-running with `facts ∪ output` derives
   nothing new.
 - [x] **B3** Set semantics: duplicating any subset of input facts leaves
@@ -208,14 +237,39 @@ compared keyed by predicate *name*, not `PredId`.
 - [x] **B4** Monotonicity for positive programs (the queryFuzz relation):
   `output(p) ⊆ output(p + fact)` and `⊆ output(p + fact + rule)`.
 - [x] **B5** Body-reorder invariance: permuting a rule's body leaves output
-  unchanged. (Scoped to atoms and negations, which the generator produces:
-  positives/negations reorder freely. §8 assignment *chains* are order-sensitive
-  — `N = A+1, M = N+1` binds in source order — so full-body permutation is not
-  invariant once comparisons are present; the generator here emits none.)
+  unchanged. **Now unconditional** (2026-07-25): builtins are dependency-scheduled
+  (`crate::schedule`), so `N = A+1, M = N+1` and its reverse are the same clause,
+  and so are the two placements of a computed aggregate group key. Previously
+  scoped to atoms and negations, because §8 assignment chains bound in source
+  order. Checked at three levels:
+  `b5_body_order_is_irrelevant` (atoms/negations, the original),
+  `b5_aggregate_body_order_does_not_change_the_model` (all six permutations of an
+  aggregate rule must now *lower* as well as agree — before scheduling, some were
+  rejected; before that, they silently mis-grouped), and
+  `b5_a_computed_group_key_is_order_independent` (the group key bound by an
+  `=`-assignment written on either side of its aggregate).
+
+  The scheduler needs its **own** contract property,
+  `schedules_bind_before_they_read`: lowering and both evaluators consume the one
+  `schedule_body`, so a scheduling bug moves them together and B1 sees two
+  evaluators agreeing on a wrong answer. `source_order_breaks_ties_among_ready_literals`
+  pins the tie-break that makes scheduling a widening — without it, a body that
+  worked before could silently change pruning order (observable on the error
+  path). Both were verified by mutation: reversing the tie-break, or making an
+  aggregate ignore its group keys, fails the suite.
 - [x] **B6** Rule-order invariance within a stratum.
 - [x] **B7** Independent oracle for a fixed shape: random `parent` edge sets
   into the §16.1 ancestor program vs. a hand-rolled DFS transitive closure
-  (independent of *both* evaluators).
+  (independent of *both* evaluators). Extended to §9 aggregation
+  (`aggregation_matches_an_independent_group_by`, 2026-07-25): a plain group-by
+  fold over random `node`/`edge` data, calling neither evaluator nor
+  `fold_aggregate`. This is the only check that the **grouping** is right —
+  which keys exist and which witnesses land in which group. The fold proptests
+  pin the reducer in isolation and B1 pins the evaluators against each other;
+  neither would notice a group-assignment bug, and until this landed §9 had a
+  single generated program shape (one relation, no empty groups, single-atom
+  goal), so the query-position panic and the source-order grouping hole both sat
+  inside the untested region.
 - [x] **B8** Query/rule equivalence: `Model::answer(q)` equals the relation of
   a synthesized rule whose head projects `q`'s named variables over `q`'s
   body, evaluated in a fresh final stratum. A query is a rule plus projection,

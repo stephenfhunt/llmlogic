@@ -30,6 +30,17 @@ The evaluation-first roadmap (decided 2026-07-10; rationale in `AGENTS.md` and
 
 ## Open backlog
 
+### Soundness (§4/§7) — highest priority
+
+- **`absent` × negation and repeated occurrences** — `q(X) :- p(X), not p(X).`
+  derives `q(absent)` (P ∧ ¬P), and `p(X), p(X)` selects less than `p(X)`.
+  A variable bound to `absent` is both matched and unmatchable: a fresh slot
+  binds to a stored absent, but every later use applies the semantic rule, which
+  absent fails. Found 2026-07-25; three candidate directions and the acceptance
+  criterion (two `#[ignore]`d tests) are in §17. **Needs a design session — do
+  not patch ahead of it**, every fix moves §4's structural/semantic split.
+  _designing._ — §4/§7/§11.
+
 ### Aggregation follow-ons (§9)
 
 - **Statistical reducers** — `median`/`stddev`/`variance`/`percentile`. The
@@ -45,7 +56,10 @@ The evaluation-first roadmap (decided 2026-07-10; rationale in `AGENTS.md` and
 ### Provenance surface (§11)
 
 - **Provenance query syntax** — `?why <fact>` is provisional across CLI + API;
-  also decide the proof-tree JSON encoding. _queued._ — §11/§14.
+  also decide the proof-tree JSON encoding. Now also the surface §9's
+  skip-but-report rule was designed around: an interim stderr warning covers the
+  aggregate skip count (2026-07-25), but `?why` is what makes the rest of the
+  recorded derivation readable. _queued._ — §11/§14.
 - **Provenance as facts** — emit `?why` output as ground derivation-edge facts
   so provenance itself pipes back in (the Datalog-in/out closure). _queued._ — §11/§14.
 - **Semiring provenance under negation** — `?whynot` with minimal repairs,
@@ -84,8 +98,14 @@ the highest-signal next item.
 
 ### Errors & API edges (§12/§14)
 
-- **Machine-readable error taxonomy** — flesh out §12: codes, spans, suggested
-  fixes over the current structured-prose errors. _queued._ — §12.
+- **Machine-readable error taxonomy** — §12 is now Draft: `Error` is a struct
+  (category, message, span, line/column position, suggestion) with `Display`
+  composed from the fields, and lexer/parser diagnostics carry real positions
+  (2026-07-25). Two pieces remain: a stable **code** vocabulary so an agent can
+  branch on `unsafe-aggregate` without matching prose, and **spans on semantic
+  errors** — lowering reports many from points where the responsible span is not
+  threaded, so choosing one per diagnostic is a design pass. _queued (partially
+  shipped)._ — §12.
 - **`--format json` scope** — a documented future *edge* feature (structured
   errors, provenance); the data path stays Datalog-native. _parked (low value)._ — §14.
 - **`serde` for the API** — decide as §14 stabilizes. _queued._ — §14.

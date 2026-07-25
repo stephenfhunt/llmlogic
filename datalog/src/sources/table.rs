@@ -117,7 +117,7 @@ pub(crate) fn finalize(
     let arity = fields.len();
     for (index, row) in data.iter().enumerate() {
         if row.len() != arity {
-            errors.push(Error::Source(format!(
+            errors.push(Error::source(format!(
                 "in `{source}`: row {} has {} column(s), expected {arity}",
                 first_data_row + index,
                 row.len(),
@@ -188,7 +188,7 @@ fn arrange(
                 .filter_map(|name| {
                     let position = columns.iter().position(|c| c == name);
                     if position.is_none() {
-                        errors.push(Error::Source(format!(
+                        errors.push(Error::source(format!(
                             "in `{source}`: the explicit schema names `{name}`, which the \
                              source does not have (source fields: {})",
                             columns.join(", ")
@@ -199,7 +199,7 @@ fn arrange(
                 .collect();
             for column in &columns {
                 if !fields.contains(column) {
-                    errors.push(Error::Source(format!(
+                    errors.push(Error::source(format!(
                         "in `{source}`: the source has field `{column}`, which the \
                          explicit schema does not name (schema fields: {})",
                         fields.join(", ")
@@ -220,7 +220,7 @@ fn arrange(
         (None, None) => {
             let mut rows = raw.rows.into_iter();
             let Some(header) = rows.next() else {
-                return Err(vec![Error::Source(format!(
+                return Err(vec![Error::source(format!(
                     "in `{source}`: the file is empty; a header row (or an explicit \
                      schema) is required"
                 ))]);
@@ -266,7 +266,7 @@ fn validate_field_names(names: &[String], source: &str) -> Result<(), Vec<Error>
     let mut errors = Vec::new();
     for (index, name) in names.iter().enumerate() {
         if !is_legal_field_name(name) {
-            errors.push(Error::Source(format!(
+            errors.push(Error::source(format!(
                 "in `{source}`: field {} (`{name}`) is not a legal field name \
                  (§3: lowercase-initial identifier); give the import an explicit \
                  schema to rename it",
@@ -274,7 +274,7 @@ fn validate_field_names(names: &[String], source: &str) -> Result<(), Vec<Error>
             )));
         }
         if names[..index].contains(name) {
-            errors.push(Error::Source(format!(
+            errors.push(Error::source(format!(
                 "in `{source}`: duplicate field name `{name}`; give the import an \
                  explicit schema to rename it"
             )));
@@ -306,10 +306,9 @@ fn type_column(
     for (index, row) in data.iter().enumerate() {
         match coerce(&row[col], ty) {
             Ok(value) => values.push(value),
-            Err(cell) => errors.push(Error::Source(format!(
-                "in `{source}`: row {}, column `{field}`: {cell} is not {}",
+            Err(reason) => errors.push(Error::source(format!(
+                "in `{source}`: row {}, column `{field}`: {reason}",
                 first_data_row + index,
-                type_label(ty),
             ))),
         }
     }
@@ -359,7 +358,7 @@ fn infer_column(
                 if matches!(row[col], RawValue::Text(_)) {
                     return Ok(TypeName::String);
                 }
-                return Err(vec![Error::Source(format!(
+                return Err(vec![Error::source(format!(
                     "in `{source}`: column `{field}` mixes {} and {} (row {}); the \
                      value space has no mixed columns — declare an explicit type",
                     type_label(a),
@@ -377,10 +376,10 @@ fn infer_column(
     Ok(inferred.unwrap_or(TypeName::String))
 }
 
-/// Converts one cell to a declared/inferred column type, or reports the cell
-/// (rendered for the error message).
+/// Converts one cell to a declared/inferred column type, or returns the clause
+/// explaining why it could not (the caller prefixes source, row and column).
 fn coerce(value: &RawValue, ty: TypeName) -> Result<Value, String> {
-    let fail = |value: &RawValue| Err(render(value));
+    let fail = |value: &RawValue| Err(format!("{} is not {}", render(value), type_label(ty)));
     // A missing value inhabits any column (§4): it is coerced to `absent`
     // regardless of the column's type, and is never a type violation. Real
     // cross-type cells (a `"abc"` in an int column) still fail below.
@@ -398,12 +397,12 @@ fn coerce(value: &RawValue, ty: TypeName) -> Result<Value, String> {
         },
         TypeName::Float => match value {
             RawValue::Text(t) => match classify_cell(t) {
-                CellClass::Float(f) => new_float(f).ok_or_else(|| render(value)),
-                CellClass::Int(n) => new_float(n as f64).ok_or_else(|| render(value)),
+                CellClass::Float(f) => new_float(f).ok_or_else(|| not_finite(value)),
+                CellClass::Int(n) => widen_int(n),
                 _ => fail(value),
             },
-            RawValue::Float(f) => new_float(*f).ok_or_else(|| render(value)),
-            RawValue::Int(n) => new_float(*n as f64).ok_or_else(|| render(value)),
+            RawValue::Float(f) => new_float(*f).ok_or_else(|| not_finite(value)),
+            RawValue::Int(n) => widen_int(*n),
             _ => fail(value),
         },
         TypeName::Bool => match value {
@@ -430,6 +429,34 @@ fn coerce(value: &RawValue, ty: TypeName) -> Result<Value, String> {
 
 fn new_float(f: f64) -> Option<Value> {
     F64::new(f).ok().map(Value::Float)
+}
+
+/// Widens an integer cell into a **float** column — which happens when the
+/// column holds both integers and floats, so inference unified it to `float`
+/// (§13) — rejecting the widening when it would not be exact.
+///
+/// Above 2⁵³ an `i64` generally has no exact `f64`, and this is the *import*
+/// path over untrusted data: large integer identifiers are precisely what CSVs
+/// and Parquet files carry, and one float cell elsewhere in the column is enough
+/// to drag the whole column to `float`. Silently rounding an ID would corrupt
+/// every join on it, so it is a structured source error naming the cell instead
+/// (§13, 2026-07-25). The exactness test round-trips through `i128`, which —
+/// unlike `as i64` — cannot saturate and call a lossy conversion exact.
+fn widen_int(n: i64) -> Result<Value, String> {
+    let widened = n as f64;
+    if widened as i128 != i128::from(n) {
+        return Err(format!(
+            "`{n}` cannot be widened to a float without losing precision (this column \
+             mixes integers and floats, so it is float; give the column an explicit \
+             `int` type, or keep the values below 2^53)"
+        ));
+    }
+    new_float(widened).ok_or_else(|| format!("`{n}` widens to a non-finite float"))
+}
+
+/// The clause for a cell that is numeric but not a finite float (NaN/∞).
+fn not_finite(value: &RawValue) -> String {
+    format!("{} is not a finite float", render(value))
 }
 
 fn render(value: &RawValue) -> String {
@@ -769,6 +796,45 @@ mod tests {
                 "for {bad:?}, got: {errors:?}"
             );
         }
+    }
+
+    /// An integer that cannot be widened to a float exactly is a structured
+    /// error, not a silent rounding. This only arises when the column *mixes*
+    /// integers and floats — one float cell drags the whole column to `float`
+    /// (§13) — and on the import path the large integers are typically
+    /// identifiers, where rounding would corrupt every join on them.
+    #[test]
+    fn a_lossy_int_to_float_widening_is_rejected() {
+        // 2^53 + 1: the first integer with no exact f64.
+        let errors = err(csv(&[&["v"], &["9007199254740993"], &["2.5"]]), None);
+        let message = errors[0].to_string();
+        assert!(
+            message.contains("9007199254740993") && message.contains("losing precision"),
+            "got: {message}"
+        );
+    }
+
+    /// 2^53 itself *is* exactly representable, so it widens. The check is
+    /// exactness, not a blanket magnitude cutoff.
+    #[test]
+    fn an_exact_int_to_float_widening_is_allowed() {
+        // Rows come back sorted, so compare the whole (small) table.
+        let table = ok(csv(&[&["v"], &["9007199254740992"], &["2.5"]]), None);
+        assert_eq!(
+            table.rows,
+            vec![
+                vec![Value::Float(F64::new(2.5).unwrap())],
+                vec![Value::Float(F64::new(9007199254740992.0).unwrap())],
+            ]
+        );
+    }
+
+    /// Widening is only reachable through a mixed column: an all-integer column
+    /// stays `int`, so large identifiers import losslessly.
+    #[test]
+    fn an_all_int_column_keeps_large_values_exactly() {
+        let table = ok(csv(&[&["v"], &["9007199254740993"]]), None);
+        assert_eq!(table.rows[0][0], Value::Int(9007199254740993));
     }
 
     #[test]

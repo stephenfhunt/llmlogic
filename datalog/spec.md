@@ -463,11 +463,37 @@ requirement. It is a comparison/filter — the `not` is part of the operator, no
 (§10) and it adds no stratum. (A general `X is Y` null-safe equality is a possible
 extension, §17.)
 
+**The literal `absent` may not be a comparison operand** (2026-07-25). Since
+*every* comparison with an absent operand is false, writing the literal —
+`V = absent`, `V != absent`, `V < absent` — is an always-false filter, and
+`V != absent` in particular reads as "where the value exists" while selecting
+nothing. So a bare `absent` literal on either side of a comparison is a
+**structured error steering to `is [not] absent`**, exactly as a literal `absent`
+in a body atom argument is (§4). This costs no expressiveness: the comparison it
+forbids could only ever be false. Two things stay legal — the **producer form**
+`X = absent` where `X` is unbound (an assignment; §4's way to produce the value),
+and `absent` reached through *arithmetic*, which is annihilation, not comparison.
+The runtime rule is unchanged: comparing a *variable* that happens to hold
+`absent` against a value is still silently false.
+
 **Mode / safety (§10).** Every comparison operand variable must be bound by a
-positive atom, *except* an `=`-assignment target, which the assignment binds.
-Assignments are evaluated in source order (after positives and negations), so a
-later one may depend on an earlier (`N = A+1, M = N+1`); a negated atom's
-variables must be *positively* bound (negations run before assignments).
+positive atom, *except* an `=`-assignment target, which the assignment binds. A
+negated atom's variables must be *positively* bound.
+
+**Evaluation order is by dependency, not by source order** (2026-07-25). A body
+is a conjunction, so where a binder is *written* does not decide what the clause
+means: the engine schedules positives first, then negations, then the builtins in
+an order where every literal's inputs are already bound
+(`src/schedule.rs`). `M = N+1, N = A+1` is the same clause as `N = A+1,
+M = N+1` — previously the first was rejected. Two guarantees make this a
+widening rather than a change of meaning:
+
+- among the literals that are ready, the **earliest in source order runs first**,
+  so a body whose source order already worked keeps exactly that order, and `=`
+  resolves assignment-vs-filter as it always did;
+- a body is rejected only when *no* order works — a variable nothing binds, or a
+  circular dependency (`M = N+1, N = M+1`). The two get different messages,
+  because only the first can be fixed by adding a binder.
 
 *Operator precedence for the surface syntax is deferred to the parser (§5, Phase
 D); the AST already carries whatever grouping the parser chose.*
@@ -506,6 +532,36 @@ local to it. There is no separate `group by`: the rule's other body literals
 supply the group keys, and a bare `Avg = avg { A | m(_, A) }` (no outer
 variables) is a single global group.
 
+A **group key must be bound by the enclosing body** — a positive atom, an
+`=`-assignment, or another aggregate's result. *Where* that binder is written is
+irrelevant: the aggregate declares its group keys as inputs and is scheduled
+after whatever binds them (§8, 2026-07-25), so
+
+```datalog
+g(X, N) :- q(X), Y = X + 1, N = count { C | r(Y, C) }.
+g(X, N) :- q(X), N = count { C | r(Y, C) }, Y = X + 1.
+```
+
+are the same rule. (Before scheduling, the second silently enumerated `Y` as a
+goal-local existential and aggregated over everything — the same conjunction
+meaning two different things.) A group key nothing binds is a structured error;
+so is a **circular** one, where the key is only bound by something that needs the
+aggregate's own result — the case no reordering can fix. Two aggregates in one
+body may reuse a goal-local name freely: each `Goal` is its own scope, so neither
+name is a group key or a scheduling dependency of the other.
+
+**The goal is a body and binds like one.** `Goal` is an ordinary conjunction, so
+a variable it binds by an `=`-assignment or by a *nested* aggregate is available
+to the collected expression exactly as one bound by a positive atom is:
+`max { T | s(K, V), T = V * 2 }` and `max { T | s(K, _), T = sum { V | s(K, V) } }`
+are both well-formed (2026-07-25). Nested aggregates hoist into the enclosing
+goal, where the goal's own bindings are in scope.
+
+**In a query**, an aggregate answers over the variables the **query body** binds
+— its goal-local variables are named but exist only inside the sub-join, so
+`?- N = count { C | m(T, C) }.` answers over `N` alone (one global group), while
+`?- thing(T), N = count { C | m(T, C) }.` answers over `T` and `N` (§14).
+
 **Witnesses and duplicates.** For fixed group-key bindings, the aggregate folds
 the multiset `{ eval(Expr, w) : w ∈ W }`, where `W` is the set of **distinct
 satisfying assignments to all of `Goal`'s variables** (set semantics dedups
@@ -514,6 +570,14 @@ differ elsewhere are *two* multiset elements — so `sum { S | emp(N, S) }` coun
 two equal salaries twice (the "duplicates and aggregates" question, §17;
 `references.md`). Deduping the projected values instead is *not* what these
 aggregates do.
+
+A **wildcard inside a goal is a witness dimension**, not an existential: `count
+{ P | parent(P, _) }` counts *edges*, not distinct parents, because each `_` is a
+fresh goal variable and distinct fillings are distinct witnesses. This matches
+SQL's `COUNT(col)` and follows from the witness-set rule above, but it is the one
+place `_` does not mean "don't care" (contrast §7/§10, where a wildcard under
+negation *is* existential) — so it is worth stating. There is no count-distinct
+in v1; project into a helper relation first if you need one.
 
 **The five reducers and their result types** (inferred, §4):
 
@@ -538,9 +602,20 @@ Aggregates treat the absent value (§4) uniformly:
   annihilation (§8) and never divided by the missing. (`min`/`max` must skip
   regardless: `absent` has no order against values.) The engine **reports the
   count of skipped absents** through **provenance** (§11): the skip is recorded in
-  the derivation and rendered by `?why` ("averaged 8 values, skipped 2 absent"),
-  keeping the aggregate a pure single value so it still composes under §8. A user
-  who wants the skip count *as data* writes it directly:
+  the derivation, keeping the aggregate a pure single value so it still composes
+  under §8. Two surfaces read that record:
+  - a **warning per aggregate site** on stderr whenever a site skipped anything
+    ("`avg` in `mean/2` skipped 1 absent input(s) across 1 group(s)"), summed over
+    every group. This is what makes the skip non-silent today — an `avg` over a
+    half-empty column is otherwise indistinguishable from one over a full column
+    (added 2026-07-25; the warning channel is §12's severity axis);
+  - eventually `?why` ("averaged 8 values, skipped 2 absent") once the §11 query
+    surface exists. The record it reads is already there.
+
+  Not covered by the warning: an aggregate appearing only in a **query**, since
+  queries are answered as projections and record no derivations.
+
+  A user who wants the skip count *as data* writes it directly:
   `S = count { A | Goal, A is absent }` (§17, 2026-07-24 — provenance-only chosen
   over a two-place result that could not nest in arithmetic).
 - **`count { X | Goal }` counts bindings**, absent ones included (a binding is a
@@ -586,9 +661,12 @@ Violations are structured semantic errors reported before evaluation.
 Recursion through negation is rejected by stratification (§7). Recursion through
 an **aggregate** (§9) is likewise rejected: the predicates in an aggregate's
 `Goal` are stratified strictly below the enclosing rule. Aggregate safety mirrors
-negation — a group-key variable used in the `Goal` must be positively bound by
-the enclosing body, while variables occurring only inside the `Goal` are
-existential (like wildcard variables under negation) and never exported.
+negation — a group-key variable used in the `Goal` must be bound by the enclosing
+body (in any position; the aggregate is scheduled after its binder, §8), while
+variables occurring only inside the `Goal` are
+existential (like wildcard variables under negation) and never exported. Because
+they are never exported, a goal-local variable is also **not an answer variable**
+of a query that contains the aggregate (§14).
 
 *Still to fill in: termination guarantees; safety/mode conditions for arithmetic
 (§8); recursive/monotonic aggregation semantics (§9).*
@@ -633,10 +711,48 @@ JSON encoding, and the provenance-as-facts closure question.*
 
 ## 12. Error model
 
-*Status: TBD*
+*Status: Draft — the shape (category, message, span, position, suggestion,
+severity) is implemented in `src/error.rs`, 2026-07-25; the machine-readable
+**code** vocabulary and spans on semantic/source errors remain open.*
 
-*To fill in: the structured error taxonomy — categories, machine-readable codes,
-source spans, severities, and suggested fixes — designed for LLM consumption.*
+A diagnostic is **data with a rendering**, never a rendering with data attached.
+The prose sentence is one field among several, so a consumer never has to parse
+English to recover where the problem is or what to do about it — the
+structured-errors pillar (§2), which matters most when the consumer is an agent
+about to rewrite the program.
+
+**Severity.** Two levels today. An **error** rejects the program (exit 1, stderr;
+every stage collects *all* of its own errors before returning, so one run reports
+everything at that stage rather than the first thing). A **warning** lets the
+program run (exit 0) but flags something that is valid yet usually a mistake —
+currently a referenced-but-undefined predicate (§10) and an aggregate that
+skipped `absent` inputs (§9). Warnings go to stderr, never stdout, which stays a
+clean fact stream (§14).
+
+**Category.** Which stage rejected the program, and so which vocabulary the
+message speaks: `lex`, `parse`, `semantic` (safety, stratification, types),
+`source` (§13 loading).
+
+**Location.** An error carries the **span** it is about, and that span resolved
+against the source to a 1-based **line and column** — not a byte offset, which
+cannot be turned into a caret or a `file:line` an editor will follow. Columns
+count characters, so a caret lands correctly under non-ASCII text. Lexer and
+parser errors carry positions today; semantic and source errors carry the source
+name and, for imports, the row and column, but not yet a span (below).
+
+**Suggested fix.** A separate field, not a sentence fragment: the near-miss
+hints models reach for out of a Prolog prior (`=<` → `<=`, `\=` → `!=`), an
+uppercase relation name, the nearest defined predicate for a typo.
+
+**Rendering** is `"{category} error: {message} (at {line}:{column}) ({suggestion})"`,
+composed from the fields — so a future `--format json` edge (§14) serializes the
+same data with no message re-parsing.
+
+*Open:* a stable machine-readable **code** per diagnostic (an agent should be
+able to branch on `unsafe-aggregate` without matching prose), and spans on
+semantic errors — lowering reports many from points where the responsible span
+is not threaded, and choosing the right span per diagnostic is a design pass
+rather than a mechanical change. Both tracked in `ROADMAP.md`.
 
 ## 13. External data / fact sources
 
@@ -671,7 +787,15 @@ import "data/parents.csv" as parent.
   **non-absent** cells: all-int → int, int/float mix → float, all-bool → bool,
   anything else → string; missing cells become `absent` and do **not** force the
   column's type (an int column with gaps stays `int` — this unbroke the USDA
-  `amount`/`food_category_id` columns, §17 2026-07-24). A column whose cells are
+  `amount`/`food_category_id` columns, §17 2026-07-24). An int/float mix widens
+  each integer cell to float, and **a widening that would lose precision is a
+  structured error, never a silent rounding** (2026-07-25): above 2⁵³ an `i64`
+  generally has no exact `f64`, and large integers in imported data are usually
+  identifiers, where rounding would corrupt every join on them. One stray float
+  cell is enough to make a whole ID column `float`, so the error names the cell
+  and points at the explicit-schema escape hatch. The test is exactness, not a
+  magnitude cutoff — 2⁵³ itself widens fine — and an *all*-integer column is
+  never widened at all. A column whose cells are
   *all* absent has no inferable type: it is resolved by use-site variable flow
   (§4), else left unconstrained. Inferred types are never symbol. This makes the
   anchor property exact:
@@ -781,9 +905,17 @@ double-quoted with the §3 escapes; a float always carries a decimal point
   substituted (`?- ancestor("alice", Who).` → `ancestor("alice", "bob").` …)
   when every variable position is a projected variable; a ground such query
   prints the atom once if it holds;
-- any **other** body emits synthesized `answer/N` facts over the query's named
-  variables;
+- any **other** body emits synthesized `answer/N` facts over the query's
+  **answer variables**;
 - rows are deduplicated and sorted.
+
+The **answer variables** are the named variables the query body *binds* — which
+is not the same as every named variable (clarified 2026-07-25). An aggregate's
+goal-local variables are named, but they exist only inside that aggregate's
+sub-join (§9) and have no value in the answer row, so they are not projected:
+`?- N = count { C | m(T, C) }.` answers over `N` alone. The rule is the one a
+rule head is checked against — bound by a positive body atom, an `=`-assignment,
+or an aggregate result, never by descending into an aggregate's goal.
 
 **Binary contract** (2026-07-22; `-q` completed 2026-07-23, roadmap step 6).
 Invocation is `datalog [<file> | -] [-q <query>]…`. The positional source is a
@@ -1044,6 +1176,121 @@ the ratified set-builder `avg { A | Goal }` (§9), grouped globally here.
 *Status: living*
 
 ### Decisions
+
+- **2026-07-25** — **Correctness review of milestones 8–9** (the absent value and
+  aggregation, both shipped 2026-07-24). Re-derived their semantics against
+  §4/§8/§9/§10 and probed the built binary. The happy paths held; four things did
+  not, and are now decided:
+  - **Query answer variables are the ones the body *binds*, not every named
+    slot** (§14). An aggregate's goal-local variables are named but live only in
+    the sub-join, so projecting them left an unbound slot — every query
+    containing an aggregate with a named goal variable *panicked*, including the
+    `-q` form the agent skill teaches. Lowering now computes the projection
+    (`ir::Query::projection`) with the same `safe_bound_vars` notion a rule head
+    is checked against, and the engine's residual unbound case is a structured
+    error, not a panic. The panic escaped notice because the §9 tests only ever
+    exercised the *rule* form.
+  - **An aggregate goal binds like any body** (§9). The safety check used
+    "occurs in a positive atom of the goal" for the collected expression, which
+    rejected `max { T | s(K,V), T = V*2 }` and every **nested** aggregate — forms
+    lowering already supports (it hoists a nested aggregate into the goal for
+    exactly this reason). Now `safe_bound_vars(goal)`.
+  - **The literal `absent` is not a comparison operand** (§8). `V != absent`
+    reads as "where the value exists" and silently selects nothing, because every
+    comparison with absent is false. It is now a structured error steering to
+    `is [not] absent` — the same steer §4 already applies to a literal `absent`
+    in a body atom argument, and it forbids only comparisons that could not have
+    been true. The producer form `X = absent` (assignment) is unaffected.
+  - **The §9 skip is reported now, by a warning** (§9/§12). "Skip but report"
+    was chosen over a two-place aggregate result on the strength of `?why`
+    rendering it — but `?why` does not exist yet, so `avg` over a half-empty
+    column was indistinguishable from `avg` over a full one. A
+    `Warning::AbsentSkippedInAggregate` per aggregate site now reads the count
+    back out of the recorded `Premise::Aggregate` and prints it on stderr, which
+    also demonstrates the provenance record is real. `?why` remains the eventual
+    surface; queries are not covered (they record no derivations).
+
+  - **Body evaluation order is by dependency, not source order** (§8/§9/§10,
+    `src/schedule.rs`). The evaluator ran builtins in source order, so a group
+    key whose `=`-assignment sat *after* its aggregate was still unbound when the
+    aggregate ran and got enumerated as a goal-local existential — the grouping
+    silently vanished. Two orderings of one conjunction, two answers, which no
+    declarative reading permits.
+
+    The first fix rejected the out-of-order form, making aggregates consistent
+    with the pre-existing rule that `=`-chains must be written in dependency
+    order. That restored soundness (reordering could produce an error, never a
+    different answer) but kept a wart, and its message was actively wrong for the
+    one case reordering *cannot* fix — a genuine cycle, where "move the
+    assignment earlier" is impossible advice.
+
+    So the discipline itself was removed instead. Each builtin declares what it
+    **reads** and **binds** — an aggregate reads its group keys (identified
+    syntactically: a variable used both inside it and outside it) and binds its
+    result — and the body is scheduled to a fixpoint over those edges. Both
+    orderings above now mean "grouped by `Y`", and `M = N+1, N = A+1` is accepted.
+    Rejection is reserved for bodies where *no* order works, split into
+    **unbound** (nothing binds the variable) and **circular** (the binder needs
+    this literal), which want different advice.
+
+    Two things keep this a widening rather than a change of meaning: among ready
+    literals the **earliest in source order** runs first, so any body that
+    already worked keeps its exact schedule (including how `=` resolves
+    assignment-vs-filter, and including pruning order, which is observable on the
+    error path); and the schedule is a pure function of the body, so lowering —
+    which reports the errors — and both evaluators derive the same one, shared
+    the way `fold_aggregate` is. That sharing means B1 cannot see a scheduling
+    bug, so the scheduler carries its own contract property
+    (`schedules_bind_before_they_read`) alongside the end-to-end invariance
+    (`b5_aggregate_body_order_does_not_change_the_model`,
+    `b5_a_computed_group_key_is_order_independent`).
+
+    Negated atoms stay in their own phase, before every builtin: §10 requires
+    their named variables to be bound *positively*, and folding them into the
+    dependency order would widen negation safety — a §7/§10 decision, not a
+    consequence of scheduling. It is the one remaining phase-ordering artifact.
+
+  - **The semantic sameness rule moved onto `Value`** as
+    `Value::unifies_with` (with `Value::is_absent` for the structural absence
+    test), replacing the free `engine::values_unify`. Considered and **rejected**:
+    moving the derived `Eq`/`Ord`/`Hash` off `Value` onto a storage-key newtype
+    so that `==` at a match site would not compile. It reads well in the
+    abstract, but ~146 sites depend on the derive — `Tuple`/`Fact` need it for
+    `BTreeSet` storage, canonical output order needs it, and every test assertion
+    over answers wants exactly structural equality — so the cost falls almost
+    entirely on the *legitimate* uses in order to guard four semantic ones. It
+    would also not have prevented the bug it was proposed for: `engine::naive`
+    used `==` because absent was not in the author's view at all, and would have
+    written `Key(a) == Key(b)` just as readily. What catches that class is the
+    differential (`b1_absent_programs_agree`); what makes it less likely is one
+    discoverable method on the type. Both are now in place.
+
+  - **§12 errors became structured data** (§12 now Draft). Every error was a
+    bare `String` with its location `format!`ed in as `"(at byte 217)"` — a
+    stringly-typed diagnostic in the one part of the system whose stated job is
+    to be machine-consumable, and a byte offset at that, which cannot become a
+    caret or a `file:line`. `Error` is now a struct — category, message, span,
+    **line/column** position, suggestion — with `Display` composed *from* the
+    fields rather than the fields being recovered from `Display`. Suggested fixes
+    (the Prolog-prior near-misses, the lowercase-relation hint) moved out of the
+    message text into their own field. The parser's `Result<T, ()>` became
+    `Result<T, Reported>`, where `Reported` has no constructor outside the error
+    helpers: "you may only return `Err` after recording a diagnostic" is now
+    checked by the compiler instead of by convention (rustc's `ErrorGuaranteed`,
+    in miniature). Deferred deliberately: the machine-readable **code**
+    vocabulary, and spans for semantic errors — both need decisions, not
+    mechanics.
+  - **A lossy int→float widening on the import path is an error** (§13). A
+    mixed int/float column widens its integer cells; above 2⁵³ that rounds
+    silently, on untrusted data, where the large integers are typically
+    identifiers. Now a structured source error naming the cell. (The neighbouring
+    concern, DuckDB's `UBigInt` → `i64`, was already checked — it widens through
+    `i128` and uses `i64::try_from`.)
+
+  Also recorded: a **wildcard inside an aggregate goal is a witness dimension**,
+  not an existential (§9) — `count { P | parent(P, _) }` counts edges. Consistent
+  with the witness-set rule and with SQL, but it is the one place `_` does not
+  mean "don't care", so it is now stated rather than implied.
 
 - **2026-07-24** — **Aggregation (§9): full design ratified** (design session;
   implementation is a follow-on roadmap item). v1 ships the canonical five —
@@ -1646,6 +1893,57 @@ the ratified set-builder `avg { A | Goal }` (§9), grouped globally here.
   column types remain a §13 concern. testing.md **C6** covers it.
 
 ### Open questions
+
+- **`absent` × negation and repeated occurrences — two logical laws currently
+  fail.** _Needs a design session; do not patch ahead of it._ Found in the
+  2026-07-25 review. §4 splits "same" into a *semantic* notion (unification:
+  absent matches nothing, not even another absent) and a *structural* one (set
+  dedup and canonical `Ord`). Matching straddles the split: `try_match` binds a
+  **fresh** slot to a stored `absent` — that is how a missing cell flows to a
+  head, and it is wanted — but every **later** use of that slot goes through the
+  semantic notion, which absent always fails. A variable bound to `absent` is
+  therefore both matched and unmatchable, and two laws break:
+
+  - **Non-contradiction.** `q(X) :- p(X), not p(X).` derives `q(absent)` when
+    `p(absent)` is stored: the positive atom binds `X := absent`, and the
+    anti-join's pattern (matching semantically) matches nothing, so the negation
+    is satisfied too. P ∧ ¬P — in an engine that advertises consistency checking
+    (§1). SQL's analogue, `NOT IN` over a `NULL`, returns *no* row, so this is not
+    a two-valued simplification of three-valued logic; it is further from sound
+    than either. Practically: absent rows leak through every "things with no …"
+    query.
+  - **Idempotence of conjunction.** `p(X), p(X)` selects strictly less than
+    `p(X)` — the second occurrence, by then bound to `absent`, unifies with
+    nothing. Repeating a literal is a no-op in any logic; here it changes the
+    answer.
+
+  Both are pinned as `#[ignore]`d tests asserting the *sound* behaviour
+  (`a_fact_never_satisfies_its_own_negation`,
+  `repeating_a_body_literal_does_not_change_the_answer`), so a resolution has an
+  executable acceptance criterion. Note the B1 differential **cannot** find these:
+  both evaluators implement the same semantics and agree: it is the semantics
+  that is wrong, not one implementation of it.
+
+  Candidate directions, each moving a different part of the §4 split — the point
+  of the session is to choose deliberately rather than let matching decide:
+  1. **Anti-join tests structural membership.** `not p(X)` with `X` bound to
+     absent asks "is the tuple `p(absent)` in the relation?" — it is, so the
+     negation fails. Kills non-contradiction directly; leaves joins alone (a
+     missing foreign key still joins nothing, the property absent was designed
+     for). Costs: negation and joining now use different notions of same, which
+     needs to be *stated* rather than discovered.
+  2. **A bound slot re-matches structurally.** Once a variable holds a value,
+     later occurrences compare structurally; only *unbound*-to-stored matching
+     applies the semantic rule. Restores both laws at once, but weakens
+     "missing keys never join each other" for self-joins (`p(X, X)`).
+  3. **Absent never reaches a negated or repeated position** — a safety error
+     instead of a semantics. Cheapest to specify, but the front end cannot know
+     which columns carry absent (it is a *value*, not a type, §4), so this is
+     likely undecidable in practice.
+
+  Whatever is chosen must also say what `?- p(X), not p(X).` means for a
+  *query*, and whether provenance's `AbsentPattern` follows the same rule (it
+  currently delegates to `values_unify`). — §4/§7/§11.
 
 - **Optional/absent value design** — **resolved 2026-07-24** (Decisions above): a
   single first-class, two-valued `absent` value; `absent ≠ absent` semantically but

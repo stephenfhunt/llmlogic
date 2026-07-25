@@ -160,7 +160,7 @@ impl<'a> TypeChecker<'a> {
         match self.ty[root] {
             None => self.ty[root] = Some(t),
             Some(existing) if existing == t => {}
-            Some(existing) => self.errors.push(Error::Semantic(format!(
+            Some(existing) => self.errors.push(Error::semantic(format!(
                 "type error: {} is used as both {} and {}",
                 self.label[root],
                 type_label(existing),
@@ -178,7 +178,7 @@ impl<'a> TypeChecker<'a> {
         }
         let merged = match (self.ty[ra], self.ty[rb]) {
             (Some(x), Some(y)) if x != y => {
-                self.errors.push(Error::Semantic(format!(
+                self.errors.push(Error::semantic(format!(
                     "type error: {} has type {} but {} has type {}",
                     self.label[ra],
                     type_label(x),
@@ -362,7 +362,7 @@ impl<'a> TypeChecker<'a> {
             if let Some(ty) = self.ty[root]
                 && !is_numeric(ty)
             {
-                self.errors.push(Error::Semantic(format!(
+                self.errors.push(Error::semantic(format!(
                     "type error: {} has type {} but is used in arithmetic or an ordered \
                      comparison, which requires int or float",
                     self.label[root],
@@ -386,7 +386,7 @@ impl<'a> TypeChecker<'a> {
                 if let Some(inferred) = self.ty[root]
                     && inferred != declared_ty
                 {
-                    self.errors.push(Error::Semantic(format!(
+                    self.errors.push(Error::semantic(format!(
                         "type error: {} is declared as {} but its values are {}",
                         column_label(info, col),
                         type_label(declared_ty),

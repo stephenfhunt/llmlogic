@@ -112,7 +112,7 @@ impl F64 {
     /// Wraps a float, rejecting NaN and normalizing `-0.0` to `+0.0`.
     pub fn new(value: f64) -> crate::Result<F64> {
         if value.is_nan() {
-            return Err(Error::Semantic(
+            return Err(Error::semantic(
                 "NaN is not a representable float value".to_string(),
             ));
         }
@@ -163,13 +163,29 @@ impl Ord for F64 {
 /// deterministic output (§14). Symbols are plain `String`s in v1; interning is
 /// a deferred drop-in behind this single choke point (§17).
 ///
-/// The derived `Eq`/`Ord`/`Hash` are the **structural** notion of sameness
-/// (§4): `Absent == Absent`, so a relation holds a single copy of `p(absent)`
-/// and `absent` has a fixed sort position. The **semantic** notion — `absent`
-/// matches/equals *nothing*, including another `absent` — is *not* these
-/// derives; it lives explicitly in the join/compare paths ([`crate::engine`]
-/// `try_match`/`apply_compare`, and [`crate::provenance::AbsentPattern`]), so a
-/// missing foreign key never joins another into a cartesian blowup.
+/// # Two notions of "same" (§4)
+///
+/// The derived `Eq`/`Ord`/`Hash` are the **structural** notion: `Absent ==
+/// Absent`, so a relation holds a single copy of `p(absent)` and `absent` has a
+/// fixed sort position. That is what set storage, deduplication, canonical
+/// output order (§14) and test assertions all want, which is why it is the
+/// derive.
+///
+/// The **semantic** notion — `absent` matches *nothing*, including another
+/// `absent`, so a missing foreign key never joins another into a cartesian
+/// blowup — is [`Value::unifies_with`]. Every join, anti-join and unification
+/// site must use it; `==` at such a site is silently wrong.
+///
+/// **If you are matching two values, you almost certainly want
+/// `unifies_with`, not `==`.** The rule lives here, as a method, precisely so
+/// it is discoverable from the type: it was previously only a free function in
+/// `engine`, and `engine::naive` — written without it in view — used plain `==`
+/// at four match sites and diverged from the engine on every absent value for
+/// as long as no generator emitted one (§17, 2026-07-25). What catches that
+/// class of mistake is the differential (`b1_absent_programs_agree`); what makes
+/// it less likely is having one obvious place to reach for.
+///
+/// Testing for absence itself *is* structural — use [`Value::is_absent`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Value {
     /// The missing-data value (§4): type-neutral, inhabits any column,
@@ -181,6 +197,27 @@ pub enum Value {
     Int(i64),
     Float(F64),
     Bool(bool),
+}
+
+impl Value {
+    /// Is this the missing-data value? A **structural** test — `absent` is
+    /// perfectly identifiable, it just does not *match* anything (§4).
+    pub fn is_absent(&self) -> bool {
+        matches!(self, Value::Absent)
+    }
+
+    /// The **semantic** sameness of two ground values (§4): structural equality,
+    /// except that `absent` unifies with nothing — not with a value, and not
+    /// with another `absent`.
+    ///
+    /// This is the notion every join, anti-join and unification uses
+    /// ([`crate::engine`]'s `try_match`, [`crate::provenance::AbsentPattern`]).
+    /// It is deliberately *not* `PartialEq`: the derive is the structural
+    /// notion that set storage and canonical output order need, and both are
+    /// load-bearing.
+    pub fn unifies_with(&self, other: &Value) -> bool {
+        !self.is_absent() && self == other
+    }
 }
 
 /// A ground tuple: one row of a relation.
@@ -279,12 +316,20 @@ pub struct Rule {
     pub span: Span,
 }
 
-/// A lowered query. Entries of `var_names` that are `Some` are the projected
-/// answer variables.
+/// A lowered query.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Query {
     pub body: Vec<BodyLiteral>,
+    /// `Var(i)` → the variable's source name; `None` for lowering-generated
+    /// fresh variables (wildcards, partial selection, aggregate results).
     pub var_names: Vec<Option<String>>,
+    /// The answer variables, as slots in ascending order: the *named* variables
+    /// the body binds at the top level. Computed by lowering rather than
+    /// re-derived from `var_names`, because being named is not the same as being
+    /// bound: an aggregate's goal-local variables (§9) are named and are bound
+    /// only inside the aggregate's sub-join, so `?- N = count { C | p(P, C) }.`
+    /// names `C` and `P` but answers over `N` alone.
+    pub projection: Vec<u32>,
     pub span: Span,
 }
 
@@ -453,6 +498,7 @@ pub(crate) mod fixtures {
                         span: Span::DUMMY,
                     }],
                     var_names: vec![Some("Who".to_string())],
+                    projection: vec![0],
                     span: Span::DUMMY,
                 },
             ],

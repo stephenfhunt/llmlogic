@@ -224,9 +224,31 @@ impl<'a> Lexer<'a> {
         });
     }
 
+    /// Records a lexical error spanning from `start` to the current position,
+    /// with its source position resolved (§12) — the location is structured
+    /// data on the error, never text baked into the message.
     fn error(&mut self, start: usize, message: impl Into<String>) {
+        let span = Span {
+            start: start as u32,
+            end: self.pos.max(start) as u32,
+        };
+        self.errors.push(Error::lex(message).at(span, self.src));
+    }
+
+    /// [`Self::error`] plus a structured suggested fix (§12) — the near-miss
+    /// hints, which used to be sentence fragments inside the message.
+    fn error_suggesting(
+        &mut self,
+        start: usize,
+        message: impl Into<String>,
+        suggestion: impl Into<String>,
+    ) {
+        let span = Span {
+            start: start as u32,
+            end: self.pos.max(start) as u32,
+        };
         self.errors
-            .push(Error::Lex(format!("{} (at byte {start})", message.into())));
+            .push(Error::lex(message).at(span, self.src).suggest(suggestion));
     }
 
     fn scan_one(&mut self) {
@@ -274,7 +296,7 @@ impl<'a> Lexer<'a> {
                 // `=<` is Prolog's `<=`; recognize it, hint, and substitute.
                 if self.peek_at(1) == Some(b'<') {
                     self.pos += 2;
-                    self.error(start, "`=<` is not an operator; did you mean `<=`?");
+                    self.error_suggesting(start, "`=<` is not an operator", "did you mean `<=`?");
                     self.push(TokenKind::Le, start);
                 } else {
                     self.punct(TokenKind::Eq, 1);
@@ -326,7 +348,11 @@ impl<'a> Lexer<'a> {
                 match self.peek_at(1) {
                     Some(b'=') => {
                         self.pos += 2;
-                        self.error(start, "`\\=` is not an operator; did you mean `!=`?");
+                        self.error_suggesting(
+                            start,
+                            "`\\=` is not an operator",
+                            "did you mean `!=`?",
+                        );
                         self.push(TokenKind::Ne, start);
                     }
                     Some(b'+') => {

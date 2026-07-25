@@ -103,7 +103,7 @@ impl Resolver {
                     self.push(statement, file);
                 }
                 StatementKind::Query(_) if !is_root => {
-                    self.errors.push(Error::Source(format!(
+                    self.errors.push(Error::source(format!(
                         "in `{}`: query statements are not allowed in imported modules \
                          (libraries define relations; the importing program asks)",
                         self.files[file]
@@ -119,14 +119,14 @@ impl Resolver {
         let context = in_file(&self.files[file]);
 
         if is_url(path) {
-            self.errors.push(Error::Source(format!(
+            self.errors.push(Error::source(format!(
                 "{context}: module imports are local files only (`{path}` is a URL); \
                  URLs import data, with `as`"
             )));
             return;
         }
         if Path::new(path).extension().and_then(|e| e.to_str()) != Some("dl") {
-            self.errors.push(Error::Source(format!(
+            self.errors.push(Error::source(format!(
                 "{context}: `import \"{path}\".` without `as` is a module import, which \
                  takes a `.dl` file; importing data requires `as`: \
                  `import \"{path}\" as <relation>.`"
@@ -138,7 +138,7 @@ impl Resolver {
         let canonical = match resolved.canonicalize() {
             Ok(canonical) => canonical,
             Err(e) => {
-                self.errors.push(Error::Source(format!(
+                self.errors.push(Error::source(format!(
                     "{context}: cannot read module `{}`: {e}",
                     resolved.display()
                 )));
@@ -154,7 +154,7 @@ impl Resolver {
         let source = match std::fs::read_to_string(&resolved) {
             Ok(source) => source,
             Err(e) => {
-                self.errors.push(Error::Source(format!(
+                self.errors.push(Error::source(format!(
                     "{context}: cannot read module `{}`: {e}",
                     resolved.display()
                 )));
@@ -210,13 +210,11 @@ fn is_url(path: &str) -> bool {
     path.contains("://")
 }
 
-fn prefix_error(error: Error, context: &str) -> Error {
-    match error {
-        Error::Lex(msg) => Error::Lex(format!("{context}: {msg}")),
-        Error::Parse(msg) => Error::Parse(format!("{context}: {msg}")),
-        Error::Semantic(msg) => Error::Semantic(format!("{context}: {msg}")),
-        Error::Source(msg) => Error::Source(format!("{context}: {msg}")),
-    }
+/// Prefixes an error's message with the module it came from, keeping its kind,
+/// span, position and suggestion intact.
+fn prefix_error(mut error: Error, context: &str) -> Error {
+    error.message = format!("{context}: {}", error.message);
+    error
 }
 
 #[cfg(test)]

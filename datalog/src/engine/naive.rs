@@ -14,6 +14,16 @@
 //! programs every stratum order reaches the same least fixpoint, so B1's
 //! anchor meaning is unchanged; with negation, B1 becomes the perfect-model
 //! differential (testing.md C3).
+//!
+//! The **absent value (§4/§8) is in scope** (2026-07-25): annihilation in
+//! arithmetic, false in every comparison, matching nothing in joins and
+//! anti-joins, and the presence filter. It is written out here from the spec's
+//! truth tables rather than delegating to `Value::unifies_with` /
+//! the engine's `apply_compare` / `apply_arith` — an oracle that shares the code under test
+//! cannot contradict it. Until then this module used plain `==` and had no
+//! absent arms at all, so B1 was silently blind to the newest semantics in the
+//! language; the generators emitted no absent, which is the only reason it
+//! passed.
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -97,20 +107,31 @@ fn matches(
     Ok(out)
 }
 
-/// Folds every comparison (§8) and aggregate (§9) literal over `env` in source
-/// order: a comparison filter that fails discards the environment (`Ok(None)`);
-/// an `=`-assignment binds its target; an aggregate folds over its goal's
-/// witnesses and binds its result; a runtime error (overflow, division by zero,
-/// NaN, type mismatch) aborts. Source order lets a later builtin use an earlier
-/// one's binding (an aggregate result consumed by a comparison), mirroring the
-/// engine's scheduling.
+/// Folds every comparison (§8), presence test (§4) and aggregate (§9) literal
+/// over `env` in **dependency order**: a filter that fails discards the
+/// environment (`Ok(None)`); an `=`-assignment binds its target; an aggregate
+/// folds over its goal's witnesses and binds its result; a runtime error
+/// (overflow, division by zero, NaN, type mismatch) aborts.
+///
+/// The order comes from [`crate::schedule::schedule_body`], the same pure
+/// function lowering validates with and the engine evaluates by — shared like
+/// `fold_aggregate`, because an order the two derived separately could differ
+/// for reasons B1 would report as a semantic disagreement. Non-builtin indices
+/// appear in the schedule too (atoms first, then negations) and are skipped
+/// here: `matches` has already handled them.
 fn apply_builtins(
     body: &[BodyLiteral],
     facts: &BTreeSet<Fact>,
     mut env: HashMap<Var, Value>,
 ) -> Result<Option<HashMap<Var, Value>>> {
-    for literal in body {
-        match &literal.kind {
+    let order = crate::schedule::schedule_body(body).map_err(|failure| {
+        Error::semantic(format!(
+            "malformed IR: body literal {} can never run",
+            failure.literal
+        ))
+    })?;
+    for &index in &order {
+        match &body[index].kind {
             BodyLiteralKind::Compare { op, lhs, rhs } => {
                 // Assignment: `=` where exactly one side is a bare, currently-
                 // unbound variable and the other side evaluates.
@@ -150,9 +171,16 @@ fn apply_builtins(
                 let outcome = crate::engine::fold_aggregate(*op, &values)?;
                 env.insert(*result, outcome.value);
             }
-            // Atoms and negated atoms are handled in `matches`; a presence test
-            // (§4/§8) is outside the generated differential scope.
-            _ => {}
+            BodyLiteralKind::Presence { expr, negated } => {
+                // §8: holds iff the operand is absent, flipped by `negated`.
+                // A filter — it binds nothing.
+                let value = eval_expr(expr, &env)?;
+                if matches!(value, Value::Absent) == *negated {
+                    return Ok(None);
+                }
+            }
+            // Atoms and negated atoms are handled in `matches`.
+            BodyLiteralKind::Atom(_) | BodyLiteralKind::NegAtom(_) => {}
         }
     }
     Ok(Some(env))
@@ -166,11 +194,32 @@ fn unbound_var(expr: &Expr, env: &HashMap<Var, Value>) -> Option<Var> {
     }
 }
 
+/// The §4 *semantic* sameness of two ground values: `absent` matches nothing —
+/// not a value, and not another `absent` — while every other value matches
+/// structurally.
+///
+/// Deliberately written out here rather than calling the engine's
+/// `Value::unifies_with`: the oracle's whole value is that it can *disagree*, so it
+/// re-expresses the rule (match on both operands) instead of sharing the
+/// engine's expression of it. Same rule, independent code.
+fn same_value(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Absent, _) | (_, Value::Absent) => false,
+        _ => a == b,
+    }
+}
+
 /// Applies a comparison to two evaluated operands. Strict: cross-type operands
 /// are a structured error (§4), never a silent `false`.
 fn compare(op: CmpOp, lhs: &Value, rhs: &Value) -> Result<bool> {
+    // §8: a comparison with an absent operand is *false* for every operator,
+    // ahead of the same-type check below — so it is never a type error, and
+    // `X = v` and `X != v` are both false when `X` is absent.
+    if matches!(lhs, Value::Absent) || matches!(rhs, Value::Absent) {
+        return Ok(false);
+    }
     if std::mem::discriminant(lhs) != std::mem::discriminant(rhs) {
-        return Err(Error::Semantic(
+        return Err(Error::semantic(
             "type error: comparison requires operands of the same type".to_string(),
         ));
     }
@@ -189,7 +238,7 @@ fn eval_expr(expr: &Expr, env: &HashMap<Var, Value>) -> Result<Value> {
     match expr {
         Expr::Term(Term::Const(value)) => Ok(value.clone()),
         Expr::Term(Term::Var(var)) => env.get(var).cloned().ok_or_else(|| {
-            Error::Semantic("malformed IR: arithmetic operand variable is unbound".to_string())
+            Error::semantic("malformed IR: arithmetic operand variable is unbound".to_string())
         }),
         Expr::Binary { op, lhs, rhs } => {
             let a = eval_expr(lhs, env)?;
@@ -203,6 +252,11 @@ fn eval_expr(expr: &Expr, env: &HashMap<Var, Value>) -> Result<Value> {
 /// truncating integer division, checked overflow and division by zero, NaN
 /// rejected.
 fn arith(op: ArithOp, lhs: Value, rhs: Value) -> Result<Value> {
+    // §8: absent annihilates, and does so *ahead* of the type, division-by-zero
+    // and overflow checks — `5 / absent` and `absent / 0` are both absent.
+    if matches!(lhs, Value::Absent) || matches!(rhs, Value::Absent) {
+        return Ok(Value::Absent);
+    }
     match (lhs, rhs) {
         (Value::Int(a), Value::Int(b)) => {
             let checked = match op {
@@ -211,7 +265,7 @@ fn arith(op: ArithOp, lhs: Value, rhs: Value) -> Result<Value> {
                 ArithOp::Mul => a.checked_mul(b),
                 ArithOp::Div => {
                     if b == 0 {
-                        return Err(Error::Semantic(
+                        return Err(Error::semantic(
                             "arithmetic error: division by zero".to_string(),
                         ));
                     }
@@ -220,7 +274,7 @@ fn arith(op: ArithOp, lhs: Value, rhs: Value) -> Result<Value> {
             };
             checked
                 .map(Value::Int)
-                .ok_or_else(|| Error::Semantic("arithmetic error: integer overflow".to_string()))
+                .ok_or_else(|| Error::semantic("arithmetic error: integer overflow".to_string()))
         }
         (Value::Float(a), Value::Float(b)) => {
             let result = match op {
@@ -231,7 +285,7 @@ fn arith(op: ArithOp, lhs: Value, rhs: Value) -> Result<Value> {
             };
             F64::new(result).map(Value::Float)
         }
-        _ => Err(Error::Semantic(
+        _ => Err(Error::semantic(
             "type error: arithmetic requires two ints or two floats".to_string(),
         )),
     }
@@ -256,16 +310,17 @@ fn match_positives(
 }
 
 /// Does `tuple` refute the negated `atom` under `env`? Constants and bound
-/// variables must agree; unbound variables are open and match anything.
-/// Deliberately non-binding — the counterpart of the engine's
+/// variables must agree *semantically* ([`same_value`], so a slot holding
+/// `absent` closes nothing and refutes nothing); unbound variables are open and
+/// match anything. Deliberately non-binding — the counterpart of the engine's
 /// `AbsentPattern::matches`, written against `env` instead.
 fn refutes(atom: &Atom, tuple: &Tuple, env: &HashMap<Var, Value>) -> bool {
     atom.args
         .iter()
         .zip(&tuple.0)
         .all(|(term, value)| match term {
-            Term::Const(c) => c == value,
-            Term::Var(v) => env.get(v).is_none_or(|bound| bound == value),
+            Term::Const(c) => same_value(c, value),
+            Term::Var(v) => env.get(v).is_none_or(|bound| same_value(bound, value)),
         })
 }
 
@@ -280,11 +335,15 @@ pub(crate) fn match_atom(
     let mut env = env.clone();
     for (term, value) in atom.args.iter().zip(&tuple.0) {
         match term {
-            Term::Const(c) if c == value => {}
+            // Matching an *already-known* value uses the semantic rule (§4), so
+            // a repeated variable or a constant never unifies with `absent`.
+            Term::Const(c) if same_value(c, value) => {}
             Term::Const(_) => return None,
             Term::Var(v) => match env.get(v) {
-                Some(bound) if bound == value => {}
+                Some(bound) if same_value(bound, value) => {}
                 Some(_) => return None,
+                // A *fresh* slot binds to whatever is stored, `absent` included —
+                // that is how a missing cell flows to the head.
                 None => {
                     env.insert(*v, value.clone());
                 }
