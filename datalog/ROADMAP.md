@@ -40,6 +40,14 @@ The evaluation-first roadmap (decided 2026-07-10; rationale in `AGENTS.md` and
 > blocked on "Termination & value-creating recursion" below. `001` (a compound
 > argument in a negated atom silently misread as a wildcard) was **fixed
 > 2026-07-25** by negation item 2 below — see `bugs/resolved/`.
+>
+> **`002` is the cheapest to close**: its fix sketch is written, and the general
+> property is already in the tree, failing, as
+> `api::tests::dash_q_rule_equals_the_same_rule_in_a_file` (testing.md C8). It is
+> `#[ignore]`d with the shrunk case seeded, so the work is the fix plus deleting
+> the `#[ignore]`. `cargo test -- --ignored` should report exactly **three**
+> known failures — that one and the two absent × negation tests; a fourth means
+> something regressed.
 
 ### Negation (§7)
 
