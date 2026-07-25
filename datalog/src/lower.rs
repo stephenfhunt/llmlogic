@@ -972,20 +972,15 @@ impl Lowerer {
                     // A negated atom's variables must be bound by *something* —
                     // a positive atom, an `=`-assignment or an aggregate result
                     // all make it ground before the anti-join runs, and the
-                    // scheduler places the negation after whichever it is
-                    // (§7/§10, 2026-07-25).
+                    // scheduler places the negation after whichever it is (§7/§10).
                     //
                     // The scheduler cannot make this call itself: a slot bound
                     // nowhere is, to it, a wildcard — open and existential under
                     // the negation (§7), which is right for `_` and wrong for a
                     // named variable. `var_names` is what separates them, and
                     // keeping it here is what keeps `crate::schedule` free of it.
-                    //
-                    // Before 2026-07-25 this read `!positive.contains(..)`, and
-                    // the wildcard test was `is_some()` on the name. Hoisting an
-                    // inline-arithmetic argument (`not q(X + 1)`) mints an
-                    // unnamed slot that is nonetheless bound, which that test
-                    // silently skipped — `bugs/001`.
+                    // Note the test is `bound`, not "has a name": hoisting mints
+                    // unnamed slots that are nonetheless bound (`bugs/001`).
                     for arg in &atom.args {
                         if let ir::Term::Var(var) = arg
                             && var_names[var.0 as usize].is_some()

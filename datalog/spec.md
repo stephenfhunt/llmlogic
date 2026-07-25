@@ -563,8 +563,8 @@ r(V) :- p(A, B), V = (A as float) / (B as float).   % a real ratio, not A / B
 **Mode / safety (§10).** Every comparison operand variable must be bound by a
 positive atom, *except* an `=`-assignment target, which the assignment binds. A
 negated atom's named variables must likewise be bound — by a positive atom, an
-assignment, or an aggregate result (2026-07-25); the scheduler places the
-anti-join after whichever it is.
+assignment, or an aggregate result; the scheduler places the anti-join after
+whichever it is.
 
 **Evaluation order is by dependency, not by source order** (2026-07-25). A body
 is a conjunction, so where a binder is *written* does not decide what the clause
@@ -1139,9 +1139,9 @@ root(X) :- person(X), not parent(_, X).
 ```
 *Raised:* `not` keyword and wildcard `_` (ratified, §3/§5); the safety rule and
 how stratification is computed and reported (ratified, §7/§10 — *named*
-variables in negated atoms must be bound by the body (relaxed from *positively*
-bound, 2026-07-25), wildcards are existential under the negation, and
-stratification is predicate-level numbering with a structured cycle error).
+variables in negated atoms must be bound by the body, wildcards are existential
+under the negation, and stratification is predicate-level numbering with a
+structured cycle error).
 
 ### 16.3 Arithmetic & comparison builtins
 
