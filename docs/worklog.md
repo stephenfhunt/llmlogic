@@ -16,6 +16,76 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-25 — Spec design & style review; a `bugs/` tracker
+
+No engine change this session — a review of `spec.md` as a *specification* (style,
+structure) and as a *language design* (syntax, semantics), with every candidate
+finding probed against the built binary rather than argued from the prose.
+Everything found is queued; nothing was fixed.
+
+**Done**
+- **Read §1–§17 end to end and verified findings against the binary.** Claims that
+  held: absent round-trips through output, empty-group `sum` → `absent`, the §9
+  skip warning, contextual `int`/`table` as relation names, head-only group keys
+  erroring correctly, positive atoms with compound arguments. Tree green (369
+  tests; only the 2 known absent × negation `#[ignore]`s plus a network test).
+- **Opened `datalog/bugs/`** — one file per defect, three filed:
+  - **`001` (soundness).** `r(X) :- p(X), not q(X + 1).` silently returns *nothing*
+    where the answer is `r(1). r(3).` The hoist that lands compound atom arguments
+    mints a `None`-named slot; the negation safety check (`lower.rs:970`) tests
+    only *named* variables, skips it, and the anti-join treats it as an open
+    wildcard — so the rule degrades to `not q(_)`. Hits aggregates and queries too.
+    The hand-hoisted spelling of the same rule is correctly rejected, so one
+    conjunction has two meanings.
+  - **`002`.** `-q 'r(X) :- p(X), X < 5 ; p(X), s(X)'` is rejected with a *query*
+    grammar error; the same rule in a file works. `api.rs:146` matches a single
+    statement, but the parser expands DNF into one clause per disjunct.
+  - **`003` (doc).** Three verified false assertions: §10's range restriction names
+    one binder where there are three; §3's reserved-word list omits `absent` and
+    `is`; §8's closing italic contradicts §8's own body on precedence.
+- **Queued the rest in `ROADMAP.md`** — new sections for *Expressions*, *Surface
+  uniformity & the agent edge*, and *Spec hygiene & §6*, plus count-distinct under
+  §9. Corrected negation item 2's premise, which `001` falsifies.
+
+**Decided (detail in `spec.md` §17, 2026-07-25)**
+- **`bugs/` is the defect tracker; location is the status.** `bugs/*.md` is exactly
+  the open set, resolving is `git mv` to `bugs/resolved/`, so there is no `status:`
+  field and no index — either would be a second copy of what the directory says,
+  and stale cross-references are this project's demonstrated failure mode (this
+  review found five). A resolved file must *append* a `## Resolution` note saying
+  which candidate fix was taken and why the others were dropped. Rejected: GitHub
+  Issues (private SSH remote), `git-bug`/Fossil (issue text leaves plain files).
+- **Strict numerics stay — no implicit `int + float` widening** (user call). An int
+  column beside a float column usually reflects a real distinction in the data
+  model, and implicit widening would reintroduce in expressions the >2⁵³ precision
+  hazard §13 closed at the import path the same day. The fix is an explicit
+  `float(X)`, which folds the numeric gap into the call-form question.
+- **Parens were never a design decision** — no §17 entry exists; "deliberately
+  flat" lives only in commit a7d1ff1's message. Both `Expr` types are already
+  general trees and there is no ambiguity, so it is a small task, **deliberately
+  not bundled** with the scalar-call form. Real cost: `print.rs` must become
+  precedence-aware (D2/D3 already cover it).
+- **§6 is the biggest substantive gap and belongs to the negation session** — no
+  model-theoretic account of aggregation or `absent`. "What does `p(X), not p(X)`
+  mean" is a §6 question in implementation clothing.
+- **Aggregate group keys are a fourth `absent` site** and were added to that
+  session's scope: `g(K,N) :- k(K), N = count{C|v(K,C)}.` gives `g(absent, 0)`.
+  SQL-consistent and defensible, but it means direction 1 leaves four sites with
+  three answers — settle them in one table, not three plus an omission.
+
+**Next up**
+- **`bugs/001` first** — soundness, small, and independent of the absent × negation
+  semantics question, so it should not wait behind that design session. It also
+  removes negation item 2's deferral rationale.
+- Then `002` and `003` (both small), and parenthesized expressions, which is good
+  company for them.
+- The two design sessions, unchanged in order: **absent × negation** (now including
+  §6 and aggregate group keys), then **negated atoms in the dependency schedule**.
+- Performance profiling remains the highest-signal *feature* work and is untouched
+  by any of this.
+
+---
+
 ## 2026-07-25 — Correctness review of milestones 8–9, and the fixes
 
 **Done**
