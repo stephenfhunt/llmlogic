@@ -1816,6 +1816,17 @@ say.
     surfaced, should be provenance-as-facts. `--format json` remains a documented
     future *edge* feature only (hand-rolled if ever — no serde).
 
+  ***Consequences 2026-07-25.*** "Classify by **parsing**, never by
+  string-splitting on `:-`" was and is right — the string-splitting failure it
+  avoids is real. What it cost is subtler: the *implementation* of that rule
+  matches a single statement (`[statement]`), which silently assumes one clause
+  in yields one statement out. The previous day's disjunction desugaring had
+  already made that false, so `-q` rejects a rule the same file accepts
+  (`bugs/002`). Neither decision is wrong; their composition was never checked,
+  and §14's prose describes the `[statement]` match while reading like a
+  language-level statement. The general claim — `-q` is sugar for appending to
+  the loaded program — is now a property rather than prose (testing.md C8).
+
 - **2026-07-22** — **Phase D: lexer + parser** (`src/lexer.rs`, `src/parser.rs`,
   `src/print.rs`, `src/api.rs`, thin `src/main.rs`). Decisions ratified this
   session:
@@ -1854,6 +1865,20 @@ say.
   - **Minimal binary contract** pulled forward from step 6 to enable system
     tests: `datalog <file | ->`, answers to stdout / errors to stderr, exit
     codes 0/1/2. The full `-q`/`--format json`/skill CLI remains step 6.
+
+  ***Consequences 2026-07-25.*** The two widenings this session ratified turned
+  out to be the two that later broke something, in the same way: each created a
+  surface form whose equivalence to an existing one was asserted and not tested.
+  **Inline arithmetic** hoists to a generated slot, which falsified the
+  2026-07-20 negation-safety invariant two days later and returned wrong rows
+  until `bugs/001`; the "same IR as the hand-written form" claim had a unit test,
+  not a property. **Disjunction** desugars one clause into N statements, which
+  the next day's `-q` classifier assumed away — `bugs/002`. Both are now
+  properties (testing.md C8). Two smaller residues: ratifying **precedence** here
+  did not remove §8's trailing "deferred to the parser" note, so the section
+  contradicted itself for three days (`bugs/003`); and the entry's silence on
+  **grouping** later read as a deliberate flat-expression design, when the
+  ROADMAP established it was simply never considered.
 
 - **2026-07-03** — Language scope for v1 is **full-featured**: facts, rules,
   recursion, stratified negation, arithmetic/comparison builtins, and aggregation.
@@ -2179,6 +2204,18 @@ say.
   comparison/arithmetic programs, including the error path (both reject a
   `/ 0`). Type *inference* (§4) — verifying these operand rules statically
   before evaluation — is the next step.
+
+  ***Consequences 2026-07-25.*** The substance held: strict numerics, truncating
+  `/`, the error trio and `Premise::Builtin` are all still in force, and B1 over
+  comparison programs remains the property that carries them. Two mechanisms did
+  not. "Comparisons are scheduled after positives and negations" and the
+  assignment-safety exception "computed in source order" were both replaced by
+  dependency scheduling (2026-07-25), which is what the entry's own
+  evaluator-internal framing invited — it recorded an *order* as if it were a
+  detail, and safety quietly came to depend on it. The larger unnoticed cost:
+  admitting arithmetic made the Herbrand universe unbounded and falsified §6's
+  "finite set of constants" and "reached in finitely many steps" — `bugs/004`,
+  filed four days later. Nothing in this entry mentions §6, and nothing failed.
 - **2026-07-21** — **Type inference is a separate pass, and `eval` stays
   type-blind.** `typecheck(&ir::Program) -> Result<TypeEnv, Vec<Error>>`
   (`src/typecheck.rs`) runs between `lower` and `eval` — a union-find over the
