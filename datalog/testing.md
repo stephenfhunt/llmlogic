@@ -359,7 +359,12 @@ compared keyed by predicate *name*, not `PredId`.
 
   - **A15** `a15_inline_and_hoisted_arguments_agree` — an inline compound atom
     argument lowers to the same program as the hand-written `=`-assignment
-    (`testgen::hoist_atom_args`). Compared with `testgen::alpha_eq`, not `==`:
+    (`testgen::hoist_atom_args`), in **rule bodies**. Queries are excluded and
+    the exclusion is load-bearing: a query's answer variables are its *named*
+    slots (§14), so a hand-written variable becomes an answer column where
+    lowering's anonymous slot does not — a real difference in what was asked,
+    not an artifact. On its first run the property found `bugs/005`, a separate
+    consequence of that same §14 rule. Compared with `testgen::alpha_eq`, not `==`:
     the hand-written variable is *named* where lowering mints an anonymous slot
     and the two number slots differently, neither observable to the evaluator —
     which is exactly what `lower_arg_expr`'s "engine-identical" asserts, so

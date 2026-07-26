@@ -35,11 +35,13 @@ The evaluation-first roadmap (decided 2026-07-10; rationale in `AGENTS.md` and
 
 > **Open defects live in [`bugs/`](bugs/)** — currently `002` (`-q` rejects a
 > disjunctive rule), `003` (three normative errors in `spec.md`), `004` (§6
-> asserts a finiteness that arithmetic falsified). These came out of the
-> 2026-07-25 spec review and the design session that followed it (§17). `004` is
-> blocked on "Termination & value-creating recursion" below. `001` (a compound
-> argument in a negated atom silently misread as a wildcard) was **fixed
-> 2026-07-25** by negation item 2 below — see `bugs/resolved/`.
+> asserts a finiteness that arithmetic falsified), `005` (a ground query with a
+> computed argument prints nothing). `002`–`004` came out of the 2026-07-25 spec
+> review and the design session that followed it (§17); `005` was found by the
+> C8 property suite on its first run. `004` is blocked on "Termination &
+> value-creating recursion" below. `001` (a compound argument in a negated atom
+> silently misread as a wildcard) was **fixed 2026-07-25** by negation item 2
+> below — see `bugs/resolved/`.
 >
 > **`002` is the cheapest to close**: its fix sketch is written, and the general
 > property is already in the tree, failing, as

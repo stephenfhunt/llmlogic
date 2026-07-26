@@ -1394,16 +1394,27 @@ pub(crate) fn positionalize(program: &Program) -> Program {
     Program { statements }
 }
 
-/// Rewrites every **compound** atom argument in a clause or query *body* into a
-/// preceding `=`-assignment over a fresh variable — the transformation lowering
-/// performs internally when it hoists inline arithmetic (`src/lower.rs`,
+/// Rewrites every **compound** atom argument in a *rule body* into a preceding
+/// `=`-assignment over a fresh variable — the transformation lowering performs
+/// internally when it hoists inline arithmetic (`src/lower.rs`,
 /// `ArgMode::Hoist`), written out by hand.
 ///
-/// `p(X + 1)` becomes `H0 = X + 1, p(H0)`. Facts are left alone: an empty-body
-/// clause constant-*folds* its arguments rather than hoisting them (`ArgMode::Fold`),
-/// and turning one into a rule would not be the same program. Head arguments are
-/// left alone too — lowering appends their assignments *after* the body, so the
-/// hand-written equivalent is a different edit and a separate claim.
+/// `p(X + 1)` becomes `H0 = X + 1, p(H0)`. Three things are deliberately left
+/// alone:
+///
+/// - **Facts.** An empty-body clause constant-*folds* its arguments rather than
+///   hoisting them (`ArgMode::Fold`); turning one into a rule is a different
+///   program.
+/// - **Head arguments.** Lowering appends their assignments *after* the body, so
+///   the hand-written equivalent is a different edit and a separate claim.
+/// - **Queries** — where the two spellings genuinely differ, and correctly so. A
+///   query's answer variables are the *named* slots it binds (§14), so a
+///   hand-written `H0` becomes an answer column while lowering's anonymous slot
+///   does not. That is a real difference in what the user asked for, not an
+///   artifact, so the rewrite must not claim the two are the same program.
+///   (`bugs/005` is a *separate* consequence of the same §14 rule, found by this
+///   property: it makes `?- p("a", 1 + 1).` print nothing where `?- p("a", 2).`
+///   prints the fact.)
 ///
 /// The point of the rewrite is the §5 claim that the two spellings are the same
 /// program. Compare the results with [`alpha_eq`], not `==`: a hand-written `H0`
@@ -1482,13 +1493,9 @@ pub(crate) fn hoist_atom_args(program: &Program) -> Program {
                 }),
                 span: statement.span,
             },
-            StatementKind::Query(query) => Statement {
-                kind: StatementKind::Query(crate::ast::Query {
-                    body: rewrite_body(&query.body),
-                    span: query.span,
-                }),
-                span: statement.span,
-            },
+            // Queries are left alone: a hand-written variable is an answer
+            // variable (§14) and the anonymous slot lowering mints is not, so
+            // the two spellings really do differ. See the doc comment.
             _ => statement.clone(),
         })
         .collect();
