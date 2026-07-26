@@ -72,13 +72,36 @@ practice.
 - `engine::positively_bound` (earlier in the day, superseded by the shared
   scheduler binding set).
 
+**The suite earned itself immediately.** `a15` failed on a generated case within
+minutes of landing — not an engine bug but a flaw in the property: it rewrote
+*queries*, where the two spellings genuinely differ (a hand-written variable is
+an answer variable per §14; lowering's anonymous slot is not). Restricted to rule
+bodies, with the reason recorded rather than silently narrowed. Chasing it
+surfaced **`bugs/005`**: `?- p("a", 1 + 1).` prints nothing where `?- p("a", 2).`
+prints the fact — the third instance of this session's class, found by the thing
+built for it. §14's "one shape the closure does not cover yet" is reachable from
+an ordinary-looking query.
+
+**`CLAUDE.md` → `AGENTS.md` symlink.** Checked the docs rather than assuming:
+Claude Code reads `CLAUDE.md`, *not* `AGENTS.md`, and has a documented section on
+exactly this bridge. So until now the practice rules had no trigger — this session
+read `AGENTS.md` on its own initiative, not because anything loaded it. Verify
+with `/context` under **Memory files**.
+
 **Next up**
 - **`absent` × negation** (negation item 1) — the only open negation thread, and
   unblocked. Two `#[ignore]`d tests are the acceptance criterion.
-- **`bugs/002`** is now the cheapest defect to close: the fix sketch is written,
-  and the property already exists and fails. Delete the `#[ignore]` to finish.
+- **`bugs/002`** is the cheapest defect to close: the fix sketch is written, and
+  the property already exists and fails. Delete the `#[ignore]` to finish.
+- **`bugs/005`** is new and small — an output-shape defect in `api.rs`, no engine
+  or lowering change implied.
 - `bugs/003` (three false spec assertions) and `bugs/004` (blocked on the
   termination design item).
+- **Agent-context pass, deferred deliberately** (user call): `AGENTS.md` is now
+  238 lines against a documented target of under 200 for a loaded instruction
+  file, and longer files measurably reduce adherence. The working-style rules are
+  the natural thing to move into `.claude/rules/` — same load behaviour, scopable,
+  and it keeps the root file short. Do this before adding more to `AGENTS.md`.
 - **Known coverage gap, recorded not fixed:** E3's `replay` returns `None` on any
   `Premise::Builtin`, so derivation replay has never covered §8 builtins at all.
   Widening it means folding builtin premises into the replayed environment.
