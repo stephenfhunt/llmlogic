@@ -16,7 +16,7 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
-## 2026-07-25 — Practice: stop building on doc claims that stopped being true
+## 2026-07-25/26 — Practice: stop building on doc claims that stopped being true
 
 Same day, after `bugs/001`. Prompted by asking why this week's defects kept
 having the same shape. They do, and the diagnosis was already written down — four
