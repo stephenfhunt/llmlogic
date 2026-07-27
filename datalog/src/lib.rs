@@ -3,10 +3,12 @@
 //! A Datalog engine targeted at LLM/agent use, with convenient import of fact
 //! tables from external sources.
 //!
-//! This crate is an early scaffold: the module layout below mirrors the intended
-//! architecture, but most modules are stubs pending the language specification in
-//! `spec.md`. The engine is exposed as a library so it stays reusable and
-//! testable; the `datalog` binary is a thin CLI/REPL wrapper over it.
+//! The pipeline is `parse → resolve modules → load imports → lower → typecheck →
+//! eval`: a hand-rolled lexer and recursive-descent parser, module and data
+//! imports (§13), lowering to a positional core IR, static type inference, and a
+//! stratified semi-naive fixpoint that records provenance. The language it
+//! implements is specified in `spec.md`. The engine is exposed as a library so it
+//! stays reusable and testable; the `datalog` binary is a thin CLI wrapper over it.
 //!
 //! ## Design pillars
 //! 1. Provenance / explainability — explain *why* a fact was derived.
