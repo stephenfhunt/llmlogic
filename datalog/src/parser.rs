@@ -1096,6 +1096,49 @@ adult(N) :- person(name: N, age: A), A >= 18.
         assert_eq!(declaration.relation.name, "table");
     }
 
+    /// §3's reserved-word list, made checkable. It had drifted twice — `absent`
+    /// and `is` were reserved by the lexer but missing from the list (`bugs/003`),
+    /// because nothing failed when a new keyword landed without a doc edit.
+    #[test]
+    fn every_reserved_word_is_rejected_as_a_relation_name() {
+        for word in [
+            "import", "as", "declare", "not", "is", "true", "false", "absent",
+        ] {
+            let src = format!("{word}(1).");
+            parse(&src).expect_err(&format!(
+                "`{word}` is reserved (§3), so `{src}` must not parse"
+            ));
+        }
+    }
+
+    #[test]
+    fn a_reserved_word_is_rejected_as_a_field_name() {
+        // The other half of §3's "cannot be used as relation *or field* names".
+        parse_err("declare p(is: int).");
+        parse_err("declare p(absent: int).");
+    }
+
+    /// The converse of the list above, also §3: these are contextual keywords,
+    /// recognized only in the one position each is meaningful, so they stay
+    /// usable as ordinary relation names.
+    #[test]
+    fn contextual_keywords_are_ordinary_relation_names() {
+        for word in [
+            // §13's `table "…"` selector.
+            "table", // The five type names (§4).
+            "int", "float", "string", "symbol", "bool",
+            // The five aggregate operators (§9), recognized only before `{`.
+            "count", "sum", "min", "max", "avg",
+        ] {
+            let src = format!("{word}(2).");
+            let program = parse_ok(&src);
+            let StatementKind::Clause(clause) = &program.statements[0].kind else {
+                panic!("expected a fact for {src:?}");
+            };
+            assert_eq!(clause.head.predicate.name, word);
+        }
+    }
+
     #[test]
     fn import_error_mentions_the_module_alternative() {
         let errors = parse_err("import \"x.csv\" garbage.");
@@ -1205,12 +1248,6 @@ adult(N) :- person(name: N, age: A), A >= 18.
     fn is_without_absent_is_a_targeted_error() {
         let errors = parse_err("p(X) :- q(X), X is 5.");
         assert!(errors[0].to_string().contains("absent"), "got: {errors:?}");
-    }
-
-    #[test]
-    fn absent_is_reserved_and_cannot_name_a_relation() {
-        // A keyword, not an identifier — `absent(...)` cannot be a head atom.
-        assert!(!parse_err("absent(1).").is_empty());
     }
 
     #[test]

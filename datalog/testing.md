@@ -419,6 +419,16 @@ modulo spans, via a span-zeroing helper) — 16.4/16.6 excluded (not in the
 grammar). Structured-error quality stays example/golden-based (the near-miss
 did-you-mean set, one test each).
 
+**§3's keyword lists are asserted, not just written** (2026-07-27, `bugs/003`).
+`every_reserved_word_is_rejected_as_a_relation_name` and
+`contextual_keywords_are_ordinary_relation_names` are table-driven over the two
+lists §3 states — the eight reserved words, and the eleven contextual ones
+(`table`, the five type names, the five aggregate operators) — plus a field-name
+case for the other half of "relation *or field* names". They exist because §3 had
+silently fallen two words behind the lexer: `absent` and `is` were reserved with
+no §3 edit, and nothing failed. A doc list a test walks is the only version of
+that list that cannot drift.
+
 - [x] **D1** **The §14 closure property**: print any IR fact set in canonical
   output form → parse → lower → identical `Fact` set
   (`d1_fact_set_closure` over `arb_printable_fact_set`). Datalog-out is
