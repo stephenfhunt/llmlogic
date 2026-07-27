@@ -18,8 +18,8 @@ design pass before it can be built) · **building** (implementation underway) ·
 
 ## Shipped milestones
 
-The evaluation-first roadmap (decided 2026-07-10; rationale in `AGENTS.md` and
-§17). One line each; detail in `AGENTS.md` "Implementation roadmap".
+The evaluation-first roadmap (decided 2026-07-10; rationale in §17). One line
+each; detail in §17 and `docs/worklog.md`.
 
 1. **AST + IR** — surface AST + positional core IR + lowering. ✅ 2026-07-19
 2. **Core evaluator** — stratified semi-naive fixpoint with provenance recording. ✅ 2026-07-19
@@ -396,9 +396,16 @@ kind of work.
   and restate rules the log explains. The acceptance criterion is that **§1–§16
   read as the best current understanding of the language** — no dates, no
   "formerly", no residue of how we got here, every rule stated once with a pointer
-  for the why (`AGENTS.md`, "Changing what already exists"). Pairs naturally with
+  for the why (`docs/rules/editing-docs.md`). Pairs naturally with
   the status-vocabulary and stale-pointer items below; `bugs/003` is the same
   cleanup for the assertions that are outright false. _queued (user call)._ — §17.
+
+  **Confirmed by the `AGENTS.md` pass** (2026-07-26). That pass is this item at
+  small scale, and the ratio came out as predicted: extracting a section into
+  `docs/rules/editing-docs.md` was ~30 lines and half an hour, while deleting the
+  residue — shipped-milestone history, a directory listing, a restated test
+  pyramid — was ~97 lines and the actual work. Anyone sizing this item by how
+  long §17 is will size it wrong; measure §1–§16 instead.
 - **Rename the provenance "absence pattern".** §4 and §11 each carry a footnote
   apologizing for the collision with the `absent` *value* ("the two share a word,
   not a concept"). Two standing disclaimers is the signal to rename the provenance
@@ -426,3 +433,8 @@ kind of work.
   unblocked by §13 imports. _queued._ — skill.
 - **"Big external fact base" demo** — the motivating import demo; unblocked by
   §13 (the USDA dogfood is a first pass). _queued._ — skill.
+- **Other agent-exposure forms** — a Claude API agent-loop harness, and an MCP
+  server. Both are deliberately waiting on a trigger: the skill (2026-07-23) is
+  the first experiment, and how well a model actually drives it is what should
+  decide whether a second form is worth building. _parked (awaiting the skill
+  experiment)._ — skill.
