@@ -139,16 +139,32 @@ fn query_source(arg: &str) -> Result<String, Vec<Error>> {
     let core = arg.trim();
     let core = core.strip_suffix('.').unwrap_or(core).trim_end();
 
-    // A define-and-select rule parses as exactly one clause with a non-empty
-    // body. A bare atom parses as a clause with an *empty* body (a fact), which
-    // we treat as a query body, not a rule.
+    // A define-and-select rule parses as one *rule* with a non-empty body —
+    // however many clauses that rule desugars to, since the parser expands a
+    // top-level `;` into one clause per disjunct sharing the head (§17,
+    // 2026-07-22). A bare atom parses as a clause with an *empty* body (a fact),
+    // which we treat as a query body, not a rule.
     if let Ok(program) = parse(&format!("{core}."))
-        && let [statement] = &program.statements[..]
-        && let StatementKind::Clause(clause) = &statement.kind
-        && !clause.body.is_empty()
+        && let Some((first, rest)) = program.statements.split_first()
+        && let StatementKind::Clause(first_clause) = &first.kind
+        && !first_clause.body.is_empty()
     {
-        let head = print_atom(&clause.head);
-        return Ok(format!("{core}.\n?- {head}.\n"));
+        let head = print_atom(&first_clause.head);
+        // Every clause must share that head, or this is two unrelated rules
+        // rather than one disjunctive one — which belongs on the query-body path
+        // below, where it becomes a parse error attributed to the argument,
+        // instead of here where it would silently select only the first head.
+        // Compared as printed text: the canonical printer is span-free, and the
+        // shared head means the disjuncts print identically.
+        let one_rule = rest.iter().all(|statement| match &statement.kind {
+            StatementKind::Clause(clause) => {
+                !clause.body.is_empty() && print_atom(&clause.head) == head
+            }
+            _ => false,
+        });
+        if one_rule {
+            return Ok(format!("{core}.\n?- {head}.\n"));
+        }
     }
 
     // Otherwise it is a query body. Validate it as one so a genuinely malformed
@@ -615,14 +631,10 @@ age(\"bob\", 15).
         /// the file would (§14: `-q` "is sugar for appending `?- …` to the
         /// loaded program").
         ///
-        /// Fails today: `bugs/002` is precisely this divergence — a disjunctive
-        /// rule is accepted in a file and rejected via `-q`, because the
-        /// classifier matches a *single* statement and the parser expands one
-        /// disjunctive clause into several. Ignored rather than deleted, as the
-        /// executable acceptance criterion for that defect (the precedent is
-        /// the two absent × negation tests in `engine::tests`).
+        /// This was `bugs/002`'s executable acceptance criterion, `#[ignore]`d
+        /// and failing until the classifier stopped matching a *single*
+        /// statement (resolved 2026-07-26).
         #[test]
-        #[ignore = "bugs/002: -q rejects a disjunctive rule the file form accepts"]
         fn dash_q_rule_equals_the_same_rule_in_a_file(
             (base, rule, head) in crate::testgen::arb_dash_q_rule()
         ) {
@@ -689,6 +701,36 @@ age(\"bob\", 15).
             build("", &["gp(X,Z) :- parent(X,Y), parent(Y,Z)"]),
             "gp(X,Z) :- parent(X,Y), parent(Y,Z).\n?- gp(X, Z).\n"
         );
+    }
+
+    #[test]
+    fn a_disjunctive_rule_is_one_rule() {
+        // `bugs/002`: the parser expands a top-level `;` into one clause per
+        // disjunct sharing the head, so this arrives as *two* statements and
+        // used to fall through to the query path — reporting a syntax error
+        // about a grammar the user did not write.
+        assert_eq!(
+            build("", &["r(X) :- p(X), X < 5 ; p(X), s(X)"]),
+            "r(X) :- p(X), X < 5 ; p(X), s(X).\n?- r(X).\n"
+        );
+        let result = run_with_queries(
+            "p(1). p(9). s(9).",
+            &["r(X) :- p(X), X < 5 ; p(X), s(X)".to_string()],
+        )
+        .expect("runs");
+        assert_eq!(
+            result.answers,
+            vec![vec!["r(1).".to_string(), "r(9).".to_string()]]
+        );
+    }
+
+    #[test]
+    fn two_unrelated_rules_are_not_a_define_and_select() {
+        // Outside the documented `-q` contract: heads differ, so this must not
+        // silently select only `a`. It lands on the query-body path, where it is
+        // a parse error attributed to the argument.
+        let queries = ["a(X) :- p(X). b(X) :- p(X)".to_string()];
+        assert!(program_with_queries("p(1).", &queries).is_err());
     }
 
     #[test]
