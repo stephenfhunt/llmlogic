@@ -1,5 +1,9 @@
-# Claude Code per-project tooling state (local settings, saved plans, etc.)
-.claude/
+# Claude Code: ignore per-checkout *state*, ship shared *config*.
+# `.claude/skills/` stays ignored on purpose — a project's skill is a deliverable
+# you activate deliberately, not something every clone should load (AGENTS.md).
+.claude/*
+!.claude/rules/
+!.claude/settings.json
 
 # Editor swap/backup files
 *.swp

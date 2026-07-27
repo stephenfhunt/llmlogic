@@ -1,0 +1,1 @@
+../../docs/rules/editing-docs.md
