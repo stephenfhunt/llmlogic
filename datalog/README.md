@@ -4,7 +4,7 @@ A Datalog engine written in Rust, targeted at **LLM/agent use**. It aims to make
 formal, explainable reasoning convenient for language-model agents, and to make it
 easy to load fact tables from external sources (files and databases).
 
-Part of the [`llmlogic`](../) repository — experiments in LLM agents that use formal
+Part of the [`llmlogic`](../README.md) repository — experiments in LLM agents that use formal
 logic engines for better reasoning. This is the first project; it is entirely
 self-contained within the `datalog/` directory.
 
