@@ -6,7 +6,7 @@ catalog's checkboxes as layers land.*
 
 ## The pyramid
 
-The test pyramid grows outward with the pipeline (AGENTS.md):
+The test pyramid grows outward with the pipeline:
 
 1. **Engine unit tests** over hand-constructed IR (`ir::Program`); lowering
    tests over hand-constructed ASTs. Verbose literal-struct construction, no
@@ -107,12 +107,12 @@ Design rules (Csmith lessons):
   silently regressed.
 
 **Policy — generators vs. the no-DSL rule.** The no-macro-DSL/no-builder rule
-(AGENTS.md) is about ergonomic sugar for hand-written tests; generators are
-*coverage machinery* that construct plain `ast::`/`ir::` values and return
-them. They are `pub(crate)`, test-only, and must never be used to shorten
-hand-written example tests — §16-derived example tests construct literal
-structs verbatim. If a generator helper starts looking like a convenience API
-for humans, it has crossed the line.
+(the pyramid, item 1) is about ergonomic sugar for hand-written tests;
+generators are *coverage machinery* that construct plain `ast::`/`ir::` values
+and return them. They are `pub(crate)`, test-only, and must never be used to
+shorten hand-written example tests — §16-derived example tests construct
+literal structs verbatim. If a generator helper starts looking like a
+convenience API for humans, it has crossed the line.
 
 ## First-order algebra coverage map
 

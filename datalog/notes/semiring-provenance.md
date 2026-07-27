@@ -1,7 +1,7 @@
 # Semiring provenance under negation — parked research thread
 
 *Recorded 2026-07-20, after the §7 stratified-negation sessions. Status:
-**parked** — deliberately not on the roadmap (AGENTS.md). This note exists so
+**parked** — deliberately not on the roadmap (`ROADMAP.md`). This note exists so
 the thread can be rebooted later without re-deriving it. It supplements — and
 does not reopen — the §17 decision of 2026-07-20 that negation provenance is a
 proof-tree-level why-not record rather than a semiring construction.*

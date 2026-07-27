@@ -381,7 +381,7 @@ pub enum Constant {
 pub(crate) mod fixtures {
     //! Hand-constructed AST fixtures from the spec §16 corpus, shared with the
     //! lowering tests. Plain verbatim construction — no builders, per
-    //! AGENTS.md testing conventions.
+    //! `testing.md`.
 
     use super::*;
 

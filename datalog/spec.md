@@ -1274,7 +1274,7 @@ This section is an **append-only record**: history is what it is for. Amend
 entries in place, never rewrite them — a rationale that turned out wrong is the
 most useful thing here, because it shows where the reasoning misleads. Everything
 outside §17 states present truth instead and merely *points* here (see
-`AGENTS.md`, "Changing what already exists").
+`docs/rules/editing-docs.md`).
 
 **Amendment markers.** One vocabulary, so the sweep after a rule changes is a
 grep and not a judgement call. Each goes in **bold italic** at the end of the

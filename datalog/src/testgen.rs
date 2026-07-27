@@ -2,8 +2,8 @@
 //!
 //! This module is coverage machinery, not a test DSL: strategies construct
 //! plain [`crate::ast`] / [`crate::ir`] values and return them. Hand-written
-//! example tests must keep constructing literal structs verbatim (AGENTS.md;
-//! `testing.md`); nothing here is for human ergonomics.
+//! example tests must keep constructing literal structs verbatim
+//! (`testing.md`); nothing here is for human ergonomics.
 //!
 //! Design rules (see `testing.md`):
 //! - **Valid by construction, no rejection sampling** — rules are generated
