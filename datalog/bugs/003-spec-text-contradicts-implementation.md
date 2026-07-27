@@ -13,37 +13,46 @@ sitting's work and one commit. Each was verified against the built binary. None 
 a code bug — the implementation is right and the spec is wrong, which for a
 document whose stated job is to define the language is the more serious direction.
 
-## 1. §10's range restriction names one binder; there are three
+**Re-verified 2026-07-27**, before the session that will fix it. All three are
+still open, but item 1 has *moved*: the §10 wording it named was corrected in
+passing on 2026-07-25, and the same false claim turned up in §8 instead. Line
+pointers below are current as of that date; `spec.md` shifts under edits, so
+locate by quoted text if they drift again.
 
-§10 (`spec.md:654`) states:
+## 1. Range restriction is stated in four places, and one of them is still wrong
 
-> every variable in a rule head, every *named* variable in a negated atom, and
-> every variable occurring only in comparisons must also occur in a positive body
-> atom
+**Re-verified 2026-07-27.** §10's own wording — the half this item was opened for
+— **is already fixed**: it now reads "must be **bound by the body** — it must
+occur in a positive body atom, or be bound by an `=`-assignment or an aggregate
+result", corrected in passing by the `bugs/001` session (2026-07-25). §7 and §9
+likewise state all three binders.
 
-An `=`-assignment target and an aggregate result also bind. Verified — both run
-today:
+What this item is actually about survives intact, and is the more important half:
+**the same safety rule is stated in four sections**, so "updating it" means
+finding all four. That is the drift mechanism, not merely the drift — and the
+2026-07-25 sweep, which had this file open, still missed one:
+
+§8 (`spec.md:521`), on the `is [not] absent` operator, says its operand
+
+> must be positively bound like any comparison (§10)
+
+**"Positively" has been false since 2026-07-25**, when `bugs/001` relaxed safety
+to "bound by the body". Verified against the built binary 2026-07-27:
 
 ```datalog
 p(1).
-h(N) :- p(A), N = A + 1.            % h(2).   §10 as written rejects this
-h2(N) :- N = count { X | p(X) }.    % h2(1).  ditto
+h(X) :- p(A), X = A + 1, X is not absent.   % h(2). §8 as written rejects this
+?- h(X).
 ```
 
-The implementation's own message is correct where §10 is not: "it must occur in a
-positive body atom, or be bound by an `=`-assignment or an aggregate result".
-
-§8 states the assignment exception and §9 the aggregate one, so the rule is
-correct *somewhere* — but §10 presents itself as the normative home of range
-restriction, and it is the section §7 and §9 point at. **This duplication is the
-drift mechanism, not just the drift:** the same safety rule is stated in four
-sections, and updating three of them was enough to look done. §10 should own it and
-§7/§8/§9 should cross-reference it.
+So the count is unchanged — one false assertion, in a different section than when
+this was filed. §10 should own the rule and §7/§8/§9 should cross-reference it,
+which is what stops the next relaxation from leaving a fifth residue.
 
 ## 2. §3's reserved-word list is incomplete
 
 §3 (`spec.md:97`) lists `import`, `as`, `declare`, `not`, `true`, `false`. Also
-reserved, verified by probing:
+reserved, verified by probing (re-verified 2026-07-27):
 
 - **`absent`** — `absent(1).` is a syntax error ("expected a relation name").
   §5 says it is reserved; §3, which carries the canonical list, does not.
@@ -58,15 +67,16 @@ identifier, so a reader has to infer it.
 
 ## 3. §8 contradicts itself on operator precedence
 
-§8's closing italic (`spec.md:498`) says precedence is "deferred to the parser
+§8's closing italic (`spec.md:587`) says precedence is "deferred to the parser
 (§5, Phase D); the AST already carries whatever grouping the parser chose".
 Precedence was resolved 2026-07-22 and is stated earlier **in the same section**
-(`spec.md:421-424`). Leftover scaffolding.
+(`spec.md:482-484`). Leftover scaffolding. Re-verified 2026-07-27.
 
 ## Acceptance criteria
 
-- §10 states all three binders and is the single normative statement of range
-  restriction; §7/§8/§9 reference it rather than restating it.
+- §8:521's "positively bound" is corrected, and §10 is the single normative
+  statement of range restriction — §7/§8/§9 reference it rather than restating
+  it. (§10's own wording already landed 2026-07-25; the duplication did not.)
 - §3's reserved list is `import, as, declare, not, is, true, false, absent`, with a
   sentence distinguishing reserved words from the contextual ones (`table`, the
   five type names, the five aggregate operator names).
