@@ -24,6 +24,57 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-27 — Public on GitHub: a top-level README, private remote out of the tree
+
+**Docs and metadata only;** 385 tests pass, clippy clean. Nothing pushed yet.
+
+**Done**
+- **A top-level `README.md`** — the repo had none, so a visitor landed on
+  `AGENTS.md`, which is agent guidance, not an introduction. Every console block
+  in it is verbatim output from a release build, re-run from an empty directory
+  with the binary on `PATH` to confirm a reader pasting it gets those bytes.
+- **`vault` gone from `AGENTS.md`** (its only occurrence in tracked content),
+  `repository` set in `Cargo.toml`, and `lib.rs`'s crate doc corrected — it had
+  opened with "an early scaffold … most modules are stubs pending the language
+  specification" since before the parser landed.
+- Checked before shipping: all nine relative README links resolve, and a grep for
+  the private remote, absolute paths, and the author's address across tracked
+  files is empty.
+
+**Decided**
+- **Public and unadvertised** (user call), not private-with-collaborators: link-shareable
+  now, portfolio-usable later, at the cost of being indexed and forkable.
+- **Licensing stays deferred even so** — all rights reserved by default. Because
+  the repo is public the README says this outright, so the absence reads as a
+  decision rather than an oversight. `Cargo.toml` still carries no `license`.
+- **The root README's subject is `llmlogic`, not `datalog`** (user call): the goal
+  is a holistic set of tools and skills for formal reasoning with LLMs, of which
+  the engine is the first instance. Written so a second project costs one table
+  row — the same constraint `AGENTS.md` already lives under.
+- **The process docs are the portfolio piece, not noise.** The README's *How it's
+  built* section foregrounds spec-first design, §17, this worklog, `bugs/`,
+  properties-over-unit-tests, and `editing-docs.md`. Publishing them is the choice
+  being made; they were written for an audience of one until now.
+- **No CI this pass, no history rewrite** — DuckDB builds bundled from source, so
+  cold runs are slow enough to want their own session; and the `Claude-Session:`
+  trailers and author address on all 84 commits go public knowingly.
+
+**Removed**
+- `AGENTS.md`'s `The remote is `vault`.`; `lib.rs`'s scaffold paragraph;
+  `Cargo.toml`'s "no repository URL until a remote exists" comment, false the
+  moment the remote existed. All three are the same failure the *Practice* entry
+  (now archived) named: a current-state claim nothing routes you back to.
+- The 2026-07-25/26 entry rotated verbatim to `worklog-archive/2026-07.md`.
+
+**Next up**
+- **Push**: `git push -u github trunk` — the remote is `github`; `vault` stays as
+  the local backup. Then the GitHub *About* panel (description, topics), which is
+  not stored in-repo, and a look at the rendered README.
+- **CI** (`cargo test`/`clippy`/`fmt`) deferred, not rejected. Nothing in §17 to
+  annotate — this session touched no language decision.
+- Unchanged: **`bugs/005`** pending the fold-vs-plumb call, **`absent` × negation**,
+  the **§17 restructure**, `003`, `004`.
+
 ## 2026-07-26 — `bugs/002`: a disjunctive rule survives `-q`
 
 The cheapest open defect, taken from the `bugs/` queue and closed in `0c86ab1`.
@@ -126,93 +177,3 @@ Code's documented loading behaviour first. **Docs only;** 382 tests pass, clean.
 - **§17 restructure** and **`ROADMAP.md`'s 9 long items** (299 of 435 lines) are
   the remaining half — see `datalog/notes/decisions-log-restructure.md`.
 - Unchanged: **`absent` × negation**, **`bugs/002`** (cheapest), **`005`**, `003`/`004`.
-
-## 2026-07-25/26 — Practice: stop building on doc claims that stopped being true
-
-Same day, after `bugs/001`. Prompted by asking why this week's defects kept
-having the same shape. They do, and the diagnosis was already written down — four
-bug files independently prescribed the same fix and none of them promoted it to
-practice.
-
-**Done**
-- **The evidence.** Every "surface form A means the same as form B" claim carrying
-  a *property* has held (named ≡ positional, body order); both carrying only a
-  *unit test* became defects (`bugs/001`, `bugs/002`). `bugs/003` is the doc-side
-  variant — one rule stated in four sections, "updating three was enough to look
-  done". Fixing `bugs/001` meant editing that rule in nine places.
-- **`AGENTS.md` gained a "Changing what already exists" section**: the
-  current-state vs append-only document split, one normative home per rule, sweep
-  §17 when a rule moves, annotate a decision when its consequences land. Folded
-  into the existing list rather than bolted on.
-- **Session-end checkpoint** gained *Removed* and *annotate §17* — the annotation
-  rule needed a trigger that already fires, and every other worklog field rewards
-  adding.
-- **§17 preamble**: one amendment vocabulary (Falsified / Superseded / Amended /
-  **Consequences**) replacing the six in use. The fourth is new and is the only
-  marker that can record a decision working out *well*.
-- **Three §17 entries annotated** — §8 builtins, Phase D, the `-q` classifier —
-  each saying what it cost and whether the rationale held.
-- **testing.md C8**: `A15` (inline ≡ hand-hoisted, via `testgen::hoist_atom_args`
-  and a new `alpha_eq`), disjunction ≡ separate rules, and `-q` ≡ file program.
-  The last **fails and is `#[ignore]`d** as `bugs/002`'s acceptance criterion; it
-  shrinks to `d(K) :- n(K,V), V = 0 ; n(K,V), V = 0` and the seed is recorded.
-  Known failures are now three, each an open defect with a test saying what
-  correct looks like.
-
-**Decided**
-- **Widen the guard, don't just write the rule.** The prescription existed in four
-  places already; what was missing was anyone executing it. So the practice change
-  ships with the properties it calls for, and its first act is a *failing* test for
-  an open defect rather than another prose instruction.
-- **`alpha_eq` over `==` for A15.** The hand-written variable is named where
-  lowering mints an anonymous slot, and slot numbering differs. Comparing modulo
-  renaming is not a weakening — "engine-identical" is exactly the claim, since the
-  evaluator never reads `var_names`.
-- **The §17 split is a rewrite, not a move.** Sized as a move it will be done as
-  one, and the residue — §1–§16 narrating changes and restating rules — is the
-  actual problem. ROADMAP item restated with that acceptance criterion.
-
-**Removed**
-- Five lines of change-narration from `src/lower.rs`'s negation-safety comment, a
-  story already told in §17 *and* `bugs/resolved/001` — written three times,
-  needed once.
-- §16.2's "relaxed from *positively* bound" and §8's bare date parenthetical.
-- The `TBD → Draft → Stable` ladder and "before marking a section *Stable*" from
-  `AGENTS.md` — nothing has ever reached `Stable`, so the instruction was
-  unfollowable. The dead rung itself stays a queued ROADMAP item.
-- `engine::positively_bound` (earlier in the day, superseded by the shared
-  scheduler binding set).
-
-**The suite earned itself immediately.** `a15` failed on a generated case within
-minutes of landing — not an engine bug but a flaw in the property: it rewrote
-*queries*, where the two spellings genuinely differ (a hand-written variable is
-an answer variable per §14; lowering's anonymous slot is not). Restricted to rule
-bodies, with the reason recorded rather than silently narrowed. Chasing it
-surfaced **`bugs/005`**: `?- p("a", 1 + 1).` prints nothing where `?- p("a", 2).`
-prints the fact — the third instance of this session's class, found by the thing
-built for it. §14's "one shape the closure does not cover yet" is reachable from
-an ordinary-looking query.
-
-**`CLAUDE.md` → `AGENTS.md` symlink.** Checked the docs rather than assuming:
-Claude Code reads `CLAUDE.md`, *not* `AGENTS.md`, and has a documented section on
-exactly this bridge. So until now the practice rules had no trigger — this session
-read `AGENTS.md` on its own initiative, not because anything loaded it. Verify
-with `/context` under **Memory files**.
-
-**Next up**
-- **`absent` × negation** (negation item 1) — the only open negation thread, and
-  unblocked. Two `#[ignore]`d tests are the acceptance criterion.
-- **`bugs/002`** is the cheapest defect to close: the fix sketch is written, and
-  the property already exists and fails. Delete the `#[ignore]` to finish.
-- **`bugs/005`** is new and small — an output-shape defect in `api.rs`, no engine
-  or lowering change implied.
-- `bugs/003` (three false spec assertions) and `bugs/004` (blocked on the
-  termination design item).
-- **Agent-context pass, deferred deliberately** (user call): `AGENTS.md` is now
-  238 lines against a documented target of under 200 for a loaded instruction
-  file, and longer files measurably reduce adherence. The working-style rules are
-  the natural thing to move into `.claude/rules/` — same load behaviour, scopable,
-  and it keeps the root file short. Do this before adding more to `AGENTS.md`.
-- **Known coverage gap, recorded not fixed:** E3's `replay` returns `None` on any
-  `Premise::Builtin`, so derivation replay has never covered §8 builtins at all.
-  Widening it means folding builtin premises into the replayed environment.
