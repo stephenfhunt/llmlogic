@@ -80,8 +80,11 @@ current answer has failed this criterion.
 2. **Then the restructure**, in a session with nothing else in it. 59 entries of
    judgement about what is still true is exactly the work where a mistake silently
    misleads later sessions.
-3. **`bugs/003`** is the same cleanup for assertions that are outright false, and
-   pairs naturally.
+3. **`bugs/003`** was the same cleanup for assertions that are outright false.
+   Closed 2026-07-27, ahead of the restructure — so its finding is now an input
+   rather than a companion: the rule it fixed was restated in **six** sections and
+   two sweeps each found a different subset. The same duplication is what the
+   topic-keying is meant to expose in §17.
 
 ## Open questions
 

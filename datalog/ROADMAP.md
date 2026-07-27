@@ -33,20 +33,21 @@ each; detail in §17 and `docs/worklog.md`.
 
 ## Open backlog
 
-> **Open defects live in [`bugs/`](bugs/)** — currently `003` (three normative
-> errors in `spec.md`) and `004` (§6 asserts a finiteness that arithmetic
-> falsified), both out of the 2026-07-25 spec review and the design session that
-> followed it (§17). `004` is blocked on "Termination & value-creating recursion"
-> below, which leaves **`003` the cheapest to close**: one sitting's work, and no
-> code change — the implementation is right and the spec is wrong.
+> **Open defects live in [`bugs/`](bugs/)** — currently only `004` (§6 asserts a
+> finiteness that arithmetic falsified), out of the 2026-07-25 spec review and the
+> design session that followed it (§17). It is blocked on "Termination &
+> value-creating recursion" below, so **the queue has nothing unblocked in it**:
+> the next work is a design session, not a defect.
 >
-> Three are resolved in `bugs/resolved/`: `001` (a compound argument in a negated
+> Four are resolved in `bugs/resolved/`: `001` (a compound argument in a negated
 > atom silently misread as a wildcard), **fixed 2026-07-25** by negation item 2
-> below; `002` (`-q` rejected a disjunctive rule), **fixed 2026-07-26**; and
+> below; `002` (`-q` rejected a disjunctive rule), **fixed 2026-07-26**;
 > `005` (a ground query with a computed argument printed nothing), **fixed
 > 2026-07-27** by folding a ground compound argument in a query rather than
 > hoisting it (§17 — the bug file's plumb-the-IR sketch was rejected for
-> colliding with A15).
+> colliding with A15); and `003` (three normative errors in `spec.md`), **fixed
+> 2026-07-27** — §10 is now the single normative home of range restriction, which
+> had been restated in *six* sections, two of them falsely.
 >
 > `cargo test -- --ignored` should report exactly **two** known failures, both
 > absent × negation; a third means something regressed.
@@ -116,7 +117,7 @@ on the question.
     scoped to parse-reachable ASTs, so widening `arb_ast_program` is what makes
     them exercise the new path.
 
-  _queued (small; good company for `bugs/001-003`)._ — §5/§14.
+  _queued (small)._ — §5/§14.
 
 - **Implement the `as` cast** — `Expr as type`, the conversion form (**design
   ratified 2026-07-25**, §17; written into §4/§5/§8). Postfix, binds tighter than
@@ -347,9 +348,9 @@ the highest-signal next item.
 
 ### Spec hygiene & §6 (the document itself)
 
-From the 2026-07-25 style review. The *false assertions* are `bugs/003`; what
-follows is staleness, unwritten sections, and structure — real, but a different
-kind of work.
+From the 2026-07-25 style review. The *false assertions* were `bugs/003`, closed
+2026-07-27; what follows is staleness, unwritten sections, and structure — real,
+but a different kind of work.
 
 - **§6 was never extended — the largest substantive gap.** Its own note still
   reads "Still to fill in: extension to aggregation (§9); semantics of
@@ -390,7 +391,7 @@ kind of work.
   Topic-keyed rewrite proposed; measurements, what is already decided, and the
   open questions are in
   [`notes/decisions-log-restructure.md`](notes/decisions-log-restructure.md).
-  Pairs with `bugs/003` and the stale-pointer items below.
+  Pairs with the stale-pointer items below.
   _queued (user call; own session)._ — §17.
 - **Rename the provenance "absence pattern".** §4 and §11 each carry a footnote
   apologizing for the collision with the `absent` *value* ("the two share a word,

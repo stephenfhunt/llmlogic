@@ -94,8 +94,13 @@ Candidate principles to ratify:
 - **Punctuation / operators** — `:-` (rule), `?-` (query), `.` (statement end),
   `,` (conjunction), `(` `)`, `:` (named argument), comparisons `=` `!=` `<` `<=`
   `>` `>=`, arithmetic `+` `-` `*` `/` (§8).
-- **Reserved words** — `import`, `as`, `declare`, `not`, `true`, `false`. These
-  cannot be used as relation or field names.
+- **Reserved words** — `import`, `as`, `declare`, `not`, `is`, `true`, `false`,
+  `absent`. These cannot be used as relation or field names.
+- **Contextual keywords are not reserved.** `table` (§13), the five type names
+  (`int`, `float`, `string`, `symbol`, `bool`), and the five aggregate operator
+  names (`count`, `sum`, `min`, `max`, `avg`) are lexed as ordinary identifiers
+  and recognized only in the one position each is meaningful. So `int(2).` and
+  `table(2).` are legal relations.
 - **Whitespace** is insignificant except as a token separator.
 - **Character set** — identifiers, variables, and operators are ASCII; string
   *contents* may be any Unicode. A non-ASCII character outside a string is a
@@ -417,10 +422,9 @@ and wildcard slots are **existential under the negation** (§17 2026-07-19):
 `not parent(_, X)` holds when no `parent` fact has `X` in its second column.
 Negated literals bind nothing.
 
-**Safety.** Every *named* variable in a negated atom must be bound by the same
-clause — a positive body atom, an `=`-assignment, or an aggregate result (§17
-2026-07-25). Wildcard-fresh variables under negation are scoped to the negated
-literal and never exported (§10, §17 2026-07-19).
+**Safety.** Every *named* variable in a negated atom must be **bound by the same
+clause**, in the sense §10 defines. Wildcard-fresh variables under negation are
+scoped to the negated literal and never exported (§10, §17 2026-07-19).
 
 An argument may therefore be **computed**, and the spelling does not matter:
 
@@ -518,7 +522,7 @@ two-valued semantics, not a masked type mismatch. Consequently `X = 5` and `X !=
 absent` is its negation. Unlike `=`/`!=` (both false for absent) these **partition
 every row**, and unlike `=` the right-hand `absent` is exempt from the same-type
 requirement. It is a comparison/filter — the `not` is part of the operator, not
-§7 atom-negation — so its operand must be positively bound like any comparison
+§7 atom-negation — so its operand must be bound by the body like any comparison
 (§10) and it adds no stratum. (A general `X is Y` null-safe equality is a possible
 extension, §17.)
 
@@ -563,11 +567,11 @@ r(V) :- p(A, B), V = (A as float) / (B as float).   % a real ratio, not A / B
   the absent value shipped; it did not exist when the edge-case rule above was
   written. Decided with the implementation.
 
-**Mode / safety (§10).** Every comparison operand variable must be bound by a
-positive atom, *except* an `=`-assignment target, which the assignment binds. A
-negated atom's named variables must likewise be bound — by a positive atom, an
-assignment, or an aggregate result; the scheduler places the anti-join after
-whichever it is.
+**Mode / safety (§10).** Every comparison operand variable, and every named
+variable of a negated atom, must be bound by the body in the sense §10 defines —
+the one exception being an `=`-assignment's own target, which the assignment
+itself binds. The scheduler places each literal after whatever binds its inputs,
+so an anti-join runs after the assignment or aggregate that grounds it.
 
 **Evaluation order is by dependency, not by source order** (2026-07-25). A body
 is a conjunction, so where a binder is *written* does not decide what the clause
@@ -583,9 +587,6 @@ guarantees make this a widening rather than a change of meaning:
 - a body is rejected only when *no* order works — a variable nothing binds, or a
   circular dependency (`M = N+1, N = M+1`). The two get different messages,
   because only the first can be fixed by adding a binder.
-
-*Operator precedence for the surface syntax is deferred to the parser (§5, Phase
-D); the AST already carries whatever grouping the parser chose.*
 
 ## 9. Aggregation
 
@@ -621,8 +622,8 @@ local to it. There is no separate `group by`: the rule's other body literals
 supply the group keys, and a bare `Avg = avg { A | m(_, A) }` (no outer
 variables) is a single global group.
 
-A **group key must be bound by the enclosing body** — a positive atom, an
-`=`-assignment, or another aggregate's result. *Where* that binder is written is
+A **group key must be bound by the enclosing body**, in the sense §10 defines
+(another aggregate's result counts). *Where* that binder is written is
 irrelevant: the aggregate declares its group keys as inputs and is scheduled
 after whatever binds them (§8, 2026-07-25), so
 
@@ -727,8 +728,8 @@ predicates in its `Goal` must be **fully evaluated before** the aggregate runs:
 lowering places them in a strictly lower stratum, and recursion through an
 aggregate is rejected by stratification with a structured error. Safety (§10)
 mirrors negation: a group-key variable used in `Goal` must be bound by the
-enclosing body — in any position, since the aggregate is scheduled after its
-binder (§8); `Goal`-local variables are existential (like wildcard variables
+enclosing body (§10) — in any position, since the aggregate is scheduled after
+its binder (§8); `Goal`-local variables are existential (like wildcard variables
 under negation). Recursive/monotonic aggregation (the Zaniolo et al.
 fixpoint semantics, `references.md`) is a deliberate future extension.
 
@@ -741,8 +742,11 @@ collection value, §4); recursive aggregation.
 
 *Status: Draft (range restriction only; the rest TBD)*
 
-**Range restriction** (enforced by front-end lowering, `src/lower.rs`): every
-variable in a rule head, every *named* variable in a negated atom, and every
+**Range restriction** (enforced by front-end lowering, `src/lower.rs`). **This
+section is the single normative statement of what "bound" means**; §7, §8, §9 and
+§14 apply it to their own constructs and refer here rather than restating it.
+
+Every variable in a rule head, every *named* variable in a negated atom, and every
 variable occurring only in comparisons must be **bound by the body** — it must
 occur in a positive body atom, or be bound by an `=`-assignment or an aggregate
 result (§17 2026-07-25); facts must be ground. Wildcard-fresh variables in
@@ -1017,9 +1021,9 @@ The **answer variables** are the named variables the query body *binds* — whic
 is not the same as every named variable (clarified 2026-07-25). An aggregate's
 goal-local variables are named, but they exist only inside that aggregate's
 sub-join (§9) and have no value in the answer row, so they are not projected:
-`?- N = count { C | m(T, C) }.` answers over `N` alone. The rule is the one a
-rule head is checked against — bound by a positive body atom, an `=`-assignment,
-or an aggregate result, never by descending into an aggregate's goal.
+`?- N = count { C | m(T, C) }.` answers over `N` alone. The binding rule is the
+one a rule head is checked against (§10), applied to the query body and never by
+descending into an aggregate's goal.
 
 **Binary contract** (2026-07-22; `-q` completed 2026-07-23, roadmap step 6).
 Invocation is `datalog [<file> | -] [-q <query>]…`. The positional source is a
@@ -1373,6 +1377,21 @@ say.
     interleave them too: a differential oracle that hard-codes the old order would
     have agreed with a wrong engine. Covered by testing.md **C7** plus
     `CompRule::NegShift` carrying the shape into B1.
+
+  ***Amended 2026-07-27*** (`bugs/003`). **The "three places" count was wrong, and
+  what it missed was the prose, not the code.** All three *code* sites moved
+  together as recorded. But the rule is also stated in the **spec**, and there it
+  lived in six sections — §7, §8 twice, §9 twice, §10, §14. This entry's sweep
+  updated §7 and §10 and left the rest, so two of them went on asserting the
+  pre-relaxation rule: §8's `is [not] absent` operand ("positively bound") and
+  §8's mode/safety paragraph ("bound by a positive atom"). The 2026-07-25
+  `bugs/003` sweep, run the same day with that very file open, found neither; the
+  2026-07-27 re-verification found the first and not the second.
+
+  The lesson is not "count more carefully". Two sweeps by two sessions each found
+  a different subset, which is what a rule with six homes does regardless of
+  diligence. §10 is now the single normative statement and the other five refer to
+  it — the structural fix that makes the *next* relaxation a one-line edit.
 - **2026-07-25** — **Conversion is the `as` cast; user-defined scalar functions are
   declined; and arithmetic already broke termination** (design session following the
   spec review; no engine change — implementation is a ROADMAP item). The review had
@@ -1682,6 +1701,15 @@ say.
     The literal `absent` is producible (facts/heads/arithmetic) but **not matchable**
     in a body (unification fails); a body-match `absent` is a structured error
     steering to `is absent`.
+
+    ***Amended 2026-07-27*** (`bugs/003`). The operator added a **reserved word**,
+    `is`, and neither this entry nor the implementation that followed it recorded
+    that anywhere: §3 carries the canonical reserved list and never learned about
+    `is` (or about `absent`, reserved here too and stated only in §5). A keyword is
+    a surface-syntax consequence that outlives the feature deciding it — this is
+    the class of thing a decision entry has to route back to §3, because the lexer
+    will not. §3 now names all eight, and a table-driven parser test asserts each
+    one, so the next keyword fails a test rather than a spec review.
   - **Aggregates skip-but-report** (§9): sum/avg/min/max skip absents and report
     the skip count; `count` counts bindings; an empty present-set gives `count = 0`
     and the others `absent`.

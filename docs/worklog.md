@@ -24,6 +24,58 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-27 — `bugs/003`: the safety rule had six homes, not four
+
+The last unblocked defect. Docs plus one test; no engine change. 395 tests pass
+(393 + 3 − 1), clippy clean, `--ignored` still exactly two.
+
+**Done**
+- **§10 is now the single normative statement of what "bound" means**, and says so
+  in its own text. §7, §8 (×2), §9 (×2) and §14 keep their local content and refer
+  to §10 rather than re-listing the three binders.
+- **A sixth site the bug file never named**, and the second false one: §8's
+  "Mode / safety (§10)" said `bound by a positive atom` — the same 2026-07-25
+  residue as §8:521. Both falsified against the release binary: `X = A + 1, X > 2`
+  and `N = count {…}, N > 1` are accepted today.
+- **§3's reserved list completed** — two words behind the lexer (`is`, `absent`) —
+  plus the converse it never stated: `table`, the five type names and the five
+  aggregate operators are *contextual*, so `int(2).` is a legal relation. §8's
+  "precedence is deferred to the parser" italic deleted; resolved 2026-07-22, 100
+  lines above it in the same section.
+- **The optional acceptance criterion was taken**: two table-driven parser tests
+  walk §3's two lists, so a keyword added to the lexer without a §3 edit now fails
+  a test. Also §17 ×2, testing.md Phase D, ROADMAP, `bugs/003` → `resolved/`, and
+  `editing-docs.md`'s citation of this bug (it said "four sections").
+
+**Decided**
+- **Counting the sites was never the fix.** Opened on "four", re-verified this
+  morning at "four", swept at six — and two sessions each found a *different*
+  subset, including the 2026-07-25 sweep run with this bug file open, whose whole
+  subject was the enumeration. So the fix had to be structural, not a better pass.
+- **A decision entry must route surface consequences back to their canonical
+  section.** The `is [not] absent` design (2026-07-24) added a reserved word and
+  recorded it nowhere; §3 owns that list and the lexer will not tell it. Annotated
+  there, since the next feature adding a keyword gets read there, not here.
+- **Non-vacuity by swapping the two lists** — `table` into the reserved one, `is`
+  into the contextual one, both tests fail with the right message. `bugs/005`'s
+  discipline, cheap here: the two assert opposite outcomes over one shape.
+
+**Removed**
+- `absent_is_reserved_and_cannot_name_a_relation`, subsumed by the table; §8's
+  precedence italic; five re-enumerations of the three binders. From ROADMAP, the
+  "`003` the cheapest to close" paragraph and the `bugs/001-003` grouping; from
+  the §17-restructure note, "pairs with `bugs/003`".
+- The 2026-07-26 `bugs/002` entry rotated verbatim to `worklog-archive/2026-07.md`.
+
+**Next up**
+- **The `bugs/` queue has nothing unblocked in it.** `004` waits on Termination,
+  so the next work is a **design session**: `absent` × negation (which also
+  unblocks §6) or Termination & value-creating recursion.
+- Cheapest non-design item for a short session: **parenthesized expressions**
+  (`src/parser.rs:619-628`, `src/print.rs:169` — the printer is the real work).
+- Unchanged: the **§17 restructure** (own session), **CI** (deferred, not
+  rejected), the browser-only GitHub *About* panel.
+
 ## 2026-07-27 — `bugs/005`: a query folds a ground computed argument
 
 The cheapest open defect, taken after making the design call the ROADMAP held it
@@ -128,55 +180,3 @@ on. 393 tests pass (385 + 8), clippy clean, `--ignored` still exactly two.
   annotate — this session touched no language decision.
 - Unchanged: **`bugs/005`** pending the fold-vs-plumb call, **`absent` × negation**,
   the **§17 restructure**, `003`, `004`.
-
-## 2026-07-26 — `bugs/002`: a disjunctive rule survives `-q`
-
-The cheapest open defect, taken from the `bugs/` queue and closed in `0c86ab1`.
-385 tests pass, clippy clean.
-
-**Done**
-- **`-q 'r(X) :- p(X), X < 5 ; p(X), s(X)'` answers `r(1). r(9).`**, byte-identical
-  to the file form. The classifier matched a *single* statement; the parser
-  expands a top-level `;` into one clause per disjunct sharing the head, so a
-  disjunctive rule fell through to the query path and reported a syntax error
-  about a grammar the user never wrote. Now: N clauses, non-empty bodies, same
-  printed head, query taken from the first.
-  Heads compared as *printed text*, not as ASTs — span-free without a
-  span-zeroing helper, and it keeps `a(X) :- p(X). b(X) :- p(X)` a parse error
-  rather than a silent partial answer.
-- **`dash_q_rule_equals_the_same_rule_in_a_file` un-`#[ignore]`d** (testing.md
-  C8). Known failures three → two, both absent × negation.
-- §14 prose, §17 *Amended*, `bugs/002` → `bugs/resolved/` with a resolution note,
-  ROADMAP blockquote, testing.md C8.
-
-**Decided**
-- **The prose was the carrier, not the code.** §14 said "a single clause with a
-  non-empty body is a **rule**" — a description of a Rust `match` arm that read
-  as a language rule, so nothing flagged it when the parser started desugaring
-  one clause into several. Restated as "one rule, however many clauses it
-  desugars to". This is `bugs/003`'s drift mechanism again, one layer down: not a
-  rule stated in four places, but a rule stated once *about the implementation*.
-- **The property paid for itself completely.** First time here a property was
-  written before the fix it specified: closing the defect was deleting one
-  `#[ignore]`, the recorded seed replayed the shrunk case first run, and seven
-  lines of `api.rs` changed. C8 has now *closed* a defect, not just found them.
-- **`bugs/005` needs a design call before anyone codes it.** It was the natural
-  companion (same §14 family, same `api.rs`), but its own fix sketch proposes
-  plumbing hoist-origin into the IR, which would collide with A15's inline ≡
-  hand-hoisted claim. Constant-folding a ground compound argument in a *query* —
-  the rule facts already use (`ArgMode::Fold`) — reaches the same output with no
-  IR change. Pick between them first; the sketch in the bug file is not the
-  obvious answer it looks like.
-
-**Removed**
-- The "`002` is the cheapest to close" paragraph from ROADMAP (its whole content
-  was instructions for work now done), the stale `#[ignore]` and its four-line
-  justification, and §14's `match`-arm sentence.
-
-**Next up**
-- **`bugs/005`** is now the cheapest defect, pending the fold-vs-plumb call above.
-- Unchanged: **`absent` × negation** (with §6, per ROADMAP), the **§17
-  restructure** (`notes/decisions-log-restructure.md`), `003`, `004`.
-- Path-scoped loading **verified live**: root `CLAUDE.md` loads at launch,
-  `editing-docs.md` and `datalog/CLAUDE.md` only after reading a file each scopes
-  to. Closes the previous entry's first *Next up*.

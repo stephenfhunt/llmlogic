@@ -5,7 +5,7 @@ severity: doc
 area: spec
 spec: ["§3", "§8", "§10"]
 found: 2026-07-25
-resolution:
+resolution: fixed 2026-07-27 — §10 made the single normative home of range restriction; §3's list completed; §8's precedence note deleted
 ---
 
 Three independent normative errors in `spec.md`, grouped because they are one
@@ -93,3 +93,42 @@ stale roadmap-step pointers, `§1`/`§2` still `TBD`, the dead `Stable` status r
 extended to negation/aggregation/absent — are not defects in the same sense (they
 are staleness and unwritten sections, not false assertions), so they are ROADMAP
 items rather than entries here. See ROADMAP "Spec hygiene & §6".
+
+## Resolution
+
+**Fixed 2026-07-27.** All three items closed; §10 now opens by declaring itself
+the single normative statement of what "bound" means, and §7/§8/§9/§14 apply it
+to their own constructs by reference.
+
+**The count was six, not four — and item 1 understated itself twice.** This file
+was opened on "four sections", re-verified at "four", and the sweep found a
+*sixth* restatement it had never named: §8's "Mode / safety (§10)" paragraph
+opened `Every comparison operand variable must be bound by a positive atom`,
+which is the same 2026-07-25 residue as §8:521 and equally false. Verified
+against the release binary — both a comparison operand bound by an assignment and
+one bound by an aggregate result are accepted:
+
+```datalog
+p(1). p(2).
+g(X) :- p(A), X = A + 1, X > 2.            % g(3).
+k(N) :- N = count { C | p(C) }, N > 1.     % k(2).
+```
+
+That is the item's own thesis paying out on itself: a rule stated in six places
+is one nobody can enumerate, *including the file whose entire subject is the
+enumeration*. Two sweeps by two sessions each found a different subset. The fix
+is not that the sixth is now correct — it is that there is no longer a sixth to
+find, because only §10 states it.
+
+**The guard was taken.** Acceptance criterion 4 was optional ("if it is wanted");
+it was wanted, and it is the only item here that outlives the sitting.
+`parser::tests::every_reserved_word_is_rejected_as_a_relation_name` and
+`contextual_keywords_are_ordinary_relation_names` are table-driven over §3's two
+lists, so a keyword added to the lexer without a §3 edit now fails a test rather
+than waiting for a spec review. Both were proved non-vacuous by moving `table`
+into the reserved list and `is` into the contextual one and watching each fail.
+`absent_is_reserved_and_cannot_name_a_relation` was deleted — the table subsumes
+it.
+
+**Nothing in the implementation changed**, as filed. The one code edit is the
+test; the binary that verified the claims predates it.

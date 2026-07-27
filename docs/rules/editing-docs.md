@@ -30,8 +30,10 @@ leave the pointer. "See §17 2026-07-25" is fine; "relaxed from positively bound
 is not.
 
 - **One normative home per rule.** State a rule in exactly one section; everywhere
-  else cross-references it. `datalog/bugs/003` names this as *the drift mechanism*
-  — the same safety rule lived in four sections, and updating three looked done.
+  else cross-references it. `datalog/bugs/resolved/003` names this as *the drift
+  mechanism* — the same safety rule lived in **six** sections, and two separate
+  sweeps each found a different subset of them, including the sweep run from that
+  bug file itself.
 - **Changing a rule means sweeping the decisions log** for entries resting on it.
   Fixing `datalog/bugs/001` turned up three needing amendment; that was diligence,
   not process.
