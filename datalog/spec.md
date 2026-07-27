@@ -318,8 +318,11 @@ Notes:
   (§17, 2026-07-22).
 - **Atom arguments are full expressions**, so inline arithmetic parses
   (`succ(N, N+1)`); lowering hoists a compound argument to an `=`-assignment, so
-  the IR is unchanged (§17, 2026-07-22). A compound argument in a *fact* is
-  constant-folded (`p(1+1).` → `p(2).`).
+  the IR is unchanged (§17, 2026-07-22). A compound argument is instead
+  **constant-folded** where a hoist would have no body to live in or would change
+  the meaning of the surrounding form: in a *fact* (`p(1+1).` → `p(2).`), and —
+  when it is **ground** — in a *query*, whose answer shape §14 reads off the body
+  (§17, 2026-07-27).
 - **Disjunction `;`** in a rule body is top-level DNF (no parentheses in v1);
   `,` binds tighter than `;`. The parser expands each disjunct into its own
   clause sharing the head, so the AST/IR stay conjunction-only. Queries stay
@@ -1004,6 +1007,12 @@ double-quoted with the §3 escapes; a float always carries a decimal point
   **answer variables**;
 - rows are deduplicated and sorted.
 
+This is a rule about the query *as written*, and lowering must keep it that way:
+a query constant-folds a ground compound argument (§5) precisely so that
+`?- p("a", 1 + 1).` is still the single atom it reads as. Hoisting it produced a
+two-literal body with no named variables — the uncovered shape below — so the
+query printed nothing (`bugs/005`, §17 2026-07-27).
+
 The **answer variables** are the named variables the query body *binds* — which
 is not the same as every named variable (clarified 2026-07-25). An aggregate's
 goal-local variables are named, but they exist only inside that aggregate's
@@ -1066,8 +1075,12 @@ json` therefore stays a documented future *edge* feature only — hand-rolled if
 ever lands, keeping the zero-runtime-dependency stance.
 
 One shape the closure does not yet cover: a body with no named variables that is
-not a substitutable single atom (a pure existence check) produces no fact-shaped
-output in v1.
+not a substitutable single atom produces no fact-shaped output in v1. What
+remains in that shape is the **multi-atom existence check** — `?- p("a"), q("b").`
+answers nothing whether or not it holds, and §5's ban on 0-arity atoms removes
+the obvious workaround. A single ground atom *is* distinguishable (output vs. no
+output), so the hole is narrower than "a pure existence check" suggests; it is an
+open roadmap item.
 
 ## 15. Evaluation strategy (non-normative)
 
@@ -1295,6 +1308,25 @@ that records a decision working out *well*, which the log would otherwise never
 say.
 
 ### Decisions
+
+- **2026-07-27** — **A query constant-folds a ground compound argument** (§5/§14;
+  `src/lower.rs` `ArgMode::FoldGround`; fixes `bugs/005`). Hoisting made
+  `?- p("a", 1 + 1).` a two-literal body with no named variables — the one shape
+  §14 emits nothing for — so it printed nothing where `?- p("a", 2).` printed the
+  fact. Folding keeps the query the single atom it reads as; `api.rs` unchanged.
+  - **Rejected: plumbing hoist-origin into the IR** (the bug file's own sketch).
+    Costs a new IR field *and* the claim that inline and hand-hoisted arguments
+    lower to the same program, which A15 asserts over generated inputs. Trading a
+    ratified equivalence property for an output-shape fix is the wrong exchange.
+  - **Rejected: an existence-check case in `api.rs`**, the bug file's "cheaper"
+    option. It is not cheaper — the atom to print is `p("a", V)` with `V`
+    unprojected, so the row must be reconstructed — and it fixes only the fully
+    ground case. Folding also fixes `?- p(X, 1 + 1).`, the same defect one
+    variable short of ground, which printed the weaker `answer("a")`.
+  - **Scoped to queries**, so A15's IR-identity claim over rule bodies needs no
+    weakening. Folding everywhere is more uniform and is the road not taken.
+    Cost: an ill-typed ground query argument is now reported by folding rather
+    than typecheck, with more specific wording; `1 / 0` and overflow unchanged.
 
 - **2026-07-25** — **Negated atoms join the dependency schedule** (§7/§10;
   `src/schedule.rs`, `src/lower.rs`, `src/engine/`; resolves the open question of
@@ -1891,6 +1923,16 @@ say.
   contradicted itself for three days (`bugs/003`); and the entry's silence on
   **grouping** later read as a deliberate flat-expression design, when the
   ROADMAP established it was simply never considered.
+
+  ***Amended 2026-07-27.*** "Lowering hoists a compound arg to an
+  `=`-assignment (facts constant-fold)" is now three-way: a **query** folds a
+  *ground* one (`bugs/005`, decision of the same date). The two-way split was
+  never a language rule — it recorded where an assignment had somewhere to live —
+  but §14 had meanwhile started reading a query's output shape off its body, so
+  hoisting silently changed the answer. The lesson is the one this entry's
+  *Consequences* note already draws twice: what this entry ratified was checked
+  against the IR, and both later defects were about what a *different* section
+  reads off the same structure.
 
 - **2026-07-03** — Language scope for v1 is **full-featured**: facts, rules,
   recursion, stratified negation, arithmetic/comparison builtins, and aggregation.

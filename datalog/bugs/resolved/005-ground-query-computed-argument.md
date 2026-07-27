@@ -5,7 +5,7 @@ severity: usability
 area: api
 spec: ["§5", "§14"]
 found: 2026-07-26
-resolution:
+resolution: fixed 2026-07-27 — a query constant-folds a ground compound argument (`ArgMode::FoldGround`)
 ---
 
 `?- p("a", 2).` prints the fact; `?- p("a", 1 + 1).` prints nothing and exits 0.
@@ -86,3 +86,42 @@ description.
 - **§14's "one shape the closure does not cover yet"** is more reachable than
   that phrasing suggests, and should say so.
 - No engine or lowering change is implied; this is an output-shape defect.
+
+## Resolution
+
+**fixed 2026-07-27** — `?- p("a", 1 + 1).` and `?- p("a", 2).` both answer
+`p("a", 2).`, verified against the release binary. A query lowers a compound atom
+argument with a new `ArgMode::FoldGround`: fold when the expression is ground,
+hoist otherwise. `api.rs` did not change at all — the folded query is a single
+atom again, so it reaches the substituted-atom case that already existed.
+
+**The fix sketch was not taken.** It proposed plumbing hoist-origin into the IR
+so `api.rs` could recognize lowering's own assignments; that would have cost a
+new IR field and A15's claim that inline and hand-hoisted arguments lower to the
+same program. The bug file's own "cheaper alternative" — an existence-check case
+in `api.rs` — was also rejected, and it was not cheaper: `V` is unprojected, so
+the row must be reconstructed before the atom can be printed. Rationale and what
+each rejected option would have cost are in §17 (2026-07-27).
+
+**It fixed one case more than the report described.** `?- p(X, 1 + 1).` — ground
+argument, non-ground atom — printed the weaker `answer("a")` and now prints
+`p("a", 2).`. Same defect, one variable short of ground; the report only covered
+the fully ground spelling.
+
+**Acceptance criterion 3 holds unchanged:** `?- V = 1 + 1, p("a", V).` still
+prints `answer(2).`, so the *fallout* item stands — `testgen::hoist_atom_args`
+keeps excluding queries, because the projection difference for an explicitly
+named variable is real and was never part of this defect.
+
+**The property took two attempts, and that is the durable finding.** Written
+first as a rewrite over `arb_ast_program`, it passed *with the bug present*: two
+spellings of a query that matches nothing both print nothing, and over arbitrary
+generated programs a query that both computes and matches is vanishingly rare.
+The syntactic non-vacuity guard was green the whole time — it counted ground
+compound arguments in queries, which was never the binding constraint. The
+targeted generator (`arb_ground_query_spellings`, which builds the expression
+backwards from a value the EDB contains) failed on its first generated case and
+shrank to `n("b", 2). ?- n(K, 0 + 2).`; that seed is recorded. The guard that
+would have caught the vacuity asserts the generated queries *hold*
+(`ground_query_spellings_generate_queries_that_hold`). Catalogued in testing.md
+C8, which now carries both the property and this lesson.

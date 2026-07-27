@@ -24,6 +24,60 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-27 — `bugs/005`: a query folds a ground computed argument
+
+The cheapest open defect, taken after making the design call the ROADMAP held it
+on. 393 tests pass (385 + 8), clippy clean, `--ignored` still exactly two.
+
+**Done**
+- **`?- p("a", 1 + 1).` answers `p("a", 2).`**, identical to the folded spelling
+  and verified against the release binary. A query lowers a compound atom
+  argument with a new `ArgMode::FoldGround` — fold when ground, hoist otherwise —
+  so it stays the single atom §14 reads its output shape from. `api.rs` did not
+  change at all.
+- **One case more than the report described:** `?- p(X, 1 + 1).` printed the
+  weaker `answer("a")` and now prints `p("a", 2).` — the same defect one variable
+  short of ground.
+- Four unit tests, two properties, two non-vacuity guards; §5/§14/§17,
+  testing.md C8, `bugs/005` → `resolved/`, ROADMAP blockquote.
+
+**Decided**
+- **Fold, not plumb — the bug file's own fix sketch was rejected.** Plumbing
+  hoist-origin into the IR costs a new field *and* A15's claim that inline and
+  hand-hoisted arguments lower to the same program. Its "cheaper alternative" (an
+  existence-check case in `api.rs`) is not cheaper either: `V` is unprojected, so
+  the row must be reconstructed. Scoped to queries, so A15 needs no weakening.
+  Both rejections and what they would have cost are in §17.
+- **A non-vacuity guard can be green while the property is useless.** Written
+  first as a rewrite over `arb_ast_program`, the property **passed with the bug
+  present**: two spellings of a query that matches nothing both print nothing,
+  and over arbitrary programs a query that computes *and matches* is vanishingly
+  rare. The guard counted ground compound arguments in queries — never the
+  binding constraint.
+- **So: revert the fix and watch the property fail, every time.** That is the
+  only direct evidence a property tests what its name says, and it is how this
+  one was caught. C8's two earlier properties were written against a live defect,
+  which supplied that evidence for free; this one was not.
+- **The targeted generator is the pattern, not the exception.** All three C8
+  properties now build both spellings from a purpose-built generator
+  (`arb_ground_query_spellings` builds the expression backwards from a value the
+  EDB contains). It failed on its first generated case; the seed is recorded.
+
+**Removed**
+- ROADMAP's "`005` is now the cheapest to close" paragraph — its whole content was
+  instructions for work now done — and §14's "a pure existence check", which
+  overstated a gap that is now only the *multi-atom* case.
+- The 2026-07-26 agent-context entry rotated verbatim to `worklog-archive/2026-07.md`.
+
+**Next up**
+- **`bugs/003`** is now the cheapest: three normative spec errors, one sitting,
+  no code change. `004` stays blocked on Termination.
+- The two design sessions are unchanged and still want their own: **`absent` ×
+  negation** (with §6) and **Termination & value-creating recursion**.
+- Unchanged: the **§17 restructure**, and **CI** (deferred, not rejected).
+- Still browser-only from the last session: the GitHub *About* panel and a look
+  at the rendered README. `gh` is not installed in this checkout.
+
 ## 2026-07-27 — Public on GitHub: a top-level README, private remote out of the tree
 
 **Docs and metadata only;** 385 tests pass, clippy clean. Nothing pushed yet.
@@ -126,54 +180,3 @@ The cheapest open defect, taken from the `bugs/` queue and closed in `0c86ab1`.
 - Path-scoped loading **verified live**: root `CLAUDE.md` loads at launch,
   `editing-docs.md` and `datalog/CLAUDE.md` only after reading a file each scopes
   to. Closes the previous entry's first *Next up*.
-
-## 2026-07-26 — Agent-context pass: session-start load 2,149 → 301 lines
-
-Prompted with two references on context engineering for Claude 5 models; the
-useful half was checking their claims, and the previous *Next up*, against Claude
-Code's documented loading behaviour first. **Docs only;** 382 tests pass, clean.
-
-**Done**
-- **Root `AGENTS.md` 238 → 77, repo-wide only.** 60% of it was datalog-specific
-  and now lives in `datalog/AGENTS.md` (109 lines) with a `CLAUDE.md` symlink, so
-  it loads only when reading files in that directory. A new project costs the root
-  file one row in its project table, not a section.
-- **`docs/rules/editing-docs.md`** — the doc-editing discipline, path-scoped, plus
-  new **length caps** (worklog entry ~50, ROADMAP item ~3, decision ~15) with each
-  project's `notes/` as the overflow. Stated generically: which documents a project
-  has is that project's business, not the repo rule's.
-- **Worklog 1,613 → 224**, 24 entries rotated verbatim to `worklog-archive/`.
-  `.gitignore` now splits per-checkout *state* from shared *config*; a fresh clone
-  built from scratch gave 382 passed, identical to the working tree.
-- **`spec.md` §17 restructure written up** in `datalog/notes/` with the
-  measurements; its ROADMAP item collapsed 23 lines → a pointer, the caps' first use.
-
-**Decided**
-- **`.claude/rules/` without `paths:` buys no context** — it loads at launch like
-  `.claude/CLAUDE.md`; `@path` imports likewise. Only path-scoping defers. The
-  previous *Next up* proposed it as a budget fix; it isn't one.
-- **Deletion was the fix, extraction the sideshow** — 97 of 107 lines were deleted.
-  The working-style rules are the file's *best* content; history and derivable
-  layout were the bloat.
-- **Repo-wide vs per-project is the axis that scales** (user call). Encoding one
-  project's document names in a repo-level rule was the tell — `*/spec.md` assumes
-  every project has a spec. The repo rule owns the *discipline*; each project's
-  `AGENTS.md` owns its *document map*.
-- **A project's skill is a deliverable, not development infrastructure** (user
-  call) — `.claude/skills/` stays gitignored; one always-loaded description per
-  project does not scale. Not a contradiction of availability-over-gating: that
-  trades build time, this trades context.
-- **Caps are the only lever that bends the curve.** Cleanup without them is
-  re-accreted within a month; this entry was 130 lines before its own cap applied.
-
-**Removed**
-- 161 lines from root `AGENTS.md`, 1,389 from this file, 20 from the ROADMAP item,
-  and the blanket `.claude/` ignore that left guidance unable to load itself.
-
-**Next up**
-- **Verify loading live** — unverifiable from inside this session. `/context`
-  should show root `CLAUDE.md` but not `editing-docs.md` or `datalog/CLAUDE.md`;
-  both should appear after reading a matching file. `/doctor` is a second opinion.
-- **§17 restructure** and **`ROADMAP.md`'s 9 long items** (299 of 435 lines) are
-  the remaining half — see `datalog/notes/decisions-log-restructure.md`.
-- Unchanged: **`absent` × negation**, **`bugs/002`** (cheapest), **`005`**, `003`/`004`.

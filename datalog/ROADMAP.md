@@ -34,22 +34,19 @@ each; detail in §17 and `docs/worklog.md`.
 ## Open backlog
 
 > **Open defects live in [`bugs/`](bugs/)** — currently `003` (three normative
-> errors in `spec.md`), `004` (§6 asserts a finiteness that arithmetic
-> falsified), `005` (a ground query with a computed argument prints nothing).
-> `003`/`004` came out of the 2026-07-25 spec review and the design session that
-> followed it (§17); `005` was found by the C8 property suite on its first run.
-> `004` is blocked on "Termination & value-creating recursion" below. Two are
-> resolved in `bugs/resolved/`: `001` (a compound argument in a negated atom
-> silently misread as a wildcard), **fixed 2026-07-25** by negation item 2 below,
-> and `002` (`-q` rejected a disjunctive rule), **fixed 2026-07-26**.
+> errors in `spec.md`) and `004` (§6 asserts a finiteness that arithmetic
+> falsified), both out of the 2026-07-25 spec review and the design session that
+> followed it (§17). `004` is blocked on "Termination & value-creating recursion"
+> below, which leaves **`003` the cheapest to close**: one sitting's work, and no
+> code change — the implementation is right and the spec is wrong.
 >
-> **`005` is now the cheapest to close** — an output-shape defect in `api.rs`
-> with no engine or lowering change implied — but its fix wants a design call
-> first: the sketch in the bug file proposes plumbing hoist-origin into the IR,
-> which collides with A15's claim that inline and hand-hoisted arguments lower to
-> the same program. Constant-folding a *ground* compound argument in a query, the
-> rule facts already use (`ArgMode::Fold`), reaches the same output with no IR
-> change and is the leading alternative.
+> Three are resolved in `bugs/resolved/`: `001` (a compound argument in a negated
+> atom silently misread as a wildcard), **fixed 2026-07-25** by negation item 2
+> below; `002` (`-q` rejected a disjunctive rule), **fixed 2026-07-26**; and
+> `005` (a ground query with a computed argument printed nothing), **fixed
+> 2026-07-27** by folding a ground compound argument in a query rather than
+> hoisting it (§17 — the bug file's plumb-the-IR sketch was rejected for
+> colliding with A15).
 >
 > `cargo test -- --ignored` should report exactly **two** known failures, both
 > absent × negation; a third means something regressed.
@@ -274,12 +271,13 @@ able to work around them.
   deliberate and gets stated as such in §5 (it currently reads as an aside:
   "Queries stay conjunctive"). _queued._ — §5.
 - **An existence check has no answer.** `?- p("a"), q("b").` prints nothing and
-  exits 0 whether or not it holds (verified both ways). §14 files this as a
-  closure gap ("no fact-shaped output in v1"), but the sharper framing is that the
-  engine cannot answer a yes/no question — and §5's ban on 0-arity atoms removes
-  the obvious workaround. A single *ground atom* is distinguishable (output vs. no
-  output), so the hole is narrower than §14 implies, but a conjunction is not.
-  _queued._ — §5/§14.
+  exits 0 whether or not it holds (verified both ways, still true 2026-07-27).
+  §14 files this as a closure gap, but the sharper framing is that the engine
+  cannot answer a yes/no question — and §5's ban on 0-arity atoms removes the
+  obvious workaround. A single *ground atom* is distinguishable (output vs. no
+  output), but a conjunction is not. This is now all that is left of that gap:
+  `bugs/005` was the case where an ordinary single-atom query fell into it by
+  accident, closed 2026-07-27. _queued._ — §5/§14.
 - **`declare` does not count as defining a predicate.** `declare banned(name:
   string).` plus `not banned(X)` still warns "referenced but never defined"
   (verified). Declaring a schema is the user stating a relation exists and may be

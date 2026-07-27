@@ -352,6 +352,7 @@ compared keyed by predicate *name*, not `PredId`.
   | inline arith ≡ hand-hoisted | unit test only | `bugs/001` |
   | disjunction ≡ separate rules | unit test only | adjacent to `bugs/002` |
   | `-q` ≡ equivalent file program | nothing | `bugs/002` (closed 2026-07-26) |
+  | a computed argument ≡ its value | unit test only (facts) | `bugs/005` (closed 2026-07-27) |
 
   - **A15** `a15_inline_and_hoisted_arguments_agree` — an inline compound atom
     argument lowers to the same program as the hand-written `=`-assignment
@@ -360,11 +361,32 @@ compared keyed by predicate *name*, not `PredId`.
     slots (§14), so a hand-written variable becomes an answer column where
     lowering's anonymous slot does not — a real difference in what was asked,
     not an artifact. On its first run the property found `bugs/005`, a separate
-    consequence of that same §14 rule. Compared with `testgen::alpha_eq`, not `==`:
+    consequence of that same §14 rule, closed 2026-07-27 by the fold below — the
+    exclusion stays, because the projection difference it names is real.
+    Compared with `testgen::alpha_eq`, not `==`:
     the hand-written variable is *named* where lowering mints an anonymous slot
     and the two number slots differently, neither observable to the evaluator —
     which is exactly what `lower_arg_expr`'s "engine-identical" asserts, so
     alpha-equivalence formalizes the claim rather than weakening it.
+  - **A computed argument ≡ its value**
+    `a_computed_query_argument_answers_like_its_value`
+    (`testgen::arb_ground_query_spellings`) — `?- n("a", 1 + 1).` answers as
+    `?- n("a", 2).`; `bugs/005`'s acceptance criterion, green since 2026-07-27
+    with the failing seed recorded. Unlike A15 this is an **output** claim, since
+    the two spellings now lower differently by design.
+
+    Its generator is targeted, and that is the lesson worth keeping: the first
+    version of this property rewrote `arb_ast_program` and **passed unfixed**.
+    Three things must coincide before the spellings can differ — a single-atom
+    query, a ground computed argument, and *a matching fact* — and over arbitrary
+    programs the third almost never holds, so both spellings printed nothing and
+    agreed. Building the expression backwards from a value the EDB contains is
+    what makes it bite. The syntactic non-vacuity guard was green throughout;
+    `ground_query_spellings_generate_queries_that_hold` is the one that would
+    have caught it, and it asserts the queries *hold*, not merely that they
+    compute. `folding_a_ground_argument_anywhere_does_not_change_the_answer`
+    keeps the rewrite-based version for the fact/rule positions, documented as
+    the weaker claim it is.
   - **Disjunction** `disjunction_equals_separate_rules` — green.
   - **`-q`** `dash_q_rule_equals_the_same_rule_in_a_file` — green since
     2026-07-26. It was written `#[ignore]`d and failing as `bugs/002`'s
