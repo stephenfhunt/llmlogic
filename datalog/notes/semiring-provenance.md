@@ -75,7 +75,7 @@ ratified proof-tree model, which is simply its boolean instance.
 
 ## Opportunities, ranked by fit to the project thesis
 
-The project's pillars (AGENTS.md): LLM-agent usability, token economy,
+The project's pillars (`datalog/AGENTS.md`): LLM-agent usability, token economy,
 explainability. Ranked accordingly:
 
 ### 1. `?whynot` with minimal repairs — practical, near-term

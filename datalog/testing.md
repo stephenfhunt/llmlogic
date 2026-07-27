@@ -1,8 +1,8 @@
 # Testing strategy
 
 *Living document. This is the single source of truth for how the `datalog`
-crate is tested; `AGENTS.md` and `spec.md` §17 point here. Update the property
-catalog's checkboxes as layers land.*
+crate is tested; this project's `AGENTS.md` and `spec.md` §17 point here. Update
+the property catalog's checkboxes as layers land.*
 
 ## The pyramid
 
@@ -382,7 +382,7 @@ compared keyed by predicate *name*, not `PredId`.
   over one hand-written positive atom, and the spelling that broke it was simply
   never written down.
 
-  **The rule this group encodes** (`AGENTS.md`, "Working style"): a new surface
+  **The rule this group encodes** (`datalog/AGENTS.md`, "Working style"): a new surface
   form, desugaring, or IR-identity claim ships with a property here, in the same
   sitting.
 
