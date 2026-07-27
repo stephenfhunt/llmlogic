@@ -5,7 +5,7 @@ severity: usability
 area: api
 spec: ["§5", "§14"]
 found: 2026-07-25
-resolution:
+resolution: fixed 2026-07-26 — the `-q` classifier accepts N same-head clauses as one rule
 ---
 
 A rule with a `;` disjunction is accepted in a program file and rejected via `-q`,
@@ -92,3 +92,30 @@ Nothing outside `-q`. The file path is correct, so this is a classifier defect
 rather than a language one — but it does mean `-q` and file input have diverged,
 which §14 presents as impossible ("`-q` … is sugar for appending `?- ...` to the
 loaded program"). Any future `-q` sugar needs a spelling-equivalence test.
+
+## Resolution
+
+**fixed 2026-07-26** (`0c86ab1`) — `-q 'r(X) :- p(X), X < 5 ; p(X), s(X)'`
+answers `r(1). r(9).`, byte-identical to the file form.
+
+**The fix sketch was taken as written** and needed no extension: `[statement]`
+became `split_first`, plus an all-clauses-share-the-head condition. The sketch's
+suggested assertion that the heads are structurally identical became a *condition*
+instead — cheaper and stronger. Comparing `print_atom` output rather than the AST
+sidesteps span inequality without a span-zeroing helper, and it is what keeps
+`-q 'a(X) :- p(X). b(X) :- p(X)'` on the query-body path, where it is still a
+parse error attributed to the argument rather than a silent partial answer.
+
+**The property was the whole acceptance criterion.** `bugs/002` is the second
+defect in the "form A means form B" class (after `001`) and the first where the
+property was written *before* the fix — so closing it was deleting one
+`#[ignore]`, and the recorded seed replayed the shrunk case
+`d(K) :- n(K, V), V = 0 ; n(K, V), V = 0` on the first run. Known failures went
+three → two, both absent × negation.
+
+**The diagnosis held completely**, including its root-cause reading that §14's
+prose ("a single clause with a non-empty body is a rule") was describing a Rust
+`match` arm rather than the language. That sentence was the actual carrier of the
+bug — it read as normative, so nothing flagged it when the parser started
+desugaring one clause into several. It is now stated as "one rule, however many
+clauses it desugars to" (§14).

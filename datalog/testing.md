@@ -351,7 +351,7 @@ compared keyed by predicate *name*, not `PredId`.
   | body order ≡ any order | property (B5) | held |
   | inline arith ≡ hand-hoisted | unit test only | `bugs/001` |
   | disjunction ≡ separate rules | unit test only | adjacent to `bugs/002` |
-  | `-q` ≡ equivalent file program | nothing | `bugs/002` |
+  | `-q` ≡ equivalent file program | nothing | `bugs/002` (closed 2026-07-26) |
 
   - **A15** `a15_inline_and_hoisted_arguments_agree` — an inline compound atom
     argument lowers to the same program as the hand-written `=`-assignment
@@ -366,10 +366,12 @@ compared keyed by predicate *name*, not `PredId`.
     which is exactly what `lower_arg_expr`'s "engine-identical" asserts, so
     alpha-equivalence formalizes the claim rather than weakening it.
   - **Disjunction** `disjunction_equals_separate_rules` — green.
-  - **`-q`** `dash_q_rule_equals_the_same_rule_in_a_file` — **`#[ignore]`d and
-    failing**, as `bugs/002`'s executable acceptance criterion. It shrinks to
-    `d(K) :- n(K, V), V = 0 ; n(K, V), V = 0`; the seed is recorded, so fixing
-    the defect is "delete the `#[ignore]`".
+  - **`-q`** `dash_q_rule_equals_the_same_rule_in_a_file` — green since
+    2026-07-26. It was written `#[ignore]`d and failing as `bugs/002`'s
+    executable acceptance criterion, shrinking to
+    `d(K) :- n(K, V), V = 0 ; n(K, V), V = 0`, and closing that defect was
+    deleting the `#[ignore]` — the first time in this project a property was
+    written before the fix it specified.
 
   Non-vacuity is guarded in `testgen::tests`, per the generator-coverage
   convention above:

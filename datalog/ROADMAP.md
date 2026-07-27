@@ -33,23 +33,26 @@ each; detail in §17 and `docs/worklog.md`.
 
 ## Open backlog
 
-> **Open defects live in [`bugs/`](bugs/)** — currently `002` (`-q` rejects a
-> disjunctive rule), `003` (three normative errors in `spec.md`), `004` (§6
-> asserts a finiteness that arithmetic falsified), `005` (a ground query with a
-> computed argument prints nothing). `002`–`004` came out of the 2026-07-25 spec
-> review and the design session that followed it (§17); `005` was found by the
-> C8 property suite on its first run. `004` is blocked on "Termination &
-> value-creating recursion" below. `001` (a compound argument in a negated atom
-> silently misread as a wildcard) was **fixed 2026-07-25** by negation item 2
-> below — see `bugs/resolved/`.
+> **Open defects live in [`bugs/`](bugs/)** — currently `003` (three normative
+> errors in `spec.md`), `004` (§6 asserts a finiteness that arithmetic
+> falsified), `005` (a ground query with a computed argument prints nothing).
+> `003`/`004` came out of the 2026-07-25 spec review and the design session that
+> followed it (§17); `005` was found by the C8 property suite on its first run.
+> `004` is blocked on "Termination & value-creating recursion" below. Two are
+> resolved in `bugs/resolved/`: `001` (a compound argument in a negated atom
+> silently misread as a wildcard), **fixed 2026-07-25** by negation item 2 below,
+> and `002` (`-q` rejected a disjunctive rule), **fixed 2026-07-26**.
 >
-> **`002` is the cheapest to close**: its fix sketch is written, and the general
-> property is already in the tree, failing, as
-> `api::tests::dash_q_rule_equals_the_same_rule_in_a_file` (testing.md C8). It is
-> `#[ignore]`d with the shrunk case seeded, so the work is the fix plus deleting
-> the `#[ignore]`. `cargo test -- --ignored` should report exactly **three**
-> known failures — that one and the two absent × negation tests; a fourth means
-> something regressed.
+> **`005` is now the cheapest to close** — an output-shape defect in `api.rs`
+> with no engine or lowering change implied — but its fix wants a design call
+> first: the sketch in the bug file proposes plumbing hoist-origin into the IR,
+> which collides with A15's claim that inline and hand-hoisted arguments lower to
+> the same program. Constant-folding a *ground* compound argument in a query, the
+> rule facts already use (`ArgMode::Fold`), reaches the same output with no IR
+> change and is the leading alternative.
+>
+> `cargo test -- --ignored` should report exactly **two** known failures, both
+> absent × negation; a third means something regressed.
 
 ### Negation (§7)
 
@@ -265,10 +268,11 @@ able to work around them.
 
 - **Three different body grammars.** Rule bodies are DNF; queries and aggregate
   goals are conjunction-only (all three verified). So a disjunctive filter can be
-  expressed only by detouring through the rule form — which is also the form
-  `bugs/002` breaks. Decide whether `;` extends to queries and goals, or whether
-  the asymmetry is deliberate and gets stated as such in §5 (it currently reads as
-  an aside: "Queries stay conjunctive"). _queued._ — §5.
+  expressed only by detouring through the rule form — which `bugs/002` made
+  unusable via `-q` until 2026-07-26, and the detour is still the only route.
+  Decide whether `;` extends to queries and goals, or whether the asymmetry is
+  deliberate and gets stated as such in §5 (it currently reads as an aside:
+  "Queries stay conjunctive"). _queued._ — §5.
 - **An existence check has no answer.** `?- p("a"), q("b").` prints nothing and
   exits 0 whether or not it holds (verified both ways). §14 files this as a
   closure gap ("no fact-shaped output in v1"), but the sharper framing is that the

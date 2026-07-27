@@ -24,6 +24,58 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-26 — `bugs/002`: a disjunctive rule survives `-q`
+
+The cheapest open defect, taken from the `bugs/` queue and closed in `0c86ab1`.
+385 tests pass, clippy clean.
+
+**Done**
+- **`-q 'r(X) :- p(X), X < 5 ; p(X), s(X)'` answers `r(1). r(9).`**, byte-identical
+  to the file form. The classifier matched a *single* statement; the parser
+  expands a top-level `;` into one clause per disjunct sharing the head, so a
+  disjunctive rule fell through to the query path and reported a syntax error
+  about a grammar the user never wrote. Now: N clauses, non-empty bodies, same
+  printed head, query taken from the first.
+  Heads compared as *printed text*, not as ASTs — span-free without a
+  span-zeroing helper, and it keeps `a(X) :- p(X). b(X) :- p(X)` a parse error
+  rather than a silent partial answer.
+- **`dash_q_rule_equals_the_same_rule_in_a_file` un-`#[ignore]`d** (testing.md
+  C8). Known failures three → two, both absent × negation.
+- §14 prose, §17 *Amended*, `bugs/002` → `bugs/resolved/` with a resolution note,
+  ROADMAP blockquote, testing.md C8.
+
+**Decided**
+- **The prose was the carrier, not the code.** §14 said "a single clause with a
+  non-empty body is a **rule**" — a description of a Rust `match` arm that read
+  as a language rule, so nothing flagged it when the parser started desugaring
+  one clause into several. Restated as "one rule, however many clauses it
+  desugars to". This is `bugs/003`'s drift mechanism again, one layer down: not a
+  rule stated in four places, but a rule stated once *about the implementation*.
+- **The property paid for itself completely.** First time here a property was
+  written before the fix it specified: closing the defect was deleting one
+  `#[ignore]`, the recorded seed replayed the shrunk case first run, and seven
+  lines of `api.rs` changed. C8 has now *closed* a defect, not just found them.
+- **`bugs/005` needs a design call before anyone codes it.** It was the natural
+  companion (same §14 family, same `api.rs`), but its own fix sketch proposes
+  plumbing hoist-origin into the IR, which would collide with A15's inline ≡
+  hand-hoisted claim. Constant-folding a ground compound argument in a *query* —
+  the rule facts already use (`ArgMode::Fold`) — reaches the same output with no
+  IR change. Pick between them first; the sketch in the bug file is not the
+  obvious answer it looks like.
+
+**Removed**
+- The "`002` is the cheapest to close" paragraph from ROADMAP (its whole content
+  was instructions for work now done), the stale `#[ignore]` and its four-line
+  justification, and §14's `match`-arm sentence.
+
+**Next up**
+- **`bugs/005`** is now the cheapest defect, pending the fold-vs-plumb call above.
+- Unchanged: **`absent` × negation** (with §6, per ROADMAP), the **§17
+  restructure** (`notes/decisions-log-restructure.md`), `003`, `004`.
+- Path-scoped loading **verified live**: root `CLAUDE.md` loads at launch,
+  `editing-docs.md` and `datalog/CLAUDE.md` only after reading a file each scopes
+  to. Closes the previous entry's first *Next up*.
+
 ## 2026-07-26 — Agent-context pass: session-start load 2,149 → 301 lines
 
 Prompted with two references on context engineering for Claude 5 models; the
@@ -164,62 +216,3 @@ with `/context` under **Memory files**.
 - **Known coverage gap, recorded not fixed:** E3's `replay` returns `None` on any
   `Premise::Builtin`, so derivation replay has never covered §8 builtins at all.
   Widening it means folding builtin premises into the replayed environment.
-
-## 2026-07-25 — `bugs/001`: negated atoms join the dependency schedule
-
-First session working the `bugs/` queue. Took `001` (soundness) and fixed it by
-*removing* the restriction it violated rather than by enforcing it — which also
-closed ROADMAP negation item 2, out of its planned order.
-
-**Done**
-- **`not q(X + 1)` evaluates correctly** (`r(1). r(3).`), as do `Y = X+1, not q(Y)`
-  and `not q(Y), Y = X+1`. Same for an aggregate argument and for `-q`.
-- Negations joined the scheduler: a negated atom reads the argument variables
-  something *else* in the body binds (`binder_vars`), so a slot bound nowhere is not
-  a dependency and stays existential — the scheduler still never sees `var_names`.
-  Ready negations keep their early phase, so anti-joins still prune before aggregates.
-- Moved the same rule at its other three sites: lowering's check (relaxed to "bound
-  by the body"), the engine's `validate_body` (now shares the scheduler's binding
-  set rather than walking positives), and **`engine/naive.rs`** — the oracle
-  bulk-filtered every negation before any builtin, so it had to interleave them too.
-- Tests: testing.md **C7** (spelling-independence over `arb_neg_shift_spellings`),
-  `CompRule::NegShift` carrying the shape into B1's engine/oracle differential, two
-  `schedule.rs` unit tests, five end-to-end in `api::tests`;
-  `schedules_bind_before_they_read` now covers negations.
-- §7/§10 relaxed; §17 decision entry; three §17 entries amended in place; the
-  "negated atoms are outside the dependency schedule" open question closed.
-  `bugs/001` → `bugs/resolved/` with a resolution note. Commits `2e78eef`, `a21f031`.
-
-**Decided (detail in `spec.md` §17, 2026-07-25)**
-- **Widen rather than reject.** The bug file offered both, and its acceptance
-  criterion allowed either ("evaluates correctly, *or* is a structured error naming
-  `X + 1`"). Tagging hoist-generated slots was rejected because the restriction had
-  no justification left to enforce — §17's own open question had already concluded
-  it justified itself by the phase order and the phase order by itself — and because
-  naming the source expression in the error needed an IR-expression renderer
-  (`print.rs` is AST-only) built solely to explain a rule we meant to delete.
-- **Landed ahead of `absent` × negation** (negation item 1), against ROADMAP's
-  sequencing. Checked the premise first: `m(K, X), not q(X)` with a stored
-  `q(absent)` already returns every row, so that hole is reachable through an
-  ordinary positive binding — this change adds spellings reaching an already-broken
-  cell, it does not create one. Both `#[ignore]`d tests still fail identically.
-- **The oracle was the risk, not the engine.** `enumerate_from` needed no change at
-  all; `naive.rs` needed restructuring. A differential oracle that hard-codes the
-  order under test agrees with a wrong engine.
-- **The bug's own diagnosis was one fault short** — it located the check and
-  mentioned the phase order only in passing. Either alone leaves the bug, and two
-  further sites encode the rule. Recorded in the resolution rather than by editing
-  the diagnosis.
-
-**Next up**
-- **`absent` × negation** (negation item 1) — now the only open negation thread, and
-  unblocked. Still needs its design session; the two `#[ignore]`d tests are the
-  acceptance criterion.
-- Remaining defects: `002` (`-q` rejects a disjunctive rule), `003` (three normative
-  errors in `spec.md`), `004` (blocked on the termination design item).
-- `binder_vars` is a static over-approximation (any bare-variable side of an `=`).
-  Sound — a variable it counts that nothing binds leaves the *binder* stuck and
-  `diagnose` reports that literal — but worth remembering if scheduling grows a
-  third phase. `diagnose`'s local `bindable` was deliberately left alone: it ranges
-  over *pending* literals only, so it is a genuinely different set.
-

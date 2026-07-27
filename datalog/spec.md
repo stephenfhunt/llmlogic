@@ -1040,10 +1040,12 @@ datalog people.dl -q 'adult(N) :- person(name: N, age: A), A >= 18.' \
 ```
 
 `-q` semantics: an argument is classified by **parsing** it (never by splitting
-on `:-`, which a string literal may contain). A single clause with a non-empty
-body is a **rule** — appended verbatim, followed by a synthesized `?- <head>.`
-over its head atom. Anything else (a bare atom, or a comma-separated body) is a
-**query body** and is appended as `?- <arg>.`. A trailing `.` is optional.
+on `:-`, which a string literal may contain). **One rule** with a non-empty body
+— however many clauses it desugars to, since a top-level `;` expands to one
+clause per disjunct sharing the head (§5) — is appended verbatim, followed by a
+synthesized `?- <head>.` over that head atom. Anything else (a bare atom, a
+comma-separated body, or clauses with differing heads) is a **query body** and is
+appended as `?- <arg>.`. A trailing `.` is optional.
 Multiple `-q` apply in CLI order, so a later one may reference a predicate an
 earlier one defined; each produces its own answer block, in order.
 
@@ -1826,6 +1828,16 @@ say.
   and §14's prose describes the `[statement]` match while reading like a
   language-level statement. The general claim — `-q` is sugar for appending to
   the loaded program — is now a property rather than prose (testing.md C8).
+
+  ***Amended 2026-07-26.*** A rule is **one rule however many clauses it
+  desugars to**: the classifier accepts N clauses with non-empty bodies and the
+  same printed head, taking the query from the first. Differing heads stay on the
+  query-body path, so two unrelated rules remain a parse error rather than a
+  silent partial answer. `bugs/002` closed; §14's prose restated. The prose was
+  the carrier, not the code — it read as normative, so nothing flagged it when
+  the parser started desugaring one clause into several. Cost: seven lines in
+  `api::query_source`. The C8 property written the day before was the entire
+  acceptance criterion; fixing the defect was deleting its `#[ignore]`.
 
 - **2026-07-22** — **Phase D: lexer + parser** (`src/lexer.rs`, `src/parser.rs`,
   `src/print.rs`, `src/api.rs`, thin `src/main.rs`). Decisions ratified this
