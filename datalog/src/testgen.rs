@@ -441,6 +441,49 @@ pub(crate) fn arb_disjunction_spellings() -> impl Strategy<Value = (String, Stri
         })
 }
 
+/// A **query** whose argument is written as arithmetic and as the value that
+/// arithmetic produces — `?- n("a", 1 + 1).` against `?- n("a", 2).`. Both
+/// strings are complete programs over the same EDB.
+///
+/// This is `bugs/005`'s acceptance criterion, and it is deliberately *targeted*
+/// rather than a rewrite over [`arb_ast_program`]. Three things must line up
+/// before the two spellings can possibly differ: the query must be a single
+/// atom, its computed argument must be ground, and it must **match a fact** —
+/// two spellings of a query that answers nothing both print nothing. A rewrite
+/// over arbitrary programs satisfies the first two often and the third almost
+/// never, so it passes with or without the fix. The expression is therefore
+/// built *backwards from a value the EDB can contain*: pick the target `v`
+/// first, then decompose it.
+///
+/// Both query shapes the defect reached are generated — fully ground
+/// (`n("a", 1 + 1)`, which printed nothing) and key-bound (`n(K, 1 + 1)`, which
+/// printed the weaker `answer("a")`).
+pub(crate) fn arb_ground_query_spellings() -> impl Strategy<Value = (String, String)> {
+    (arb_edb_text(), 0u8..3, -2i64..=2, 0i64..=3, any::<bool>()).prop_map(
+        |(edb, key, value, operand, ground)| {
+            // `operand op rest` evaluates to `value` by construction. Written
+            // with non-negative literals only: a signed literal parses, but
+            // keeping them out means the generator exercises the arithmetic
+            // rather than the lexer's sign handling.
+            let rest = value - operand;
+            let expr = if rest >= 0 {
+                format!("{operand} + {rest}")
+            } else {
+                format!("{operand} - {}", -rest)
+            };
+            let subject = if ground {
+                format!("\"{}\"", key_name(key))
+            } else {
+                "K".to_string()
+            };
+            (
+                format!("{edb}?- n({subject}, {expr}).\n"),
+                format!("{edb}?- n({subject}, {value}).\n"),
+            )
+        },
+    )
+}
+
 /// A base program plus one rule, for the `-q` ≡ file-program claim (§14: `-q`
 /// is sugar for appending to the loaded program). Returns
 /// `(base, rule_text, head_text)` so the property can build both spellings.
@@ -1411,10 +1454,11 @@ pub(crate) fn positionalize(program: &Program) -> Program {
 ///   query's answer variables are the *named* slots it binds (§14), so a
 ///   hand-written `H0` becomes an answer column while lowering's anonymous slot
 ///   does not. That is a real difference in what the user asked for, not an
-///   artifact, so the rewrite must not claim the two are the same program.
-///   (`bugs/005` is a *separate* consequence of the same §14 rule, found by this
-///   property: it makes `?- p("a", 1 + 1).` print nothing where `?- p("a", 2).`
-///   prints the fact.)
+///   artifact, so the rewrite must not claim the two are the same program. A
+///   query also *folds* a ground compound argument rather than hoisting it
+///   (`ArgMode::FoldGround`), so for that case the rewrite would not even be
+///   describing what lowering does. `fold_ground_atom_args` is the query-shaped
+///   claim; this one stays a rule-body claim.
 ///
 /// The point of the rewrite is the §5 claim that the two spellings are the same
 /// program. Compare the results with [`alpha_eq`], not `==`: a hand-written `H0`
@@ -1497,6 +1541,160 @@ pub(crate) fn hoist_atom_args(program: &Program) -> Program {
             // variable (§14) and the anonymous slot lowering mints is not, so
             // the two spellings really do differ. See the doc comment.
             _ => statement.clone(),
+        })
+        .collect();
+    Program { statements }
+}
+
+/// Rewrites every **ground compound** atom argument — in a fact, a rule head, a
+/// rule body, or a query — to the constant it evaluates to. `p("a", 1 + 1)`
+/// becomes `p("a", 2)`.
+///
+/// The claim this supports is the plainest one the language makes: *writing an
+/// arithmetic expression means the same as writing its value*. It is the §14
+/// half of the C8 spelling-equivalence group, and the one `bugs/005` falsified —
+/// `?- p("a", 1 + 1).` printed nothing where `?- p("a", 2).` printed the fact,
+/// because hoisting turned a single-atom query into a two-literal body with no
+/// named variables. Unlike [`hoist_atom_args`] this is an **output** claim, not
+/// an IR-identity one: the two spellings lower differently by construction
+/// (that is the fix), so they are compared by what they answer.
+///
+/// Folding is skipped, leaving the expression as written, when it cannot be
+/// justified at the surface:
+///
+/// - **A non-ground expression** — a variable or wildcard operand. `p(X + 1)`
+///   has no constant to fold to; lowering hoists it, as before.
+/// - **An expression that fails to evaluate** — `1 / 0`, or an ill-typed
+///   `"x" + 1`. Both spellings are then the same text, so the claim is vacuous
+///   rather than wrong for that case.
+/// - **A result of `absent`.** A literal `absent` in a body atom argument is a
+///   structured error steering to `is absent` (§4), so the folded *text* would
+///   be rejected where the computed value is not. That is a property of the
+///   surface ban, not a disagreement between spellings — and it cannot arise
+///   from [`arb_constant`], which never emits `absent`.
+///
+/// Evaluation goes through [`crate::engine::eval_expr`], the same §8 arithmetic
+/// lowering folds with, so the rewrite cannot drift from the behaviour it checks.
+pub(crate) fn fold_ground_atom_args(program: &Program) -> Program {
+    use crate::ast::{Args, Atom, Clause, Literal, Query, StatementKind};
+
+    /// The `ir::Value` a constant denotes, mirroring `Lowerer::lower_constant`.
+    fn value_of(constant: &Constant) -> Option<ir::Value> {
+        Some(match constant {
+            Constant::Symbol(s) => ir::Value::Symbol(s.clone()),
+            Constant::String(s) => ir::Value::String(s.clone()),
+            Constant::Int(i) => ir::Value::Int(*i),
+            Constant::Bool(b) => ir::Value::Bool(*b),
+            Constant::Absent => ir::Value::Absent,
+            Constant::Float(f) => ir::Value::Float(ir::F64::new(*f).ok()?),
+        })
+    }
+
+    /// The inverse, for writing the folded value back as source.
+    fn constant_of(value: &ir::Value) -> Option<Constant> {
+        Some(match value {
+            ir::Value::Symbol(s) => Constant::Symbol(s.clone()),
+            ir::Value::String(s) => Constant::String(s.clone()),
+            ir::Value::Int(i) => Constant::Int(*i),
+            ir::Value::Bool(b) => Constant::Bool(*b),
+            ir::Value::Float(f) => Constant::Float(f.get()),
+            // See the doc comment: a literal `absent` is banned in a body atom
+            // argument, so folding to one would test the ban, not the claim.
+            ir::Value::Absent => return None,
+        })
+    }
+
+    /// The ground expression as IR, or `None` at the first variable, wildcard,
+    /// or aggregate — none of which has a value at rewrite time.
+    fn ground_ir(expr: &Expr) -> Option<ir::Expr> {
+        match &expr.kind {
+            ExprKind::Term(term) => match &term.kind {
+                TermKind::Constant(constant) => {
+                    Some(ir::Expr::Term(ir::Term::Const(value_of(constant)?)))
+                }
+                TermKind::Variable(_) | TermKind::Wildcard => None,
+            },
+            ExprKind::Binary { op, lhs, rhs } => Some(ir::Expr::Binary {
+                op: *op,
+                lhs: Box::new(ground_ir(lhs)?),
+                rhs: Box::new(ground_ir(rhs)?),
+            }),
+            ExprKind::Aggregate(_) => None,
+        }
+    }
+
+    fn fold_expr(expr: &Expr) -> Expr {
+        // Only a *compound* argument is a rewrite; a bare term already is its
+        // own value, and folding it would make the non-vacuity guard lie.
+        if !matches!(expr.kind, ExprKind::Binary { .. }) {
+            return expr.clone();
+        }
+        let folded = ground_ir(expr)
+            .and_then(|ir_expr| crate::engine::eval_expr(&ir_expr, &[]).ok())
+            .as_ref()
+            .and_then(constant_of);
+        match folded {
+            Some(constant) => dummy_expr(ExprKind::Term(dummy_term(TermKind::Constant(constant)))),
+            None => expr.clone(),
+        }
+    }
+
+    fn fold_atom(atom: &Atom) -> Atom {
+        let args = match &atom.args {
+            Args::Positional(exprs) => Args::Positional(exprs.iter().map(fold_expr).collect()),
+            Args::Named(named) => Args::Named(
+                named
+                    .iter()
+                    .map(|arg| crate::ast::NamedArg {
+                        field: arg.field.clone(),
+                        value: fold_expr(&arg.value),
+                        span: arg.span,
+                    })
+                    .collect(),
+            ),
+        };
+        Atom {
+            predicate: atom.predicate.clone(),
+            args,
+            span: atom.span,
+        }
+    }
+
+    fn fold_body(body: &[Literal]) -> Vec<Literal> {
+        body.iter()
+            .map(|literal| match &literal.kind {
+                LiteralKind::Atom { negated, atom } => Literal {
+                    kind: LiteralKind::Atom {
+                        negated: *negated,
+                        atom: fold_atom(atom),
+                    },
+                    span: literal.span,
+                },
+                _ => literal.clone(),
+            })
+            .collect()
+    }
+
+    let statements = program
+        .statements
+        .iter()
+        .map(|statement| {
+            let kind = match &statement.kind {
+                StatementKind::Clause(clause) => StatementKind::Clause(Clause {
+                    head: fold_atom(&clause.head),
+                    body: fold_body(&clause.body),
+                    span: clause.span,
+                }),
+                StatementKind::Query(query) => StatementKind::Query(Query {
+                    body: fold_body(&query.body),
+                    span: query.span,
+                }),
+                other => other.clone(),
+            };
+            Statement {
+                kind,
+                span: statement.span,
+            }
         })
         .collect();
     Program { statements }
@@ -1889,6 +2087,142 @@ mod tests {
             under_negation > 0,
             "generator never produced a compound argument under `not` — A15 \
              would not have caught bugs/001"
+        );
+    }
+
+    /// [`arb_ground_query_spellings`] must generate queries that **match a
+    /// fact**, not merely queries that compute. This is the whole reason the
+    /// generator is targeted: two spellings of a query that answers nothing
+    /// both print nothing and agree trivially, so a generator that rarely hits
+    /// a fact yields a property that passes with or without `bugs/005`'s fix —
+    /// measured, that is exactly what a rewrite over [`arb_ast_program`] did.
+    ///
+    /// Asserts on the *folded* spelling, whose answer is what the computed one
+    /// failed to produce.
+    #[test]
+    fn ground_query_spellings_generate_queries_that_hold() {
+        let mut runner = TestRunner::deterministic();
+        let strategy = arb_ground_query_spellings();
+        let (mut held, mut total) = (0, 0);
+        for _ in 0..200 {
+            let (_, folded) = strategy
+                .new_tree(&mut runner)
+                .expect("strategy produces a value")
+                .current();
+            total += 1;
+            if let Ok(result) = crate::api::run(&folded)
+                && result.answers.iter().any(|lines| !lines.is_empty())
+            {
+                held += 1;
+            }
+        }
+        // Not a threshold for its own sake: at 0 the property is vacuous, and
+        // the defect it guards showed up only where the query held.
+        assert!(
+            held * 5 >= total,
+            "only {held}/{total} generated queries matched a fact — the \
+             fold-equivalence property is close to vacuous"
+        );
+    }
+
+    /// The *widened* fold property's generator must emit **ground** compound
+    /// atom arguments, and [`fold_ground_atom_args`] must rewrite them — in a
+    /// **query** above all, since that is the position `bugs/005` was in and the
+    /// only one whose output shape §14 reads off the body.
+    ///
+    /// The A15 guard above is the precedent and the reason: a property that
+    /// never sees the shape it guards is what let `bugs/001` through. Note what
+    /// this guard does *not* establish — see
+    /// `ground_query_spellings_generate_queries_that_hold`: these counts were
+    /// all positive while the property they guard still passed unfixed.
+    #[test]
+    fn generator_emits_ground_compound_arguments_that_folding_rewrites() {
+        let mut runner = TestRunner::deterministic();
+        let strategy = arb_ast_program();
+        let (mut ground_compound, mut in_a_query, mut rewritten) = (0, 0, 0);
+
+        // A compound expression every operand of which is a constant — what
+        // folding can act on. Mirrors `fold_ground_atom_args::ground_ir`'s
+        // acceptance, without its evaluation step.
+        fn is_ground_compound(expr: &Expr) -> bool {
+            fn all_constant(expr: &Expr) -> bool {
+                match &expr.kind {
+                    ExprKind::Term(term) => matches!(term.kind, TermKind::Constant(_)),
+                    ExprKind::Binary { lhs, rhs, .. } => all_constant(lhs) && all_constant(rhs),
+                    ExprKind::Aggregate(_) => false,
+                }
+            }
+            matches!(expr.kind, ExprKind::Binary { .. }) && all_constant(expr)
+        }
+
+        fn atom_exprs(atom: &Atom) -> Vec<&Expr> {
+            match &atom.args {
+                Args::Positional(exprs) => exprs.iter().collect(),
+                Args::Named(named) => named.iter().map(|a| &a.value).collect(),
+            }
+        }
+
+        fn body_ground_compounds(body: &[Literal]) -> usize {
+            body.iter()
+                .filter_map(|literal| match &literal.kind {
+                    LiteralKind::Atom { atom, .. } => Some(atom),
+                    _ => None,
+                })
+                .map(|atom| {
+                    atom_exprs(atom)
+                        .into_iter()
+                        .filter(|e| is_ground_compound(e))
+                        .count()
+                })
+                .sum()
+        }
+
+        for _ in 0..200 {
+            let program = strategy
+                .new_tree(&mut runner)
+                .expect("strategy produces a value")
+                .current();
+            for statement in &program.statements {
+                match &statement.kind {
+                    StatementKind::Clause(clause) => {
+                        ground_compound += atom_exprs(&clause.head)
+                            .into_iter()
+                            .filter(|e| is_ground_compound(e))
+                            .count();
+                        ground_compound += body_ground_compounds(&clause.body);
+                    }
+                    StatementKind::Query(query) => {
+                        let n = body_ground_compounds(&query.body);
+                        ground_compound += n;
+                        in_a_query += n;
+                    }
+                    _ => {}
+                }
+            }
+            // The rewrite replaces a compound argument with a term, so a
+            // program it touches prints differently.
+            if crate::print::print_program(&fold_ground_atom_args(&program))
+                != crate::print::print_program(&program)
+            {
+                rewritten += 1;
+            }
+        }
+        assert!(
+            ground_compound > 0,
+            "generator never produced a ground compound atom argument — the \
+             fold-equivalence property is vacuous"
+        );
+        assert!(
+            rewritten > 0,
+            "fold_ground_atom_args never rewrote anything — the \
+             fold-equivalence property is vacuous"
+        );
+        // The `bugs/005` position specifically. Without this the property could
+        // pass on rules alone, where the defect never was.
+        assert!(
+            in_a_query > 0,
+            "generator never produced a ground compound argument in a query — \
+             the fold-equivalence property would not have caught bugs/005"
         );
     }
 

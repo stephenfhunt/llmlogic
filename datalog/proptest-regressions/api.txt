@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 41dcb8fae17903ebdad1a72f41a501fdae4e7c336722d79aee635204b8fc0339 # shrinks to (base, rule, head) = ("", "d(K) :- n(K, V), V = 0 ; n(K, V), V = 0", "d(K)")
+cc 85a0443d8e106ad8d5e514865cb66714987b5ada0ec9d3d01f6b2731415567d7 # shrinks to (computed, folded) = ("n(\"b\", 2).\n?- n(K, 0 + 2).\n", "n(\"b\", 2).\n?- n(K, 2).\n")

@@ -190,12 +190,23 @@ enum AtomPos {
 }
 
 /// How a compound (inline-arithmetic) atom argument is resolved (spec §17,
-/// Phase D). Rules and queries hoist it to an `=`-assignment; facts, having no
-/// body, constant-fold it.
+/// Phase D and 2026-07-27). One variant per context:
+///
+/// - [`Hoist`](ArgMode::Hoist) — rule bodies, rule heads, aggregate goals: a
+///   fresh slot plus an `=`-assignment, engine-identical to writing the
+///   assignment by hand (A15).
+/// - [`Fold`](ArgMode::Fold) — facts, which have no body to hold an assignment,
+///   so a non-ground argument is an error.
+/// - [`FoldGround`](ArgMode::FoldGround) — query bodies: fold when the argument
+///   is ground, hoist otherwise. §14 decides a query's output shape from its
+///   *body* shape, so hoisting a ground argument turned a single-atom query into
+///   a two-literal one with no named variables — the one shape that printed
+///   nothing (`bugs/005`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ArgMode {
     Hoist,
     Fold,
+    FoldGround,
 }
 
 /// Per-clause variable numbering state.
@@ -454,7 +465,7 @@ impl Lowerer {
             return;
         };
 
-        let mut body = self.lower_body(&clause.body, &mut scope);
+        let mut body = self.lower_body(&clause.body, &mut scope, ArgMode::Hoist);
         body.extend(head_hoisted);
 
         let rule = ir::Rule {
@@ -521,7 +532,9 @@ impl Lowerer {
 
     fn lower_query(&mut self, query: &ast::Query, out: &mut ir::Program) {
         let mut scope = VarScope::default();
-        let body = self.lower_body(&query.body, &mut scope);
+        // A ground compound argument folds rather than hoisting, so a query that
+        // reads as a single atom stays one (`bugs/005`, §14 output shape).
+        let body = self.lower_body(&query.body, &mut scope, ArgMode::FoldGround);
         // The answer variables are the *named* slots the body binds at the top
         // level (§14). `safe_bound_vars` is the same notion the head of a rule is
         // checked against, and it deliberately does not descend into aggregate
@@ -546,7 +559,15 @@ impl Lowerer {
         out.queries.push(lowered);
     }
 
-    fn lower_body(&mut self, body: &[ast::Literal], scope: &mut VarScope) -> Vec<ir::BodyLiteral> {
+    /// Lowers a body. `mode` is [`ArgMode::Hoist`] for a rule body and an
+    /// aggregate goal, and [`ArgMode::FoldGround`] for a query body — see
+    /// [`ArgMode`] for why the query differs.
+    fn lower_body(
+        &mut self,
+        body: &[ast::Literal],
+        scope: &mut VarScope,
+        mode: ArgMode,
+    ) -> Vec<ir::BodyLiteral> {
         let mut lowered = Vec::with_capacity(body.len());
         for literal in body {
             match &literal.kind {
@@ -556,7 +577,7 @@ impl Lowerer {
                     // value is bound when the atom is matched.
                     let mut hoisted = Vec::new();
                     let Some(lowered_atom) =
-                        self.lower_atom(atom, scope, AtomPos::Body, ArgMode::Hoist, &mut hoisted)
+                        self.lower_atom(atom, scope, AtomPos::Body, mode, &mut hoisted)
                     else {
                         continue;
                     };
@@ -606,9 +627,8 @@ impl Lowerer {
 
     /// Lowers an atom to positional form, or reports an error and returns
     /// `None`. `mode` decides how a non-term (inline-arithmetic) argument is
-    /// handled: hoisted to a fresh `=`-assignment appended to `hoisted`
-    /// ([`ArgMode::Hoist`], rules/queries) or constant-folded ([`ArgMode::Fold`],
-    /// facts).
+    /// handled — hoisted to a fresh `=`-assignment appended to `hoisted`, or
+    /// constant-folded; see [`ArgMode`].
     fn lower_atom(
         &mut self,
         atom: &ast::Atom,
@@ -635,7 +655,7 @@ impl Lowerer {
     /// Lowers one atom argument, which is a full [`ast::Expr`] since the
     /// inline-arithmetic widening (spec §17, Phase D). A bare term lowers
     /// directly; a compound expression is either hoisted or constant-folded per
-    /// `mode`.
+    /// [`ArgMode`].
     fn lower_arg_expr(
         &mut self,
         expr: &ast::Expr,
@@ -666,40 +686,47 @@ impl Lowerer {
             return self.lower_term(term, scope);
         }
         let ir_expr = self.lower_expr(expr, scope, hoisted);
-        match mode {
-            ArgMode::Hoist => {
-                // Fresh var V, plus `V = <expr>` for the caller to place. The
-                // fresh (`None`-named) slot and `=`-assignment are exactly what a
-                // hand-written `V = <expr>` produces, so the IR is engine-identical.
-                let var = scope.fresh();
-                hoisted.push(ir::BodyLiteral {
-                    kind: ir::BodyLiteralKind::Compare {
-                        op: ast::CmpOp::Eq,
-                        lhs: ir::Expr::Term(ir::Term::Var(var)),
-                        rhs: ir_expr,
-                    },
-                    span: expr.span,
-                });
-                ir::Term::Var(var)
-            }
-            ArgMode::Fold => {
-                // Fact context: fold a ground expression through the engine's §8
-                // arithmetic (single source of truth). A variable operand makes
-                // the fact non-ground; returning a fresh slot lets the caller's
-                // ground check report it.
-                if expr_vars(&ir_expr).is_empty() {
-                    match crate::engine::eval_expr(&ir_expr, &[]) {
-                        Ok(value) => ir::Term::Const(value),
-                        Err(error) => {
-                            self.errors.push(error);
-                            // Placeholder; lowering already failed, so it is
-                            // never emitted in a successful result.
-                            ir::Term::Const(ir::Value::Int(0))
-                        }
-                    }
-                } else {
-                    ir::Term::Var(scope.fresh())
-                }
+        let ground = expr_vars(&ir_expr).is_empty();
+
+        // A query folds a *ground* argument and hoists anything else
+        // (`bugs/005`); the other two modes do not consult the argument.
+        // An aggregate is never ground — it lowers to a fresh result slot — so
+        // it hoists under `FoldGround` exactly as it does in a rule body.
+        let fold = match mode {
+            ArgMode::Hoist => false,
+            ArgMode::Fold => true,
+            ArgMode::FoldGround => ground,
+        };
+
+        if !fold {
+            // Fresh var V, plus `V = <expr>` for the caller to place. The fresh
+            // (`None`-named) slot and `=`-assignment are exactly what a
+            // hand-written `V = <expr>` produces, so the IR is engine-identical.
+            let var = scope.fresh();
+            hoisted.push(ir::BodyLiteral {
+                kind: ir::BodyLiteralKind::Compare {
+                    op: ast::CmpOp::Eq,
+                    lhs: ir::Expr::Term(ir::Term::Var(var)),
+                    rhs: ir_expr,
+                },
+                span: expr.span,
+            });
+            return ir::Term::Var(var);
+        }
+
+        if !ground {
+            // Fact context: a variable operand makes the fact non-ground.
+            // Returning a fresh slot lets the caller's ground check report it.
+            return ir::Term::Var(scope.fresh());
+        }
+        // Fold through the engine's §8 arithmetic, the single source of truth.
+        match crate::engine::eval_expr(&ir_expr, &[]) {
+            Ok(value) => ir::Term::Const(value),
+            Err(error) => {
+                self.errors.push(error);
+                // Placeholder; lowering already failed, so it is never emitted
+                // in a successful result.
+                ir::Term::Const(ir::Value::Int(0))
             }
         }
     }
@@ -863,7 +890,9 @@ impl Lowerer {
         scope: &mut VarScope,
         hoisted: &mut Vec<ir::BodyLiteral>,
     ) -> ir::Expr {
-        let mut goal = self.lower_body(&agg.goal, scope);
+        // An aggregate goal hoists whichever body encloses it: its shape feeds
+        // the reducer, not §14's output rule, so it has no reason to fold.
+        let mut goal = self.lower_body(&agg.goal, scope, ArgMode::Hoist);
         // The collected expression is evaluated per witness of the goal, so a
         // nested aggregate inside it hoists into the goal, not the outer body.
         let expr = self.lower_expr(&agg.expr, scope, &mut goal);

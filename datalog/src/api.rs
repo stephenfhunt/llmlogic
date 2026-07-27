@@ -18,8 +18,16 @@
 //! - Any **other** body (multiple literals, or a wildcard in the sole atom)
 //!   emits synthesized `answer/N` facts over the query's named variables.
 //! - A body with **no named variables** that is not a substitutable single atom
-//!   produces no fact-shaped output in v1 (an existence check with nowhere to
-//!   put the answer); this is the one shape the closure does not cover yet.
+//!   produces no fact-shaped output in v1 — a *multi-atom* existence check like
+//!   `?- p("a"), q("b").`, which has nowhere to put its yes/no. This is the
+//!   shape the closure does not cover, and §5's ban on 0-arity atoms removes the
+//!   obvious workaround; it is an open roadmap item.
+//!
+//! A computed argument reaches the **first** case, not the third: a query
+//! constant-folds a *ground* compound argument rather than hoisting it
+//! (`lower::ArgMode::FoldGround`), so `?- p("a", 1 + 1).` stays the single atom
+//! it reads as. Hoisting made the body two literals with no named variables, so
+//! an ordinary-looking query printed nothing (`bugs/005`).
 //!
 //! Rows are deduplicated and printed in the canonical value order.
 //!
@@ -652,10 +660,120 @@ age(\"bob\", 15).
         }
     }
 
+    proptest! {
+        /// **C8** — a **query** argument written as arithmetic answers exactly
+        /// as the same argument written as its value: `?- n("a", 1 + 1).` and
+        /// `?- n("a", 2).` are one question (§5/§8/§14).
+        ///
+        /// `bugs/005`'s executable acceptance criterion. The defect was that
+        /// the first printed *nothing* while the second printed the fact,
+        /// because hoisting turned a single-atom query into a two-literal body
+        /// with no named variables — the one shape §14 emitted nothing for.
+        ///
+        /// The A15 analogue makes the *IR-identity* claim over rule bodies and
+        /// excludes queries, because a hand-written variable becomes an answer
+        /// column where lowering's anonymous slot does not. That exclusion
+        /// stays; this is the **output** claim, which is the one §14's shape
+        /// rule can break.
+        #[test]
+        fn a_computed_query_argument_answers_like_its_value(
+            (computed, folded) in crate::testgen::arb_ground_query_spellings()
+        ) {
+            let a = run(&computed).map(|r| r.answers);
+            let b = run(&folded).map(|r| r.answers);
+            match (a, b) {
+                (Ok(a), Ok(b)) => prop_assert_eq!(a, b),
+                (Err(_), Err(_)) => {}
+                (a, b) => prop_assert!(
+                    false,
+                    "the two spellings disagreed on acceptance: {:?} vs {:?}\n\
+                     --- computed ---\n{}\n--- folded ---\n{}",
+                    a.is_ok(), b.is_ok(), &computed, &folded
+                ),
+            }
+        }
+    }
+
+    proptest! {
+        /// **C8**, the same claim widened past the query: folding a ground
+        /// compound argument *anywhere* — fact, rule head, rule body, query —
+        /// does not change what the program answers.
+        ///
+        /// Weaker than the property above and deliberately kept separate: over
+        /// arbitrary generated programs the interesting case (a query that
+        /// both computes and *matches*) is vanishingly rare, so this one would
+        /// pass with or without `bugs/005`'s fix. It guards the positions the
+        /// targeted generator does not reach, and nothing more.
+        #[test]
+        fn folding_a_ground_argument_anywhere_does_not_change_the_answer(
+            program in crate::testgen::arb_ast_program()
+        ) {
+            let inline = crate::print::print_program(&program);
+            let folded = crate::print::print_program(
+                &crate::testgen::fold_ground_atom_args(&program)
+            );
+            let a = run(&inline).map(|r| r.answers);
+            let b = run(&folded).map(|r| r.answers);
+            match (a, b) {
+                (Ok(a), Ok(b)) => prop_assert_eq!(a, b),
+                (Err(_), Err(_)) => {}
+                (a, b) => prop_assert!(
+                    false,
+                    "the two spellings disagreed on acceptance: {:?} vs {:?}\n\
+                     --- inline ---\n{}\n--- folded ---\n{}",
+                    a.is_ok(), b.is_ok(), &inline, &folded
+                ),
+            }
+        }
+    }
+
     #[test]
     fn constant_folding_in_a_fact() {
         let result = run("p(1 + 1).\n?- p(X).").expect("runs");
         assert_eq!(result.answers, vec![vec!["p(2).".to_string()]]);
+    }
+
+    /// `bugs/005`: `?- p("a", 1 + 1).` printed nothing while `?- p("a", 2).`
+    /// printed the fact — the same question, two spellings, two answers, and
+    /// the empty one indistinguishable from "no such fact". A query now folds a
+    /// *ground* compound argument instead of hoisting it, so it stays the
+    /// single atom the user wrote (§14 reads output shape off the body).
+    #[test]
+    fn a_ground_computed_argument_answers_like_the_folded_spelling() {
+        let facts = "p(\"a\", 2).\n";
+        let folded = run(&format!("{facts}?- p(\"a\", 2).")).expect("folded runs");
+        let computed = run(&format!("{facts}?- p(\"a\", 1 + 1).")).expect("computed runs");
+        assert_eq!(folded.answers, computed.answers);
+        assert_eq!(computed.answers, vec![vec!["p(\"a\", 2).".to_string()]]);
+    }
+
+    /// The same defect one variable short of ground: the computed argument is
+    /// ground even though the atom is not, so folding leaves a single atom and
+    /// the substituted form prints — where hoisting made it a two-literal body
+    /// and downgraded the answer to `answer("a")`.
+    #[test]
+    fn a_ground_computed_argument_folds_in_a_non_ground_query() {
+        let result = run("p(\"a\", 2).\np(\"b\", 3).\n?- p(X, 1 + 1).").expect("runs");
+        assert_eq!(result.answers, vec![vec!["p(\"a\", 2).".to_string()]]);
+    }
+
+    /// The difference that must *survive* the fix (`bugs/005`, acceptance 3):
+    /// naming a value is a request to see it, so a hand-written assignment
+    /// makes the value an answer column. This is the projection difference that
+    /// keeps A15's query exclusion load-bearing.
+    #[test]
+    fn a_hand_written_assignment_still_projects_its_variable() {
+        let result = run("p(\"a\", 2).\n?- V = 1 + 1, p(\"a\", V).").expect("runs");
+        assert_eq!(result.answers, vec![vec!["answer(2).".to_string()]]);
+    }
+
+    /// A *non-ground* computed argument still hoists, so the answer stays the
+    /// synthesized form — folding is scoped to what it can evaluate, and this
+    /// is the boundary.
+    #[test]
+    fn a_non_ground_computed_argument_still_hoists() {
+        let result = run("n(1).\nn(2).\np(2).\n?- n(X), p(X + 1).").expect("runs");
+        assert_eq!(result.answers, vec![vec!["answer(1).".to_string()]]);
     }
 
     #[test]
