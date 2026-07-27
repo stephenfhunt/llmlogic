@@ -8,13 +8,19 @@ Guidance for AI agents working in the `llmlogic` repository.
 better reasoning. It is a multi-project repo: each project lives in its own
 top-level directory and is self-contained (its own build system, tests, and docs).
 
+Current projects:
+- **`datalog/`** — a Datalog engine in Rust, targeted at LLM/agent use, with
+  convenient import of fact tables from external sources. This is the first project.
+
+Future projects (other Rust crates, Python packages) will get their own top-level
+directories. There is **no root Cargo workspace** — do not add one without being asked.
+
+## Session protocol
+
 **Start here each session:** read [`docs/worklog.md`](docs/worklog.md) — the most
-recent entry's *Next up* tells you where the last session left off — and, for a
-project, its `ROADMAP.md` (e.g. [`datalog/ROADMAP.md`](datalog/ROADMAP.md)) for
-the indexed backlog of open items. Open **defects** are tracked separately, one
-file per defect, in the project's `bugs/` directory (`ls datalog/bugs/*.md` is the
-open set; conventions in [`datalog/bugs/README.md`](datalog/bugs/README.md)).
-ROADMAP holds what is *missing*; `bugs/` holds what is *wrong*.
+recent entry's *Next up* tells you where the last session left off. Then, for a
+project, [`datalog/ROADMAP.md`](datalog/ROADMAP.md), whose header explains what
+each document in the project is for. Open defects are `ls datalog/bugs/[0-9]*.md`.
 
 **End your session** by updating any item whose status changed in `ROADMAP.md`
 and adding a worklog entry with four fields:
@@ -25,21 +31,20 @@ and adding a worklog entry with four fields:
   counterweight. "Nothing" is a fine answer once you have actually looked.
 
 Then **annotate any `spec.md` §17 decision this session taught you something
-about** — see "Working style" below. Raw session transcripts are auto-saved by
-Claude Code under `~/.claude/projects/<repo-slug>/*.jsonl` — don't commit
-transcripts into the repo.
-
-Current projects:
-- **`datalog/`** — a Datalog engine in Rust, targeted at LLM/agent use, with
-  convenient import of fact tables from external sources. This is the first project.
-
-Future projects (other Rust crates, Python packages) will get their own top-level
-directories. There is **no root Cargo workspace** — do not add one without being asked.
+about** — the vocabulary and the trigger are in §17's preamble; the *why* is in
+[`docs/rules/editing-docs.md`](docs/rules/editing-docs.md). Raw session
+transcripts are auto-saved by Claude Code under
+`~/.claude/projects/<repo-slug>/*.jsonl` — don't commit transcripts into the repo.
 
 ## Project: `datalog/`
 
 A Rust library (the engine) plus a thin binary (CLI/REPL). Everything for this
 project lives inside `datalog/`.
+
+Design pillars (they drive decisions): provenance/explainability, LLM-friendly
+syntax + structured/actionable errors, and an agent-native CLI — Datalog in,
+Datalog out (results are facts; output composes as input), with JSON at the
+machine-readable edges (errors, provenance).
 
 ### Environment
 Rust is installed via rustup. If `cargo` is not on `PATH` in a fresh shell, source
@@ -52,23 +57,38 @@ source "$HOME/.cargo/env"
 ```sh
 cargo build          # compile
 cargo test           # unit + integration tests
-cargo run            # launch the (stub) CLI/REPL
+cargo run            # launch the CLI/REPL
 cargo clippy --all-targets   # lints — keep clean, no warnings
 cargo fmt            # apply formatting (run before committing)
 ```
-The starter is warning-free and rustfmt-clean; keep it that way.
+Keep the tree warning-free and rustfmt-clean.
 
-### Layout
-- `src/lib.rs` — crate root and public API; the engine belongs here.
-- `src/main.rs` — thin binary; delegates to the library.
-- `src/{ast,lexer,parser,error,provenance,sources,api}.rs`, `src/engine/` — modules
-  mirroring the intended architecture. Most are stubs pending the spec.
-- `tests/` — integration tests.
-- `spec.md` — see below.
-- `references.md` — annotated bibliography of the Datalog literature, grouped by
-  topic and mapped to spec sections. Consult the relevant group before designing or
-  implementing a feature (evaluation, negation, aggregation, provenance all have
-  well-established solutions in these papers).
+Implementation proceeds **bottom-up, evaluation-first** (decided 2026-07-10;
+rationale in spec §17). Shipped milestones and the open backlog are in
+[`ROADMAP.md`](datalog/ROADMAP.md); the test strategy and the phased property
+catalog are in [`datalog/testing.md`](datalog/testing.md), which is their single
+normative home — consult it and implement the relevant phase as each layer lands.
+
+### Using `datalog` as an agent skill
+
+`datalog/skill/` is a committed Claude Code skill (`SKILL.md` + a `datalog`
+wrapper that builds the release binary on first use). Build a standalone bundle
+with `cargo package-skill`. Try-it tasks are in
+[`datalog/EXPERIMENTS.md`](datalog/EXPERIMENTS.md).
+
+**Activation is deliberate, and `.claude/skills/` is gitignored so it stays that
+way.** A project's skill is a deliverable, not development infrastructure —
+building the engine needs `cargo`, not a logic engine in context — and a skill's
+description loads in *every* session, so auto-activating one per project does not
+scale as this repo grows. Turn it on when running experiments:
+
+```sh
+mkdir -p .claude/skills && ln -s ../../datalog/skill .claude/skills/datalog
+```
+
+The truer test of the skill is `cargo package-skill` installed into an unrelated
+repo, where an agent with no knowledge of this project either reaches for it or
+does not.
 
 ## Working style: spec-driven
 
@@ -76,7 +96,8 @@ The starter is warning-free and rustfmt-clean; keep it that way.
 implementing a language feature:
 1. Read the relevant `spec.md` section and its status.
 2. Prefer working from **canonical example programs** (spec §16) — let examples drive
-   syntax/semantics rather than designing in the abstract.
+   syntax/semantics rather than designing in the abstract. They are also the
+   canonical test corpus at every level of the pyramid.
 3. Record non-obvious design choices in the **decisions log** (spec §17) with a date
    and rationale; track unresolved questions there too. When a decision's
    correctness rests on an invariant, **name the test that fails if the invariant
@@ -91,127 +112,12 @@ implementing a language feature:
    such claim carrying a property has held (named ≡ positional, body order); both
    carrying only a unit test became defects (`bugs/001`, `bugs/002`).
 
-### Changing what already exists
-
-Most of the damage so far has come from editing, not building — three of the four
-2026-07-25 defects were caused by a doc claim that had quietly stopped being true.
-
-**Know which kind of document you are in.** They have opposite disciplines:
-
-| | current-state | append-only record |
-|---|---|---|
-| what | `spec.md` §1–§16, `README.md`, `SKILL.md`, code and doc comments | `spec.md` §17, `docs/worklog.md`, `bugs/resolved/` |
-| discipline | **rewrite** it to state present truth | **append**; never rewrite |
-| history | *point* to the decision; never narrate the change | history is the payload |
-
-The test for any sentence in a current-state document: *would this still be here
-if the feature had always worked this way?* If not, it is narration — cut it and
-leave the pointer. "See §17 2026-07-25" is fine; "relaxed from positively bound"
-is not.
-
-- **One normative home per rule.** State a rule in exactly one section; everywhere
-  else cross-references it. `bugs/003` names this as *the drift mechanism* — the
-  same safety rule lived in four sections, and updating three looked like done.
-- **Changing a rule means sweeping §17** for entries resting on it. Fixing
-  `bugs/001` turned up three needing amendment; that was diligence, not process.
-- **Annotate a decision when its consequences land, not only when it is
-  overturned.** The most valuable note has no change attached — that the
-  2026-07-19 wildcard entry's instinct was right and the entry overturning it was
-  wrong is something no diff can recover. Record what it actually cost, whether
-  the stated rationale held, and what the *rejected* alternative would have done;
-  the last is the part a later session cannot reconstruct.
-
-Design pillars for `datalog` (they drive decisions): provenance/explainability,
-LLM-friendly syntax + structured/actionable errors, and an agent-native CLI —
-Datalog in, Datalog out (results are facts; output composes as input), with JSON
-at the machine-readable edges (errors, provenance).
-
-## Implementation roadmap & testing (`datalog/`)
-
-Implementation proceeds **bottom-up, evaluation-first** (decided 2026-07-10;
-rationale in spec §17):
-
-1. **AST + IR** (`src/ast.rs`, `src/ir.rs`, `src/lower.rs`) designed against spec
-   §3–§5 — done 2026-07-19. Two distinct plain type hierarchies (spec §17): the
-   surface AST mirrors the grammar (spans, named args, wildcards); the core IR is
-   **positional-only** and index-resolved. The evaluator consumes `ir::Program`
-   only. (Named-argument resolution — lowering pass 2 — was stubbed here and
-   landed 2026-07-20; see step 3.)
-2. **Core evaluator** (`src/engine/`, `src/provenance.rs`) — done 2026-07-19.
-   `eval(&ir::Program) -> Result<Model, Error>`: stratified semi-naive fixpoint
-   recording **all derivations per fact** (deduped by rule instance) plus
-   first-round stamps for finite proof extraction (`ProofTree::explain`);
-   queries answered as projections (`Model::answer`). The naive reference
-   evaluator (`src/engine/naive.rs`, test-only, permanent) is the differential
-   oracle; testing.md Phase B (B1–B7) and Phase E (E1–E4, pulled forward) are
-   green. Spec §6/§15 and the §11 data model are Draft.
-3. **Named-argument lowering** (`src/lower.rs` pass 2) — done 2026-07-20.
-   Named literals resolve against a `lower`-internal field registry collected
-   from `declare` statements and explicit import schemas; omitted fields become
-   fresh anonymous slots (partial selection) and named heads must supply every
-   field (§4). Named and positional forms lower to identical IR (testing.md
-   A13); §16.7 is the contract fixture.
-4. **Stratified negation** (§7) — done 2026-07-20. Ullman relaxation numbering
-   in lowering (`stratify`) with structured concrete-cycle errors; the engine
-   evaluates negated atoms as anti-join filters over frozen lower strata and
-   records `Premise::Absent` patterns for provenance (`ProofTree::Absent`
-   leaves); the naive oracle iterates strata (perfect model). §16.2 is the
-   contract fixture; testing.md C1–C3 are green. **Builtins + type inference**
-   (§8/§4) remain in this step.
-5. **Lexer + parser** (§3–§5), wired to the engine — done 2026-07-22.
-   Hand-rolled zero-dep lexer (`src/lexer.rs`) + recursive-descent parser
-   (`src/parser.rs`) producing the existing surface AST, with statement-level
-   error recovery and did-you-mean messages for Prolog-prior near-misses; a
-   canonical printer (`src/print.rs`) defining the §14 output form; and the
-   first production pipeline `parse → lower → typecheck → eval` (`src/api.rs`,
-   thin `src/main.rs`). Atom arguments widened `Term → Expr` for inline
-   arithmetic (lowering hoists); disjunction `;` expands in the parser. The §16
-   corpus is now source-text-first (golden AST fixtures); testing.md D1–D4 plus
-   integration (`tests/pipeline.rs`) and system (`tests/system.rs`, compiled
-   binary over `tests/programs/*.dl`) tests are green. A minimal binary contract
-   (stdout/stderr, exit 0/1/2) was pulled forward here; the full agent CLI stays
-   step 6.
-6. **Agent CLI** (§14) — done 2026-07-23. One-shot `-q` queries: a bare atom /
-   comma-body appends `?- <arg>.`, a `head :- body` rule appends the rule plus a
-   synthesized `?- <head>.` (classified by *parsing* the arg, not splitting on
-   `:-`). Logic lives in the library (`api::program_with_queries` /
-   `run_with_queries`); `src/main.rs` grew a small hand-rolled arg loop (zero new
-   deps, no clap); optional positional source (empty base when only `-q`). Agent
-   guide: `docs/agent-skill.md`. **JSON output was deferred as low-value** — the
-   data path is Datalog-native (`-q` over facts is the jq analog) and errors are
-   already actionable prose; `--format json` stays a documented future edge only.
-   Post-v1 threads (§9 aggregation, a first-class optional/absent value, §11
-   provenance surface, §12 error taxonomy, §13 follow-ons, …) are tracked as a
-   single indexed backlog in [`datalog/ROADMAP.md`](datalog/ROADMAP.md) — the
-   *what's-open-and-what-state* view, with each item pointing to its §17 detail.
-
-### Using `datalog` as an agent skill
-
-`datalog/skill/` is a committed Claude Code skill (`SKILL.md` + a `datalog`
-wrapper) — the first experiment in exposing the engine to an LLM agent
-(2026-07-23; form + inline-facts-now decided with the user). Activate it in a
-dev checkout by symlinking `datalog/skill` to `.claude/skills/datalog`; build a
-standalone bundle with `cargo package-skill` (feature-gated build-tooling bin
-`src/bin/package_skill.rs`, std-only, excluded from normal builds). Try-it tasks
-are in `datalog/EXPERIMENTS.md`. A Claude API agent-loop harness and an MCP
-server are possible later forms, deferred until the skill experiment tells us how
-well the model uses the tool. The "big external fact base" demo waits on §13 CSV
-imports.
-
-The test pyramid grows outward with the pipeline:
-- Engine unit tests over **hand-constructed IR** (`ir::Program`); lowering tests
-  over **hand-constructed ASTs**. Verbose construction in tests is acceptable —
-  do not build macro DSLs or builder frameworks for ergonomics.
-- **Property-based tests** (proptest): generated programs checked against
-  metamorphic relations and reference oracles. Strategy, generator policy, and
-  the phased property catalog live in **`datalog/testing.md`** — consult it and
-  implement the relevant phase's properties as each layer lands.
-- Parser tests: source text → expected AST, plus golden tests for structured errors.
-- Integration tests: source text → query results through the full pipeline.
-- System tests: run the binary on program files and assert on output.
-- The spec **§16 worked examples are the canonical test corpus** at every level:
-  encoded as AST fixtures first, reused as source-text fixtures once the parser
-  exists.
+**Editing what already exists** is where most of the damage has come from — three
+of the four 2026-07-25 defects were a doc claim that had quietly stopped being
+true. The discipline (current-state vs append-only documents, one normative home
+per rule, sweeping §17 when a rule changes) lives in
+[`docs/rules/editing-docs.md`](docs/rules/editing-docs.md). Read it before editing
+`spec.md`, `README.md`, `SKILL.md`, the worklog, or a doc comment.
 
 ## Conventions
 - Match the style of surrounding code; keep modules documented with `//!` headers.
