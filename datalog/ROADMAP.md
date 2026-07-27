@@ -291,6 +291,24 @@ able to work around them.
   recorded derivation readable. _queued._ — §11/§14.
 - **Provenance as facts** — emit `?why` output as ground derivation-edge facts
   so provenance itself pipes back in (the Datalog-in/out closure). _queued._ — §11/§14.
+- **E3 replay does not cover §8 builtins** — a coverage hole, not a defect, but
+  the one place provenance is least checked. `e3_derivations_replay` reapplies
+  each derivation's rule instance to its premises and asserts it rederives the
+  fact; its `replay` helper rebuilds the environment from **fact premises only**
+  and returns `None` on any `Premise::Builtin`. It passes solely because its
+  generator (`arb_program_with_edb`) emits no comparisons — every column is a
+  symbol after `monotype`, so arithmetic cannot appear. So the strongest
+  provenance property has never seen an `=`-assignment, a presence test, or an
+  aggregate, and by extension never sees a deferred negation, whose absence
+  pattern is closed by an assignment-bound value (§7/§10, 2026-07-25).
+
+  The work: teach `replay` to fold builtin premises into the environment in
+  schedule order, then run E3 over a generator that emits them —
+  `arb_comparison_program` already exists and is int-typed. Expect it to surface
+  the same class of question `Premise::Builtin` raised when it was added: a
+  self-justifying leaf records the *values*, not the expression, so replay has to
+  re-evaluate rather than re-check. Catalogued as **E6** in `testing.md`.
+  _queued._ — §11/§15.
 - **Semiring provenance under negation** — `?whynot` with minimal repairs,
   tropical cheapest-proof selection; sketch in `notes/semiring-provenance.md`.
   _parked (research)._ — §11.

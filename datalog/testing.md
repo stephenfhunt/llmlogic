@@ -338,12 +338,8 @@ compared keyed by predicate *name*, not `PredId`.
   **provenance** half: the absence pattern must record `Some(2)`, not an open
   slot, or "why?" answers the far stronger "because no `q` fact exists".
 
-  *Known gap:* **E3** (`e3_derivations_replay`) runs over `arb_program_with_edb`
-  only, and its `replay` helper rebuilds the environment from *fact* premises
-  alone — it returns `None` on any `Premise::Builtin`. So derivation replay has
-  never covered §8 builtins at all, and therefore does not cover a deferred
-  negation, whose absence pattern depends on an assignment-bound value. Widening
-  it means teaching `replay` to fold builtin premises into the environment.
+  *Known gap:* derivation **replay** does not reach a deferred negation, whose
+  absence pattern depends on an assignment-bound value — see **E6** below.
 - [ ] **C8** **Surface-spelling equivalence** — the language's "form A means the
   same as form B" claims, each as a property rather than a unit test. This group
   exists because the record was unambiguous: every such claim carrying a property
@@ -467,6 +463,19 @@ loop that recorded the derivation. Only E5 waits on the step-6 surface design.
 - [x] **E4** A base fact's provenance is a leaf.
 - [ ] **E5** Once provenance-as-facts is designed (§17 open question),
   provenance output itself satisfies D1 closure.
+- [ ] **E6** Extend **E3 to §8 builtins**. E3 passes today only because
+  `arb_program_with_edb` emits no comparisons — `monotype` makes every column a
+  symbol, so arithmetic cannot appear — and its `replay` helper rebuilds the
+  environment from *fact* premises alone, returning `None` on any
+  `Premise::Builtin`. The strongest provenance property has therefore never seen
+  an `=`-assignment, a presence test or an aggregate, and by extension never sees
+  a **deferred negation**, whose absence pattern is closed by an assignment-bound
+  value (§7/§10, 2026-07-25). The work: fold builtin premises into the replayed
+  environment in schedule order, then run E3 over `arb_comparison_program`, which
+  is int-typed and already emits them. Note what replay has to become — a
+  `Premise::Builtin` records the *values*, not the expression, so replaying it is
+  re-evaluation, not re-checking. Tracked in `ROADMAP.md` under "Provenance
+  surface".
 
 ### Phase F — §13 imports (roadmap step 7) — generalizes §16.5, §16.7
 

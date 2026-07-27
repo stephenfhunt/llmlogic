@@ -3047,10 +3047,14 @@ mod tests {
                                 Premise::Builtin { .. }
                                 | Premise::Presence { .. }
                                 | Premise::Aggregate { .. } => {
-                                    // Self-justifying; `arb_program_with_edb`
-                                    // emits no comparisons, presence tests, or
-                                    // aggregates, so these are not yet exercised
-                                    // here.
+                                    // Self-justifying, and unreached: this
+                                    // generator emits no builtins (`monotype`
+                                    // makes every column a symbol, so
+                                    // arithmetic cannot appear). `replay` below
+                                    // cannot handle them either — it returns
+                                    // `None` on a builtin premise — so E3 does
+                                    // not currently cover §8 at all. Widening it
+                                    // is testing.md E6.
                                 }
                             }
                         }
