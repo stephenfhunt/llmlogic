@@ -16,6 +16,136 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-26 — Agent-context pass: `AGENTS.md` 238 → 145
+
+The pass the last session deferred. Prompted with two references on context
+engineering for Claude 5 models; the useful half of the session was checking
+their claims and the previous *Next up* against Claude Code's actual documented
+loading behaviour before moving anything. **Documentation only; no engine change.**
+
+**Done**
+- **`AGENTS.md` is 145 lines**, against the documented target of under 200 (the
+  memory docs: *"Longer files consume more context and reduce adherence"*).
+  Nothing was compressed — three blocks were deleted outright because each failed
+  the file's own current-state test, and one was moved.
+- **`.gitignore` now ignores per-checkout *state* and ships shared *config*** —
+  `.claude/*` with `!.claude/rules/` and `!.claude/settings.json`. Verified path
+  by path: `settings.local.json` and `plans/` ignored, `rules/` and
+  `settings.json` trackable, `skills/` still ignored. The rule symlink is
+  committed, so it loads on clone with no setup; a curated `settings.json` ships
+  the cargo/git allowances so a fresh clone doesn't prompt through routine work
+  (the one-off research `curl`s stay in the local file).
+- **Fresh-clone verification, actually run**: cloned to a temp dir and built from
+  scratch — **382 passed, 0 failed, 4 ignored, identical to the working tree**.
+  The clang workaround and the `package-skill` alias travel in the tracked
+  `datalog/.cargo/config.toml`, the toolchain is pinned, `CLAUDE.md → AGENTS.md`
+  survives clone (git stores symlinks), the skill wrapper keeps its exec bit, and
+  all eleven paths the instruction files reference exist.
+- **New `docs/rules/editing-docs.md`**, symlinked to `.claude/rules/` — the
+  "Changing what already exists" discipline, moved verbatim, with `paths:`
+  frontmatter scoping it to the documents it governs (`spec.md`, `README.md`,
+  `SKILL.md`, `ROADMAP.md`, `testing.md`, `bugs/`, the worklog, `src/**/*.rs`).
+  Neutral path + symlink rather than living in `.claude/` so a non-Claude agent
+  reading `AGENTS.md` can still follow the link — the same bridge pattern as
+  `CLAUDE.md → AGENTS.md`.
+- **Inbound pointer sweep**: `ROADMAP.md` ×2, `spec.md` ×1, `testing.md` ×2,
+  `testgen.rs`, `ast.rs`, `notes/semiring-provenance.md`. The remaining four live
+  references were each checked against the new section list rather than assumed —
+  all still resolve. 382 tests pass, clippy and fmt clean.
+- **The orphan was caught before the cut, not after.** The deferred
+  MCP-server / API-agent-loop thread existed *only* in the `AGENTS.md` prose being
+  deleted — neither `ROADMAP.md` nor §17 carried it. It is now a parked
+  `ROADMAP.md` item under *Agent skill*, with its trigger (the skill experiment)
+  named.
+
+**Decided**
+- **`.claude/rules/` without `paths:` frontmatter buys no context at all.** The
+  previous *Next up* proposed moving the working-style rules there for
+  "same load behaviour, scopable, keeps the root file short" — true, but it reads
+  as a budget fix and isn't one: rules without `paths` load at launch *"with the
+  same priority as `.claude/CLAUDE.md`"*, and `@path` imports are explicitly the
+  same (*"helps organization but doesn't reduce context"*). Only path-scoping
+  defers. Recorded because it is the kind of thing that gets re-proposed.
+- **Deletion was the fix; extraction was the sideshow.** ~97 of the 107 lines
+  removed were deleted, not relocated. The working-style rules — the thing the
+  previous session proposed moving — are the file's *best* content, each backed by
+  a filed defect, and the Claude 5 guidance carves out exactly that case ("rules →
+  judgment, unless you have a demonstrable failure mode"). What was actually
+  bloating the file was history and filesystem-derivable layout.
+- **`AGENTS.md` was breaking its own "one normative home per rule" rule.**
+  `testing.md` opens by declaring itself the single source of truth for the test
+  strategy and says `AGENTS.md` points there; `AGENTS.md` restated the whole
+  pyramid instead. Now it points. Same for the doc map, which `ROADMAP.md`'s
+  header owns — `AGENTS.md` keeps routing only.
+- **`SKILL.md` reviewed and deliberately not changed.** The Claude 5 advice to
+  stop shipping usage examples is about *tool schemas*, where examples narrow
+  parameter exploration. `SKILL.md` is a language reference for a syntax no model
+  has seen — the set-builder aggregate, `is absent`, `import … as` — plus gotchas
+  (`_` as a witness dimension, `count` counting bindings not present values). That
+  is irreducible knowledge, and it loads only on invocation, so it costs no
+  session budget. Reporting "no change needed" rather than manufacturing edits.
+- **A project's skill is a deliverable, not development infrastructure** (user
+  call, and the better read). The rule symlink is committed; the *skill* symlink
+  deliberately is not, and `.claude/skills/` stays gitignored to keep it that way.
+  Three reasons, in order of how long they take to hurt: building the engine needs
+  `cargo` and the spec, not a logic engine in context; a skill's `description` is
+  always loaded, and datalog's is ~12 broad lines that would ride along in every
+  parser refactor; and **it does not scale** — future projects get their own
+  top-level directories, so auto-activating one skill each means N always-loaded
+  descriptions for tools irrelevant to the task, re-spending exactly what this
+  session's deletions bought. Committing the symlink would set that precedent at
+  N=1, where it is cheapest not to notice. There is also an experimental-hygiene
+  argument: `EXPERIMENTS.md` asks *did the model reach for the tool*, and a repo
+  where it is always on cannot answer that. The truer test was always the packaged
+  bundle in an unrelated repo.
+  - **This does not contradict availability-over-gating** (DuckDB default-on,
+    §17): a default-on cargo feature costs build time, a default-on skill costs
+    context in every session. Different currency, and context is the one this
+    session is spending down.
+- **Auto-memory overlap flagged, not reconciled.** Two `MEMORY.md` entries
+  restate committed rules (verbose-tests-no-DSL, prefers-PBT). Both channels load
+  every session, but it is two index lines and auto-memory is machine-local while
+  the committed docs are the durable record. The risk to watch is *drift* between
+  them, not the duplication.
+
+**Removed**
+- **`AGENTS.md` roadmap steps 1–6 (71 lines)** — six entries reading "done
+  2026-07-XX" with implementation detail: a changelog inside a current-state
+  document. `ROADMAP.md` already carried one line each; §17 and this file carry
+  the detail. It also closed a citation loop, where `ROADMAP.md` deferred to
+  `AGENTS.md` for detail while `AGENTS.md` deferred the backlog to `ROADMAP.md`.
+- **`### Layout` (12 lines)** — a directory listing, i.e. precisely what
+  `/doctor` is documented to cut ("content Claude can derive from the codebase").
+- **The test-pyramid restatement (14 lines)** — `testing.md` owns it.
+- **The skill section's narration (9 of 12 lines)** — dates, who decided what, and
+  the deferred-forms discussion; the three actionable facts stayed and the
+  deferred forms became a ROADMAP item.
+- The `AGENTS.md` parentheticals in `testing.md:9` and `testgen.rs`, which pointed
+  at a rule `testing.md` itself states.
+- **The blanket `.claude/` ignore**, which conflated state with config and was the
+  reason committed guidance had no way to load itself.
+
+**Next up**
+- **The loading behaviour is unverified in a live session** — path-scoping is the
+  one claim here that this session could not check on itself. In a fresh session:
+  `/context` should list `CLAUDE.md` but *not* `editing-docs.md`; after reading
+  `datalog/spec.md`, re-running `/context` should show it. If it doesn't, the
+  `paths` globs are wrong and the discipline is silently not loading — worse than
+  before, since `AGENTS.md` no longer carries it. `/doctor` is a second opinion on
+  the trimmed file, and the `InstructionsLoaded` hook logs what loads and when.
+  A wrong glob is now the *only* quiet failure mode — committing the symlink
+  removed the other one.
+- Unchanged from the last entry: **`absent` × negation** (needs its design
+  sitting), **`bugs/002`** (cheapest — the property exists and fails; delete the
+  `#[ignore]`), **`bugs/005`** (small, `api.rs` output shape), then `003`/`004`.
+- One judgement to revisit: `editing-docs.md`'s `paths` include
+  `datalog/src/**/*.rs`, so it loads in most code sessions and the context saving
+  is small. That glob is there because the failure mode is real in code comments
+  (last session removed five lines of change-narration from `lower.rs`). If the
+  rule proves noisy in code-only sessions, narrowing it is the knob.
+
+---
+
 ## 2026-07-25/26 — Practice: stop building on doc claims that stopped being true
 
 Same day, after `bugs/001`. Prompted by asking why this week's defects kept
