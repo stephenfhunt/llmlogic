@@ -3,8 +3,9 @@ name = "datalog"
 version = "0.1.0"
 edition = "2024"
 description = "A Datalog engine targeted at LLM/agent use, with convenient import of fact tables from external sources."
-# Licensing deliberately deferred (all rights reserved by default); no repository
-# URL until a remote exists. Set both before any publish.
+repository = "https://github.com/stephenfhunt/llmlogic"
+# Licensing deliberately deferred (all rights reserved by default). Set `license`
+# before any publish — crates.io rejects a package without one.
 readme = "README.md"
 keywords = ["datalog", "logic", "reasoning", "llm", "agent"]
 categories = ["database", "parsing"]

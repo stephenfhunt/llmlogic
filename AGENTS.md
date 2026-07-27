@@ -51,7 +51,7 @@ transcripts into the repo.
   `main` and no feature branch: this is a single-developer repository with no PR
   or review gate, so a branch would only add ceremony. (Revisit if the project
   gains other contributors or a CI review flow — feature branches are a fine
-  answer to a problem this repo does not have yet.) The remote is `vault`.
+  answer to a problem this repo does not have yet.)
 - **Commit in small, self-contained steps as the work lands**, rather than
   accumulating a session's worth of change into one commit. Each commit should
   build, pass its project's tests, and be one coherent idea — a fix, a property, a
