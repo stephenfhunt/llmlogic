@@ -280,12 +280,12 @@ able to work around them.
   output), but a conjunction is not. This is now all that is left of that gap:
   `bugs/005` was the case where an ordinary single-atom query fell into it by
   accident, closed 2026-07-27. _queued._ — §5/§14.
-- **No string operations, and `<` refuses strings.** There is no prefix, split or
-  concat, and ordered comparison is int/float-only against §8's own text
-  (`bugs/006`). Together they make two standard idioms unwritable — canonicalising
-  an unordered pair as `A < B`, and reducing `lower::tests` to `lower` — so both
-  had to be pushed back into the fact producer (2026-07-27). Decide whether string
-  builtins are in scope at all. _queued._ — §8.
+- **No string operations.** No prefix, split or concat, so reducing `lower::tests`
+  to `lower` is unwritable and the fact producer must do it (2026-07-27). Closed:
+  string construction fails §5's own termination test and would widen the hole the
+  Termination session has not yet closed. _rejected — §17, 2026-07-27._ — §8/§10.
+  (Ordered comparison refusing strings is a separate matter and a defect:
+  `bugs/006`.)
 - **`declare` does not count as defining a predicate.** `declare banned(name:
   string).` plus `not banned(X)` still warns "referenced but never defined"
   (verified). Declaring a schema is the user stating a relation exists and may be

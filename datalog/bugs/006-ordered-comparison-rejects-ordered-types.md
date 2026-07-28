@@ -126,12 +126,12 @@ order single-homed. Write it in the same sitting — `bugs/README.md` is explici
 that `002` and `003` each identified their property and neither filed it, which
 is how `001` stayed reachable by a second spelling.
 
-**Deliberately out of scope: string *operations*.** No prefix/split/concat here.
-Widening a comparison reuses an order that already exists; adding functions that
-*construct* strings introduces the first value-creating builtins, which lands on
-the open termination question (§10) and needs an `absent` rule per function. It
-is a queued ROADMAP item under *Surface uniformity*, and it wants its own design
-session — not a ride-along with a three-line fix.
+**Out of scope, and now settled: string *operations*.** Rejected outright (§17,
+2026-07-27) — not deferred, so nothing here waits on them. The line is that a
+comparison *filters* and constructs no value, while `concat` would construct
+unboundedly many, failing the termination test §5 already applies to casts. This
+matters to the fix only as reassurance: widening `<` adds no reachable value and
+so touches none of the open termination work.
 
 ## Fallout
 

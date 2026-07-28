@@ -1313,6 +1313,24 @@ say.
 
 ### Decisions
 
+- **2026-07-27** — **String operations are rejected, not deferred** (§8/§10; user
+  call). No `concat`, `substr`, `split`, `starts_with`; `ROADMAP.md` records the
+  absence as closed rather than queued.
+  - **The test already exists** — §5's cast governance: a builtin is safe when it
+    "maps a finite value set to a finite value set with no accumulation". Casts
+    pass. String construction fails it, unbounded in value *size*, not just count.
+  - **Worse than arithmetic, which is already the open hole.** `nat(N) :- nat(M),
+    N = M + 1.` hangs (`bugs/004`, Termination session), but i64 bounds its values
+    and overflow errors, so it fails loudly at a known edge. `concat` has no edge —
+    it exhausts memory, sooner. And §8's assignment rule would make `Y = concat(X,
+    "-s")` a *binder*, so the function is immediately a generator inside a positive
+    cycle: the shape Termination classifies as rejected.
+  - **The line is filters yes, constructors no.** `<` constructs nothing, so
+    widening it (`bugs/006`) is untouched by any of this.
+  - **What would reopen it:** Termination landing a rule that admits value creation
+    soundly — then string functions are re-arguable *under that rule*, not before.
+    Until then the fact producer does it, which two analyses already had to.
+
 - **2026-07-27** — **A query constant-folds a ground compound argument** (§5/§14;
   `src/lower.rs` `ArgMode::FoldGround`; fixes `bugs/005`). Hoisting made
   `?- p("a", 1 + 1).` a two-literal body with no named variables — the one shape

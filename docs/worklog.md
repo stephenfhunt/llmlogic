@@ -24,7 +24,7 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
-## 2026-07-27 — Source-analysis dogfood, second run: the engine on 22k facts
+## 2026-07-27 — Source-analysis dogfood, second run: the engine on 28k facts
 
 Re-ran the 2026-07-23 use case now that §13 imports and §9 aggregation exist.
 Facts from `syn` (a throwaway scratchpad extractor, not committed), not regex.
@@ -33,8 +33,7 @@ rustfmt clean, `cargo package-skill` green with `recipes/` in the bundle.
 
 **Done**
 - **`skill/recipes/source-analysis.md`** — the recipe deferred in 2026-07-23
-  pending §13/§9. `cargo package-skill` now bundles `recipes/`, so it ships with
-  the skill rather than living only in this checkout.
+  pending §13/§9. `cargo package-skill` now bundles `recipes/`, so it ships.
 - **`bugs/006`** — `<` rejects strings while `min`/`max` order them, against §8's
   own text; `src/typecheck.rs` cites §8 for both halves. Found by needing `A < B`
   to canonicalise a pair, not by reading the spec.
@@ -43,41 +42,38 @@ rustfmt clean, `cargo package-skill` green with `recipes/` in the bundle.
   reached through the **aggregate** arm, including `parse_primary →
   parse_aggregate → parse_expr`; `print_fact_lines` is public with zero callers
   and zero tests; `lower.rs ↔ provenance.rs` co-change 6× with no `use` edge,
-  coupled through `ir::BodyIdx`'s meaning; §1, §2, §6 cited by no source line. No
-  dead private function, no unconstructed variant — the negatives are the part
-  prose cannot claim credibly.
+  coupled through `ir::BodyIdx`'s meaning. No dead private function, no
+  unconstructed variant — the negatives prose cannot claim credibly.
 - **First evaluation numbers**, filed under *Profile the engine*: importing 28k
-  facts across 15 JSONL files is 0.4 s, so the cost is evaluation — a 5,248-edge
-  closure deriving 173k pairs took ~13 s, and its self-join did not finish in 2
-  minutes (25 s anchored on direct edges, 2.3 s once the edges were resolved).
+  facts is 0.4 s, so the cost is evaluation — a 5,248-edge closure deriving 173k
+  pairs took ~13 s; its self-join never finished (2.3 s once edges were resolved).
 
 **Decided**
 - **The engine holds the uncertainty, not the extractor.** 2026-07-23 said the
   fix for bad facts was a better parser. `syn` removed the regex error class and
-  introduced its own — macro bodies opaque (7% of functions invisible), bare
-  callee names merging `Model::new` with `Lexer::new`. What worked was resolving
-  in Datalog in confidence tiers, leftovers kept as a *counted* relation: 1,504
+  added its own — macro bodies opaque (7% of functions invisible), bare callee
+  names merging `Model::new` with `Lexer::new`. What worked was resolving in
+  Datalog in confidence tiers, leftovers kept as a *counted* relation: 1,504
   certain edges, 2,458 likely, conclusion stable across both.
 - **Two language limits push work back into the fact producer** — no string
   ordering (`bugs/006`), no string operations at all. Both forced extractor
-  columns that exist only to serve the query. New ROADMAP item under *Surface
-  uniformity*, where it is the fourth of a genre.
-- **The count-distinct trap is worse than §9 says** and §13 is why: over a wide
-  imported table the wildcard is never written. 36 call sites where the question
-  wanted 20 callers. §17 and the ROADMAP item now carry the measurement.
+  columns that exist only to serve the query. Their resolutions diverge, and the
+  line between them is *filters yes, constructors no*: **widen `<`**, and
+  **reject string operations outright** rather than defer them (§17) — `concat`
+  fails the finite-value-set test §5 already applies to casts.
+- **The count-distinct trap is worse than §9 says**, and §13 is why: over a wide
+  imported table the wildcard is never written — 36 call sites where the question
+  wanted 20 callers. §17 and the ROADMAP item carry the measurement.
 
 **Removed**
 - The 2026-07-27 GitHub-publication entry rotated verbatim to
-  `worklog-archive/2026-07.md`. Nothing else — the ROADMAP recipe item was
-  completed rather than deleted, and no doc claim was found stale this session.
+  `worklog-archive/2026-07.md`. Nothing else: no doc claim was found stale.
 
 **Next up**
-- **`bugs/006` is decided and specified, not done** — widen the typechecker
-  (owner's call this session). The file now carries the exact three lines, the
-  finding that *both evaluators already handle it* so nothing below typecheck
-  changes, and the warning that `b1_comparison_programs_agree`'s generator emits
-  integers only and so cannot cover the widened surface. `004` stays blocked on
-  Termination.
+- **`bugs/006` is decided and specified, not done** — widen the typechecker. The
+  file carries the exact three lines, the finding that *both evaluators already
+  handle it*, and the warning that `b1_comparison_programs_agree`'s generator is
+  integer-only and cannot cover the widened surface. `004` blocked on Termination.
 - Unchanged: the two design sessions (**`absent` × negation**, **Termination**),
   the **§17 restructure**, and **CI**.
 
