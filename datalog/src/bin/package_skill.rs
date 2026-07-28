@@ -7,9 +7,9 @@
 //! It (1) builds the release `datalog` binary, then (2) assembles
 //! `target/dist/datalog-skill/` — `SKILL.md`, the compiled `datalog` binary
 //! (under that name, so the skill's `./datalog` call resolves to the real
-//! binary), the `examples/`, and a generated `INSTALL.md` — and (3) rolls a
-//! `.tar.gz` if `tar` is available. The bundle is self-contained and installs by
-//! being dropped into a `.claude/skills/` directory.
+//! binary), the `examples/`, the `recipes/`, and a generated `INSTALL.md` — and
+//! (3) rolls a `.tar.gz` if `tar` is available. The bundle is self-contained and
+//! installs by being dropped into a `.claude/skills/` directory.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -62,6 +62,7 @@ fn package() -> Result<String, String> {
     copy(&release_bin, &bundle.join("datalog"))?;
     make_executable(&bundle.join("datalog"))?;
     copy_dir(&crate_dir.join("skill/examples"), &bundle.join("examples"))?;
+    copy_dir(&crate_dir.join("skill/recipes"), &bundle.join("recipes"))?;
     fs::write(bundle.join("INSTALL.md"), install_md())
         .map_err(|e| format!("writing INSTALL.md: {e}"))?;
 
@@ -130,7 +131,7 @@ fn install_md() -> &'static str {
 # Installing the datalog skill
 
 This bundle is a self-contained Claude Code skill: `SKILL.md`, the compiled
-`datalog` binary, and example programs.
+`datalog` binary, example programs, and per-use-case recipes.
 
 ## Install
 
