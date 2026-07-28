@@ -132,7 +132,8 @@ it. A future audit starts here.
 | Existential (wildcards, partial selection) | wildcard/named specs | A8/A13; §16.2/§16.7 |
 | Ad-hoc queries (incl. negated) | `QuerySpec` bodies | **B8**; §16.1/§16.2 hand tests |
 | Set semantics | duplication mutators | A5, B3 |
-| Comparisons / arithmetic (§8) | `arb_comparison_program` (filter/assign/join) | B1 extended (incl. error path); §16.3 hand test |
+| Comparisons / arithmetic (§8) | `arb_comparison_program` (filter/assign/join on the int column **and the string key**) | B1 extended (incl. error path); `comparison_generator_is_well_typed` — the acceptance half, which is what B1 cannot be (`bugs/006`); §16.3 hand test |
+| Value order across constructs (§4/§8/§9) | `arb_order_agreement_spellings` (two distinct constants of one type, over all five primitives, both ends of the order) | **C8** `ordered_comparison_and_minmax_agree_on_every_type`; `order_agreement_spellings_reach_every_type_and_both_ends` |
 | Aggregation (§9) | `aggregate_ir` (grouped, one relation); `grouped_ir` (group keys from a *second* relation, empty groups, absent witnesses); `aggregate_goal_ir` (multi-atom + negated goal, all 6 goal orderings) | **independent group-by oracle** (`aggregation_matches_an_independent_group_by`); B1 differentials (`b1_aggregate_programs_agree`, `b1_aggregate_goal_shapes_agree`); body-order invariance (`b5_aggregate_body_order_does_not_change_the_model`); fold laws (absent-skip, empty→absent, count=witnesses, sum oracle, min/max bounds); §16.4 hand test; query-position and nested/assignment-bound goals in `tests/pipeline.rs` |
 | Absent value (§4/§8) | `arb_fact_constant` (absent in *data*, ~1 in 10) + `absent_ir` (join / self-join / anti-join / comparison / arithmetic / presence over a `{0, 1, absent}` pool) | B1 absent differential (`b1_absent_programs_agree`); value laws (annihilation, comparison-false, unify-vs-eq, sorts-first); `generator_emits_absent_in_facts_only` |
 
@@ -353,6 +354,7 @@ compared keyed by predicate *name*, not `PredId`.
   | disjunction ≡ separate rules | unit test only | adjacent to `bugs/002` |
   | `-q` ≡ equivalent file program | nothing | `bugs/002` (closed 2026-07-26) |
   | a computed argument ≡ its value | unit test only (facts) | `bugs/005` (closed 2026-07-27) |
+  | `<` ≡ `min`/`max` on one value order | nothing (unwritable — `<` was rejected) | `bugs/006` (closed 2026-07-27) |
 
   - **A15** `a15_inline_and_hoisted_arguments_agree` — an inline compound atom
     argument lowers to the same program as the hand-written `=`-assignment
@@ -395,6 +397,28 @@ compared keyed by predicate *name*, not `PredId`.
     deleting the `#[ignore]` — the first time in this project a property was
     written before the fix it specified.
 
+  - **One value order, three constructs**
+    `ordered_comparison_and_minmax_agree_on_every_type`
+    (`testgen::arb_order_agreement_spellings`) — for two distinct constants of
+    one type, the value `<` puts first is the value `min` returns, over all five
+    primitives; `max` reads the other end of the same `A < B`. `bugs/006`'s
+    acceptance criterion. Unlike the other rows this is not two spellings of one
+    construct but **two constructs reading one order** — §4 fixes it, §8's `<`
+    and §9's `min`/`max` both consume it, and the printer sorts by it, all from
+    one `Ord` on `Value` with nothing to notice when one drifts out of scope.
+    The pair is distinct by construction: at `a == b` the comparison answers
+    nothing where `min` still answers `a`, which is a difference between "the
+    smallest" and "strictly smaller than something", not about order.
+
+    **The generator lesson here is the inverse of `bugs/005`'s.** There the
+    danger was a generator too broad to hit the case; here the extended
+    `arb_comparison_program` hit the case and B1 *still* could not see it,
+    because `eval` is type-blind by design (spec §17, 2026-07-21) and a
+    differential over two evaluators never asks what the type checker accepts.
+    Reverting the fix leaves `b1_comparison_programs_agree` green and fails
+    `comparison_generator_is_well_typed`. **Widening a generator therefore needs
+    a matching acceptance property, not just a wider differential.**
+
   Non-vacuity is guarded in `testgen::tests`, per the generator-coverage
   convention above:
   `generator_emits_compound_atom_arguments_that_hoisting_rewrites` asserts the
@@ -405,6 +429,10 @@ compared keyed by predicate *name*, not `PredId`.
   without evaluating anything. The prior test of that same claim was a unit test
   over one hand-written positive atom, and the spelling that broke it was simply
   never written down.
+  `order_agreement_spellings_reach_every_type_and_both_ends` asserts all five
+  primitive pools are drawn from, both `min` and `max` are generated, and every
+  generated pair *answers* — the same "holds, not merely computes" bar as the
+  query guard above.
 
   **The rule this group encodes** (`datalog/AGENTS.md`, "Working style"): a new surface
   form, desugaring, or IR-identity claim ships with a property here, in the same

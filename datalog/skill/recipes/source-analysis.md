@@ -122,7 +122,7 @@ and its top entries named the problem outright: `format` (140), `matches` (52),
 crate function names. Joining on the bare name would have invented an edge for
 every one.
 
-## 5. Five traps, in the order they will bite
+## 5. Four traps, in the order they will bite
 
 1. **`count` counts bindings, not distinct values — and the wildcard can be
    invisible.** Over a wide imported table, named-argument syntax leaves every
@@ -146,18 +146,12 @@ every one.
    warning does not fire, since both predicates exist). If a relation comes back
    empty, check that both sides speak the same vocabulary before believing it.
 
-3. **Ordered comparison rejects strings**, so the standard idiom for
-   canonicalising an unordered pair — `A < B`, to count each pair once — is
-   unwritable on string keys. Emit a numeric id per file/entity from the
-   extractor and order by that. (`min`/`max` *do* order strings; the asymmetry is
-   a known defect, not a rule to learn.)
-
-4. **No string operations.** There is no prefix, split, or concat, so a submodule
+3. **No string operations.** There is no prefix, split, or concat, so a submodule
    path (`lower::tests`) cannot be reduced to its file's module (`lower`) inside
    the engine. Emit both columns from the extractor instead. Generally: anything
    requiring string surgery has to be decided by the producer.
 
-5. **Disjunction is rule-only.** A query body rejects `;` (with a clear error).
+4. **Disjunction is rule-only.** A query body rejects `;` (with a clear error).
    Define a rule with `-q 'p(X) :- a(X) ; b(X)'` and query its head.
 
 ## 6. Verify before you believe

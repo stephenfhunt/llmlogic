@@ -1313,6 +1313,29 @@ say.
 
 ### Decisions
 
+- **2026-07-27** — **Ordered comparison is widened to every primitive** (§4/§8;
+  `src/typecheck.rs`; fixes `bugs/006`). `<` `<=` `>` `>=` now type-check on
+  symbols, strings and bools as §8 has always specified, leaving `union(l, r)` —
+  the same-type rule — in place, so `1 < "a"` is still an error. **No normative
+  change:** the spec was right and the checker was wrong, and both evaluators
+  already implemented §8, so the fix deleted three lines and added no behaviour.
+  - **A differential property cannot catch a type-checker defect.** The
+    2026-07-21 entry below makes `eval` type-blind on purpose, so B1 over
+    comparison programs is structurally blind to what `typecheck` accepts. The
+    bug file called extending B1's generator "the whole job"; measured, the
+    extended generator left B1 **green with the fix reverted**. What fails is
+    `comparison_generator_is_well_typed` — the property that calls `typecheck`.
+    A generator widening needs a matching *acceptance* property, or it only
+    broadens a differential that was never asking the question.
+  - **§4's order now has one guard across all three of its homes** — `<`,
+    `min`/`max`, and the printer's sort, each deriving from `Ord` on `Value`.
+    `ordered_comparison_and_minmax_agree_on_every_type` (testing.md C8) fixes
+    the pair `bugs/006` found out of step; it was unwritable until the widening.
+  - **Cost of not having it:** found on real data, not by reading §8. The
+    unordered-pair idiom `A < B` was unwritable over string keys, so a numeric
+    `file_id` column was added to the *extractor* purely to sort by — pushing
+    work into the layer a Datalog user is least able to change.
+
 - **2026-07-27** — **String operations are rejected, not deferred** (§8/§10; user
   call). No `concat`, `substr`, `split`, `starts_with`; `ROADMAP.md` records the
   absence as closed rather than queued.
@@ -2371,6 +2394,14 @@ say.
   generator `arb_well_typed_program`. Still deferred: imported column types
   (§13) and `declare`-signature verification (needs declared types threaded onto
   `ir::PredicateInfo`).
+
+  ***Amended 2026-07-27*** (`bugs/006`). "arithmetic/ordered comparison ⇒
+  numeric" was derived one step too far: §8 constrains *arithmetic* to numerics,
+  and orders every primitive. Only the same-type half was ever §8's. No coercion
+  still stands — that is the other half of the same sentence and is untouched.
+  The type-blind `eval` decided here also held, and cost something: it is exactly
+  why B1 could not catch the over-derivation, since the two evaluators agreed on
+  string comparisons the whole time and only the checker refused them.
 - **2026-07-21** — **`declare`-signature verification, closing §4.** Declared
   column types now flow AST→IR: `ir::PredicateInfo` gains a
   `field_types: Option<Vec<Option<TypeName>>>` parallel to `fields` (invariant:

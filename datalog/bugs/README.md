@@ -75,6 +75,9 @@ Whatever the defect needs, but a fixable bug wants four things:
   `002` and `003` each identified theirs precisely ("the general property this
   bug is one instance of"; "the only durable fix for this class") and neither
   became one, which is how `001` was still reachable by a second spelling.
+  `006` is the rule working: its property was unwritable *until* the fix landed,
+  and writing it in the same sitting is what exposed that the fix's own
+  acceptance test had to call `typecheck`, not just widen a differential.
 - **Fallout** — other decisions this invalidates. A defect that falsifies a
   recorded §17 decision must say so, and §17 gets the amendment; one that
   undercuts a ROADMAP item's rationale must name the item.

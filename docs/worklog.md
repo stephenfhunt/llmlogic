@@ -24,6 +24,59 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-27 — `bugs/006`: `<` orders every primitive, and B1 could not have known
+
+The last unblocked defect. Three lines deleted from the type checker; no spec or
+evaluator change. 401 tests pass (395 + 6), clippy and rustfmt clean, `--ignored`
+still exactly two.
+
+**Done**
+- **`p(X), p(Y), X < Y` answers over strings, symbols and bools**, verified
+  against the release binary; `min`/`max` unchanged, `1 < "a"` still a type error
+  because `union(l, r)` was never the numeric constraint. §8 already specified
+  this, so the fix edited **no normative text** — the checker was wrong.
+- **A third site the bug file never listed:** `finish`'s error message said "used
+  in arithmetic **or an ordered comparison**", which after the fix is
+  *unreachable*, not merely stale. Found by grepping every `numeric.push`.
+- **The property the bug file identified, in the same sitting** —
+  `ordered_comparison_and_minmax_agree_on_every_type` (C8), over a purpose-built
+  generator across all five primitives and both ends of the order, plus its
+  coverage guard. `arb_comparison_program` now orders the string key it always
+  had, counted in `generator_emits_comparison_shapes`.
+
+**Decided**
+- **A differential property cannot catch a type-checker defect, and B1 is one.**
+  The bug file called extending B1's generator "the whole job". Measured: with
+  the fix reverted the extended `b1_comparison_programs_agree` stays **green**,
+  because `eval` is type-blind by design (§17, 2026-07-21) and a differential
+  between two evaluators never asks what `typecheck` accepts. The property that
+  fails is a new `comparison_generator_is_well_typed`. **Widening a generator
+  needs a matching acceptance property.** In §17, testing.md C8, and the bug's
+  Resolution.
+- **The 2026-07-21 type-inference entry is amended, not falsified.** "arithmetic/
+  ordered comparison ⇒ numeric" was derived one step too far; no coercion — the
+  other half of that sentence — stands. Its type-blind `eval` held too, and this
+  is what it cost. Both new properties and the coverage guard were confirmed red
+  with the fix reverted before being kept, per `bugs/005`'s discipline.
+
+**Removed**
+- The skill recipe's **trap #3, which told readers to work around this defect**
+  (emit a numeric `file_id` and sort by that) — deleted, renumbered to four. The
+  only doc content this made false rather than incomplete.
+- ROADMAP's claim that the bug queue held "**only `004`**" and "has nothing
+  unblocked in it: the next work is a design session, not a defect" — written
+  while `006` was open, unblocked, and named *Next up* in that same session's
+  worklog. Stale on arrival; the ROADMAP contradicting the worklog is new.
+- The 2026-07-27 `bugs/005` entry rotated verbatim to `worklog-archive/2026-07.md`.
+
+**Next up**
+- **The `bugs/` queue has nothing unblocked in it** — now actually true. `004`
+  waits on Termination, so the next work is a **design session**: `absent` ×
+  negation (which also unblocks §6) or Termination & value-creating recursion.
+- Cheapest non-design item, unchanged: **parenthesized expressions**
+  (`src/parser.rs:619-628`, `src/print.rs:169` — the printer is the real work).
+  Also unchanged: the **§17 restructure**, **CI**, the GitHub *About* panel.
+
 ## 2026-07-27 — Source-analysis dogfood, second run: the engine on 28k facts
 
 Re-ran the 2026-07-23 use case now that §13 imports and §9 aggregation exist.
@@ -128,57 +181,3 @@ The last unblocked defect. Docs plus one test; no engine change. 395 tests pass
   (`src/parser.rs:619-628`, `src/print.rs:169` — the printer is the real work).
 - Unchanged: the **§17 restructure** (own session), **CI** (deferred, not
   rejected), the browser-only GitHub *About* panel.
-
-## 2026-07-27 — `bugs/005`: a query folds a ground computed argument
-
-The cheapest open defect, taken after making the design call the ROADMAP held it
-on. 393 tests pass (385 + 8), clippy clean, `--ignored` still exactly two.
-
-**Done**
-- **`?- p("a", 1 + 1).` answers `p("a", 2).`**, identical to the folded spelling
-  and verified against the release binary. A query lowers a compound atom
-  argument with a new `ArgMode::FoldGround` — fold when ground, hoist otherwise —
-  so it stays the single atom §14 reads its output shape from. `api.rs` did not
-  change at all.
-- **One case more than the report described:** `?- p(X, 1 + 1).` printed the
-  weaker `answer("a")` and now prints `p("a", 2).` — the same defect one variable
-  short of ground.
-- Four unit tests, two properties, two non-vacuity guards; §5/§14/§17,
-  testing.md C8, `bugs/005` → `resolved/`, ROADMAP blockquote.
-
-**Decided**
-- **Fold, not plumb — the bug file's own fix sketch was rejected.** Plumbing
-  hoist-origin into the IR costs a new field *and* A15's claim that inline and
-  hand-hoisted arguments lower to the same program. Its "cheaper alternative" (an
-  existence-check case in `api.rs`) is not cheaper either: `V` is unprojected, so
-  the row must be reconstructed. Scoped to queries, so A15 needs no weakening.
-  Both rejections and what they would have cost are in §17.
-- **A non-vacuity guard can be green while the property is useless.** Written
-  first as a rewrite over `arb_ast_program`, the property **passed with the bug
-  present**: two spellings of a query that matches nothing both print nothing,
-  and over arbitrary programs a query that computes *and matches* is vanishingly
-  rare. The guard counted ground compound arguments in queries — never the
-  binding constraint.
-- **So: revert the fix and watch the property fail, every time.** That is the
-  only direct evidence a property tests what its name says, and it is how this
-  one was caught. C8's two earlier properties were written against a live defect,
-  which supplied that evidence for free; this one was not.
-- **The targeted generator is the pattern, not the exception.** All three C8
-  properties now build both spellings from a purpose-built generator
-  (`arb_ground_query_spellings` builds the expression backwards from a value the
-  EDB contains). It failed on its first generated case; the seed is recorded.
-
-**Removed**
-- ROADMAP's "`005` is now the cheapest to close" paragraph — its whole content was
-  instructions for work now done — and §14's "a pure existence check", which
-  overstated a gap that is now only the *multi-atom* case.
-- The 2026-07-26 agent-context entry rotated verbatim to `worklog-archive/2026-07.md`.
-
-**Next up**
-- **`bugs/003`** is now the cheapest: three normative spec errors, one sitting,
-  no code change. `004` stays blocked on Termination.
-- The two design sessions are unchanged and still want their own: **`absent` ×
-  negation** (with §6) and **Termination & value-creating recursion**.
-- Unchanged: the **§17 restructure**, and **CI** (deferred, not rejected).
-- Still browser-only from the last session: the GitHub *About* panel and a look
-  at the rendered README. `gh` is not installed in this checkout.

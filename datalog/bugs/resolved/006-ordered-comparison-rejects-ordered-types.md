@@ -5,7 +5,7 @@ severity: usability
 area: typecheck
 spec: ["§4", "§8", "§9"]
 found: 2026-07-27
-resolution:
+resolution: fixed 2026-07-27 — the type checker widened to match §8; the spec needed no change
 ---
 
 §8 says ordered comparisons work on every primitive: *"Ordered comparisons use the
@@ -142,3 +142,42 @@ so touches none of the open termination work.
 - **ROADMAP *Surface uniformity & the agent edge*** — a fourth instance of the
   same genre as the three already listed. Each is small; the pattern is that they
   all land on the agent surface.
+
+## Resolution
+
+**fixed 2026-07-27** — `p(X), p(Y), X < Y` answers over strings, symbols and
+bools, verified against the release binary; `min`/`max` are unchanged. The three
+lines went as specified above and `union(l, r)` stayed, so `1 < "a"` is still a
+type error. Neither evaluator changed, and **§8 was not edited** — the spec had
+said this all along.
+
+Two things the plan above got wrong, both worth keeping:
+
+- **"Extending the generator is the whole job" was false, and the reason
+  generalises.** Extending `arb_comparison_program` to order the string key does
+  make the surface reachable — but `b1_comparison_programs_agree` stays **green
+  with the fix reverted**, measured, because `eval` is type-blind by design (§17,
+  2026-07-21) and a differential between two evaluators never asks what the type
+  checker accepts. The property that fails is a new one,
+  `comparison_generator_is_well_typed`, which calls `typecheck` — modelled on the
+  `evaluation_generator_is_well_typed` that already existed for the other
+  generator. **A widened generator needs a matching acceptance property, not just
+  a wider differential.**
+- **The error message was a third site, unlisted here.** `finish` reported
+  "used in arithmetic **or an ordered comparison**, which requires int or float";
+  after the fix the only slots reaching it are arithmetic and `sum`/`avg`, so the
+  clause was not merely stale but unreachable. Found by grepping every
+  `numeric.push`, not by reading this file — the same lesson as `003`, where
+  enumerating the sites by hand missed two.
+
+**The identified property was written in the same sitting**, as this file
+required: `ordered_comparison_and_minmax_agree_on_every_type` (testing.md C8),
+over a purpose-built generator across all five primitives and both ends of the
+order, with `order_agreement_spellings_reach_every_type_and_both_ends` guarding
+its coverage. Both it and `comparison_generator_is_well_typed` were confirmed to
+fail with the fix reverted.
+
+**A stale claim this turned up:** ROADMAP's open-defects blockquote said the bug
+queue held "only `004`" and that "the queue has nothing unblocked in it: the next
+work is a design session, not a defect" — written while this file was open and
+unblocked, and contradicted by the same session's own worklog *Next up*. Fixed.

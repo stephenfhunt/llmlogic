@@ -39,15 +39,17 @@ each; detail in §17 and `docs/worklog.md`.
 > value-creating recursion" below, so **the queue has nothing unblocked in it**:
 > the next work is a design session, not a defect.
 >
-> Four are resolved in `bugs/resolved/`: `001` (a compound argument in a negated
+> Five are resolved in `bugs/resolved/`: `001` (a compound argument in a negated
 > atom silently misread as a wildcard), **fixed 2026-07-25** by negation item 2
 > below; `002` (`-q` rejected a disjunctive rule), **fixed 2026-07-26**;
 > `005` (a ground query with a computed argument printed nothing), **fixed
 > 2026-07-27** by folding a ground compound argument in a query rather than
 > hoisting it (§17 — the bug file's plumb-the-IR sketch was rejected for
-> colliding with A15); and `003` (three normative errors in `spec.md`), **fixed
+> colliding with A15); `003` (three normative errors in `spec.md`), **fixed
 > 2026-07-27** — §10 is now the single normative home of range restriction, which
-> had been restated in *six* sections, two of them falsely.
+> had been restated in *six* sections, two of them falsely; and `006` (`<`
+> rejected the types §8 orders), **fixed 2026-07-27** by widening the type
+> checker to match the spec, which needed no change.
 >
 > `cargo test -- --ignored` should report exactly **two** known failures, both
 > absent × negation; a third means something regressed.
@@ -284,8 +286,8 @@ able to work around them.
   to `lower` is unwritable and the fact producer must do it (2026-07-27). Closed:
   string construction fails §5's own termination test and would widen the hole the
   Termination session has not yet closed. _rejected — §17, 2026-07-27._ — §8/§10.
-  (Ordered comparison refusing strings is a separate matter and a defect:
-  `bugs/006`.)
+  (Ordered comparison over strings was the separate, opposite call: widened,
+  `bugs/006`, closed 2026-07-27.)
 - **`declare` does not count as defining a predicate.** `declare banned(name:
   string).` plus `not banned(X)` still warns "referenced but never defined"
   (verified). Declaring a schema is the user stating a relation exists and may be
