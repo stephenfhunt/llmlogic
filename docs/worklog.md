@@ -44,9 +44,9 @@ rustfmt clean, `cargo package-skill` green with `recipes/` in the bundle.
   and zero tests; `lower.rs ↔ provenance.rs` co-change 6× with no `use` edge,
   coupled through `ir::BodyIdx`'s meaning. No dead private function, no
   unconstructed variant — the negatives prose cannot claim credibly.
-- **First evaluation numbers**, filed under *Profile the engine*: importing 28k
-  facts is 0.4 s, so the cost is evaluation — a 5,248-edge closure deriving 173k
-  pairs took ~13 s; its self-join never finished (2.3 s once edges were resolved).
+- **First evaluation numbers**, in `notes/performance-baseline.md`: importing 28k
+  facts is 0.32 s, so the cost is evaluation — 173k derived tuples in 11.6 s and
+  505 MB, and a **35x cliff** from an unused closure merely being in scope.
 
 **Decided**
 - **The engine holds the uncertainty, not the extractor.** 2026-07-23 said the

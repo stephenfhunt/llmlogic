@@ -47,14 +47,15 @@ import "../facts/calls.jsonl"  as calls.
 ...
 ```
 
-Loading 27,957 facts across 15 JSONL files takes **0.4 s**. Import is not the
+Loading 27,957 facts across 15 JSONL files takes **0.32 s**. Import is not the
 expensive part.
 
 Evaluation is bottom-up: everything a program defines gets computed, whether the
 query touches it or not. A rule library spliced with `import "lib/graph.dl".`
 therefore charges every analysis for every closure in it. Splitting one library
 into `lib/callgraph.dl` and `lib/modgraph.dl` took the module-cycle analysis from
-13 s to 0.3 s. **Import the closure you are about to use, not the library.**
+11.5 s to 0.33 s — same question, same answer, 35x. **Import the closure you
+are about to use, not the library.**
 
 JSON `null` and an empty CSV cell both arrive as `absent`, and the same program
 over the same table as JSONL and as CSV gives byte-identical output — so a
@@ -81,17 +82,17 @@ variant and *no* dead private function is a real statement about a codebase, and
 prose reasoning cannot make it credibly.
 
 Reachability is the expensive one. Over 5,248 call edges it derives 173,177
-pairs in ~13 s. The natural spelling of mutual recursion —
+pairs in 11.6 s, in 505 MB. The natural spelling of mutual recursion —
 `reaches(A, B), reaches(B, A)` — is a self-join of that 173k relation and **did
 not finish in two minutes**. Anchor one side on the direct-edge relation, which
 drives the join from 5k tuples instead of 173k:
 
 ```datalog
-mutual(A, B) :- call_edge(A, B), reaches(B, A), A != B.   % same relation, 25 s
+mutual(A, B) :- call_edge(A, B), reaches(B, A), A != B.   % same relation, 19 s
 ```
 
 Tightening the edge relation itself is the larger win, though: the same query
-over 1,504 resolved edges instead of 5,248 raw ones runs in **2.3 s**. Fewer,
+over 1,504 resolved edges instead of 5,248 raw ones runs in **2.2 s**. Fewer,
 better edges beat a cleverer query.
 
 ## 4. Resolve names in tiers, and count what stays ambiguous

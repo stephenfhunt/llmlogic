@@ -342,15 +342,11 @@ Deliberately sequenced **after** aggregation and the absent value (both shipped
 semantics change (both added evaluation paths that would move the hotspots). Now
 the highest-signal next item.
 
-- **Profile the engine** — it has never been profiled. The USDA dogfood put
-  `foundation × 170k-measurement` joins at ~11–20 s in release, but the cause is
-  unmeasured (join strategy? the semi-naive fixpoint? hashing? provenance
-  recording? import vs. eval split?). The source-analysis dogfood (2026-07-27)
-  splits that question once: importing 28k facts from 15 JSONL files is 0.4 s,
-  so it is evaluation — a 5,248-edge transitive closure deriving 173k pairs took
-  ~13 s, and its self-join did not finish in 2 minutes. Stand up a repeatable
-  benchmark and a profile *before* optimizing anything.
-  _queued (after feature-complete)._ — engine.
+- **Profile the engine** — never profiled; first measurements and the leads they
+  suggest are in [`notes/performance-baseline.md`](notes/performance-baseline.md)
+  (import is 0.32 s and not the problem; ~15k derived tuples/s; a 35× cliff from
+  bottom-up materialisation). Stand up a repeatable benchmark and a profile
+  *before* optimizing anything. _queued (after feature-complete)._ — engine.
 - **Parallelism** — assess how much of semi-naive evaluation and joins can go
   parallel (independent rules within a stratum, partitioned/hash joins) while
   preserving the deterministic canonical output and full provenance recording,
