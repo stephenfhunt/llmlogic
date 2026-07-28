@@ -661,6 +661,42 @@ age(\"bob\", 15).
     }
 
     proptest! {
+        /// **C8** — `<` and `min`/`max` answer the same question about order.
+        /// For two distinct constants of one type, the value `<` puts first is
+        /// the value `min` returns, over all five primitives (§4/§8/§9).
+        ///
+        /// `bugs/006`'s acceptance criterion, and the guard that keeps §4's
+        /// order **single-homed**: it is implemented three times over — `<` in
+        /// `apply_compare`, the `min`/`max` fold, and the printer's sort — all
+        /// deriving from one `Ord` on `Value`, with nothing to notice if one
+        /// drifts. The defect was not a disagreement about order but a
+        /// disagreement about *scope*: `min` ordered all five types while the
+        /// type checker let `<` see only int and float. It could not be written
+        /// until the check widened, which is exactly why it was worth writing.
+        #[test]
+        fn ordered_comparison_and_minmax_agree_on_every_type(
+            (compared, folded) in crate::testgen::arb_order_agreement_spellings()
+        ) {
+            let a = run(&compared).map(|r| r.answers);
+            let b = run(&folded).map(|r| r.answers);
+            match (a, b) {
+                (Ok(a), Ok(b)) => prop_assert_eq!(
+                    a, b,
+                    "`<` and the aggregate disagree\n\
+                     --- compared ---\n{}\n--- folded ---\n{}",
+                    &compared, &folded
+                ),
+                (a, b) => prop_assert!(
+                    false,
+                    "the two spellings disagreed on acceptance: {:?} vs {:?}\n\
+                     --- compared ---\n{}\n--- folded ---\n{}",
+                    a.is_ok(), b.is_ok(), &compared, &folded
+                ),
+            }
+        }
+    }
+
+    proptest! {
         /// **C8** — a **query** argument written as arithmetic answers exactly
         /// as the same argument written as its value: `?- n("a", 1 + 1).` and
         /// `?- n("a", 2).` are one question (§5/§8/§14).

@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc de8626cd172be22d1d329486cfba2cca72b1400ac9570f6dfe837fa030de7000 # shrinks to program = Program { predicates: [PredicateInfo { name: "n", arity: 2, fields: None, field_types: None }, PredicateInfo { name: "d0", arity: 2, fields: None, field_types: None }], facts: [Fact { pred: PredId(0), tuple: Tuple([String("a"), Int(0)]) }], rules: [Rule { head: Atom { pred: PredId(1), args: [Var(Var(0)), Var(Var(1))] }, body: [BodyLiteral { kind: Atom(Atom { pred: PredId(0), args: [Var(Var(0)), Var(Var(2))] }), span: Span { start: 0, end: 0 } }, BodyLiteral { kind: Atom(Atom { pred: PredId(0), args: [Var(Var(1)), Var(Var(3))] }), span: Span { start: 0, end: 0 } }, BodyLiteral { kind: Compare { op: Lt, lhs: Term(Var(Var(0))), rhs: Term(Var(Var(1))) }, span: Span { start: 0, end: 0 } }], var_names: [Some("K1"), Some("K2"), Some("V1"), Some("V2")], span: Span { start: 0, end: 0 } }], queries: [], imports: [], strata: [[RuleId(0)]] }

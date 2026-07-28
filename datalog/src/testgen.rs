@@ -384,6 +384,15 @@ enum CompRule {
     Assign { op: u8, c: i64 },
     /// `d(K1, K2) :- n(K1, V1), n(K2, V2), V1 <cmp> V2.`
     Join { op: u8 },
+    /// `d(V) :- n(K, V), K <cmp> "b".` — the same filter on the **string**
+    /// column. Every primitive is ordered (§8), but until `bugs/006` the
+    /// typechecker required int or float, so this generator reached `<` on
+    /// integers only and B1 was green over a surface half the size of the
+    /// specified one.
+    FilterKey { op: u8, k: u8 },
+    /// `d(K1, K2) :- n(K1, V1), n(K2, V2), K1 <cmp> K2.` — the join half of the
+    /// same widening, and the canonicalisation idiom `bugs/006` was found by.
+    JoinKey { op: u8 },
     /// A negation whose argument is *computed*, in one of three spellings
     /// (`spelling`): inline `not n(_, V + c)`, or the assignment hoisted by
     /// hand either before or after the negation. All three lower to the same
@@ -438,6 +447,57 @@ pub(crate) fn arb_disjunction_spellings() -> impl Strategy<Value = (String, Stri
                 .map(|body| format!("d(K) :- {body}.\n"))
                 .collect();
             (disjunctive, format!("{edb}{separate}?- d(K).\n"))
+        })
+}
+
+/// The surface text of every primitive type's constants, three apiece (two for
+/// `bool`, which has no third). Grouped by type because §4's value order is
+/// *within* a type — a pair drawn across two of these pools is a cross-type
+/// comparison, which stays a type error (§8).
+const ORDERED_POOLS: [&[&str]; 5] = [
+    &["alpha", "beta", "gamma"],  // symbol
+    &["\"x\"", "\"y\"", "\"z\""], // string
+    &["-2", "0", "3"],            // int
+    &["-2.0", "0.0", "1.5"],      // float
+    &["false", "true"],           // bool
+];
+
+/// Two **distinct constants of one type**, written both as an ordered comparison
+/// and as the `min`/`max` that folds the same pair — over all five primitives.
+///
+/// The claim, and `bugs/006`'s acceptance criterion: *a value order that one
+/// construct honours and another rejects is a defect in whichever one is out of
+/// step.* §4 fixes one order over the value space; §8 says `<` uses it and §9
+/// says `min`/`max` fold with it. So for two distinct same-typed values, the one
+/// `<` puts first must be the one `min` returns — and until this session `<`
+/// answered that question for two of the five types and refused the other three.
+///
+/// Both spellings define `extreme` and query it, so the two programs' answers
+/// are directly comparable. The pair is distinct by construction: at `a == b`
+/// the comparison spelling is empty where `min` still returns `a`, which is a
+/// difference between "the smallest" and "strictly smaller than something", not
+/// a disagreement about order.
+pub(crate) fn arb_order_agreement_spellings() -> impl Strategy<Value = (String, String)> {
+    (
+        0usize..ORDERED_POOLS.len(),
+        0usize..3,
+        0usize..3,
+        any::<bool>(),
+    )
+        .prop_map(|(ty, i, j, want_max)| {
+            let pool = ORDERED_POOLS[ty];
+            let (i, j) = (i % pool.len(), j % pool.len());
+            // Force distinctness without discarding: step the second index on.
+            let j = if i == j { (j + 1) % pool.len() } else { j };
+            let (a, b) = (pool[i], pool[j]);
+            let edb = format!("p({a}).\np({b}).\n");
+            // The end of the order under test: `max` reads the *larger* side of
+            // the same `A < B`, so one generated pair exercises both directions.
+            let (projected, op) = if want_max { ("B", "max") } else { ("A", "min") };
+            (
+                format!("{edb}extreme({projected}) :- p(A), p(B), A < B.\n?- extreme(V).\n"),
+                format!("{edb}extreme(M) :- M = {op} {{ X | p(X) }}.\n?- extreme(V).\n"),
+            )
         })
 }
 
@@ -501,8 +561,13 @@ pub(crate) fn arb_dash_q_rule() -> impl Strategy<Value = (String, String, String
         })
 }
 
-/// A comparison/arithmetic program: a numeric EDB plus derived filter/assign/
-/// join rules, lowered to IR.
+/// A comparison/arithmetic program: an `n(string, int)` EDB plus derived
+/// filter/assign/join rules, lowered to IR.
+///
+/// Comparisons reach **both** columns. Ordering the string key is not decoration:
+/// §8 orders every primitive, and a generator that only ever compares integers
+/// is green whatever the typechecker does to the other four types — which is how
+/// `bugs/006` survived B1.
 pub(crate) fn arb_comparison_program() -> impl Strategy<Value = ir::Program> {
     let facts = proptest::collection::vec((0u8..3, -2i64..=2), 0..=8);
     let rules = proptest::collection::vec(arb_comp_rule(), 0..=4);
@@ -537,6 +602,8 @@ fn arb_comp_rule() -> impl Strategy<Value = CompRule> {
         (0u8..4, -3i64..=3).prop_map(|(op, c)| CompRule::Assign { op, c }),
         (0u8..6).prop_map(|op| CompRule::Join { op }),
         (-3i64..=3, 0u8..3).prop_map(|(c, spelling)| CompRule::NegShift { c, spelling }),
+        (0u8..6, 0u8..3).prop_map(|(op, k)| CompRule::FilterKey { op, k }),
+        (0u8..6).prop_map(|op| CompRule::JoinKey { op }),
     ]
 }
 
@@ -663,6 +730,29 @@ fn build_comparison_ast(facts: &[(u8, i64)], rules: &[CompRule]) -> Program {
                         cmp_from(*op),
                         expr_of(var_term("V1")),
                         expr_of(var_term("V2")),
+                    ),
+                ],
+            ),
+            CompRule::FilterKey { op, k } => rule(
+                positional_atom(&name, vec![var_term("V")]),
+                vec![
+                    positive_literal(positional_atom("n", vec![var_term("K"), var_term("V")])),
+                    comparison_literal(
+                        cmp_from(*op),
+                        expr_of(var_term("K")),
+                        expr_of(string_term(key_name(*k))),
+                    ),
+                ],
+            ),
+            CompRule::JoinKey { op } => rule(
+                positional_atom(&name, vec![var_term("K1"), var_term("K2")]),
+                vec![
+                    positive_literal(positional_atom("n", vec![var_term("K1"), var_term("V1")])),
+                    positive_literal(positional_atom("n", vec![var_term("K2"), var_term("V2")])),
+                    comparison_literal(
+                        cmp_from(*op),
+                        expr_of(var_term("K1")),
+                        expr_of(var_term("K2")),
                     ),
                 ],
             ),
@@ -2125,6 +2215,56 @@ mod tests {
         );
     }
 
+    /// [`arb_order_agreement_spellings`] must reach **all five primitive
+    /// types** and both ends of the order.
+    ///
+    /// The point of the property is that `<` and `min`/`max` agree *over the
+    /// whole value space*, and `bugs/006` was precisely a generator-shaped blind
+    /// spot: `arb_comparison_program` compared integers only, so B1 was green
+    /// while three of the five types could not be compared at all. A generator
+    /// that drifted back to two types would reproduce that, silently.
+    #[test]
+    fn order_agreement_spellings_reach_every_type_and_both_ends() {
+        let mut runner = TestRunner::deterministic();
+        let strategy = arb_order_agreement_spellings();
+        let mut seen_type = [false; ORDERED_POOLS.len()];
+        let (mut mins, mut maxes) = (0, 0);
+        for _ in 0..200 {
+            let (compared, folded) = strategy
+                .new_tree(&mut runner)
+                .expect("strategy produces a value")
+                .current();
+            for (ty, pool) in ORDERED_POOLS.iter().enumerate() {
+                if pool.iter().any(|c| compared.contains(&format!("p({c})."))) {
+                    seen_type[ty] = true;
+                }
+            }
+            if folded.contains("min {") {
+                mins += 1;
+            }
+            if folded.contains("max {") {
+                maxes += 1;
+            }
+            // Both spellings must answer something: an empty pair agrees
+            // trivially, which is the vacuity `bugs/005` was caught by.
+            let answers = crate::api::run(&folded).expect("well-typed by construction");
+            assert!(
+                answers.answers.iter().any(|lines| !lines.is_empty()),
+                "generated a pair whose aggregate answered nothing: {folded}"
+            );
+        }
+        for (ty, reached) in seen_type.iter().enumerate() {
+            assert!(
+                *reached,
+                "generator never produced a {ty}-indexed type pair"
+            );
+        }
+        assert!(
+            mins > 0 && maxes > 0,
+            "only one end of the order was tested"
+        );
+    }
+
     /// The *widened* fold property's generator must emit **ground** compound
     /// atom arguments, and [`fold_ground_atom_args`] must rewrite them — in a
     /// **query** above all, since that is the position `bugs/005` was in and the
@@ -2453,9 +2593,46 @@ mod tests {
             matches!(expr, ir::Expr::Binary { .. })
         }
 
+        // An ordered comparison (`<`/`<=`/`>`/`>=`) with a string operand — the
+        // half of §8's specified surface the generator could not reach before
+        // `bugs/006`, and so the counter that keeps it reachable.
+        fn orders_a_string(rule: &ir::Rule) -> bool {
+            let head_vars: Vec<_> = rule
+                .head
+                .args
+                .iter()
+                .filter_map(|a| match a {
+                    ir::Term::Var(v) => Some(*v),
+                    _ => None,
+                })
+                .collect();
+            rule.body.iter().any(|l| match &l.kind {
+                ir::BodyLiteralKind::Compare { op, lhs, rhs } => {
+                    if !matches!(op, CmpOp::Lt | CmpOp::Le | CmpOp::Gt | CmpOp::Ge) {
+                        return false;
+                    }
+                    match (lhs, rhs) {
+                        // `K <cmp> "b"` — a string constant is unambiguous.
+                        (_, ir::Expr::Term(ir::Term::Const(ir::Value::String(_))))
+                        | (ir::Expr::Term(ir::Term::Const(ir::Value::String(_))), _) => true,
+                        // `K1 <cmp> K2` — the key join. Its operands are the
+                        // head's own variables, where the int-column join
+                        // (`V1 <cmp> V2`) compares variables the head projects
+                        // away.
+                        (ir::Expr::Term(ir::Term::Var(a)), ir::Expr::Term(ir::Term::Var(b))) => {
+                            head_vars.contains(a) && head_vars.contains(b)
+                        }
+                        _ => false,
+                    }
+                }
+                _ => false,
+            })
+        }
+
         let mut runner = TestRunner::deterministic();
         let strategy = arb_comparison_program();
         let (mut filters, mut assigns, mut joins, mut errors) = (0, 0, 0, 0);
+        let mut string_orders = 0;
         for _ in 0..400 {
             let program = strategy
                 .new_tree(&mut runner)
@@ -2482,6 +2659,9 @@ mod tests {
                 } else if has_compare {
                     filters += 1;
                 }
+                if orders_a_string(rule) {
+                    string_orders += 1;
+                }
             }
             if crate::engine::eval(&program).is_err() {
                 errors += 1;
@@ -2493,6 +2673,11 @@ mod tests {
         assert!(
             errors > 0,
             "generator never produced a division-by-zero program"
+        );
+        assert!(
+            string_orders > 0,
+            "generator never ordered the string column — B1 and \
+             `comparison_generator_is_well_typed` would be green over integers alone"
         );
     }
 

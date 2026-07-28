@@ -2636,6 +2636,22 @@ mod tests {
                 }
             }
 
+            /// The comparison generator produces well-typed programs, like
+            /// `evaluation_generator_is_well_typed` above — and this is the
+            /// property that carries `bugs/006`, not B1 beside it. `eval` is
+            /// deliberately type-agnostic (§17, 2026-07-21), so B1 would stay
+            /// green over string comparisons however the type checker treats
+            /// them; only a property that *calls* `typecheck` fails when the
+            /// numeric constraint on `<` comes back.
+            #[test]
+            fn comparison_generator_is_well_typed(program in arb_comparison_program()) {
+                prop_assert!(
+                    typecheck(&program).is_ok(),
+                    "comparison generator produced an ill-typed program: {:?}",
+                    typecheck(&program).err()
+                );
+            }
+
             /// C5 — typed-generator completeness: every well-typed-by-
             /// construction program is accepted by the type checker (no false
             /// rejections).
