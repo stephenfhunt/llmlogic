@@ -57,5 +57,49 @@ Run task 1, then feed its output back in with a follow-up query — e.g.
 
 ---
 
-**Notes / observations** (fill in as you run):
-- …
+### 6. Analyse a real codebase (the hard task)
+Not a fixture: the `datalog` crate itself, ~21k lines. Extract facts with `syn`,
+import them, and ask what reaches what. Recipe and the traps:
+[`skill/recipes/source-analysis.md`](skill/recipes/source-analysis.md).
+- **Prompt idea:** "Are there import cycles in this crate? Any mutually recursive
+  functions? Anything defined and never used?"
+- **Expected:** `engine ↔ provenance` is a cycle; three mutual-recursion clusters,
+  all reached through the aggregate arm; no dead private function.
+- **Why:** the first five have small closed answers a model could luck into.
+  This one has 22k facts and no memorised answer, and its failure modes are the
+  real ones — a wrong encoding, a silently empty join, a closure that does not
+  terminate in the time available.
+
+---
+
+**Notes / observations**
+
+Run 2026-07-27, task 6 (tasks 1–5 last run 2026-07-23, all correct; see
+`docs/worklog-archive/2026-07.md`).
+
+- **Reached for it?** Yes, but that is not evidence — the session was convened to
+  use it. The honest signal is the one place the model *stopped* reaching for it:
+  three questions got answered with `grep` because the engine could not express
+  them (string ordering, string prefixes, `;` in a query body). A skill that
+  cannot say something loses the question silently, and the model does not
+  announce the switch.
+- **Correct?** Every derived answer was correct *about the facts it was given*.
+  All four wrong conclusions came from the fact base — 7% of the functions missing
+  (`proptest!` bodies opaque to `syn`), `use` edges attributed to `lower::tests`
+  rather than `lower`, bare callee names merging `Model::new` with `Lexer::new`,
+  and one join across two id-spaces that derived nothing at all. Two sessions in,
+  evaluation has still never been the thing that was wrong.
+- **Self-corrected?** On malformed programs, yes — the string-comparison type
+  error named the offending variable and the constraint, and the `;`-in-a-query
+  error suggested the fix. On *well-formed programs asking the wrong question*,
+  no, and that is the gap: `dead(F)` returning six plainly-used functions read
+  exactly like `dead(F)` returning nothing. Only source-checking every claim
+  caught it, which is why the recipe leads with that.
+- **What the skill made easy** that prose would not: the negative results. "No
+  unconstructed enum variant, no dead private function" over 159 variants and 901
+  functions is a claim worth having, and no amount of careful reading produces it
+  credibly.
+- **Where the time went:** almost entirely the extractor, which needed three
+  fix-and-re-extract rounds. Each round was triggered by a query whose answer was
+  visibly wrong, never by reading the extractor code — so the engine's real job
+  here was auditing its own inputs.
