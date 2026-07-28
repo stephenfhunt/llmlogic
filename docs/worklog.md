@@ -24,6 +24,63 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-07-27 — Source-analysis dogfood, second run: the engine on 22k facts
+
+Re-ran the 2026-07-23 use case now that §13 imports and §9 aggregation exist.
+Facts from `syn` (a throwaway scratchpad extractor, not committed), not regex.
+Docs only in the engine; one build-tooling line. 395 tests pass, clippy and
+rustfmt clean, `cargo package-skill` green with `recipes/` in the bundle.
+
+**Done**
+- **`skill/recipes/source-analysis.md`** — the recipe deferred in 2026-07-23
+  pending §13/§9. `cargo package-skill` now bundles `recipes/`, so it ships with
+  the skill rather than living only in this checkout.
+- **`bugs/006`** — `<` rejects strings while `min`/`max` order them, against §8's
+  own text; `src/typecheck.rs` cites §8 for both halves. Found by needing `A < B`
+  to canonicalise a pair, not by reading the spec.
+- **Findings, each source-verified before being written down:** `engine ↔
+  provenance` is a genuine import cycle; three mutual-recursion clusters, all
+  reached through the **aggregate** arm, including `parse_primary →
+  parse_aggregate → parse_expr`; `print_fact_lines` is public with zero callers
+  and zero tests; `lower.rs ↔ provenance.rs` co-change 6× with no `use` edge,
+  coupled through `ir::BodyIdx`'s meaning; §1, §2, §6 cited by no source line. No
+  dead private function, no unconstructed variant — the negatives are the part
+  prose cannot claim credibly.
+- **First evaluation numbers**, filed under *Profile the engine*: importing 28k
+  facts across 15 JSONL files is 0.4 s, so the cost is evaluation — a 5,248-edge
+  closure deriving 173k pairs took ~13 s, and its self-join did not finish in 2
+  minutes (25 s anchored on direct edges, 2.3 s once the edges were resolved).
+
+**Decided**
+- **The engine holds the uncertainty, not the extractor.** 2026-07-23 said the
+  fix for bad facts was a better parser. `syn` removed the regex error class and
+  introduced its own — macro bodies opaque (7% of functions invisible), bare
+  callee names merging `Model::new` with `Lexer::new`. What worked was resolving
+  in Datalog in confidence tiers, leftovers kept as a *counted* relation: 1,504
+  certain edges, 2,458 likely, conclusion stable across both.
+- **Two language limits push work back into the fact producer** — no string
+  ordering (`bugs/006`), no string operations at all. Both forced extractor
+  columns that exist only to serve the query. New ROADMAP item under *Surface
+  uniformity*, where it is the fourth of a genre.
+- **The count-distinct trap is worse than §9 says** and §13 is why: over a wide
+  imported table the wildcard is never written. 36 call sites where the question
+  wanted 20 callers. §17 and the ROADMAP item now carry the measurement.
+
+**Removed**
+- The 2026-07-27 GitHub-publication entry rotated verbatim to
+  `worklog-archive/2026-07.md`. Nothing else — the ROADMAP recipe item was
+  completed rather than deleted, and no doc claim was found stale this session.
+
+**Next up**
+- **`bugs/006` is decided and specified, not done** — widen the typechecker
+  (owner's call this session). The file now carries the exact three lines, the
+  finding that *both evaluators already handle it* so nothing below typecheck
+  changes, and the warning that `b1_comparison_programs_agree`'s generator emits
+  integers only and so cannot cover the widened surface. `004` stays blocked on
+  Termination.
+- Unchanged: the two design sessions (**`absent` × negation**, **Termination**),
+  the **§17 restructure**, and **CI**.
+
 ## 2026-07-27 — `bugs/003`: the safety rule had six homes, not four
 
 The last unblocked defect. Docs plus one test; no engine change. 395 tests pass
@@ -129,54 +186,3 @@ on. 393 tests pass (385 + 8), clippy clean, `--ignored` still exactly two.
 - Unchanged: the **§17 restructure**, and **CI** (deferred, not rejected).
 - Still browser-only from the last session: the GitHub *About* panel and a look
   at the rendered README. `gh` is not installed in this checkout.
-
-## 2026-07-27 — Public on GitHub: a top-level README, private remote out of the tree
-
-**Docs and metadata only;** 385 tests pass, clippy clean. Nothing pushed yet.
-
-**Done**
-- **A top-level `README.md`** — the repo had none, so a visitor landed on
-  `AGENTS.md`, which is agent guidance, not an introduction. Every console block
-  in it is verbatim output from a release build, re-run from an empty directory
-  with the binary on `PATH` to confirm a reader pasting it gets those bytes.
-- **`vault` gone from `AGENTS.md`** (its only occurrence in tracked content),
-  `repository` set in `Cargo.toml`, and `lib.rs`'s crate doc corrected — it had
-  opened with "an early scaffold … most modules are stubs pending the language
-  specification" since before the parser landed.
-- Checked before shipping: all nine relative README links resolve, and a grep for
-  the private remote, absolute paths, and the author's address across tracked
-  files is empty.
-
-**Decided**
-- **Public and unadvertised** (user call), not private-with-collaborators: link-shareable
-  now, portfolio-usable later, at the cost of being indexed and forkable.
-- **Licensing stays deferred even so** — all rights reserved by default. Because
-  the repo is public the README says this outright, so the absence reads as a
-  decision rather than an oversight. `Cargo.toml` still carries no `license`.
-- **The root README's subject is `llmlogic`, not `datalog`** (user call): the goal
-  is a holistic set of tools and skills for formal reasoning with LLMs, of which
-  the engine is the first instance. Written so a second project costs one table
-  row — the same constraint `AGENTS.md` already lives under.
-- **The process docs are the portfolio piece, not noise.** The README's *How it's
-  built* section foregrounds spec-first design, §17, this worklog, `bugs/`,
-  properties-over-unit-tests, and `editing-docs.md`. Publishing them is the choice
-  being made; they were written for an audience of one until now.
-- **No CI this pass, no history rewrite** — DuckDB builds bundled from source, so
-  cold runs are slow enough to want their own session; and the `Claude-Session:`
-  trailers and author address on all 84 commits go public knowingly.
-
-**Removed**
-- `AGENTS.md`'s `The remote is `vault`.`; `lib.rs`'s scaffold paragraph;
-  `Cargo.toml`'s "no repository URL until a remote exists" comment, false the
-  moment the remote existed. All three are the same failure the *Practice* entry
-  (now archived) named: a current-state claim nothing routes you back to.
-- The 2026-07-25/26 entry rotated verbatim to `worklog-archive/2026-07.md`.
-
-**Next up**
-- **Push**: `git push -u github trunk` — the remote is `github`; `vault` stays as
-  the local backup. Then the GitHub *About* panel (description, topics), which is
-  not stored in-repo, and a look at the rendered README.
-- **CI** (`cargo test`/`clippy`/`fmt`) deferred, not rejected. Nothing in §17 to
-  annotate — this session touched no language decision.
-- Unchanged: **`bugs/005`** pending the fold-vs-plumb call, **`absent` × negation**,
-  the **§17 restructure**, `003`, `004`.

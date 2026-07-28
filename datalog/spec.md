@@ -1680,6 +1680,26 @@ say.
   - **Deferred:** statistical reducers (into the reserved param slot); collection
     reducers (blocked on a first-class collection value, §4); recursive
     aggregation (Zaniolo et al.).
+  - ***Consequences 2026-07-27*** (source-analysis dogfood; `docs/worklog.md`):
+    - **"`min`/`max` at no cost because the value `Ord` already exists" is now
+      the argument in `bugs/006`.** That `Ord` is §4's canonical order; `<`
+      refuses the strings `min`/`max` happily order, and `src/typecheck.rs` cites
+      §8 for both halves. The clause was right; it just proved more than it
+      claimed.
+    - **The count-distinct trap is worse than §9 documents.** §9 warns about a
+      visible `_` in a goal. Over an imported table the wildcard is *invisible*:
+      named-argument syntax leaves every unmentioned column implicitly
+      wildcarded, and each is a witness dimension. `count { C | calls(caller: C,
+      callee: "bump") }` returned 36 — call sites — where the question wanted 20
+      callers, with no `_` written anywhere. §13's wide machine-generated tables
+      are exactly where this bites, and §13 arrived after §9 was documented.
+    - **Aggregation made three tree-walkers mutually recursive**, because
+      `op { Expr | Goal }` nests a *body* inside an *expression*:
+      `parse_primary → parse_aggregate → parse_expr`, `naive::matches ↔
+      apply_builtins`, `testgen::monotype_expr ↔ monotype_body`. This falsifies
+      the 2026-07-23 dogfood's "zero mutual recursion; parser expression grammar
+      acyclic" — a structural cost of the syntax that the design session did not
+      anticipate and that nothing recorded until it was measured.
 
 - **2026-07-24** — **Absent value: full design ratified** (design session;
   supersedes the 2026-07-23 direction below and resolves its open question;
@@ -1857,6 +1877,21 @@ say.
     (count/sum/min/max + grouping); deferred after §13, but confirmed important —
     every ranking/"how-many" in the dogfooding session was hand-done outside the
     engine (`sort | uniq -c`).
+  - ***Consequences 2026-07-27*** (the same use case re-run with §13 and §9 in
+    place; `docs/worklog.md`, recipe in `skill/recipes/source-analysis.md`):
+    - **The sequencing was right and the two features carried the run.** 27,957
+      facts across 15 JSONL tables import in 0.4 s, and every ranking that was
+      `sort | uniq -c` last time is now a `count`. Nothing about the ordering
+      looks wrong in hindsight.
+    - **"Extraction is the weak link" held; "so use a real parser" was half an
+      answer.** `syn` did remove the entire regex error class, and introduced its
+      own: macro bodies are opaque (7% of this crate's functions invisible) and
+      bare callee names merge `Model::new` with `Lexer::new`. The other half is
+      **resolving in Datalog, in confidence tiers, with the leftovers kept as a
+      counted relation** — the engine holding the uncertainty rather than the
+      extractor guessing. No extractor removes ambiguity it cannot see.
+    - **A prediction confirmed, and worse than stated** — see the count-distinct
+      note on the 2026-07-24 §9 entry above.
 
 - **2026-07-23** — **Step 6: agent CLI** (`-q` one-shot queries;
   `api::program_with_queries` / `run_with_queries`, a hand-rolled arg loop in

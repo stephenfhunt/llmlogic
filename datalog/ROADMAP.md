@@ -239,15 +239,16 @@ which a static rule does not address at all. _designing._ — §2/§6/§8/§10.
 
 ### Aggregation follow-ons (§9)
 
-- **Count-distinct, and the `_`-in-a-goal trap.** `count { S | e(_, S) }` returns
-  the edge count, not the distinct-`S` count (verified: 3 where 2 is wanted),
-  because a wildcard inside a goal is a witness dimension — the one place `_` does
-  not mean "don't care" (§9). §9 documents both halves honestly and offers
-  "project into a helper relation first", but every ranking and "how many" in the
-  source-analysis use case that motivated §9 (§17, 2026-07-23) wants a distinct
-  count, and the natural spelling silently returns the wrong number. Decide
-  whether v1 gets `count_distinct` / a `distinct` modifier, or whether the trap is
-  documented harder. _queued._ — §9.
+- **Count-distinct, and the invisible wildcard.** `count { S | e(_, S) }` returns
+  the edge count, not the distinct-`S` count, because a wildcard inside a goal is
+  a witness dimension — the one place `_` does not mean "don't care" (§9). Over an
+  **imported table the wildcard is not written at all**: named-argument syntax
+  leaves every unmentioned column implicitly wildcarded. Measured 2026-07-27 on a
+  7-column table — `count { C | calls(caller: C, callee: "bump") }` = 36 call
+  sites where the question wanted 20 callers. Decide whether v1 gets
+  `count_distinct` / a `distinct` modifier, or whether the trap is documented
+  harder; §13's wide machine-generated tables are the case that makes it urgent
+  (§17, 2026-07-24 *Consequences*). _queued._ — §9/§13.
 - **Statistical reducers** — `median`/`stddev`/`variance`/`percentile`. The
   aggregate node reserves a parameter slot for `percentile(p)`; each is a reducer
   registration + a typecheck arm, no evaluator restructure. _queued._ — §9.
@@ -279,6 +280,12 @@ able to work around them.
   output), but a conjunction is not. This is now all that is left of that gap:
   `bugs/005` was the case where an ordinary single-atom query fell into it by
   accident, closed 2026-07-27. _queued._ — §5/§14.
+- **No string operations, and `<` refuses strings.** There is no prefix, split or
+  concat, and ordered comparison is int/float-only against §8's own text
+  (`bugs/006`). Together they make two standard idioms unwritable — canonicalising
+  an unordered pair as `A < B`, and reducing `lower::tests` to `lower` — so both
+  had to be pushed back into the fact producer (2026-07-27). Decide whether string
+  builtins are in scope at all. _queued._ — §8.
 - **`declare` does not count as defining a predicate.** `declare banned(name:
   string).` plus `not banned(X)` still warns "referenced but never defined"
   (verified). Declaring a schema is the user stating a relation exists and may be
@@ -338,8 +345,12 @@ the highest-signal next item.
 - **Profile the engine** — it has never been profiled. The USDA dogfood put
   `foundation × 170k-measurement` joins at ~11–20 s in release, but the cause is
   unmeasured (join strategy? the semi-naive fixpoint? hashing? provenance
-  recording? import vs. eval split?). Stand up a repeatable benchmark and a
-  profile *before* optimizing anything. _queued (after feature-complete)._ — engine.
+  recording? import vs. eval split?). The source-analysis dogfood (2026-07-27)
+  splits that question once: importing 28k facts from 15 JSONL files is 0.4 s,
+  so it is evaluation — a 5,248-edge transitive closure deriving 173k pairs took
+  ~13 s, and its self-join did not finish in 2 minutes. Stand up a repeatable
+  benchmark and a profile *before* optimizing anything.
+  _queued (after feature-complete)._ — engine.
 - **Parallelism** — assess how much of semi-naive evaluation and joins can go
   parallel (independent rules within a stratum, partitioned/hash joins) while
   preserving the deterministic canonical output and full provenance recording,
@@ -416,8 +427,9 @@ but a different kind of work.
 
 ### Agent skill
 
-- **`skill/recipes/source-analysis.md`** — a source-analysis recipe, now
-  unblocked by §13 imports. _queued._ — skill.
+- **`skill/recipes/source-analysis.md`** — the source-analysis recipe: extract
+  with a real parser, import, ask; the five traps. Bundled by `cargo
+  package-skill`, so `recipes/` is now a shipped part of the skill. ✅ 2026-07-27.
 - **"Big external fact base" demo** — the motivating import demo; unblocked by
   §13 (the USDA dogfood is a first pass). _queued._ — skill.
 - **Other agent-exposure forms** — a Claude API agent-loop harness, and an MCP
