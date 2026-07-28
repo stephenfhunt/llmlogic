@@ -12,8 +12,9 @@
 //! 1. literals in facts,
 //! 2. variable flow through rule bodies (a variable unifies the types of every
 //!    position it occupies), and
-//! 3. builtin operands (§8): arithmetic and ordered comparisons require int or
-//!    float, and every comparison requires both operands the same type.
+//! 3. builtin operands (§8): arithmetic requires int or float, and every
+//!    comparison requires both operands the same type — any type, since every
+//!    primitive is ordered (§8).
 //!
 //! Any conflict — an int column joined against a string column, `age(X, "old")`
 //! beside `age("bob", 30)`, or `1 + "a"` — is a structured **type error before
@@ -21,7 +22,7 @@
 //! and declared-signature verification (§4) are additional sources that land
 //! once imports and IR-level declared types exist.
 
-use crate::ast::{AggOp, CmpOp, TypeName};
+use crate::ast::{AggOp, TypeName};
 use crate::error::Error;
 use crate::ir;
 
@@ -261,25 +262,26 @@ impl<'a> TypeChecker<'a> {
                 ir::BodyLiteralKind::Atom(atom) | ir::BodyLiteralKind::NegAtom(atom) => {
                     self.atom_constraints(atom, vars);
                 }
-                ir::BodyLiteralKind::Compare { op, lhs, rhs } => {
+                ir::BodyLiteralKind::Compare { lhs, rhs, .. } => {
                     let l = self.expr_slot(lhs, vars);
                     let r = self.expr_slot(rhs, vars);
                     // A comparison with a bare `absent` operand is
                     // unconditionally false (§8), so it constrains nothing — the
                     // operands need not share a type, and `<`/`<=`/`>`/`>=`
-                    // against absent is *false*, not a numeric-type error. Any
-                    // arithmetic *inside* the other operand is still typed by
-                    // `expr_slot` above.
+                    // against absent is *false*, not an error. Any arithmetic
+                    // *inside* the other operand is still typed by `expr_slot`
+                    // above.
                     if is_absent_literal(lhs) || is_absent_literal(rhs) {
                         continue;
                     }
                     // Every comparison unifies its operands' types (§8): `=`
                     // assignment gives the target the other side's type, and any
-                    // filter requires both operands the same type.
+                    // filter requires both operands the same type. That is the
+                    // *only* constraint — an ordered comparison uses the operand
+                    // type's natural order and every primitive has one (§8), the
+                    // same order `min`/`max` fold with, so `<` adds no numeric
+                    // requirement.
                     self.union(l, r);
-                    if matches!(op, CmpOp::Lt | CmpOp::Le | CmpOp::Gt | CmpOp::Ge) {
-                        self.numeric.push(l);
-                    }
                 }
                 ir::BodyLiteralKind::Presence { expr, .. } => {
                     // A presence test constrains no type — its operand may be any
@@ -363,8 +365,8 @@ impl<'a> TypeChecker<'a> {
                 && !is_numeric(ty)
             {
                 self.errors.push(Error::semantic(format!(
-                    "type error: {} has type {} but is used in arithmetic or an ordered \
-                     comparison, which requires int or float",
+                    "type error: {} has type {} but is used in arithmetic or a numeric \
+                     aggregate (`sum`/`avg`), which requires int or float",
                     self.label[root],
                     type_label(ty),
                 )));
@@ -441,7 +443,7 @@ fn dedup(errors: Vec<Error>) -> Vec<Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::Span;
+    use crate::ast::{CmpOp, Span};
     use crate::ir::{Atom, BodyLiteral, BodyLiteralKind, Expr, Fact, Program, Rule, Term, Tuple};
     use crate::ir::{RuleId, Value, Var};
 
@@ -586,8 +588,9 @@ mod tests {
     }
 
     #[test]
-    fn ordered_comparison_on_non_numeric_is_a_type_error() {
-        // p("x"). t(X) :- p(X), X > "a".  =>  ordered comparison on strings.
+    fn ordered_comparison_accepts_any_single_type() {
+        // p("x"). t(X) :- p(X), X > "a".  =>  ordered comparison on strings,
+        // which §8 orders lexicographically. Rejected until `bugs/006`.
         let mut program = Program::default();
         let p = program.intern_pred("p", 1);
         let t = program.intern_pred("t", 1);
@@ -609,11 +612,40 @@ mod tests {
             span: Span::DUMMY,
         });
         program.strata = vec![vec![RuleId(0)]];
-        let errors = typecheck(&program).expect_err("non-numeric ordered comparison");
+        let env = typecheck(&program).expect("`X > \"a\"` over a string column type-checks");
+        assert_eq!(env.column_type(p, 0), Some(TypeName::String));
+    }
+
+    #[test]
+    fn ordered_comparison_still_rejects_a_cross_type_pair() {
+        // p("x"). t(X) :- p(X), X > 1.  =>  string vs int, still a type error:
+        // widening the ordered comparison left `union(l, r)` in place.
+        let mut program = Program::default();
+        let p = program.intern_pred("p", 1);
+        let t = program.intern_pred("t", 1);
+        program.facts.push(Fact {
+            pred: p,
+            tuple: Tuple(vec![Value::String("x".to_string())]),
+        });
+        program.rules.push(Rule {
+            head: atom(t, vec![Term::Var(Var(0))]),
+            body: vec![
+                lit(BodyLiteralKind::Atom(atom(p, vec![Term::Var(Var(0))]))),
+                lit(BodyLiteralKind::Compare {
+                    op: CmpOp::Gt,
+                    lhs: Expr::Term(Term::Var(Var(0))),
+                    rhs: Expr::Term(Term::Const(Value::Int(1))),
+                }),
+            ],
+            var_names: vec![Some("X".to_string())],
+            span: Span::DUMMY,
+        });
+        program.strata = vec![vec![RuleId(0)]];
+        let errors = typecheck(&program).expect_err("cross-type ordered comparison");
         assert!(
             errors
                 .iter()
-                .any(|e| e.to_string().contains("int or float")),
+                .any(|e| e.to_string().contains("string") && e.to_string().contains("int")),
             "unexpected: {errors:?}"
         );
     }

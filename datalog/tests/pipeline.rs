@@ -293,6 +293,48 @@ fn a_type_error_is_reported() {
 }
 
 #[test]
+fn ordered_comparison_uses_every_types_natural_order() {
+    // §8: ordered comparisons use the operand type's natural order — strings and
+    // symbols lexicographically, `false < true` — the same order `min`/`max`
+    // fold with. `bugs/006`: the typechecker required int or float, so `<` was
+    // usable on two of the five primitives while `min` ordered all five.
+    assert_eq!(
+        answers("s(\"a\"). s(\"b\").\n?- s(X), s(Y), X < Y."),
+        vec!["answer(\"a\", \"b\")."]
+    );
+    assert_eq!(
+        answers("y(alpha). y(beta).\n?- y(X), y(Y), X < Y."),
+        vec!["answer(alpha, beta)."]
+    );
+    assert_eq!(
+        answers("b(true). b(false).\n?- b(X), b(Y), X < Y."),
+        vec!["answer(false, true)."]
+    );
+    // The canonicalisation idiom the defect made unwritable over string keys:
+    // an unordered pair counted once (`bugs/006`, "What it cost").
+    assert_eq!(
+        answers(
+            "e(\"x\", \"y\"). e(\"y\", \"x\"). e(\"x\", \"z\").\n\
+             pair(A, B) :- e(A, B), A < B.\n?- pair(A, B)."
+        ),
+        vec!["pair(\"x\", \"y\").", "pair(\"x\", \"z\")."]
+    );
+}
+
+#[test]
+fn a_cross_type_ordered_comparison_is_still_a_type_error() {
+    // Widening `<` past int/float left the same-type rule alone: `union(l, r)`
+    // is what rejects this, and it is independent of the numeric constraint
+    // that `bugs/006` removed.
+    let errors =
+        datalog::run("s(\"a\").\n?- s(X), X < 1.").expect_err("string compared against int");
+    assert!(
+        errors.iter().any(|e| e.to_string().contains("type error")),
+        "got {errors:?}"
+    );
+}
+
+#[test]
 fn a_runtime_arithmetic_error_is_reported() {
     let errors = datalog::run(&corpus("broken_arith.dl")).expect_err("division by zero");
     assert!(
