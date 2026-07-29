@@ -120,6 +120,24 @@ fn named_and_negation_programs_run() {
     );
 }
 
+/// `absent` under negation through the real binary (§4/§7, 2026-07-29): the
+/// anti-join is a structural membership test, so a stored `absent` refutes an
+/// absence pattern closed to `absent`.
+///
+/// Both lines of this assertion are the behaviour change, measured on the §16.8
+/// sparse-table shape. Before: `unmeasured(absent).` — a food whose id is
+/// missing was reported as having no measurement even though
+/// `measurement(absent, 3)` is stored — and `contradiction(absent).`, which is
+/// P ∧ ¬P. After: the absent-keyed food is refuted like any other, and the
+/// contradiction is gone (an empty query prints nothing, §14).
+#[test]
+fn absent_under_negation_is_a_membership_test() {
+    let out = run_file("absent_negation.dl");
+    assert_eq!(out.code, 0);
+    assert_eq!(out.stdout, "unmeasured(\"kale\").\n");
+    assert!(out.stderr.is_empty());
+}
+
 /// §13 module imports through the real binary: `modules_import.dl` splices
 /// `modules/family.dl` relative to the program file's directory, while the
 /// binary runs with the crate root as working directory — the

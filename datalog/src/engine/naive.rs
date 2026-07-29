@@ -16,8 +16,8 @@
 //! differential (testing.md C3).
 //!
 //! The **absent value (§4/§8) is in scope** (2026-07-25): annihilation in
-//! arithmetic, false in every comparison, matching nothing in joins and
-//! anti-joins, and the presence filter. It is written out here from the spec's
+//! arithmetic, false in every comparison, matching nothing in joins, matching
+//! structurally in anti-joins (§7), and the presence filter. It is written out here from the spec's
 //! truth tables rather than delegating to `Value::unifies_with` /
 //! the engine's `apply_compare` / `apply_arith` — an oracle that shares the code under test
 //! cannot contradict it. Until then this module used plain `==` and had no
@@ -309,17 +309,24 @@ fn match_positives(
 }
 
 /// Does `tuple` refute the negated `atom` under `env`? Constants and bound
-/// variables must agree *semantically* ([`same_value`], so a slot holding
-/// `absent` closes nothing and refutes nothing); unbound variables are open and
-/// match anything. Deliberately non-binding — the counterpart of the engine's
-/// `AbsentPattern::matches`, written against `env` instead.
+/// variables must agree **structurally** — a negated atom binds nothing, so
+/// this is a membership test, and `absent` is a member like any other (§4/§7).
+/// Unbound variables are open and match anything. Deliberately non-binding —
+/// the counterpart of the engine's `AbsentPattern::matches`, written against
+/// `env` instead.
+///
+/// Note this is the one match site in the oracle that does *not* use
+/// [`same_value`], and the asymmetry is the point of the design: joining and
+/// negating use different notions of "same". Written out here rather than
+/// calling the engine, per this module's rule — the oracle's value is that it
+/// *can* disagree.
 fn refutes(atom: &Atom, tuple: &Tuple, env: &HashMap<Var, Value>) -> bool {
     atom.args
         .iter()
         .zip(&tuple.0)
         .all(|(term, value)| match term {
-            Term::Const(c) => same_value(c, value),
-            Term::Var(v) => env.get(v).is_none_or(|bound| same_value(bound, value)),
+            Term::Const(c) => c == value,
+            Term::Var(v) => env.get(v).is_none_or(|bound| bound == value),
         })
 }
 

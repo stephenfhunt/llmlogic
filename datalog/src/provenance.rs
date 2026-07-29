@@ -39,17 +39,21 @@ impl AbsentPattern {
     /// Does `tuple` fall under the pattern? A match *refutes* the absence:
     /// the engine's anti-join prunes on it, and replay (testing.md E3)
     /// asserts no model tuple satisfies it.
+    ///
+    /// A closed slot compares **structurally** — the one place in the engine
+    /// that does not use [`Value::unifies_with`] (§4/§7). A negated atom binds
+    /// nothing, so this is a membership test rather than a join: it asks
+    /// whether the tuple is *in* the relation, and `absent` is a perfectly
+    /// identifiable member. The `absent`-matches-nothing rule exists to stop a
+    /// missing foreign key joining another into a cartesian blowup, and a
+    /// membership test never brings in a binding to blow up.
     pub fn matches(&self, tuple: &Tuple) -> bool {
         self.args.len() == tuple.0.len()
-            && self.args.iter().zip(&tuple.0).all(|(pattern, value)| {
-                // A closed slot must *semantically* unify with the cell (§4):
-                // `absent` closes nothing, so a negated literal never matches an
-                // absent cell and a slot bound to `absent` refutes no tuple —
-                // the same absent-matches-nothing rule the positive join uses.
-                pattern
-                    .as_ref()
-                    .is_none_or(|expected| expected.unifies_with(value))
-            })
+            && self
+                .args
+                .iter()
+                .zip(&tuple.0)
+                .all(|(pattern, value)| pattern.as_ref().is_none_or(|expected| expected == value))
     }
 }
 

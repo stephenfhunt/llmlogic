@@ -2513,19 +2513,14 @@ mod tests {
             }
         }
 
-        // --- Logical laws `absent` currently breaks (spec §17 open question) ---
+        // --- The two logical laws `absent` is measured against (§4/§7) ---
         //
-        // Both tests below assert what a *sound* engine must deliver and both
-        // currently FAIL, so they are `#[ignore]`d rather than deleted: they are
-        // the executable acceptance criterion for the absent × negation design
-        // session (§17, 2026-07-25). Run them with `cargo test -- --ignored`.
-        //
-        // Shared cause: `try_match` binds a *fresh* slot to a stored `absent`
-        // (that is how a missing cell flows to a head), but every *subsequent*
-        // use of that slot goes through `unifies_with`, which absent always
-        // fails. A variable bound to absent is therefore simultaneously matched
-        // and unmatchable — so a second occurrence of it cannot re-match, and an
-        // anti-join over it can never be refuted.
+        // `try_match` binds a *fresh* slot to a stored `absent` — that is how a
+        // missing cell flows to a head — while every *subsequent* use of that
+        // slot goes through `unifies_with`, which absent always fails. The two
+        // tests below pin what that asymmetry does and does not cost: the
+        // anti-join is exempted from it (structural membership, §7), so
+        // non-contradiction holds; joining is not, so idempotence does not.
 
         /// Answers of `?- <goal>.` against `facts`, as printed values.
         fn answers_of(facts: &str, rule: &str, query_pred: &str) -> Vec<Vec<Value>> {
@@ -2539,13 +2534,11 @@ mod tests {
         /// **Non-contradiction**: no body can be satisfied by both `p(X)` and
         /// `not p(X)`, for any `X`.
         ///
-        /// Today `q(X) :- p(X), not p(X).` derives `q(absent)` when `p(absent)`
-        /// is stored — P ∧ ¬P, in an engine whose advertised uses include
-        /// consistency checking. SQL's analogue (`NOT IN` over a NULL) returns no
-        /// row, so this is further from sound than three-valued logic, not a
-        /// two-valued simplification of it.
+        /// `q(X) :- p(X), not p(X).` used to derive `q(absent)` when `p(absent)`
+        /// was stored — P ∧ ¬P, in an engine whose advertised uses include
+        /// consistency checking. The anti-join's structural membership test
+        /// (§7) is what refutes the absence: `p(absent)` *is* in the relation.
         #[test]
-        #[ignore = "absent x negation: open design question (spec §17, 2026-07-25)"]
         fn a_fact_never_satisfies_its_own_negation() {
             let answers = answers_of("p(1).\np(absent).\n", "q(X) :- p(X), not p(X).\n", "q");
             assert!(
@@ -2554,21 +2547,25 @@ mod tests {
             );
         }
 
-        /// **Idempotence of conjunction**: `p(X), p(X)` selects exactly what
-        /// `p(X)` selects.
+        /// **Idempotence of conjunction does not hold over `absent`, by design**
+        /// (§4/§7, 2026-07-29): `p(X), p(X)` selects strictly less than `p(X)`,
+        /// dropping the absent row, because the second occurrence of `X` — by
+        /// then bound to `absent` — unifies with nothing.
         ///
-        /// Today the doubled body drops every absent row, because the second
-        /// occurrence of `X` — by then bound to `absent` — unifies with nothing.
-        /// So repeating a literal, which is semantically a no-op in any logic,
-        /// changes the answer.
+        /// This is not the negation defect's twin, and the two were separated
+        /// deliberately. It is the direct consequence of `absent ≠ absent` in a
+        /// *join*, which is the foreign-key-blowup protection the value model
+        /// exists to give (§4), and SQL drops the `NULL` from a self-join for
+        /// exactly the same reason. Restoring the law means giving that up.
+        /// Pinned rather than deleted so a later session finds the answer here
+        /// instead of re-filing the defect.
         #[test]
-        #[ignore = "absent x repeated occurrence: open design question (spec §17, 2026-07-25)"]
-        fn repeating_a_body_literal_does_not_change_the_answer() {
+        fn repeating_a_body_literal_drops_absent_rows() {
             let facts = "p(1).\np(absent).\n";
-            assert_eq!(
-                answers_of(facts, "one(X) :- p(X).\n", "one"),
-                answers_of(facts, "two(X) :- p(X), p(X).\n", "two"),
-            );
+            let one = answers_of(facts, "one(X) :- p(X).\n", "one");
+            let two = answers_of(facts, "two(X) :- p(X), p(X).\n", "two");
+            assert_eq!(one, vec![vec![Value::Absent], vec![Value::Int(1)]]);
+            assert_eq!(two, vec![vec![Value::Int(1)]]);
         }
 
         proptest! {

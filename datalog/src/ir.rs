@@ -173,8 +173,15 @@ impl Ord for F64 {
 ///
 /// The **semantic** notion — `absent` matches *nothing*, including another
 /// `absent`, so a missing foreign key never joins another into a cartesian
-/// blowup — is [`Value::unifies_with`]. Every join, anti-join and unification
-/// site must use it; `==` at such a site is silently wrong.
+/// blowup — is [`Value::unifies_with`]. Every join and unification site must
+/// use it; `==` at such a site is silently wrong.
+///
+/// **The anti-join is the one exception** (§4/§7): a negated atom binds
+/// nothing, so refutation is a *membership* test rather than a join and
+/// compares structurally — `not p(X)` with `X` bound to `absent` asks whether
+/// `p(absent)` is in the relation, and it is. The blowup the semantic notion
+/// prevents is a property of joins bringing in new bindings, which membership
+/// never does. The single site is [`crate::provenance::AbsentPattern::matches`].
 ///
 /// **If you are matching two values, you almost certainly want
 /// `unifies_with`, not `==`.** The rule lives here, as a method, precisely so
@@ -210,8 +217,9 @@ impl Value {
     /// except that `absent` unifies with nothing — not with a value, and not
     /// with another `absent`.
     ///
-    /// This is the notion every join, anti-join and unification uses
-    /// ([`crate::engine`]'s `try_match`, [`crate::provenance::AbsentPattern`]).
+    /// This is the notion every join and unification uses
+    /// ([`crate::engine`]'s `try_match`), but **not** the anti-join, which is a
+    /// structural membership test — see the type-level note above.
     /// It is deliberately *not* `PartialEq`: the derive is the structural
     /// notion that set storage and canonical output order need, and both are
     /// load-bearing.

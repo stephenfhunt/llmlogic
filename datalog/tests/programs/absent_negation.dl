@@ -1,0 +1,20 @@
+% Absent under negation, in the §16.8 sparse-table shape: a `food` row whose id
+% is missing, and a `measurement` row whose food key is missing too. This is the
+% case that discriminates the two notions of "same" (§4) at the anti-join — the
+% absence pattern closes a slot to `absent`, and whether a stored `absent` cell
+% refutes it is exactly the question. See spec §7 and §17 (2026-07-29).
+food(absent).
+food("apple").
+food("kale").
+
+measurement(absent, 3).
+measurement("apple", 5).
+
+% "things with no measurement" — the query the change is measured on.
+unmeasured(F) :- food(F), not measurement(F, _).
+
+% Non-contradiction: no body can be satisfied by both `p(X)` and `not p(X)`.
+contradiction(F) :- food(F), not food(F).
+
+?- unmeasured(F).
+?- contradiction(F).
