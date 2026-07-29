@@ -164,10 +164,34 @@ equal under `DISTINCT`/`GROUP BY`):
 - **Semantic** (unification, joins, `=`/`!=`/ordered comparisons): `absent`
   matches/equals nothing, including another `absent`. This keeps missing foreign
   keys from joining each other into a cartesian blowup.
-- **Structural** (set membership/dedup, and the canonical `Ord` for deterministic
-  output, §14): a ground fact `p(absent)` is identical to itself, so a relation
-  holds a single copy; `absent` sorts **first** in the value order (an output
-  ordering only, distinct from the `<` operator).
+- **Structural** (set membership/dedup, the anti-join of negation (§7), and the
+  canonical `Ord` for deterministic output, §14): a ground fact `p(absent)` is
+  identical to itself, so a relation holds a single copy; `absent` sorts
+  **first** in the value order (an output ordering only, distinct from the `<`
+  operator).
+
+**Negation and joining use different notions of "same"**, deliberately (§17,
+2026-07-29). Every site where the choice arises, so that none of them is decided
+by mechanism:
+
+| site | notion | on `absent` |
+|---|---|---|
+| join / unification, `=` `!=` and ordered comparison (§8) | semantic | never matches, so missing keys do not join |
+| aggregate group key (§9) | semantic | the group is real but empty — `count` of it is `0` |
+| anti-join of a negated atom (§7) | **structural** | a stored `p(absent)` refutes `not p(X)` with `X` bound to `absent` |
+| set membership/dedup, canonical `Ord` (§14) | structural | one stored copy; sorts first |
+
+The anti-join is the odd one because a negated atom **binds nothing**: refuting
+it is a *membership* test — "is this tuple in the relation?" — not a join, and
+the blowup the semantic notion prevents is a property of joins bringing in new
+bindings. Two consequences follow, both intended:
+
+- **`p(X), not p(X)` derives nothing**, for every `X` including `absent`. Under
+  one uniform notion it derived `p(absent)`'s row — P ∧ ¬P.
+- **Idempotence of conjunction still fails over `absent`**: `p(X), p(X)` selects
+  strictly less than `p(X)`, because the repeated occurrence is a *join* and
+  keeps the semantic notion. This is the direct price of `NULL ≠ NULL`, and SQL
+  pays it on a self-join for the same reason.
 
 `absent` (the missing-data value) is unrelated to the **absence pattern** of
 negation-as-failure (§7/§11), which is a provenance record for a satisfied
@@ -422,6 +446,13 @@ and wildcard slots are **existential under the negation** (§17 2026-07-19):
 `not parent(_, X)` holds when no `parent` fact has `X` in its second column.
 Negated literals bind nothing.
 
+Because they bind nothing, this is a **membership** test and matching is
+**structural** — §4's notion for set membership, not the semantic one joins use.
+`absent` is a member like any other, so `not p(X)` with `X` bound to `absent` is
+refuted by a stored `p(absent)`. §4 owns the rule and states what it costs; the
+consequence here is that a row whose key is missing drops out of a "things with
+no …" query rather than surviving it.
+
 **Safety.** Every *named* variable in a negated atom must be **bound by the same
 clause**, in the sense §10 defines. Wildcard-fresh variables under negation are
 scoped to the negated literal and never exported (§10, §17 2026-07-19).
@@ -464,7 +495,9 @@ over the finished model, where every relation is complete.
 **Provenance** (§11): the derivation premise for a negated literal is the
 **absence pattern** — the atom instantiated with the rule's bindings,
 wildcard slots left open: `root("alice")` holds *because no `parent(_,
-"alice")` fact exists*. This is a proof-tree-level why-not record, chosen
+"alice")` fact exists*. A closed slot reads under the same structural rule as
+the anti-join above, so the pattern is refuted by exactly what refutes the
+literal. This is a proof-tree-level why-not record, chosen
 deliberately over extending §11's semiring story: provenance semirings cover
 positive programs only, and the principled negation extensions
 (dual-indeterminate and absorptive polynomials, references.md group 5) are
@@ -1313,6 +1346,28 @@ say.
 
 ### Decisions
 
+- **2026-07-29** — **The anti-join is a structural membership test** (§4/§7;
+  `src/provenance.rs`). `q(X) :- p(X), not p(X).` derived `q(absent)` — P ∧ ¬P.
+  Direction 1 of the three below: a negated atom **binds nothing**, so refutation
+  asks whether a tuple is *in* the relation, and the blowup `absent ≠ absent`
+  prevents is a property of joins bringing in new bindings. Joins keep the
+  semantic notion; only the anti-join takes the structural one. Direction 2 would
+  have bought idempotence by giving the blowup back; direction 3 is undecidable,
+  `absent` being a value and not a type.
+  - **The price, decided rather than absorbed:** a row whose key is absent drops
+    out of "things with no …" — SQL's answer. Measured on the §16.8 shape
+    (`tests/programs/absent_negation.dl`): `unmeasured(absent)` before, gone
+    after, because `measurement(absent, 3)` now refutes it.
+  - **The two laws were one item but not one phenomenon.** Idempotence stays
+    broken over `absent` deliberately, and the proof is mechanical:
+    `repeating_a_body_literal_drops_absent_rows` passes identically with the fix
+    reverted, while all three negation properties flip.
+  - **The differential caught the divergence but could not have caught the law**
+    — `b1_absent_programs_agree` goes red under a one-sided revert (the oracle
+    re-expresses refutation), yet two evaluators sharing a *wrong* semantics
+    agree. Hence **C9**, asserted against the model. Same shape as the entry
+    below, different reason.
+
 - **2026-07-27** — **Ordered comparison is widened to every primitive** (§4/§8;
   `src/typecheck.rs`; fixes `bugs/006`). `<` `<=` `>` `>=` now type-check on
   symbols, strings and bools as §8 has always specified, leaving `union(l, r)` —
@@ -1433,6 +1488,13 @@ say.
   a different subset, which is what a rule with six homes does regardless of
   diligence. §10 is now the single normative statement and the other five refer to
   it — the structural fix that makes the *next* relaxation a one-line edit.
+
+  ***Consequences 2026-07-29 — the resequencing was free.*** This entry took item
+  1's slot on the argument that it only added spellings reaching an
+  already-broken cell. Item 1 landed four days later and the two never met: this
+  one changed *when* the anti-join runs, that one changed *what refutes it*. The
+  "two `#[ignore]`d tests fail exactly as before" line above is now false in the
+  good direction — one passes, one was converted (2026-07-29 entry).
 - **2026-07-25** — **Conversion is the `as` cast; user-defined scalar functions are
   declined; and arithmetic already broke termination** (design session following the
   spec review; no engine change — implementation is a ROADMAP item). The review had
@@ -1560,6 +1622,14 @@ say.
     "still to fill in". "What does `p(X), not p(X)` mean" is a §6 question wearing
     an implementation costume, so the open absent × negation item should settle it
     there rather than in the anti-join.
+
+  ***Amended 2026-07-29 — §6 was deliberately left out of the negation session.***
+  The pairing above was not taken: the anti-join question was settled in §4/§7
+  first, on the reasoning that §6 should describe a ratified semantics rather
+  than one being decided as it is written, and that §6 also owes an account of
+  aggregation plus a finiteness claim blocked on `bugs/004`. So §6 is now a
+  session of its own with one fewer unknown, not a gap this one closed. The
+  entry's *diagnosis* stands — it is a §6 question — only its sequencing changed.
 
 - **2026-07-25** — **Correctness review of milestones 8–9** (the absent value and
   aggregation, both shipped 2026-07-24). Re-derived their semantics against
@@ -2538,6 +2608,16 @@ say.
   currently delegates to `Value::unifies_with`). **Sequence this before the
   negation-scheduling item below**: that one changes *when* a negated atom runs,
   and there is no sense implementing it against semantics about to be replaced.
+
+  ***Answered 2026-07-29*** — direction 1, as the decision entry above records.
+  Two notes the entry does not carry. **The sequencing instruction was not
+  followed and the cost was zero**: negation scheduling landed 2026-07-25, four
+  days ahead of this, because `bugs/001` made it a live soundness fix. It
+  changed *when* the anti-join runs, and this changed *what refutes it* — the
+  two turned out orthogonal, so the stated worry ("no sense implementing against
+  semantics about to be replaced") was wrong about its own risk. **And the two
+  laws listed here were one item but not one phenomenon**: only
+  non-contradiction was the defect.
   — §4/§7/§11.
 
   **Scope note (2026-07-25 review): aggregate group keys are a fourth site, and
@@ -2554,6 +2634,11 @@ say.
   and joining then use different notions of 'same', which must be *stated* in §4
   rather than discovered" — the same applies here, so the session should settle all
   four in one table rather than three plus an omission.
+
+  ***Consequences 2026-07-29 — taken as written.*** §4 now carries the four-site
+  table, and the group-key row was re-verified unchanged by the fix (`g(absent,
+  0)` still). The note earned its keep: the session's own plan had three sites
+  and would have shipped the omission this predicted.
 
 - **Negated atoms are outside the dependency schedule** — **resolved 2026-07-25**
   (Decisions above): negations join the schedule, reading the argument variables

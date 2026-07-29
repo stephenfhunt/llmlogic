@@ -36,8 +36,10 @@ each; detail in §17 and `docs/worklog.md`.
 > **Open defects live in [`bugs/`](bugs/)** — currently only `004` (§6 asserts a
 > finiteness that arithmetic falsified), out of the 2026-07-25 spec review and the
 > design session that followed it (§17). It is blocked on "Termination &
-> value-creating recursion" below, so **the queue has nothing unblocked in it**:
-> the next work is a design session, not a defect.
+> value-creating recursion" below, so **the queue has nothing unblocked in it**.
+> The remaining design sessions are **Termination** (which unblocks `004`) and
+> **§6's extension**, now one unknown lighter — negation item 1 settled the
+> `absent` half of "what does `p(X), not p(X)` mean" on 2026-07-29.
 >
 > Five are resolved in `bugs/resolved/`: `001` (a compound argument in a negated
 > atom silently misread as a wildcard), **fixed 2026-07-25** by negation item 2
@@ -51,8 +53,11 @@ each; detail in §17 and `docs/worklog.md`.
 > rejected the types §8 orders), **fixed 2026-07-27** by widening the type
 > checker to match the spec, which needed no change.
 >
-> `cargo test -- --ignored` should report exactly **two** known failures, both
-> absent × negation; a third means something regressed.
+> `cargo test -- --ignored` should report **no** known failures since 2026-07-29,
+> when the two absent × negation tests were closed out (one passes, one was
+> converted to pin the asymmetry it turned out to describe). The only `#[ignore]`d
+> test left is `url_csv_import_reads_over_httpfs`, which needs the network and
+> passes. Any *failure* under `--ignored` now means something regressed.
 
 ### Negation (§7)
 
@@ -62,22 +67,15 @@ through an ordinary positive binding already, so item 2 added spellings that
 reach an already-broken cell rather than creating a new one — and item 2 was
 also the fix for a live soundness defect.
 
-1. **`absent` × negation — a soundness bug.** `q(X) :- p(X), not p(X).` derives
-   `q(absent)`: P ∧ ¬P, in an engine that advertises consistency checking. A
-   variable bound to `absent` is both matched and unmatchable — a fresh slot
-   binds to a stored absent, but every later use applies the semantic rule, which
-   absent fails. Checked against SQLite: the companion symptom (`p(X), p(X)`
-   selecting less than `p(X)`) is **not** an anomaly — SQL does the same, as the
-   price of `NULL ≠ NULL`, which is the FK-blowup protection we want. Only the
-   negation cell differs, and the leading fix is to make the anti-join a
-   *structural membership test*, on the grounds that a negated atom binds nothing
-   and so is not a join at all. Three directions, the SQL comparison, and the one
-   behaviour change to decide (rows with an absent key drop out of "things with
-   no …") are in §17. Acceptance criterion: two `#[ignore]`d tests
-   (`a_fact_never_satisfies_its_own_negation`,
-   `repeating_a_body_literal_does_not_change_the_answer`) already assert the
-   sound behaviour. **Needs a design session — do not patch ahead of it**; every
-   direction moves §4's structural/semantic split. _designing._ — §4/§7/§11.
+1. **`absent` × negation.** ✅ **2026-07-29.** `q(X) :- p(X), not p(X).` derived
+   `q(absent)` — P ∧ ¬P. The anti-join is now a **structural membership test**: a
+   negated atom binds nothing, so refutation is not a join and the FK-blowup
+   protection it would need does not apply. §4 gained the four-site table naming
+   which notion each match site uses; joins, group keys and set dedup are
+   unchanged. Two behaviour calls, both deliberate: a row whose key is `absent`
+   drops out of "things with no …" (SQL's answer), and idempotence of conjunction
+   stays broken over `absent`, being a join property. Detail in §17; coverage is
+   **C9** plus `b1_absent_programs_agree`. — §4/§7/§11.
 
 2. **Negated atoms in the dependency schedule.** ✅ **2026-07-25.** A negated
    atom now reads the argument variables something else in the body binds, so
@@ -366,10 +364,12 @@ but a different kind of work.
   comparison/arithmetic literals (§8)", both long shipped. So there is no
   model-theoretic account of aggregation, and none of `absent`. For a spec whose
   pitch is a logic engine an LLM can trust over its own reasoning, declarative
-  semantics stopping at positive programs is the hole that matters most. Best done
-  **with** the absent × negation session (negation item 1): "what does `p(X), not
-  p(X)` mean" is a §6 question wearing an implementation costume. _queued (with
-  negation item 1)._ — §6.
+  semantics stopping at positive programs is the hole that matters most. **Its own
+  session, and now the best-prepared one:** negation item 1 settled what `p(X),
+  not p(X)` *means* on 2026-07-29 and §4 states the four match sites, so §6 has a
+  ratified semantics to describe rather than one to decide. Its remaining unknowns
+  are aggregation and the finiteness claim `bugs/004` owns (blocked on
+  Termination). _queued._ — §6.
 - **Ratify §1 and §2.** Both are still `TBD` — the doc opens on "*To fill in:
   concrete goals, non-goals, target users, success criteria*" and "candidate
   principles to ratify", while those pillars have driven every decision for three

@@ -563,6 +563,28 @@ age(\"bob\", 15).
         assert_eq!(result.answers, vec![Vec::<String>::new()]);
     }
 
+    /// The third row of §4's four-site table: an aggregate **group key** stays
+    /// **semantic**, so a group keyed on `absent` is real but empty. Verified
+    /// against SQL, where a correlated subquery keyed on `NULL` counts nothing.
+    ///
+    /// Pinned alongside `absent_keys_do_not_join` and the negation properties
+    /// because §4 now asserts all four sites normatively, and this is the one
+    /// the 2026-07-29 session did *not* change — a silent drift here would make
+    /// the table wrong without failing anything else.
+    #[test]
+    fn an_absent_group_key_makes_a_real_but_empty_group() {
+        let src = "k(absent).\nk(\"a\").\nv(absent, 99).\nv(\"a\", 1).\n\
+                   g(K, N) :- k(K), N = count { C | v(K, C) }.\n?- g(K, N).";
+        let result = run(src).expect("runs");
+        assert_eq!(
+            result.answers,
+            vec![vec![
+                "g(absent, 0).".to_string(),
+                "g(\"a\", 1).".to_string()
+            ]]
+        );
+    }
+
     #[test]
     fn a_literal_absent_in_a_body_atom_is_an_error_steering_to_is_absent() {
         let errors =

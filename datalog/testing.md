@@ -227,13 +227,15 @@ compared keyed by predicate *name*, not `PredId`.
   bodies): a literal `absent` in a body atom argument or as a comparison operand
   does not lower (§4/§8), so it would only generate rejected programs.
 
-  **Two logical laws absent still breaks**, kept as `#[ignore]`d tests that
-  assert the *sound* behaviour rather than the current one
-  (`a_fact_never_satisfies_its_own_negation`,
-  `repeating_a_body_literal_does_not_change_the_answer`): they are the executable
-  acceptance criterion for the §17 absent × negation design session. B1 cannot
-  catch these — both evaluators implement the same semantics, so they agree; it
-  is the semantics that is wrong.
+  **The two logical laws absent is measured against** are unit tests beside the
+  differential, because B1 cannot see either: both evaluators implement the same
+  semantics, so they agree whether or not it is sound.
+  `a_fact_never_satisfies_its_own_negation` holds since 2026-07-29 (§4/§7 —
+  the anti-join is structural); `repeating_a_body_literal_drops_absent_rows`
+  pins the law that stays broken **by design**, since idempotence over `absent`
+  is a *join* property and restoring it means giving up `NULL ≠ NULL`. The pair
+  is the reason C9 below is asserted against the model rather than across the
+  two evaluators.
 - [x] **B2** Fixpoint idempotence: re-running with `facts ∪ output` derives
   nothing new.
 - [x] **B3** Set semantics: duplicating any subset of input facts leaves
@@ -437,6 +439,33 @@ compared keyed by predicate *name*, not `PredId`.
   **The rule this group encodes** (`datalog/AGENTS.md`, "Working style"): a new surface
   form, desugaring, or IR-identity claim ships with a property here, in the same
   sitting.
+- [x] **C9** **Non-contradiction** — a body asserting both `p(X, _)` and
+  `not p(X, _)` derives nothing, over `absent_ir`'s row pool including the rows
+  that bind `X` to `absent` (`c9_a_body_and_its_negation_derive_nothing`, the
+  `contra` rule). Acceptance criterion for the 2026-07-29 absent × negation
+  decision (§4/§7), which closed ROADMAP negation item 1.
+
+  **Asserted against the model, not across the evaluators, and that placement is
+  the point.** B1 stays green with the fix reverted: `naive` and `seminaive`
+  implement one semantics, so a differential cannot ask whether the semantics is
+  *sound* — the same blind spot C8 records from `bugs/006`, reached by a
+  different route (there it was `typecheck` the differential could not see; here
+  it is a logical law neither evaluator claims). What B1 **does** catch is a
+  one-sided change: `b1_absent_programs_agree` goes red when the engine is
+  reverted and the oracle is not, which is what an independent re-expression of
+  the rule buys.
+
+  Non-vacuity is `absent_ir_binds_an_absent_key_under_negation`: C9 proves
+  nothing over row sets whose key column never holds `absent`, so the guard pins
+  that `absent_ir` reaches the discriminating case (`unmatched` derives
+  `(absent)` from the same positive prefix). The three plus B1 were all confirmed
+  red with `AbsentPattern::matches` reverted before being kept — `bugs/005`'s
+  discipline.
+
+  Its counterpart in the other direction is
+  `repeating_a_body_literal_drops_absent_rows` (Phase B above): the law C9 does
+  *not* generalize to, kept so the asymmetry is a decision on the record rather
+  than a gap.
 
 ### Phase D — lexer + parser (roadmap step 5) — generalizes all §16 source texts
 
