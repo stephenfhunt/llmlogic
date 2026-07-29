@@ -105,6 +105,10 @@ sorted — and they round-trip as input, so runs compose over pipes:
   it explicitly with `A is absent` / `A is not absent`. Writing `A = absent` or
   `A != absent` is an error that says so — both would be always-false. A numeric
   column with gaps still counts as numeric.
+  **Negation is the one place `absent` does match**: in `p(X), not q(X)`, an `X`
+  bound to `absent` is refuted by a stored `q(absent)`. So a "things with no …"
+  query does not report rows whose key is missing — if you want those, ask for
+  them with `X is absent` rather than expecting the negation to surface them.
 - **Queries**: `?- ancestor("alice", Who).`
 - **Imports** load external data or split a program across files:
   ```
