@@ -26,15 +26,15 @@ raw transcripts (Claude Code auto-saves those under
 
 ## 2026-07-29 — `absent` × negation: the anti-join is not a join
 
-ROADMAP negation item 1, open since 2026-07-25 — design and implementation in
-one sitting, since §17 had already argued the direction. 407 tests pass (401 +
-6), clippy and rustfmt clean, `--ignored` now **zero** known failures, not two.
+The last open item of ROADMAP's Negation section, there since 2026-07-25 — design
+and implementation in one sitting, since §17 had already argued the direction. 407
+tests pass (401 + 6), clippy and rustfmt clean, `--ignored` now **zero** known
+failures rather than two.
 
 **Done**
-- **`q(X) :- p(X), not p(X).` derives nothing.** `AbsentPattern::matches`
-  compares closed slots structurally — one line, one choke point, since the
-  anti-join is its only caller. `engine::naive`'s `refutes` re-expresses the rule
-  independently, per that module's standing rule.
+- **`q(X) :- p(X), not p(X).` derives nothing.** `AbsentPattern::matches` compares
+  closed slots structurally — one line, one choke point, the anti-join being its
+  only caller. `engine::naive`'s `refutes` re-expresses the rule independently.
 - **§4 gained the four-site table**, the real deliverable: join and comparison
   semantic, group key semantic, anti-join structural, dedup and `Ord` structural.
   The split had lived only in `ir.rs`'s doc comment, whose "every join, anti-join
@@ -47,31 +47,34 @@ one sitting, since §17 had already argued the direction. 407 tests pass (401 +
 - **Only one of the two "broken laws" was a defect.** The open question paired
   non-contradiction with idempotence of conjunction; not one phenomenon.
   Idempotence stays broken over `absent` **by design** — a *join* property, and
-  restoring it means giving up `NULL ≠ NULL`. The proof is mechanical rather than
-  argued: `repeating_a_body_literal_drops_absent_rows` passes identically with the
-  fix and without it, while every negation property flips.
+  restoring it means giving up `NULL ≠ NULL`. Proof is mechanical, not argued:
+  `repeating_a_body_literal_drops_absent_rows` passes identically with the fix and
+  without, while every negation property flips.
 - **The price, measured before it was accepted.** On the §16.8 sparse shape a food
   whose id is `absent` used to survive `not measurement(F, _)` even with
   `measurement(absent, 3)` stored. It no longer does. SQL's answer.
-- **§6 was deliberately *not* folded in**, against the 2026-07-25 review: it
-  should describe a ratified semantics, not one being decided as it is written.
-  Amended there rather than here.
+- **§6 was deliberately *not* folded in**, against the 2026-07-25 review: it should
+  describe a ratified semantics, not one being decided as written. Amended there.
 - **A four-day-old scope note earned its keep.** That same review predicted this
-  session would ship a three-site table omitting the aggregate group key — which
-  is exactly what the plan had. Re-verified `g(absent, 0)` and pinned it.
+  session would ship a three-site table omitting the aggregate group key — exactly
+  what the plan had. Re-verified `g(absent, 0)` and pinned it.
 
 **Removed**
 - Both `#[ignore]`d tests: one un-ignored, one converted. With them, ROADMAP's
   "`--ignored` should report exactly **two** known failures" and testing.md's
-  "two logical laws absent still breaks" paragraph. Nothing else deleted — but
-  `SKILL.md`'s "Missing data" bullet was *incomplete*, the source-analysis
-  recipe's `not used(F)` being exactly the shape that changed, so it gained the
-  negation case.
+  "two logical laws absent still breaks" paragraph. `SKILL.md`'s "Missing data"
+  bullet was *incomplete* rather than wrong — the recipe's `not used(F)` is
+  exactly the shape that changed — so it gained the negation case.
+- **ROADMAP's whole `### Negation (§7)` section**, ~30 lines. Closing this item
+  emptied it, so an open-backlog index held two ✅ items plus a preamble narrating
+  a resequencing it then said was "recorded in §17". Both are now one pointer
+  under milestone 4. Four current-state "negation item 1/2" references repointed;
+  those in `bugs/resolved/` and §17 stay, being frozen.
 - The 2026-07-27 `bugs/003` entry rotated verbatim to `worklog-archive/2026-07.md`.
 
 **Next up**
-- **Termination & value-creating recursion** — the remaining design session and
-  the one that unblocks `004`. Direction decided (static error, not fuel); open is
+- **Termination & value-creating recursion** — the remaining design session and the
+  one that unblocks `004`. Direction decided (static error, not fuel); open is
   whether cost-accumulating transitive closure gets an escape hatch.
 - **§6's extension** is now the better-prepared of the two: one unknown lighter,
   with §4's table to describe.

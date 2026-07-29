@@ -443,7 +443,7 @@ compared keyed by predicate *name*, not `PredId`.
   `not p(X, _)` derives nothing, over `absent_ir`'s row pool including the rows
   that bind `X` to `absent` (`c9_a_body_and_its_negation_derive_nothing`, the
   `contra` rule). Acceptance criterion for the 2026-07-29 absent × negation
-  decision (§4/§7), which closed ROADMAP negation item 1.
+  decision (§4/§7), the second of milestone 4's two negation follow-ons.
 
   **Asserted against the model, not across the evaluators, and that placement is
   the point.** B1 stays green with the fix reverted: `naive` and `seminaive`

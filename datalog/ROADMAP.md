@@ -25,6 +25,12 @@ each; detail in §17 and `docs/worklog.md`.
 2. **Core evaluator** — stratified semi-naive fixpoint with provenance recording. ✅ 2026-07-19
 3. **Named-argument lowering** — named literals desugar to positional IR. ✅ 2026-07-20
 4. **Stratified negation** — Ullman relaxation numbering + anti-join eval. ✅ 2026-07-20
+   Two follow-ons, both shipped: negated atoms **join the dependency schedule**,
+   so a computed argument means the same in all three spellings (✅ 2026-07-25,
+   closed `bugs/001`, property **C7**); and the anti-join is a **structural
+   membership test**, so `p(X), not p(X)` derives nothing (✅ 2026-07-29, property
+   **C9**). Both changed §7/§10 normative text — §17 has the rationale, including
+   why the second was resequenced behind the first.
 5. **Lexer + parser** — hand-rolled, zero-dep; canonical printer; `parse→lower→typecheck→eval`. ✅ 2026-07-22
 6. **Agent CLI** — one-shot `-q` queries; the Claude Code skill. ✅ 2026-07-23
 7. **§13 imports** — data (CSV/JSONL/Parquet/URL via DuckDB) + module imports. ✅ 2026-07-23
@@ -38,12 +44,12 @@ each; detail in §17 and `docs/worklog.md`.
 > design session that followed it (§17). It is blocked on "Termination &
 > value-creating recursion" below, so **the queue has nothing unblocked in it**.
 > The remaining design sessions are **Termination** (which unblocks `004`) and
-> **§6's extension**, now one unknown lighter — negation item 1 settled the
-> `absent` half of "what does `p(X), not p(X)` mean" on 2026-07-29.
+> **§6's extension**, now one unknown lighter — milestone 4's second follow-on
+> settled the `absent` half of "what does `p(X), not p(X)` mean" on 2026-07-29.
 >
 > Five are resolved in `bugs/resolved/`: `001` (a compound argument in a negated
-> atom silently misread as a wildcard), **fixed 2026-07-25** by negation item 2
-> below; `002` (`-q` rejected a disjunctive rule), **fixed 2026-07-26**;
+> atom silently misread as a wildcard), **fixed 2026-07-25** by milestone 4's
+> scheduling follow-on; `002` (`-q` rejected a disjunctive rule), **fixed 2026-07-26**;
 > `005` (a ground query with a computed argument printed nothing), **fixed
 > 2026-07-27** by folding a ground compound argument in a query rather than
 > hoisting it (§17 — the bug file's plumb-the-IR sketch was rejected for
@@ -58,35 +64,6 @@ each; detail in §17 and `docs/worklog.md`.
 > converted to pin the asymmetry it turned out to describe). The only `#[ignore]`d
 > test left is `url_csv_import_reads_over_httpfs`, which needs the network and
 > passes. Any *failure* under `--ignored` now means something regressed.
-
-### Negation (§7)
-
-Item 2 landed first, against the original sequencing. The reason is recorded in
-§17 and in `bugs/001`'s resolution: the interaction item 1 owns is reachable
-through an ordinary positive binding already, so item 2 added spellings that
-reach an already-broken cell rather than creating a new one — and item 2 was
-also the fix for a live soundness defect.
-
-1. **`absent` × negation.** ✅ **2026-07-29.** `q(X) :- p(X), not p(X).` derived
-   `q(absent)` — P ∧ ¬P. The anti-join is now a **structural membership test**: a
-   negated atom binds nothing, so refutation is not a join and the FK-blowup
-   protection it would need does not apply. §4 gained the four-site table naming
-   which notion each match site uses; joins, group keys and set dedup are
-   unchanged. Two behaviour calls, both deliberate: a row whose key is `absent`
-   drops out of "things with no …" (SQL's answer), and idempotence of conjunction
-   stays broken over `absent`, being a join property. Detail in §17; coverage is
-   **C9** plus `b1_absent_programs_agree`. — §4/§7/§11.
-
-2. **Negated atoms in the dependency schedule.** ✅ **2026-07-25.** A negated
-   atom now reads the argument variables something else in the body binds, so
-   `not q(X+1)`, `Y = X+1, not q(Y)` and `not q(Y), Y = X+1` are one conjunction
-   with one answer; negations the positives already ground keep their early phase
-   so anti-joins still prune first. Safety relaxed from "bound *positively*" to
-   "bound by the body" in §7/§10. The rule had been stated in three places
-   (scheduler phases, lowering's check, the engine's hand-built-IR contract) and
-   the naive oracle hard-coded the old order — all four moved together. Closed
-   `bugs/001`. Detail in §17; property coverage is testing.md **C7** + B1.
-   — §7/§8/§10.
 
 ### Expressions (§5/§8)
 
@@ -365,8 +342,8 @@ but a different kind of work.
   model-theoretic account of aggregation, and none of `absent`. For a spec whose
   pitch is a logic engine an LLM can trust over its own reasoning, declarative
   semantics stopping at positive programs is the hole that matters most. **Its own
-  session, and now the best-prepared one:** negation item 1 settled what `p(X),
-  not p(X)` *means* on 2026-07-29 and §4 states the four match sites, so §6 has a
+  session, and now the best-prepared one:** the anti-join decision settled what
+  `p(X), not p(X)` *means* on 2026-07-29 and §4 states the four match sites, so §6 has a
   ratified semantics to describe rather than one to decide. Its remaining unknowns
   are aggregation and the finiteness claim `bugs/004` owns (blocked on
   Termination). _queued._ — §6.
