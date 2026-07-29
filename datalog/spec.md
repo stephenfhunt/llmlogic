@@ -161,18 +161,15 @@ is a structured error suggesting `is absent`.
 Two notions of "same" coexist, exactly as in SQL (`NULL ≠ NULL` under `=`, yet
 equal under `DISTINCT`/`GROUP BY`):
 
-- **Semantic** (unification, joins, `=`/`!=`/ordered comparisons): `absent`
-  matches/equals nothing, including another `absent`. This keeps missing foreign
-  keys from joining each other into a cartesian blowup.
-- **Structural** (set membership/dedup, the anti-join of negation (§7), and the
-  canonical `Ord` for deterministic output, §14): a ground fact `p(absent)` is
-  identical to itself, so a relation holds a single copy; `absent` sorts
-  **first** in the value order (an output ordering only, distinct from the `<`
-  operator).
+- **Semantic**: `absent` matches/equals nothing, including another `absent`. This
+  keeps missing foreign keys from joining each other into a cartesian blowup.
+- **Structural**: a ground fact `p(absent)` is identical to itself, so a relation
+  holds a single copy, and `absent` sorts **first** in the value order (an output
+  ordering only, distinct from the `<` operator).
 
-**Negation and joining use different notions of "same"**, deliberately (§17,
-2026-07-29). Every site where the choice arises, so that none of them is decided
-by mechanism:
+**Negation and joining use different notions**, deliberately (§17, 2026-07-29).
+Every site where the choice arises, so that none of them is decided by mechanism
+rather than by design:
 
 | site | notion | on `absent` |
 |---|---|---|

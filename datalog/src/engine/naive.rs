@@ -17,10 +17,11 @@
 //!
 //! The **absent value (§4/§8) is in scope** (2026-07-25): annihilation in
 //! arithmetic, false in every comparison, matching nothing in joins, matching
-//! structurally in anti-joins (§7), and the presence filter. It is written out here from the spec's
-//! truth tables rather than delegating to `Value::unifies_with` /
-//! the engine's `apply_compare` / `apply_arith` — an oracle that shares the code under test
-//! cannot contradict it. Until then this module used plain `==` and had no
+//! structurally in anti-joins (§7), and the presence filter. It is written out
+//! here from the spec's truth tables rather than delegating to
+//! `Value::unifies_with` / the engine's `apply_compare` / `apply_arith` — an
+//! oracle that shares the code under test cannot contradict it. Until then this
+//! module used plain `==` and had no
 //! absent arms at all, so B1 was silently blind to the newest semantics in the
 //! language; the generators emitted no absent, which is the only reason it
 //! passed.
@@ -311,15 +312,13 @@ fn match_positives(
 /// Does `tuple` refute the negated `atom` under `env`? Constants and bound
 /// variables must agree **structurally** — a negated atom binds nothing, so
 /// this is a membership test, and `absent` is a member like any other (§4/§7).
-/// Unbound variables are open and match anything. Deliberately non-binding —
-/// the counterpart of the engine's `AbsentPattern::matches`, written against
-/// `env` instead.
+/// Unbound variables are open and match anything.
 ///
-/// Note this is the one match site in the oracle that does *not* use
-/// [`same_value`], and the asymmetry is the point of the design: joining and
-/// negating use different notions of "same". Written out here rather than
-/// calling the engine, per this module's rule — the oracle's value is that it
-/// *can* disagree.
+/// The one match site here that does *not* use [`same_value`], which is the
+/// design and not an oversight: joining and negating use different notions of
+/// "same". Written out rather than calling the engine's
+/// `AbsentPattern::matches`, per this module's rule — the oracle's value is
+/// that it *can* disagree, and under a one-sided revert it does.
 fn refutes(atom: &Atom, tuple: &Tuple, env: &HashMap<Var, Value>) -> bool {
     atom.args
         .iter()
