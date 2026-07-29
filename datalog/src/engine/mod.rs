@@ -3101,6 +3101,8 @@ mod tests {
         /// - `chain` joins two relations on a middle column that may be absent;
         /// - `self_join` repeats a variable *within* one atom;
         /// - `unmatched` anti-joins on a key that may be absent;
+        /// - `contra` asserts a literal and its negation in one body — the
+        ///   non-contradiction shape (C9), which must derive nothing;
         /// - `flows` just carries a column through, which must keep absent;
         /// - `above` filters on a comparison whose operand may be absent (false,
         ///   never a type error);
@@ -3130,6 +3132,7 @@ mod tests {
                 "chain(X, Y) :- p(X, Z), q(Z, Y).\n\
                  self_join(X) :- p(X, X).\n\
                  unmatched(X) :- p(X, _), not q(X, _).\n\
+                 contra(X) :- p(X, _), not p(X, _).\n\
                  flows(X, Y) :- p(X, Y).\n\
                  above(X) :- p(X, _), X > 0.\n\
                  bumped(X, N) :- p(X, Y), N = Y + 1.\n\
@@ -3162,6 +3165,65 @@ mod tests {
                 let model = eval(&program).unwrap();
                 prop_assert_eq!(model_facts(&model), naive_eval(&program).unwrap());
             }
+
+            /// **C9 — non-contradiction**: a body asserting both `p(X, _)` and
+            /// `not p(X, _)` derives nothing, for every row set including ones
+            /// where `X` binds to `absent`.
+            ///
+            /// **B1 cannot carry this**, and that is the point of stating it
+            /// separately: both evaluators implement the same semantics, so a
+            /// differential agrees with itself while the law is broken — the
+            /// same blindness `bugs/006` found in a differential over a type
+            /// error. The law has to be asserted directly against the model.
+            /// Reverting `AbsentPattern::matches` to `unifies_with` must make
+            /// this fail.
+            #[test]
+            fn c9_a_body_and_its_negation_derive_nothing(
+                p_rows in prop::collection::vec((0u8..3, 0u8..3), 0..8),
+                q_rows in prop::collection::vec((0u8..3, 0u8..3), 0..8),
+            ) {
+                let program = absent_ir(&p_rows, &q_rows);
+                let contra = program
+                    .predicates
+                    .iter()
+                    .position(|p| p.name == "contra")
+                    .expect("the generated program defines `contra`");
+                let model = eval(&program).unwrap();
+                prop_assert!(
+                    model.relation(PredId(contra as u32)).is_empty(),
+                    "P and not-P were both satisfied: {:?}",
+                    model.relation(PredId(contra as u32))
+                );
+            }
+        }
+
+        /// Non-vacuity for C9 (the generator-coverage convention, testing.md):
+        /// the shape only discriminates when `p`'s key column actually holds
+        /// `absent`, and a green C9 over row sets that never produce one would
+        /// prove nothing. Pins that `absent_ir`'s pool reaches the key column,
+        /// and that the contradiction rule is reachable at all — `unmatched`
+        /// derives from the same positive prefix.
+        #[test]
+        fn absent_ir_binds_an_absent_key_under_negation() {
+            let program = absent_ir(&[(2, 0)], &[]);
+            let pred = |name: &str| {
+                PredId(
+                    program
+                        .predicates
+                        .iter()
+                        .position(|p| p.name == name)
+                        .expect("predicate exists") as u32,
+                )
+            };
+            let model = eval(&program).expect("evaluates");
+            // `p(absent, 0)` binds X := absent, so the negated literal is an
+            // absence pattern closed to `absent` — the discriminating case.
+            assert_eq!(
+                model.relation(pred("unmatched")),
+                &BTreeSet::from([Tuple(vec![Value::Absent])]),
+                "the positive prefix must bind an absent key"
+            );
+            assert!(model.relation(pred("contra")).is_empty());
         }
 
         // --- Aggregation (§9) ---
