@@ -1220,12 +1220,29 @@ fn arb_statement() -> impl Strategy<Value = Statement> {
                 span: Span::DUMMY,
             })
         });
-    let query = proptest::collection::vec(arb_printable_literal(), 1..=3).prop_map(|body| {
-        StatementKind::Query(crate::ast::Query {
-            body,
-            span: Span::DUMMY,
-        })
-    });
+    // A query is named or not (§14). `count` is deliberately in the pool: it is a
+    // *contextual* keyword (§3), so it lexes as an identifier and must survive the
+    // round trip as an answer name rather than being read as an aggregate operator.
+    let query_name = prop_oneof![
+        Just(None),
+        Just(Some("adult")),
+        Just(Some("conflict")),
+        Just(Some("count")),
+    ];
+    let query = (
+        query_name,
+        proptest::collection::vec(arb_printable_literal(), 1..=3),
+    )
+        .prop_map(|(name, body)| {
+            StatementKind::Query(crate::ast::Query {
+                name: name.map(|name| crate::ast::Ident {
+                    name: name.to_string(),
+                    span: Span::DUMMY,
+                }),
+                body,
+                span: Span::DUMMY,
+            })
+        });
     prop_oneof![fact, rule, query].prop_map(|kind| Statement {
         kind,
         span: Span::DUMMY,
@@ -1660,6 +1677,7 @@ pub(crate) fn positionalize(program: &Program) -> Program {
             },
             StatementKind::Query(query) => Statement {
                 kind: StatementKind::Query(crate::ast::Query {
+                    name: query.name.clone(),
                     body: rewrite_body(&query.body),
                     span: query.span,
                 }),
@@ -1925,6 +1943,7 @@ pub(crate) fn fold_ground_atom_args(program: &Program) -> Program {
                     span: clause.span,
                 }),
                 StatementKind::Query(query) => StatementKind::Query(Query {
+                    name: query.name.clone(),
                     body: fold_body(&query.body),
                     span: query.span,
                 }),

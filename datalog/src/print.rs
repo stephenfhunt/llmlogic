@@ -107,7 +107,10 @@ fn print_clause(clause: &Clause) -> String {
 }
 
 fn print_query(query: &Query) -> String {
-    format!("?- {}.", print_body(&query.body))
+    match &query.name {
+        Some(name) => format!("?- {}: {}.", name.name, print_body(&query.body)),
+        None => format!("?- {}.", print_body(&query.body)),
+    }
 }
 
 fn print_body(body: &[Literal]) -> String {

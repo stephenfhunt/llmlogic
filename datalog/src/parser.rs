@@ -337,6 +337,23 @@ impl Parser<'_> {
     fn parse_query(&mut self) -> PResult<Statement> {
         let start = self.span();
         self.bump(); // `?-`
+        // An optional answer name: `?- adult: person(…), … .` (§14). One token of
+        // lookahead decides it, and unambiguously — a body literal beginning with
+        // an identifier is an atom (`ident (`) or a symbol constant, no
+        // comparison operator is `:`, and a named *argument* only occurs inside
+        // an atom's parentheses. So `ident :` here can only be an answer name.
+        let name = match (self.kind(), self.kind_at(1)) {
+            (TokenKind::Ident(name), TokenKind::Colon) => {
+                let name = Ident {
+                    name: name.clone(),
+                    span: self.span(),
+                };
+                self.bump(); // the name
+                self.bump(); // `:`
+                Some(name)
+            }
+            _ => None,
+        };
         let body = self.parse_conjunction()?;
         // Queries are conjunctive in v1 — a `;` here is disjunction, deferred.
         if matches!(self.kind(), TokenKind::Semi) {
@@ -349,6 +366,7 @@ impl Parser<'_> {
         let end = self.expect(&TokenKind::Dot, "`.` to end the query")?.span;
         Ok(Statement {
             kind: StatementKind::Query(Query {
+                name,
                 body,
                 span: join(start, end),
             }),
@@ -958,6 +976,9 @@ mod tests {
                 }
                 StatementKind::Query(query) => {
                     query.span = Span::DUMMY;
+                    if let Some(name) = &mut query.name {
+                        name.span = Span::DUMMY;
+                    }
                     query.body.iter_mut().for_each(zero_literal);
                 }
             }
@@ -1594,6 +1615,78 @@ adult(N) :- person(name: N, age: A), A >= 18.
             assert_eq!(
                 parse_ok(&printed),
                 parse_ok(&src),
+                "round trip changed the tree for {src:?} (printed as {printed})"
+            );
+        }
+    }
+
+    /// The optional answer name (§14): `?- name: body.` parses to a `Query` whose
+    /// `name` is set and whose body is untouched — the name is not a body literal.
+    #[test]
+    fn a_named_query_parses_its_name_beside_an_unchanged_body() {
+        let body = || {
+            vec![fixtures::positive_literal(fixtures::named_atom(
+                "person",
+                vec![fixtures::named_arg("name", fixtures::var_term("N"))],
+            ))]
+        };
+        assert_eq!(
+            parse_ok("?- adult: person(name: N)."),
+            Program {
+                statements: vec![fixtures::named_query("adult", body())],
+            }
+        );
+        // Same body, no name — the two differ in exactly that one field.
+        assert_eq!(
+            parse_ok("?- person(name: N)."),
+            Program {
+                statements: vec![fixtures::query(body())],
+            }
+        );
+    }
+
+    /// One token of lookahead separates the answer name from every body that
+    /// *starts* with an identifier, so naming costs the unnamed forms nothing.
+    /// A **contextual** keyword (§3) is an ordinary name here, as it is anywhere
+    /// a relation may be named.
+    #[test]
+    fn an_identifier_starting_a_query_body_is_still_a_body() {
+        // An atom, a symbol constant on the left of a comparison, and an
+        // aggregate — none of them a name, none of them disturbed.
+        parse_ok("?- person(name: N).");
+        parse_ok("?- alice < bob.");
+        parse_ok("?- N = count { C | e(C, _) }.");
+        // …and the contextual keywords are available as names.
+        parse_ok("?- count: person(name: N).");
+        parse_ok("?- int: person(name: N).");
+    }
+
+    /// The acceptance partner for the [`arb_statement`] query-name widening
+    /// (testing.md rule 4), in the shape the grouping and cast round trips
+    /// established. A printer that dropped the name would leave D2/D3 green only
+    /// if the *generator* never produced one, which is why the widening and this
+    /// test land together.
+    ///
+    /// [`arb_statement`]: crate::testgen
+    #[test]
+    fn a_query_name_survives_the_print_round_trip() {
+        for (src, expected) in [
+            ("?- adult: person(name: N, age: A), A >= 18.", "?- adult: "),
+            // A ground body, where the unnamed form would print its own atoms.
+            ("?- ok: p(\"a\"), q(\"b\").", "?- ok: "),
+            // A contextual keyword as the name.
+            ("?- count: p(X).", "?- count: "),
+            // The unnamed form must not acquire one.
+            ("?- p(X).", "?- p(X)."),
+        ] {
+            let printed = print_program(&parse(src).expect("parses"));
+            assert!(
+                printed.contains(expected),
+                "printing {src:?} should render {expected:?}: {printed}"
+            );
+            assert_eq!(
+                parse_ok(&printed),
+                parse_ok(src),
                 "round trip changed the tree for {src:?} (printed as {printed})"
             );
         }

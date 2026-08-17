@@ -146,9 +146,14 @@ pub struct Clause {
     pub span: Span,
 }
 
-/// A query statement: `?- body.`
+/// A query statement: `?- body.`, or `?- name: body.` when named (§14).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Query {
+    /// The relation the answer is published under, when the query names itself.
+    /// Exact sugar for a rule whose head is the projection — lowering
+    /// synthesizes that rule, so the name is a *definition* and not a print-time
+    /// label (§17, 2026-08-17).
+    pub name: Option<Ident>,
     pub body: Vec<Literal>,
     pub span: Span,
 }
@@ -557,6 +562,19 @@ pub(crate) mod fixtures {
     pub(crate) fn query(body: Vec<Literal>) -> Statement {
         Statement {
             kind: StatementKind::Query(Query {
+                name: None,
+                body,
+                span: Span::DUMMY,
+            }),
+            span: Span::DUMMY,
+        }
+    }
+
+    /// A query publishing its answer under `name` (§14).
+    pub(crate) fn named_query(name: &str, body: Vec<Literal>) -> Statement {
+        Statement {
+            kind: StatementKind::Query(Query {
+                name: Some(ident(name)),
                 body,
                 span: Span::DUMMY,
             }),
@@ -594,6 +612,7 @@ pub(crate) mod fixtures {
                 ),
                 Statement {
                     kind: StatementKind::Query(Query {
+                        name: None,
                         body: vec![positive_literal(positional_atom(
                             "ancestor",
                             vec![string_term("alice"), var_term("Who")],
