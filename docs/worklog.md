@@ -24,6 +24,60 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-16 — Building the decided backlog: one shipped, one renamed, one falsified
+
+Three sessions of design had left five items *decided, not built*, and `src/` had
+not changed since 2026-07-29. This session took the three carrying no open design
+question. 410 tests pass (was 407), 1 ignored, clippy and rustfmt clean.
+
+**Done**
+- **Parenthesized expressions ship** — `primary → "(" expr ")"`, and printing
+  became precedence-aware: parens go on a child binding looser than its parent,
+  and on an equal-precedence child on the **right**, so `A - (B - C)` survives.
+  `arb_printable_expr` generates arbitrarily shaped trees now, which is what puts
+  D2/D3 on the new code.
+- **The rename landed** — `AbsentPattern` → `NoMatchPattern`, `Premise::Absent` →
+  `NoMatch`, "absence pattern" → "no-match pattern". §4's and §11's two standing
+  "shares a word, not a concept" disclaimers are gone, which was the point.
+- **§17's open questions were swept**: four contradicted decisions above them in
+  the same file. ***Answered*** joined the marker table, having been in use since
+  2026-07-29 without being in the vocabulary that table calls a grep.
+
+**Decided**
+- **First-appearance stamping is closed without being built: its premise is false
+  here.** It was adopted from tsdl on the reasoning that "the solver reads the
+  store live". Ours does not — `eval_stratum` collects a round's matches against
+  the previous round's model and applies them in a **batch**, so the
+  first-producing derivation always has strictly-earlier premises. Measured over
+  400 generated programs: `explain` returned `None` **zero** times, and same-round
+  premises sat only on redundant rediscoveries (254 of 659 derivations). A sequence
+  number would admit those and *change which proof is printed*, for no correctness
+  gain. The forward risk is now recorded at the apply loop: interleaving collection
+  with insertion breaks the bound silently, and E1 is what fires.
+- **D2 is the property that bites, not D3.** Mutation-verified: flattening the
+  printer leaves **D3 green**, dropping parens being still a *fixpoint* — it just
+  re-parses to a different tree. Only the round trip sees a lossy canonicalization.
+- **The rename's scope claim was wrong**, amended in place: ~40 non-frozen lines
+  over 9 files, not 31 over 8, and six §17 entries hold the old name and keep it.
+  The carve-out that entry called "nothing to argue about" is what the sweep needed.
+
+**Removed**
+- The parens ROADMAP item and its §8 *Not covered* paragraph;
+  `grouped_expression_is_rejected_with_the_decomposition_hint` and the message it
+  pinned; `arb_chain`, whose whole job was the left-leaning restriction. The
+  Expressions preamble lost a "two findings" that had stopped counting.
+- **testing.md E5 restated, not deleted** — it waited on provenance-as-facts,
+  decided in the *negative*, so it now pins that decision's own guard: stripping
+  `%` comments leaves byte-for-byte what the program prints without its goals.
+- The 2026-07-29 entry rotated verbatim to `worklog-archive/2026-07.md`.
+
+**Next up**
+- **The answer shape** is still the user call, and still blocks the widening.
+  Unchanged: **Termination** (blocks `bugs/004`), then **§6's extension**.
+- The `as` cast is the cheapest remaining non-design item; Expressions holds
+  nothing else. **Parallelism** is now the change most likely to break E1's
+  batching assumption — written down where it would be violated.
+
 ## 2026-08-16 — Reading a sibling engine: three decisions taken, one question reopened
 
 Cross-project review of `~/code/tsdl`, a Datalog engine in TypeScript that names
@@ -132,60 +186,3 @@ decision ships as a ROADMAP item with its property specified first, per the
   `skill/SKILL.md` and `docs/agent-skill.md`, which each restate the rule.
 - Unchanged: the **Termination** design session, the **§17 restructure**, **CI**.
   `bugs/004` still blocked on Termination.
-
-## 2026-07-29 — `absent` × negation: the anti-join is not a join
-
-The last open item of ROADMAP's Negation section, there since 2026-07-25 — design
-and implementation in one sitting, since §17 had already argued the direction. 407
-tests pass (401 + 6), clippy and rustfmt clean, `--ignored` now **zero** known
-failures rather than two.
-
-**Done**
-- **`q(X) :- p(X), not p(X).` derives nothing.** `AbsentPattern::matches` compares
-  closed slots structurally — one line, one choke point, the anti-join being its
-  only caller. `engine::naive`'s `refutes` re-expresses the rule independently.
-- **§4 gained the four-site table**, the real deliverable: join and comparison
-  semantic, group key semantic, anti-join structural, dedup and `Ord` structural.
-  The split had lived only in `ir.rs`'s doc comment, whose "every join, anti-join
-  and unification site must use `unifies_with`" was about to become false.
-- **C9** (`c9_a_body_and_its_negation_derive_nothing`), a `contra` rule in
-  `absent_ir`, the non-vacuity guard — all three plus `b1_absent_programs_agree`
-  confirmed red with the fix reverted.
-
-**Decided**
-- **Only one of the two "broken laws" was a defect.** The open question paired
-  non-contradiction with idempotence of conjunction; not one phenomenon.
-  Idempotence stays broken over `absent` **by design** — a *join* property, and
-  restoring it means giving up `NULL ≠ NULL`. Proof is mechanical, not argued:
-  `repeating_a_body_literal_drops_absent_rows` passes identically with the fix and
-  without, while every negation property flips.
-- **The price, measured before it was accepted.** On the §16.8 sparse shape a food
-  whose id is `absent` used to survive `not measurement(F, _)` even with
-  `measurement(absent, 3)` stored. It no longer does. SQL's answer.
-- **§6 was deliberately *not* folded in**, against the 2026-07-25 review: it should
-  describe a ratified semantics, not one being decided as written. Amended there.
-- **A four-day-old scope note earned its keep.** That same review predicted this
-  session would ship a three-site table omitting the aggregate group key — exactly
-  what the plan had. Re-verified `g(absent, 0)` and pinned it.
-
-**Removed**
-- Both `#[ignore]`d tests: one un-ignored, one converted. With them, ROADMAP's
-  "`--ignored` should report exactly **two** known failures" and testing.md's
-  "two logical laws absent still breaks" paragraph. `SKILL.md`'s "Missing data"
-  bullet was *incomplete* rather than wrong — the recipe's `not used(F)` is
-  exactly the shape that changed — so it gained the negation case.
-- **ROADMAP's whole `### Negation (§7)` section**, ~30 lines. Closing this item
-  emptied it, so an open-backlog index held two ✅ items plus a preamble narrating
-  a resequencing it then said was "recorded in §17". Both are now one pointer
-  under milestone 4. Four current-state "negation item 1/2" references repointed;
-  those in `bugs/resolved/` and §17 stay, being frozen.
-- The 2026-07-27 `bugs/003` entry rotated verbatim to `worklog-archive/2026-07.md`.
-
-**Next up**
-- **Termination & value-creating recursion** — the remaining design session and the
-  one that unblocks `004`. Direction decided (static error, not fuel); open is
-  whether cost-accumulating transitive closure gets an escape hatch.
-- **§6's extension** is now the better-prepared of the two: one unknown lighter,
-  with §4's table to describe.
-- Unchanged: **parenthesized expressions** (cheapest non-design item), the **§17
-  restructure**, **CI**, the GitHub *About* panel.
