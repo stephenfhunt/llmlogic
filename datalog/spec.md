@@ -1405,6 +1405,7 @@ entry it amends, with a date and a pointer:
 | ***Falsified*** | a load-bearing premise turned out untrue (usually a `bugs/` file) |
 | ***Superseded by …*** | still-true reasoning, but a later decision replaced the outcome |
 | ***Amended …*** | the decision stands with its scope or detail changed |
+| ***Reopened …*** | the decision stands and is *under review*: nothing is overturned, but it is not to be built on until the question it points at is answered |
 | ***Consequences …*** | nothing changed — what it cost, whether the rationale held, whether the rejected alternative still looks rejected |
 
 The last is the one that needs deliberate effort: it has no triggering change, so
@@ -1507,6 +1508,13 @@ say.
     hazard is pre-existing, is enlarged here, and cut in favour; §14 gained prose
     instead. Soufflé settled the division of labour: **inference is for reading
     one query's output, naming is for composing it** (§14).
+  - ***Reopened 2026-08-16*** — user call, against the open question below. Nothing
+    here is overturned and the reasoning is intact; what changed is that the surface
+    this decides is the one the user is least willing to get wrong, and a second
+    engine has since shipped the opposite answer (an `unnamed-answer` error, no
+    invented relation name) with an argument this entry never weighed. **The
+    widening is not to be implemented while the shape it widens is under review**,
+    which is what this marker exists to tell a reader who arrives via the ROADMAP.
 
 - **2026-07-29** — **The anti-join is a structural membership test** (§4/§7;
   `src/provenance.rs`). `q(X) :- p(X), not p(X).` derived `q(absent)` — P ∧ ¬P.
@@ -2691,6 +2699,31 @@ say.
 > each (`bugs/README.md` for the conventions). This section is for questions with
 > no settled answer; a defect has a known-wrong answer. Where a defect falsifies a
 > decision above, the decision carries the amendment inline.
+
+- **What does a query print, and under what relation name?** Reopened 2026-08-16
+  (user call), against the 2026-08-03 decision above. Not a move in the opposite
+  direction: the user-facing language on both input and output is the thing this
+  engine exists to get right, and it is not yet clear this shape is right. Nothing
+  changes until this is answered, and **the 2026-08-03 widening is not built
+  meanwhile** — building a widening of a shape under review buys the wrong thing
+  twice. `notes/query-answer-shape.md` holds the long form; it already carries the
+  measured boundary table, the Soufflé survey and two rejected alternatives, and
+  gains the axes below.
+
+  **Five axes, separable, and answering them as one is the trap**, stated with
+  their evidence in the note: (1) does an unnameable query **error or synthesize** —
+  the real disagreement, where tsdl errors so that nothing is ever printed under an
+  invented relation name; (2) if it synthesizes, is **`answer/N`** the right name,
+  colliding as it does with every other query's answer; (3) the **projection
+  hazard**, which is unfixed in *both* engines and must not be read as their
+  advantage; (4) **yes/no**, which has no real opposition and could be settled
+  early; and (5) **naming at the invocation** — `-q 'conflict: p(X), q(X)'` — which
+  keeps the language total, which neither engine has considered, and which is
+  exactly where being a CLI and being an embedded library diverge.
+
+  **No recommendation is recorded**, deliberately: one would turn a question the
+  user asked to have thought through into a decision with a default.
+  — §5/§14, `notes/query-answer-shape.md`, `notes/tsdl-cross-project-review.md`.
 
 - **Does a failed `as` conversion error, or yield `absent`?** The one piece of the
   cast left undecided (2026-07-25). `"abc" as int` can be a structured error,

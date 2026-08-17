@@ -241,22 +241,26 @@ which a static rule does not address at all. _designing._ — §2/§6/§8/§10.
 Items landing on the agent surface, the one consumer least able to work around
 them. Except where noted these are documented v1 limits rather than defects.
 
-- **The answer shape reads one *literal*, not one *atom*.** `?- p("a"), 1 < 2.`
-  answers nothing where `?- p("a").` answers. Decided 2026-08-03: widen to one
-  positive atom whose variables are exactly the answer variables; C8 property
-  first. _queued — decided, not built._ — §14, `notes/query-answer-shape.md`.
+- **The answer shape — what a query prints, and under what relation name.**
+  **Reopened 2026-08-16** (user call): the 2026-08-03 widening stands but is **not
+  to be built** while the shape it widens is under review. Absorbs two items that
+  were separate and are one question — the widening itself (`?- p("a"), 1 < 2.`
+  answering nothing where `?- p("a").` answers), and the multi-atom existence check
+  (`?- p("a"), q("b").` printing nothing and exiting 0 either way, which is the
+  *silently lost question* `EXPERIMENTS.md` names as the failure mode that matters).
+  Five separable axes, a fifth option neither engine has considered, and the
+  evidence are in §17's open question. _designing._ — §5/§14,
+  `notes/query-answer-shape.md`.
 - **Three different body grammars.** Rule bodies are DNF; queries and aggregate
   goals are conjunction-only (all three verified). So a disjunctive filter can be
   expressed only by detouring through the rule form — which `bugs/002` made
   unusable via `-q` until 2026-07-26, and the detour is still the only route.
   Decide whether `;` extends to queries and goals, or whether the asymmetry is
   deliberate and gets stated as such in §5 (it currently reads as an aside:
-  "Queries stay conjunctive"). _queued._ — §5.
-- **A multi-atom existence check has no answer.** `?- p("a"), q("b").` prints
-  nothing and exits 0 whether or not it holds: the engine cannot answer a yes/no
-  question, and §5's ban on 0-arity atoms removes the workaround. A single ground
-  atom is distinguishable, and the 2026-08-03 widening extends that to one atom
-  plus filters, so only the conjunction is left. _queued._ — §5/§14.
+  "Queries stay conjunctive"). One datum on how much it matters: in a sibling
+  engine's experiment **neither subject reached for `;` at all**, both writing two
+  rules over one head, so the case for uniformity is consistency rather than demand
+  (`notes/tsdl-cross-project-review.md`). _queued._ — §5.
 - **No string operations.** No prefix, split or concat, so reducing `lower::tests`
   to `lower` is unwritable and the fact producer must do it (2026-07-27). Closed:
   string construction fails §5's own termination test and would widen the hole the

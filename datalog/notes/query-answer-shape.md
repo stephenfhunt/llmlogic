@@ -1,9 +1,14 @@
-# The query answer shape — survey and boundary
+# The query answer shape — survey, boundary, and the reopened question
 
 Long-form backing for the **2026-08-03** §17 decision (the substituted-atom form
 widens to one positive atom plus non-binding literals). §17 holds the decision;
 this file holds the survey, the measured boundary, and the alternatives that were
-rejected. It is the implementation session's brief.
+rejected.
+
+**Reopened 2026-08-16** (user call, §17). It was the implementation session's
+brief; it is now the *design* session's, and the widening is not to be built until
+the question below is answered. Nothing measured here is retracted — what changed
+is that the question got wider than the widening. The axes are at the end.
 
 ## The boundary
 
@@ -107,7 +112,70 @@ that currently has no answer and gains one. What remains is the genuine
 still binds nothing, and still has nowhere to put a yes/no, with §5's ban on
 0-arity atoms removing the workaround.
 
+## The reopened question — five axes
+
+Added 2026-08-16. **They are separable, and answering them as one is the trap.**
+Where a second engine (`~/code/tsdl`, see `notes/tsdl-cross-project-review.md`)
+took the other branch, it is named; it is evidence and not an authority.
+
+**1. Does an unnameable query error, or synthesize a name?** The real
+disagreement; everything else is downstream. tsdl errors — `unnamed-answer`,
+handing back the rule that would name it — on the argument that *nothing is ever
+printed under an invented relation name*, which raises the closure property from
+"output re-lexes" to "output **re-parses and typechecks** against the program that
+produced it". We synthesize. The cost of erroring is a round trip on a question the
+user has already asked clearly; the cost of synthesizing is below.
+
+**2. If it synthesizes, is `answer/N` the right name?** It collides with every
+other query's answer, so piping two runs merges unrelated relations under one head
+— and the survey above already established that *an inferred name is the wrong name
+for composition either way*. tsdl's `answer` is arity-1 boolean **only**, which
+gives it exactly one meaning. A narrower name is a cheaper name.
+
+**3. The projection hazard is unfixed in both engines.** Their §16 re-emits a
+substituted atom exactly as we do, so `?- p(X, "a").` prints `p` facts over a
+subset of `p`'s rows with nothing marking it as one. §14 documents this here; their
+spec does not mention it. **Nobody has solved it**, and a session reading their
+design must not take it for the version without the hazard. The verified
+demonstration is in *Rejected: keep `answer/N` as a projection marker* above.
+
+**4. Yes/no.** `?- p("a"), q("b").` prints nothing and exits 0 whether or not it
+holds — the *silently lost question*, which `EXPERIMENTS.md` names as the failure
+mode that matters most, and §5's ban on 0-arity atoms removes the workaround. tsdl
+emits `answer(true)` / `answer(false)` for a body with **no answer variables**,
+arity one, always boolean, with no second sigil: which form a query gets is read
+off its body. **This axis has no real opposition** and could be settled ahead of
+1–3.
+
+**5. A CLI has an option a library does not, and neither engine has considered
+it.** `answer/N`, `unnamed-answer` and define-and-select are all *language*
+answers. The name could instead be given at the **invocation** — `-q 'conflict:
+p(X), q(X)'`, or `--as conflict` — which keeps the language total, keeps output
+composable under a name the author chose, and costs no round. It is a strictly
+smaller ask than define-and-select (no rule head, no body repetition) and it lands
+where the asymmetry actually is: tsdl is embedded in a host that has its own
+vocabulary for naming things, and we are a program invoked from a shell.
+
+### Evidence to weigh, and what it does not show
+
+- tsdl's `EXPERIMENTS.md` task A: **a bare conjunctive query is the first reflex**,
+  and `unnamed-answer` **never fired** — the guide's "define a rule and query its
+  head" line prevented it. So the error's *prevention* is measured; its *recovery*
+  is not, and axis 1 turns partly on recovery.
+- The same runs found models act on a diagnostic's suggestion **literally**, which
+  is what an `unnamed-answer` handing back a pasteable rule depends on — and, from
+  the other side, why a suggestion that cannot be acted on costs a round.
+- Against that, our own `EXPERIMENTS.md`: a skill that cannot say something **loses
+  the question silently, and the model does not announce the switch**. An error is
+  loud. `answer/N` and axis 4's silence are not.
+
+**No recommendation is recorded, deliberately.** One would turn a question the user
+asked to have thought through into a decision with a default.
+
 ## Implementation brief
+
+*Frozen 2026-08-16 pending the question above — accurate for the widening as
+decided, and not to be executed until the shape is settled.*
 
 - Site is `answer_lines` in `src/api.rs`; the shape decision is entirely
   syntactic, over `ir::Query`. No evaluator, lowering or IR change.
