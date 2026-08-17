@@ -24,6 +24,58 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-03 — The query answer shape: one atom, not one literal
+
+Design session, prompted by a user question about §14's synthesized `answer/N`
+output. Docs only — no engine or test change; 407 pass, 1 ignored, unchanged. The
+decision ships as a ROADMAP item with its property specified first, per the
+2026-07-22 entry's own *Consequences* note about untested output-shape widenings.
+
+**Done**
+- **`spec.md` §14** — a paragraph stating that substituted-atom output is a
+  **projection, not the relation**: it prints a real predicate's name over a
+  subset of its rows with nothing marking it as one, so composing it onward
+  narrows that predicate. Present truth, undocumented since 2026-07-22.
+- **`notes/query-answer-shape.md`** (new) — the overflow: the measured boundary
+  table, the Soufflé survey, both rejected alternatives, an implementation brief.
+- **`spec.md` §17** — the decision, pointing at the note; plus an ***Amended
+  2026-08-03*** marker on the 2026-07-22 entry whose output-shape rule this moves
+  for the third time.
+- **`ROADMAP.md`** — the widening as its own item; **`testing.md`** — a C8
+  sub-claim specified, `#[ignore]`d-and-failing, generator built backwards from
+  an EDB fact.
+
+**Decided**
+- **The atom form keys on one positive *atom*, not one *literal*** — plus any
+  number of non-binding literals, and the atom's variables must **equal** the
+  answer variables. The trigger was not the opaque name: `?- person("bob", 17).`
+  prints the fact and `?- person("bob", 17), 1 < 2.` prints **nothing**, which is
+  `bugs/005`'s shape reached by a filter instead of by hoisting. Variable-set
+  equality is a genuinely new condition — today's check is one-directional and
+  survives only because a one-literal body has no other binder.
+- **Inference is for reading one query's output; naming is for composing it.**
+  Soufflé settled this by having no `?-` at all — goals are `.output` directives,
+  so the user always names the relation, which is define-and-select, already
+  shipped. An inferred name is wrong for composition either way: `person`
+  collides with the relation it was projected from, `answer` with every query.
+- **The narrowing hazard cut in favour of widening**, because `answer/N` marks
+  *unnameable*, not *projection* — the atom form has carried the same hazard
+  since 2026-07-22. The answer was §14 prose, not more anonymous queries.
+
+**Removed**
+- The 2026-07-27 *Source-analysis dogfood* entry rotated verbatim to
+  `worklog-archive/2026-07.md`.
+- The existence-check ROADMAP item trimmed 8 lines → 5: its `bugs/005` history was
+  narration a current-state document should not carry, and §17 has it. Its section
+  intro lost a hardcoded "all three" that had already stopped counting correctly.
+
+**Next up**
+- **Implement the widening**: `answer_lines` (`src/api.rs`), syntactic over
+  `ir::Query`, no evaluator or IR work; land C8 by deleting its `#[ignore]`. Sweep
+  `skill/SKILL.md` and `docs/agent-skill.md`, which each restate the rule.
+- Unchanged: the **Termination** design session, the **§17 restructure**, **CI**.
+  `bugs/004` still blocked on Termination.
+
 ## 2026-07-29 — `absent` × negation: the anti-join is not a join
 
 The last open item of ROADMAP's Negation section, there since 2026-07-25 — design
@@ -133,56 +185,3 @@ still exactly two.
 - Cheapest non-design item, unchanged: **parenthesized expressions**
   (`src/parser.rs:619-628`, `src/print.rs:169` — the printer is the real work).
   Also unchanged: the **§17 restructure**, **CI**, the GitHub *About* panel.
-
-## 2026-07-27 — Source-analysis dogfood, second run: the engine on 28k facts
-
-Re-ran the 2026-07-23 use case now that §13 imports and §9 aggregation exist.
-Facts from `syn` (a throwaway scratchpad extractor, not committed), not regex.
-Docs only in the engine; one build-tooling line. 395 tests pass, clippy and
-rustfmt clean, `cargo package-skill` green with `recipes/` in the bundle.
-
-**Done**
-- **`skill/recipes/source-analysis.md`** — the recipe deferred in 2026-07-23
-  pending §13/§9. `cargo package-skill` now bundles `recipes/`, so it ships.
-- **`bugs/006`** — `<` rejects strings while `min`/`max` order them, against §8's
-  own text; `src/typecheck.rs` cites §8 for both halves. Found by needing `A < B`
-  to canonicalise a pair, not by reading the spec.
-- **Findings, each source-verified before being written down:** `engine ↔
-  provenance` is a genuine import cycle; three mutual-recursion clusters, all
-  reached through the **aggregate** arm, including `parse_primary →
-  parse_aggregate → parse_expr`; `print_fact_lines` is public with zero callers
-  and zero tests; `lower.rs ↔ provenance.rs` co-change 6× with no `use` edge,
-  coupled through `ir::BodyIdx`'s meaning. No dead private function, no
-  unconstructed variant — the negatives prose cannot claim credibly.
-- **First evaluation numbers**, in `notes/performance-baseline.md`: importing 28k
-  facts is 0.32 s, so the cost is evaluation — 173k derived tuples in 11.6 s and
-  505 MB, and a **35x cliff** from an unused closure merely being in scope.
-
-**Decided**
-- **The engine holds the uncertainty, not the extractor.** 2026-07-23 said the
-  fix for bad facts was a better parser. `syn` removed the regex error class and
-  added its own — macro bodies opaque (7% of functions invisible), bare callee
-  names merging `Model::new` with `Lexer::new`. What worked was resolving in
-  Datalog in confidence tiers, leftovers kept as a *counted* relation: 1,504
-  certain edges, 2,458 likely, conclusion stable across both.
-- **Two language limits push work back into the fact producer** — no string
-  ordering (`bugs/006`), no string operations at all. Both forced extractor
-  columns that exist only to serve the query. Their resolutions diverge, and the
-  line between them is *filters yes, constructors no*: **widen `<`**, and
-  **reject string operations outright** rather than defer them (§17) — `concat`
-  fails the finite-value-set test §5 already applies to casts.
-- **The count-distinct trap is worse than §9 says**, and §13 is why: over a wide
-  imported table the wildcard is never written — 36 call sites where the question
-  wanted 20 callers. §17 and the ROADMAP item carry the measurement.
-
-**Removed**
-- The 2026-07-27 GitHub-publication entry rotated verbatim to
-  `worklog-archive/2026-07.md`. Nothing else: no doc claim was found stale.
-
-**Next up**
-- **`bugs/006` is decided and specified, not done** — widen the typechecker. The
-  file carries the exact three lines, the finding that *both evaluators already
-  handle it*, and the warning that `b1_comparison_programs_agree`'s generator is
-  integer-only and cannot cover the widened surface. `004` blocked on Termination.
-- Unchanged: the two design sessions (**`absent` × negation**, **Termination**),
-  the **§17 restructure**, and **CI**.
