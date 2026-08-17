@@ -448,6 +448,24 @@ compared keyed by predicate *name*, not `PredId`.
   | `-q` ≡ equivalent file program | nothing | `bugs/002` (closed 2026-07-26) |
   | a computed argument ≡ its value | unit test only (facts) | `bugs/005` (closed 2026-07-27) |
   | `<` ≡ `min`/`max` on one value order | nothing (unwritable — `<` was rejected) | `bugs/006` (closed 2026-07-27) |
+  | a substituted answer ≡ the synthesized one | property, written with the change (2026-08-17) | — |
+
+  - **`c8_an_answer_shape_neither_drops_nor_collapses_a_row`** over
+    `testgen::arb_answer_shape_case` — the §14 shape rule: an answer printed under a
+    real relation's name carries the same rows the synthesized form would have. The
+    oracle **filters the generator's own fact list**, never calling `answer_lines`,
+    per the corollary below.
+
+    Two things this property records about *building* one. Its generator is built
+    **backwards from facts the EDB contains**, so the query is guaranteed to answer
+    — the cautionary precedent being
+    `a_computed_query_argument_answers_like_its_value`, whose rewrite-based first
+    version passed unfixed. And its fourth shape — a body binding a variable **no
+    atom mentions** — is what makes it guard the rule rather than restate it:
+    without that case, every generated case passes under the one-directional check
+    the change replaced, which is mutation **M1**. Also killed: emitting only the
+    first atom of a ground conjunction, dropping the canonical sort, and refusing
+    the ground-conjunction branch.
 
   - **A15** `a15_inline_and_hoisted_arguments_agree` — an inline compound atom
     argument lowers to the same program as the hand-written `=`-assignment

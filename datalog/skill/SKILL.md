@@ -74,8 +74,18 @@ sorted — and they round-trip as input, so runs compose over pipes:
 - **symbols** print bare (`red`); **strings** are double-quoted (`"red"`) — these
   are distinct types, so quote string data and leave enum-like symbols unquoted;
 - **floats** always keep a decimal point (`3.0`, not `3`);
-- a single positive-atom query re-emits that atom with bindings substituted;
-  other bodies emit `answer(...)` facts over the query's variables.
+- a query whose atoms account for every variable you asked about re-emits **those
+  atoms** with bindings substituted — so `?- person(N, A), A >= 18.` answers in
+  `person` facts, and a filter alongside the atom does not change that;
+- otherwise you get synthesized `answer(...)` facts over the query's variables —
+  which happens when something outside the atoms binds a column, such as an
+  aggregate result;
+- a question with no variables answers **`holds(true).`** if it holds and prints
+  nothing if it does not.
+
+**Reading `person` facts back does not mean you have all of them** — an answer is
+the rows your query matched, under the real relation's name. To make a result
+travel under a name of its own, define it: `-q 'adult(N) :- person(N, A), A >= 18.'`
 
 ## Datalog in 30 seconds
 

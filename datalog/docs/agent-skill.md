@@ -58,9 +58,22 @@ sorted. Formatting is stable and round-trips as input:
   are distinct types — quote string data, leave enum-like symbols unquoted.
 - **Floats** always keep a decimal point (`3.0`, not `3`) so they re-read as
   floats.
-- A single positive-atom query re-emits that atom with bindings substituted
-  (`?- ancestor("alice", W).` → `ancestor("alice", "bob").` …). Other bodies emit
-  `answer(...)` facts over the query's variables.
+- A query whose positive atoms account for every variable you asked about re-emits
+  **those atoms** with bindings substituted (`?- ancestor("alice", W).` →
+  `ancestor("alice", "bob").` …). A filter beside the atom does not change that, so
+  `?- person(N, A), A >= 18.` answers in `person` facts; and a fully **ground**
+  conjunction prints all of its atoms.
+- Other bodies emit synthesized `answer(...)` facts over the query's variables —
+  which is what happens when something outside the atoms binds a column, an
+  aggregate result being the usual case.
+- A question with no variables answers **`holds(true).`** if it holds, and prints
+  nothing if it does not. Silence therefore means "no rows", never "something went
+  wrong" — errors go to stderr and change the exit code.
+
+One trap worth knowing: an answer printed under a real relation's name is **the
+rows your query matched, not the whole relation**. Piping `?- ancestor("alice", W).`
+onward gives the next program an `ancestor` holding only alice's rows. When a result
+should travel under a name of its own, define it rather than filtering in place.
 
 Because output is valid input, runs compose over pipes:
 

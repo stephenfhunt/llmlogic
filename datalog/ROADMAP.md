@@ -236,16 +236,34 @@ _queued — decided, not built._ — §15, `notes/tsdl-cross-project-review.md`.
 Items landing on the agent surface, the one consumer least able to work around
 them. Except where noted these are documented v1 limits rather than defects.
 
-- **The answer shape — what a query prints, and under what relation name.**
-  **Reopened 2026-08-16** (user call): the 2026-08-03 widening stands but is **not
-  to be built** while the shape it widens is under review. Absorbs two items that
-  were separate and are one question — the widening itself (`?- p("a"), 1 < 2.`
-  answering nothing where `?- p("a").` answers), and the multi-atom existence check
-  (`?- p("a"), q("b").` printing nothing and exiting 0 either way, which is the
-  *silently lost question* `EXPERIMENTS.md` names as the failure mode that matters).
-  Five separable axes, a fifth option neither engine has considered, and the
-  evidence are in §17's open question. _designing._ — §5/§14,
+- **The answer shape — what a query prints, and under what relation name.** ✅
+  **2026-08-17**, closing the widening *and* the multi-atom existence check it had
+  absorbed. The rule is set **equality** between the positive atoms' variables and
+  the answer variables (§14): the atoms substitute when they account for every
+  answer variable — one atom beside any number of non-binding literals, or a
+  **ground conjunction** — and a body with no answer variables and nothing to
+  substitute answers `holds(true).`, which the lost question needed in *three*
+  shapes and not one. `answer/N` stays; silence still means no. Property **C8**,
+  example **§16.10**, four mutations recorded. — §5/§14,
   `notes/query-answer-shape.md`.
+- **Naming a query where it is asked** — `?- conflict: p(X), q(X).`, exact sugar
+  for a rule whose head is the projection. **The fix for the projection hazard**,
+  which 2026-08-16 recorded as unsolved in both engines: named output wears no
+  source relation's name. A *language* form, not `-q` sugar — the name must survive
+  lowering, and a file program has the same hazard. Naming stays optional; it is
+  also the prerequisite for ever making an unnameable query an error. _designing
+  (own session; brief written)._ — §5/§14, `notes/query-answer-shape.md`.
+- **A synthesized answer does not say which query it answers.** Two boolean queries
+  in one run both print `holds(true).` and `answer/N` collides the same way across
+  same-width projections. The fix is a **`%` comment**, not an extra argument — the
+  text is unusable by any program (string ops rejected) and an argument is the same
+  move 2026-08-16 rejected for provenance-as-facts. **Sequence with §11's comment
+  rendering** so the format is designed once. _queued._ — §11/§14.
+  - *Rejected 2026-08-17, and recorded so it is not re-proposed:* a **warning when
+    a program reads `answer` facts**. The hazard is a two-run merge, which inside a
+    single run is indistinguishable from legitimate single-pipe composition — so it
+    would fire on correct programs and be silent on the case that matters. Cf. the
+    inverted `invisible-witness` warning below.
 - **Three different body grammars.** Rule bodies are DNF; queries and aggregate
   goals are conjunction-only (all three verified). So a disjunctive filter can be
   expressed only by detouring through the rule form — which `bugs/002` made
@@ -384,13 +402,14 @@ but a different kind of work.
   2026-07-20 entry carries the pointer instead. §4's and §11's two standing
   "shares a word, not a concept" disclaimers are gone, which was the point.
 - **Name a test per §16 example.** **§16.9 (the cast) is the worked pattern** ✅
-  2026-08-16 — it names `tests/system.rs::cast_program_converts_and_guards` and
-  pins its output in a fence compared byte-for-byte. The other **eight** still
-  carry prose in comments and no named test, so a block nobody wired up cannot
-  fail; retrofitting them to §16.9's shape is the item. The rule going forward is
-  **no example means no feature**. Add a diagnostic example while doing it: none
-  of them exercises an error, so nothing checks what the engine prints when a
-  program is wrong. _queued._ — §16, `testing.md`.
+  2026-08-16 and **§16.10 (the answer shape) is the second** ✅ 2026-08-17 — each
+  names its `tests/system.rs` test and pins its output in a fence compared
+  byte-for-byte. The other **eight** still carry prose in comments and no named
+  test, so a block nobody wired up cannot fail; retrofitting them to that shape is
+  the item. The rule going forward is **no example means no feature**. Add a
+  diagnostic example while doing it: none of them exercises an error, so nothing
+  checks what the engine prints when a program is wrong. _queued._ — §16,
+  `testing.md`.
 - **Normalize §17's chronology.** Reverse-chronological for 08-16 back to 07-25,
   then it jumps to 07-03 and runs *forward* through 07-21, so a reader cannot tell
   which end is current. _queued._ — §17.
