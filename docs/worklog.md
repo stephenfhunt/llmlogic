@@ -24,6 +24,59 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-17 — Racing the sibling engine: the benchmark item closes, two of ours break
+
+A for-fun cross-engine comparison against `~/code/tsdl` that came back with three
+things reasoning would not have produced. No `src/` change (426 pass, 1 ignored);
+the deliverable is `notes/cross-engine-benchmark.md`, with the harness kept outside
+the repo at `~/datalog-cross-engine-bench-2026-08-17/`.
+
+**Done**
+- **A 26-program corpus both engines run byte-identically**, generated from a seeded
+  script inside the two dialects' common subset. All 23 that ran on both agreed, and
+  both agreed with a Python oracle that never calls either engine — **the first
+  differential test between two independent implementations of this language**.
+- **The measurement**: whole-process wall and RSS, best-of-3, 120 s cap, six shapes
+  at four to six sizes. Validated against a tsdl figure measured by an unrelated
+  route before the harness existed (15.79 s vs ~16 s).
+- **ROADMAP's *Profile the engine* loses its blocking half** — the repeatable
+  benchmark `performance-baseline.md` asked for exists, answered its "the fact base
+  needs a home" the cheapest of the three ways it listed (regenerate, don't commit).
+- **Two §17 ***Consequences*** annotations**: the 2026-08-16 naive-first decline
+  (measured, and it was an exponent) and 2026-07-19's provenance recording (the
+  third option now has a price tag, from the outside).
+
+**Decided**
+- **The chain gap is an exponent, not a constant**: ~n^2.4 here against ~n^3.8 there,
+  with closure output itself n². Semi-naive vs naive doing what the textbook says,
+  measured — and the front end is only ~4× apart (480k vs 110k facts/s), so the
+  whole separation lives in the fixpoint and none of it in reading the program.
+- **Two shapes where this engine is the bad one, neither visible without a second
+  engine.** `agg` is the one cell tsdl *wins*: 2.5× the rows at fixed group count
+  costs 9.6×, while groups scale sublinearly — a rescan of the aggregated relation,
+  now its own ROADMAP item. And `sparse_800` is a 22× cliff at 1.2 GB, cycles not
+  size: the chain at the same node count is 3.78 s against 65 s.
+- **The provenance recorder is the top profiling target, now on outside evidence.**
+  tsdl under `LINEAGE` costs **13×** on a cyclic graph, 1.3× on flat ones — and ours
+  is unconditional, so every table *understates* this engine, worst on exactly the
+  shapes that blew up. `performance-baseline.md` guessed it first and never measured
+  it; still needs a temporary build, since there is no flag.
+- Throughput is 5–14× that file's ~15k tuples/s on short values where its workload
+  had long Rust identifiers — evidence *for* its interning lead, not proof.
+
+**Removed**
+- The 2026-08-16 *Building the decided backlog* entry rotated verbatim to
+  `worklog-archive/2026-08.md`. Otherwise nothing — the one backlog item retired
+  here was retired by doing it.
+
+**Next up**
+- **Profile**, now unblocked and with a ranked list: recorder, aggregation's rescan,
+  value representation, cyclic graphs (`sparse_800`, not the chain everyone uses).
+- Unchanged and still ahead of it: **named queries**, then **Termination** (blocks
+  `bugs/004`), then **§6's extension**.
+- Open, not taken: whether the harness belongs in the repo — it needs a `tsdl`
+  checkout for the full sweep, though the generator and our half stand alone.
+
 ## 2026-08-17 — The answer shape settles, and axis 4 turns out to decide axis 2
 
 The design session the last three entries deferred to the user. Five axes settled,
@@ -133,56 +186,3 @@ still builds.
   suggest now, which there was not before. The **§16 retrofit** also got cheaper:
   §16.9 is a pattern to copy rather than a shape to invent.
 
-## 2026-08-16 — Building the decided backlog: one shipped, one renamed, one falsified
-
-Three sessions of design had left five items *decided, not built*, and `src/` had
-not changed since 2026-07-29. This session took the three carrying no open design
-question. 410 tests pass (was 407), 1 ignored, clippy and rustfmt clean.
-
-**Done**
-- **Parenthesized expressions ship** — `primary → "(" expr ")"`, and printing
-  became precedence-aware: parens go on a child binding looser than its parent,
-  and on an equal-precedence child on the **right**, so `A - (B - C)` survives.
-  `arb_printable_expr` generates arbitrarily shaped trees now, which is what puts
-  D2/D3 on the new code.
-- **The rename landed** — `AbsentPattern` → `NoMatchPattern`, `Premise::Absent` →
-  `NoMatch`, "absence pattern" → "no-match pattern". §4's and §11's two standing
-  "shares a word, not a concept" disclaimers are gone, which was the point.
-- **§17's open questions were swept**: four contradicted decisions above them in
-  the same file. ***Answered*** joined the marker table, having been in use since
-  2026-07-29 without being in the vocabulary that table calls a grep.
-
-**Decided**
-- **First-appearance stamping is closed without being built: its premise is false
-  here.** It was adopted from tsdl on the reasoning that "the solver reads the
-  store live". Ours does not — `eval_stratum` collects a round's matches against
-  the previous round's model and applies them in a **batch**, so the
-  first-producing derivation always has strictly-earlier premises. Measured over
-  400 generated programs: `explain` returned `None` **zero** times, and same-round
-  premises sat only on redundant rediscoveries (254 of 659 derivations). A sequence
-  number would admit those and *change which proof is printed*, for no correctness
-  gain. The forward risk is now recorded at the apply loop: interleaving collection
-  with insertion breaks the bound silently, and E1 is what fires.
-- **D2 is the property that bites, not D3.** Mutation-verified: flattening the
-  printer leaves **D3 green**, dropping parens being still a *fixpoint* — it just
-  re-parses to a different tree. Only the round trip sees a lossy canonicalization.
-- **The rename's scope claim was wrong**, amended in place: ~40 non-frozen lines
-  over 9 files, not 31 over 8, and six §17 entries hold the old name and keep it.
-  The carve-out that entry called "nothing to argue about" is what the sweep needed.
-
-**Removed**
-- The parens ROADMAP item and its §8 *Not covered* paragraph;
-  `grouped_expression_is_rejected_with_the_decomposition_hint` and the message it
-  pinned; `arb_chain`, whose whole job was the left-leaning restriction. The
-  Expressions preamble lost a "two findings" that had stopped counting.
-- **testing.md E5 restated, not deleted** — it waited on provenance-as-facts,
-  decided in the *negative*, so it now pins that decision's own guard: stripping
-  `%` comments leaves byte-for-byte what the program prints without its goals.
-- The 2026-07-29 entry rotated verbatim to `worklog-archive/2026-07.md`.
-
-**Next up**
-- **The answer shape** is still the user call, and still blocks the widening.
-  Unchanged: **Termination** (blocks `bugs/004`), then **§6's extension**.
-- The `as` cast is the cheapest remaining non-design item; Expressions holds
-  nothing else. **Parallelism** is now the change most likely to break E1's
-  batching assumption — written down where it would be violated.
