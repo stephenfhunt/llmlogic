@@ -37,7 +37,7 @@
 //! Type inference (§4/§8) is deliberately *not* part of lowering; it runs as a
 //! later pass over the IR (which retains spans for exactly that reason).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast;
 use crate::error::{Error, Warning};
@@ -147,6 +147,16 @@ struct Lowerer {
     /// the whole program in pass 1, so a `declare` may appear *after* the rule
     /// that uses the named form.
     schemas: HashMap<String, FieldSchema>,
+    /// Relations the program *defines*: a fact or rule head, a `declare`, or an
+    /// import binding. Collected in pass 1, so the set is complete whatever order
+    /// the statements are in.
+    ///
+    /// Distinct from [`by_name`](Self::by_name), which also holds names merely
+    /// *referenced* in a body. The distinction is what a named query's guard
+    /// needs: naming a query after a relation the program already defines would
+    /// silently extend it, while naming one after a relation only referenced is
+    /// exactly what the equivalent hand-written rule does, and stays legal (§14).
+    defined: HashSet<String>,
     errors: Vec<Error>,
 }
 
@@ -254,6 +264,7 @@ impl Lowerer {
                         relation, schema, ..
                     } = &import.kind
                     {
+                        self.defined.insert(relation.name.clone());
                         match schema {
                             // An explicit schema fixes arity and field names.
                             Some(schema) => {
@@ -275,6 +286,7 @@ impl Lowerer {
                     }
                 }
                 ast::StatementKind::Declare(declaration) => {
+                    self.defined.insert(declaration.relation.name.clone());
                     self.intern_checked(
                         &declaration.relation.name,
                         declaration.fields.len() as u32,
@@ -286,6 +298,7 @@ impl Lowerer {
                     );
                 }
                 ast::StatementKind::Clause(clause) => {
+                    self.defined.insert(clause.head.predicate.name.clone());
                     self.collect_atom(&clause.head);
                     for literal in &clause.body {
                         self.collect_literal(literal);
@@ -549,6 +562,18 @@ impl Lowerer {
             .filter(|(slot, name)| name.is_some() && bound.contains(&(*slot as u32)))
             .map(|(slot, _)| slot as u32)
             .collect();
+        // A *named* query is exact sugar for a rule whose head is the projection
+        // (§14, §17 2026-08-17), so it desugars here rather than at print time:
+        // the name has to be a real relation for the answer to compose, and the
+        // projection is computed once, above, instead of a second time in
+        // `api.rs`. The query left behind is the single atom `name(projection)`,
+        // which `answer_lines` already prints under the atom's own name — the
+        // shape rule needs no new arm.
+        if let Some(name) = &query.name {
+            self.lower_named_query(name, body, scope.names, projection, query.span, out);
+            return;
+        }
+
         let lowered = ir::Query {
             body,
             var_names: scope.names,
@@ -557,6 +582,74 @@ impl Lowerer {
         };
         self.check_body_safety(&lowered.body, &lowered.var_names, "query");
         out.queries.push(lowered);
+    }
+
+    /// Desugars `?- name: body.` into the rule `name(<projection>) :- body.`
+    /// plus the query `?- name(<projection>).` (§14).
+    ///
+    /// Two things hold by construction rather than by check. The synthesized head
+    /// is **range-safe**, the projection being by definition the variables the
+    /// body binds — so only the body is checked, and its diagnostics still read
+    /// as a query's. And an **empty** projection yields the ground head
+    /// `name(true)`, because §5 bans 0-arity atoms; the answer is then the single
+    /// fact `name(true).`, printed by the same substitution path as any other.
+    fn lower_named_query(
+        &mut self,
+        name: &ast::Ident,
+        body: Vec<ir::BodyLiteral>,
+        var_names: Vec<Option<String>>,
+        projection: Vec<u32>,
+        span: ast::Span,
+        out: &mut ir::Program,
+    ) {
+        self.check_body_safety(&body, &var_names, "query");
+
+        // Naming a query after a relation the program already defines would
+        // silently extend that relation, since predicates intern by name alone.
+        // A name only *referenced* in some body is fine — defining it is exactly
+        // what the equivalent hand-written rule does.
+        if !self.defined.insert(name.name.clone()) {
+            self.errors.push(
+                Error::semantic(format!(
+                    "a query cannot be named `{}`: the program already defines that relation, \
+                     and the answer would silently extend it",
+                    name.name
+                ))
+                .suggest(format!(
+                    "name the query something the program does not define, \
+                     or query `{}` directly",
+                    name.name
+                )),
+            );
+            return;
+        }
+
+        let args: Vec<ir::Term> = if projection.is_empty() {
+            vec![ir::Term::Const(ir::Value::Bool(true))]
+        } else {
+            projection
+                .iter()
+                .map(|&slot| ir::Term::Var(ir::Var(slot)))
+                .collect()
+        };
+        let pred = self.intern_checked(&name.name, args.len() as u32);
+        let head = ir::Atom { pred, args };
+
+        out.rules.push(ir::Rule {
+            head: head.clone(),
+            body,
+            var_names: var_names.clone(),
+            span,
+        });
+        out.queries.push(ir::Query {
+            body: vec![ir::BodyLiteral {
+                kind: ir::BodyLiteralKind::Atom(head),
+                span,
+            }],
+            var_names,
+            projection,
+            span,
+        });
     }
 
     /// Lowers a body. `mode` is [`ArgMode::Hoist`] for a rule body and an
@@ -3125,6 +3218,147 @@ lookup(N) :- usr(N, _).
                 arity: 1,
                 suggestion: None,
             }]
+        );
+    }
+
+    // --- The named query (§14) ---
+
+    /// Answers of the single query in `src`.
+    fn answers_of(src: &str) -> Vec<String> {
+        let mut result = crate::api::run(src).unwrap_or_else(|e| panic!("runs: {e:?}"));
+        assert_eq!(result.answers.len(), 1, "expected exactly one query");
+        result.answers.pop().expect("one query")
+    }
+
+    /// The name reaches the output as a **relation**, not a label: the answer
+    /// wears it instead of the source relation whose rows were narrowed, which is
+    /// the projection hazard this form exists to fix (§14).
+    #[test]
+    fn a_named_query_answers_under_its_own_name() {
+        let facts = "age(\"alice\", 30).\nage(\"bob\", 15).\n";
+        assert_eq!(
+            answers_of(&format!("{facts}?- adult: age(N, A), A >= 18.")),
+            vec!["adult(\"alice\", 30)."]
+        );
+        // The unnamed form is unchanged, and is the hazard: `age` facts that are
+        // silently a subset of `age`.
+        assert_eq!(
+            answers_of(&format!("{facts}?- age(N, A), A >= 18.")),
+            vec!["age(\"alice\", 30)."]
+        );
+    }
+
+    /// The synthesized rule is a real relation in the model, which is what makes
+    /// the name compose: a later rule may read it.
+    #[test]
+    fn a_named_query_defines_a_relation_the_program_can_read() {
+        let src = "\
+age(\"alice\", 30).
+age(\"bob\", 15).
+?- adult: age(N, A), A >= 18.
+grown(N) :- adult(N, _).
+?- grown(N).
+";
+        let result = crate::api::run(src).expect("runs");
+        assert_eq!(result.answers[0], vec!["adult(\"alice\", 30)."]);
+        assert_eq!(result.answers[1], vec!["grown(\"alice\")."]);
+    }
+
+    /// Arity is the projection's length — the columns `answer/N` would have
+    /// printed. An aggregate's goal-locals stay unprojected (§9), so they are not
+    /// columns of the named relation either.
+    #[test]
+    fn arity_is_the_projection_not_the_bodys_variable_count() {
+        let facts = "e(\"a\", 1).\ne(\"a\", 2).\ne(\"b\", 5).\n";
+        // `C` is goal-local to the aggregate; `G` and `T` are the projection.
+        assert_eq!(
+            answers_of(&format!(
+                "{facts}?- totals: e(G, _), T = sum {{ C | e(G, C) }}."
+            )),
+            vec!["totals(\"a\", 3).", "totals(\"b\", 5)."]
+        );
+    }
+
+    /// An empty projection has no columns to publish, and §5 bans 0-arity atoms,
+    /// so the yes carries an argument: `name(true).` — the named counterpart of
+    /// `holds(true).`, and silence still means no.
+    #[test]
+    fn an_empty_projection_answers_name_true() {
+        let facts = "p(\"a\").\nq(\"b\").\n";
+        assert_eq!(
+            answers_of(&format!("{facts}?- ok: p(\"a\"), q(\"b\").")),
+            vec!["ok(true)."]
+        );
+        assert!(answers_of(&format!("{facts}?- ok: p(\"a\"), q(\"zzz\").")).is_empty());
+    }
+
+    /// The guard: a name the program **defines** would be silently extended,
+    /// predicates interning by name alone.
+    #[test]
+    fn naming_a_query_after_a_defined_relation_is_rejected() {
+        for src in [
+            // A fact.
+            "age(\"alice\", 30).\n?- age: age(N, A), A >= 18.",
+            // A rule head.
+            "age(\"alice\", 30).\nadult(N) :- age(N, _).\n?- adult: age(N, A), A >= 18.",
+            // A `declare` — the user has stated the relation exists.
+            "declare adult(name: string).\nage(\"alice\", 30).\n?- adult: age(N, A), A >= 18.",
+            // Another named query, which defines its relation just as a rule does.
+            "age(\"alice\", 30).\n?- adult: age(N, A), A >= 18.\n?- adult: age(N, A), A < 18.",
+        ] {
+            let errors = lower_errors(src);
+            assert!(
+                errors.iter().any(|e| {
+                    let msg = e.to_string();
+                    msg.contains("a query cannot be named") && msg.contains("already defines")
+                }),
+                "for {src:?} expected the collision error, got {errors:?}"
+            );
+        }
+    }
+
+    /// …but a name only **referenced** in some body is not a definition, and
+    /// naming a query after it is exactly what the equivalent hand-written rule
+    /// does. Rejecting it would make the sugar inexact.
+    #[test]
+    fn naming_a_query_after_a_merely_referenced_relation_is_allowed() {
+        let src = "\
+age(\"alice\", 30).
+mentions(N) :- age(N, _), not adult(N, _).
+?- adult: age(N, A), A >= 18.
+";
+        let result = crate::api::run(src).expect("a referenced-only name is free to take");
+        assert_eq!(result.answers[0], vec!["adult(\"alice\", 30)."]);
+    }
+
+    /// Arity is still checked against other uses of the name, because the
+    /// synthesized head interns like any other: the message is the one a
+    /// hand-written rule of the wrong width would give.
+    #[test]
+    fn a_named_query_of_the_wrong_width_reports_an_arity_clash() {
+        let errors = lower_errors(
+            "age(\"alice\", 30).\nmentions(N) :- age(N, _), not adult(N).\n\
+             ?- adult: age(N, A), A >= 18.\n",
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.to_string().contains("arity 2") && e.to_string().contains("arity 1")),
+            "unexpected errors: {errors:?}"
+        );
+    }
+
+    /// A named query's body is checked as a *query*, so range restriction reads
+    /// the way it did before the name was added — the synthesized head cannot be
+    /// unsafe, the projection being what the body binds.
+    #[test]
+    fn an_unsafe_named_query_still_reports_against_the_query() {
+        let errors = lower_errors("p(1).\n?- bad: p(X), Y > X.\n");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.to_string().contains("in `query`") && e.to_string().contains("`Y`")),
+            "unexpected errors: {errors:?}"
         );
     }
 }
