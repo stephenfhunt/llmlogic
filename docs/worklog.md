@@ -24,6 +24,63 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-16 — Reading a sibling engine: three decisions taken, one question reopened
+
+Cross-project review of `~/code/tsdl`, a Datalog engine in TypeScript that names
+this project as its prior art and derives its testing rules from our `bugs/` files.
+Docs only — 407 pass, 1 ignored, unchanged; nothing under `src/` or `tests/` moved.
+
+**Done**
+- **`notes/tsdl-cross-project-review.md`** (new) — the survey and the overflow
+  target: what was adopted with its evidence, what was declined with its reason.
+- **§17 gained four decisions**: the **truncation contract** (an incomplete model
+  does not answer; the whole-model surface survives it), the **provenance query
+  surface** (`?why`/`?whynot` as one union, a bounded why-not), the **three names**,
+  and the **declines**. Four existing entries amended — 2026-07-25 Termination,
+  2026-07-19 first-round stamping and all-derivations recording, 2026-08-03 answer
+  shape. §17's marker table gained ***Reopened***.
+- **The spec hygiene pass**, closing three ROADMAP items: **every status marker
+  deleted** from §§1–16, each section now ending with one ***Not covered*** footer
+  — which is also where six different deferral labels went — and the audit trail
+  moved to **`notes/spec-traceability.md`** (new).
+- **`testing.md` gained its Four rules section**, the normative home, with rules 2
+  and 3 stated for the first time plus two corollaries: an oracle calling the
+  engine's own function agrees with a wrong engine forever, and a rejection claim
+  wants a **biconditional** property. `AGENTS.md`'s item 5 became a pointer.
+
+**Decided**
+- **No budget and no fuel — but truncation gets a contract.** 2026-07-25 stays the
+  whole guarantee (a hung browser tab is their forcing case; a CLI has `^C`). What
+  it never asked is what the engine owes when the model is short *anyway*: the store
+  only grows, so an incomplete fixpoint holds missing facts and never false ones —
+  but a **query** solved against it can be *wrong* rather than missing, since
+  `not p(X)` over an incomplete `p` succeeds. Three live instances, none a budget.
+- **Proof trees are not facts**, closing "provenance as facts" in the negative; they
+  ride in `%` comments, keeping Datalog-out-is-Datalog-in byte-for-byte.
+- **First appearance beats first round** for proof extraction — a round cannot
+  separate two facts derived in the same one, and a sequence number costs the same
+  `u32`. Whether the recorder earns its keep at all is a question for *after* the
+  profile, not before.
+
+**Removed**
+- All 16 `*Status:` lines in `spec.md` and the paragraph declaring the vocabulary;
+  §16's contradiction with §16.4 over "provisional"; §16.7's present-tense
+  workaround, which dissolved when step 7 landed.
+- Two ROADMAP items absorbed into the answer-shape question (the 2026-08-03 widening
+  and the multi-atom existence check — one question with five axes, not three
+  items), and three hygiene items closed outright.
+- The 2026-07-27 `bugs/006` entry rotated verbatim to `worklog-archive/2026-07.md`.
+
+**Next up**
+- **The answer shape is a design session, and the widening is not built until it
+  happens** — user call. Five axes in §17's open question, long form in
+  `notes/query-answer-shape.md`; axis 4 (yes/no) can be settled early.
+- **Termination** still blocks `bugs/004`, now with three of its five acceptance
+  criteria answerable. Then §6's extension, two unknowns lighter.
+- New, both from the review: **temporal types**, and **making `EXPERIMENTS.md` a
+  measuring instrument** — which the parked "other agent-exposure forms" decision
+  is explicitly waiting on.
+
 ## 2026-08-03 — The query answer shape: one atom, not one literal
 
 Design session, prompted by a user question about §14's synthesized `answer/N`
@@ -132,56 +189,3 @@ failures rather than two.
   with §4's table to describe.
 - Unchanged: **parenthesized expressions** (cheapest non-design item), the **§17
   restructure**, **CI**, the GitHub *About* panel.
-
-## 2026-07-27 — `bugs/006`: `<` orders every primitive, and B1 could not have known
-
-The last unblocked defect. Three lines deleted from the type checker; no spec or
-evaluator change. 401 tests pass (395 + 6), clippy and rustfmt clean, `--ignored`
-still exactly two.
-
-**Done**
-- **`p(X), p(Y), X < Y` answers over strings, symbols and bools**, verified
-  against the release binary; `min`/`max` unchanged, `1 < "a"` still a type error
-  because `union(l, r)` was never the numeric constraint. §8 already specified
-  this, so the fix edited **no normative text** — the checker was wrong.
-- **A third site the bug file never listed:** `finish`'s error message said "used
-  in arithmetic **or an ordered comparison**", which after the fix is
-  *unreachable*, not merely stale. Found by grepping every `numeric.push`.
-- **The property the bug file identified, in the same sitting** —
-  `ordered_comparison_and_minmax_agree_on_every_type` (C8), over a purpose-built
-  generator across all five primitives and both ends of the order, plus its
-  coverage guard. `arb_comparison_program` now orders the string key it always
-  had, counted in `generator_emits_comparison_shapes`.
-
-**Decided**
-- **A differential property cannot catch a type-checker defect, and B1 is one.**
-  The bug file called extending B1's generator "the whole job". Measured: with
-  the fix reverted the extended `b1_comparison_programs_agree` stays **green**,
-  because `eval` is type-blind by design (§17, 2026-07-21) and a differential
-  between two evaluators never asks what `typecheck` accepts. The property that
-  fails is a new `comparison_generator_is_well_typed`. **Widening a generator
-  needs a matching acceptance property.** In §17, testing.md C8, and the bug's
-  Resolution.
-- **The 2026-07-21 type-inference entry is amended, not falsified.** "arithmetic/
-  ordered comparison ⇒ numeric" was derived one step too far; no coercion — the
-  other half of that sentence — stands. Its type-blind `eval` held too, and this
-  is what it cost. Both new properties and the coverage guard were confirmed red
-  with the fix reverted before being kept, per `bugs/005`'s discipline.
-
-**Removed**
-- The skill recipe's **trap #3, which told readers to work around this defect**
-  (emit a numeric `file_id` and sort by that) — deleted, renumbered to four. The
-  only doc content this made false rather than incomplete.
-- ROADMAP's claim that the bug queue held "**only `004`**" and "has nothing
-  unblocked in it: the next work is a design session, not a defect" — written
-  while `006` was open, unblocked, and named *Next up* in that same session's
-  worklog. Stale on arrival; the ROADMAP contradicting the worklog is new.
-- The 2026-07-27 `bugs/005` entry rotated verbatim to `worklog-archive/2026-07.md`.
-
-**Next up**
-- **The `bugs/` queue has nothing unblocked in it** — now actually true. `004`
-  waits on Termination, so the next work is a **design session**: `absent` ×
-  negation (which also unblocks §6) or Termination & value-creating recursion.
-- Cheapest non-design item, unchanged: **parenthesized expressions**
-  (`src/parser.rs:619-628`, `src/print.rs:169` — the printer is the real work).
-  Also unchanged: the **§17 restructure**, **CI**, the GitHub *About* panel.
