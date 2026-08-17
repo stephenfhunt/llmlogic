@@ -2465,6 +2465,23 @@ never say.
     support: the solver reads the store live, so every premise was stored before its
     head went in. Adopted from tsdl (`notes/tsdl-cross-project-review.md`), where it
     replaced this same round-based rule for this same reason.
+  - ***Falsified 2026-08-16*** — **the premise above does not hold for this
+    engine, and the amendment was adopted without checking it.** "The solver reads
+    the store live" is tsdl's evaluator, not ours. `eval_stratum` *batches*: a
+    round's matches are all collected into `pending` against the previous round's
+    model, and only then applied, so nothing inserted in a round is visible to the
+    collection that produced it. The derivation that first produces a fact
+    therefore **always** has strictly-earlier premises, and the round bound never
+    fails to find a proof. Measured over 400 generated programs (275 derived
+    facts): `explain` returned `None` **zero** times, and a same-round premise
+    appeared only on *redundant* rediscoveries — 254 of 659 recorded derivations,
+    which the all-derivations contract keeps and which the first-producing one is
+    never among. E1 and E2 are the standing guards; `eval_stratum`'s apply loop
+    now names batching as what they rest on. **Not implemented**, therefore: a
+    sequence number would admit those redundant derivations and so *change which
+    proof is printed*, for no correctness gain. What survives is a forward risk —
+    interleaving collection with insertion (streaming, or the parallelism item)
+    breaks the round bound silently, and E1 is the test that fires.
 - **2026-07-19** — **The naive oracle is facts-only.** It computes the least
   model's fact set (its ~70 obviously-correct lines are the point) and does
   not record provenance; provenance correctness is instead checked by replay —

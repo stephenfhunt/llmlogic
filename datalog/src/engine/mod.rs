@@ -111,6 +111,14 @@ impl Model {
 
     /// The fixpoint round `fact` first appeared in (0 for base facts), or
     /// `None` if the fact does not hold.
+    ///
+    /// A round is coarser than a per-fact sequence number — every fact applied
+    /// in one batch shares it — and that coarseness is **harmless here** only
+    /// because application is batched (see `eval_stratum`'s apply loop): no
+    /// derivation can have a premise from its own round *unless* it is a
+    /// redundant rediscovery, which the first-producing derivation never is.
+    /// Facts derived in the same round are therefore never ordered against each
+    /// other, and never need to be.
     pub fn first_round(&self, fact: &Fact) -> Option<u32> {
         self.first_round.get(fact).copied()
     }
@@ -405,6 +413,17 @@ fn eval_stratum(
     loop {
         // Apply the round's matches. Every derivation is recorded (the
         // all-derivations contract); only genuinely new facts enter the delta.
+        //
+        // **Application is batched, and proof finiteness rests on it.** Nothing
+        // inserted here is visible to the collection that produced `pending` —
+        // that collection already ran, against the model as of the previous
+        // round. So the derivation that *first* produces a fact always has
+        // premises stamped strictly earlier, which is what makes
+        // `ProofTree::explain`'s round bound (§17, 2026-07-19) able to find a
+        // proof for every fact rather than merely a well-founded one.
+        // Interleaving collection with insertion here would break that silently:
+        // the test that fails is **E1** (`e1_derived_facts_have_derivations`),
+        // and behind it E2.
         let mut delta: HashMap<PredId, BTreeSet<Tuple>> = HashMap::new();
         for (fact, derivation) in pending.drain(..) {
             let pred = fact.pred;

@@ -298,11 +298,17 @@ them. Except where noted these are documented v1 limits rather than defects.
   through the scheduler the fixpoint uses. §17 has the decision. What remains open
   is the rendering, the JSON encoding, and sequencing against the truncation
   contract, whose distinction `unknown` is. _queued — decided, not built._ — §11/§14.
-- **First appearance, not first round** — §11's proof extraction stamps the fixpoint
-  *round*, which cannot separate two facts derived in the same one, so a proof that
-  exists is not always found. A monotone per-fact sequence number costs the same
-  `u32` (§17 amendment, 2026-08-16). Independent of the store question below.
-  _queued (small)._ — §11.
+- **First appearance, not first round** — **closed 2026-08-16 without building it:
+  the rationale was adopted from a sibling engine and does not hold here.** Ours
+  *batches* application, so the derivation that first produces a fact always has
+  strictly-earlier premises and the round bound never fails to find a proof —
+  measured, `explain` returned `None` zero times over 275 derived facts, and every
+  same-round premise sat on a redundant rediscovery. A sequence number would admit
+  those and change which proof is printed, for no correctness gain (§17,
+  ***Falsified 2026-08-16***). What remains is a **forward risk, not an item**:
+  interleaving collection with insertion — streaming, or the parallelism item below
+  — breaks the round bound silently. E1 is the test that fires, and
+  `eval_stratum`'s apply loop now says so. _rejected._ — §11.
 - **Provenance as facts.** A proof tree is not a fact, so emitting it as ground
   derivation-edge facts either invents relations the program never declared or
   flattens a tree into rows that no longer compose. It rides in `%` comments

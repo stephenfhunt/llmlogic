@@ -637,6 +637,12 @@ is a coverage hole in E3 rather than a new claim.
   is *well-founded* — every fact premise first appeared strictly earlier than
   the fact itself (absences exempt). Pins first-round stamping's cross-strata
   monotonicity directly, not just transitively through E2.
+  - **It also pins batched application**, which is what makes the round bound
+    strict enough to always *find* a proof rather than merely reject cycles
+    (§17, ***Falsified 2026-08-16***). Interleaving collection with insertion —
+    streaming, or parallelism — is the change that breaks it, and E1 is the test
+    that fires. Measured: a same-round premise occurs on 254 of 659 recorded
+    derivations, always a redundant rediscovery and never the first-producing one.
 - [x] **E2** Every fact has a proof tree, and every proof-tree leaf is a base
   (EDB/imported) fact.
 - [x] **E3** Replay: each derivation node's rule instance applied to its child
