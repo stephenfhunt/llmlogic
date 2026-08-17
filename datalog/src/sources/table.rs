@@ -7,11 +7,15 @@
 //! (optionally signed), otherwise it is a string — so no second classifier
 //! exists, and an import means precisely the facts you would get by writing
 //! its cells as in-program literals.
+//!
+//! That classifier lives in [`crate::lexer`], not here, because §8's `as` cast
+//! converts *from* `string` with the same one. Its home is the grammar that
+//! defines it, so neither caller owns it and the two cannot drift apart.
 
 use crate::ast::{FieldDecl, TypeName};
 use crate::error::Error;
 use crate::ir::{F64, Value};
-use crate::lexer::{TokenKind, lex};
+use crate::lexer::{CellClass, classify_cell, classify_symbol};
 
 /// One loaded data import after every §13 rule has been applied: field names
 /// are valid and unique, rows are rectangular and column-uniform, and the row
@@ -51,51 +55,6 @@ pub(crate) enum RawValue {
     /// missing JSON key or explicit `null`, a Parquet/DB `NULL`. Type-neutral in
     /// inference and coerced to [`Value::Absent`] under any column type.
     Absent,
-}
-
-/// What the literal grammar says one cell denotes (the §13 classification).
-enum CellClass {
-    Int(i64),
-    Float(f64),
-    Bool(bool),
-    Str,
-}
-
-/// Classifies untyped cell text by the language's literal grammar: the lexer
-/// must read the whole cell as exactly one (optionally signed) literal.
-/// Anything else — empty text, multiple tokens, lexical errors — is a string.
-fn classify_cell(text: &str) -> CellClass {
-    let lexed = lex(text);
-    if !lexed.errors.is_empty() {
-        return CellClass::Str;
-    }
-    let kinds: Vec<&TokenKind> = lexed.tokens.iter().map(|t| &t.kind).collect();
-    match kinds.as_slice() {
-        [TokenKind::Int(n), TokenKind::Eof] => CellClass::Int(*n),
-        [TokenKind::Minus, TokenKind::Int(n), TokenKind::Eof] => CellClass::Int(-*n),
-        [TokenKind::Float(f), TokenKind::Eof] => CellClass::Float(*f),
-        [TokenKind::Minus, TokenKind::Float(f), TokenKind::Eof] => CellClass::Float(-*f),
-        [TokenKind::True, TokenKind::Eof] => CellClass::Bool(true),
-        [TokenKind::False, TokenKind::Eof] => CellClass::Bool(false),
-        _ => CellClass::Str,
-    }
-}
-
-/// The symbol reading of cell text: a single bare identifier token. Used only
-/// under an explicit `symbol` schema type (§13 inference never produces
-/// symbol).
-fn classify_symbol(text: &str) -> Option<String> {
-    let lexed = lex(text);
-    if !lexed.errors.is_empty() {
-        return None;
-    }
-    match lexed.tokens.as_slice() {
-        [ident, eof] if matches!(eof.kind, TokenKind::Eof) => match &ident.kind {
-            TokenKind::Ident(name) => Some(name.clone()),
-            _ => None,
-        },
-        _ => None,
-    }
 }
 
 /// A legal field name is a single identifier token spelled exactly as given

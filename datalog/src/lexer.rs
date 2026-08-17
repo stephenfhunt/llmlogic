@@ -553,6 +553,62 @@ impl<'a> Lexer<'a> {
     }
 }
 
+/// How text reads under the language's literal grammar (§13/§17, 2026-07-23).
+///
+/// [`Str`](CellClass::Str) is the fall-through: text that is not exactly one
+/// literal is a string.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum CellClass {
+    Int(i64),
+    Float(f64),
+    Bool(bool),
+    Str,
+}
+
+/// Classifies text by the language's literal grammar: [`lex`] must read the
+/// whole of it as exactly one (optionally signed) literal. Anything else —
+/// empty text, multiple tokens, lexical errors — is a string.
+///
+/// This is the language's **only** text-to-value classifier, and both of its
+/// callers depend on that. §13 types an untyped CSV cell with it, so an import
+/// means precisely the facts you would get by writing its cells as in-program
+/// literals; §8's `as` cast converts *from* `string` with it, so `"30" as int`
+/// is `30` exactly when writing `30` would be that literal. A second classifier
+/// would let the two answers drift.
+pub(crate) fn classify_cell(text: &str) -> CellClass {
+    let lexed = lex(text);
+    if !lexed.errors.is_empty() {
+        return CellClass::Str;
+    }
+    let kinds: Vec<&TokenKind> = lexed.tokens.iter().map(|t| &t.kind).collect();
+    match kinds.as_slice() {
+        [TokenKind::Int(n), TokenKind::Eof] => CellClass::Int(*n),
+        [TokenKind::Minus, TokenKind::Int(n), TokenKind::Eof] => CellClass::Int(-*n),
+        [TokenKind::Float(f), TokenKind::Eof] => CellClass::Float(*f),
+        [TokenKind::Minus, TokenKind::Float(f), TokenKind::Eof] => CellClass::Float(-*f),
+        [TokenKind::True, TokenKind::Eof] => CellClass::Bool(true),
+        [TokenKind::False, TokenKind::Eof] => CellClass::Bool(false),
+        _ => CellClass::Str,
+    }
+}
+
+/// The symbol reading of text: a single bare identifier token. §13 uses it only
+/// under an explicit `symbol` schema type (inference never produces symbol);
+/// §8's cast uses it for `string as symbol`.
+pub(crate) fn classify_symbol(text: &str) -> Option<String> {
+    let lexed = lex(text);
+    if !lexed.errors.is_empty() {
+        return None;
+    }
+    match lexed.tokens.as_slice() {
+        [ident, eof] if matches!(eof.kind, TokenKind::Eof) => match &ident.kind {
+            TokenKind::Ident(name) => Some(name.clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
