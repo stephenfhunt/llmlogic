@@ -311,7 +311,7 @@ field       = ident [ ":" type ] ;
 type        = "int" | "float" | "string" | "symbol" | "bool" ;
 
 clause      = atom [ ":-" body ] "." ;          (* fact when no body, else rule *)
-query       = "?-" conjunction "." ;            (* queries are conjunctive *)
+query       = "?-" [ ident ":" ] conjunction "." ;  (* conjunctive; the ident names the answer, §14 *)
 body        = conjunction { ";" conjunction } ;  (* rule bodies: DNF, §17 *)
 conjunction = literal { "," literal } ;
 literal     = [ "not" ] atom | comparison ;
@@ -1103,8 +1103,17 @@ itself**:
 **Canonical output form** (resolved 2026-07-22). Values print in the §4
 cross-type order (symbol < string < int < float < bool); strings are
 double-quoted with the §3 escapes; a float always carries a decimal point
-(`1.0`, not `1`) so it re-lexes as a float. The **query answer shape** keys on
-whether the body's positive atoms account for **every** answer variable:
+(`1.0`, not `1`) so it re-lexes as a float.
+
+A query that **names itself** answers under that name: `?- adult: person(N, A),
+A >= 18.` prints `adult` facts, one per answer row, over exactly the columns the
+projection has (`name(true).` where it has none). The name is a definition, not a
+label — the form is exact sugar for a rule whose head is the projection — so §5's
+grammar carries it and a rule may read the relation a query named. Naming is
+optional, and it is the fix for the projection hazard below.
+
+An **unnamed** query's answer shape keys on whether the body's positive atoms
+account for **every** answer variable:
 
 - when they do, the query re-emits those atoms with the answer bindings
   substituted (`?- ancestor("alice", Who).` → `ancestor("alice", "bob").` …).
@@ -1153,17 +1162,17 @@ output marks it as a subset. Composing it onward therefore *narrows* that
 predicate: `?- ancestor("alice", W).` piped into a program reasoning about
 `ancestor` presents an `ancestor` holding only alice's rows. The closure above is
 unaffected — the output is valid input, and every row of it is true — but it
-answers a question rather than dumping a relation. A result meant to travel under
-a name of its own should be given one, which is what the `-q` rule form below is
-for; **the division of labour is that inference is for reading one query's output
-and naming is for composing it**, because an inferred name is the wrong name for
-composition either way — a source relation's name collides with the relation it
-was projected from, and `answer` collides with every other query's answer.
+answers a question rather than dumping a relation. **The division of labour is
+that inference is for reading one query's output and naming is for composing
+it**, because an inferred name is the wrong name for composition either way — a
+source relation's name collides with the relation it was projected from, and
+`answer` collides with every other query's answer.
 
-This hazard is **unsolved for unnamed queries**, here and in every engine
-surveyed (§17, 2026-08-16): re-emitting a substituted atom is what a reader
-wants, and it is a subset by construction. Naming the query is what removes it,
-since named output wears no source relation's name.
+**Naming the query removes the hazard**, and is the only thing that does: named
+output wears no source relation's name, so nothing is silently narrowed. It stays
+a hazard for an **unnamed** query, unavoidably — re-emitting a substituted atom
+is what a reader wants, and it is a subset by construction (§17, 2026-08-16 and
+2026-08-17; §16.11 shows both halves).
 
 **Binary contract** (2026-07-22; `-q` completed 2026-07-23, roadmap step 6).
 Invocation is `datalog [<file> | -] [-q <query>]…`. The positional source is a
@@ -1220,13 +1229,13 @@ LLM consumer than JSON codes), and provenance (§11), if ever surfaced, should b
 json` therefore stays a documented future *edge* feature only — hand-rolled if it
 ever lands, keeping the zero-runtime-dependency stance.
 
-*Not covered:* **a query cannot yet be given a name at the point it is asked.**
-`?- conflict: p(X), q(X).` is designed and not built (§17, 2026-08-17): the name
-would replace the whole answer relation rather than rename a column, making it the
-fix for the projection hazard above. Also not covered: **which query a synthesized
-answer answers** — two boolean queries in one run both print `holds(true).` with
-nothing to tell them apart, and the fix is a `%` comment rather than an extra
-argument, sequenced with §11's comment rendering. Also not covered: a
+*Not covered:* **which query a synthesized answer answers** — two *unnamed*
+boolean queries in one run both print `holds(true).` with nothing to tell them
+apart, and the fix is a `%` comment rather than an extra argument, sequenced with
+§11's comment rendering. Naming both queries already tells them apart, so this is
+now only the unnamed case. Also not covered: **naming is never required**, so an
+unnameable projection is not an error (§17, 2026-08-17 — a bare `?-` stays total,
+and making it strict is affordable only now that a name exists). Also not covered: a
 `--format json` data path (deferred as low-value; JSON stays at the
 machine-readable edges), `serde` on the API types, and streaming or cursored
 results.
@@ -1617,6 +1626,30 @@ never say.
 
 ### Decisions
 
+- **2026-08-17** — **The named query desugars in *lowering*, and the guard's line
+  is *defined*, not *mentioned*.** The two choices building the form above left
+  open. `lower_query` synthesizes an `ir::Rule` over the body it has just lowered
+  and leaves behind the one-atom query `name(<projection>)`, reusing the same
+  `VarScope`. So `ir::Query` gained **no field** and `api.rs` gained **no arm**:
+  the substituted-atom path settled earlier today already prints a one-atom
+  query under its atom's own name, including the empty-projection `name(true)`.
+  The brief's site list named `ir::Query`, which turned out not to be a site —
+  carrying the name to the printer and desugaring to a rule are two different
+  features, and only the second makes `eligible(N) :- adult(N, _)` legal.
+
+  **The guard rejects a name the program defines or declares, and allows one it
+  merely references.** Refusing a referenced-only name would make the sugar
+  inexact: defining it is precisely what the equivalent hand-written rule does.
+  Arity still clashes through `intern_checked`, giving the message a rule of the
+  wrong width would give.
+
+  Four mutations recorded (`testing.md` C8). Two are worth the log: a head one
+  column short of the projection is caught by the **existing** IR well-formedness
+  check, not by anything added here; and dropping the empty-projection `true`
+  prints `ans().`, which §5 does not accept as an atom — so the argument that
+  keeps the answer *re-parseable* is the same one §5 makes, now measured rather
+  than argued.
+
 - **2026-08-17** — **The answer shape: the positive atoms must account for
   *every* answer variable, and a body with none still owes a yes.** Settles the
   five axes reopened 2026-08-16, closing the question in the affirmative for
@@ -1665,6 +1698,16 @@ never say.
   unnameable query an error, since recovery becomes "prepend a word" rather than
   "rewrite it as a rule". One guard: reject a name the program already defines,
   predicates interning by name alone.
+
+  ***Consequences 2026-08-17*** — **built the same day, and the rationale held
+  except in one place: `ir::Query` was not a site.** The name never needs to reach
+  the printer, because desugaring to a rule makes the query a one-atom query and
+  the shape rule already prints those under their atom's name. The "second
+  classifier in `api.rs`" argument was right about *where* the projection must be
+  computed and understated the conclusion — it is not merely that lowering should
+  compute it, but that once lowering does, printing needs no change at all.
+  §16.11, `tests/system.rs::named_query_program_publishes_its_own_relation`, and
+  the entry at the top of this log.
 
 - **2026-08-16** — **A failed `as` conversion is `absent` when there is no value
   to represent, and an error when representing it would be lossy.** The piece the

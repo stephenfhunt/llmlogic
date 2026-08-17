@@ -52,12 +52,17 @@ Write the program to a temp `.dl` file (or pipe via stdin). Exit codes: **0** ok
 · **1** program error (structured messages on stderr — read them, they include
 spans and did-you-mean hints and are meant to guide a fix) · **2** usage error.
 
-### `-q` one-shot queries — the two forms
+### `-q` one-shot queries — the forms
 - **A query body** — a bare atom or a comma-separated conjunction, answered
   directly:
   ```sh
   ./datalog family.dl -q 'ancestor("alice", X)'
   ./datalog people.dl -q 'person(name: N, age: A), A >= 18'
+  ```
+- **A named query** — the same body with `name:` in front, which is what the
+  answer is published as:
+  ```sh
+  ./datalog people.dl -q 'adult: person(name: N, age: A), A >= 18'
   ```
 - **A define-and-select rule** — a `head :- body` clause; the rule is added and
   its head is queried for you:
@@ -74,18 +79,25 @@ sorted — and they round-trip as input, so runs compose over pipes:
 - **symbols** print bare (`red`); **strings** are double-quoted (`"red"`) — these
   are distinct types, so quote string data and leave enum-like symbols unquoted;
 - **floats** always keep a decimal point (`3.0`, not `3`);
-- a query whose atoms account for every variable you asked about re-emits **those
-  atoms** with bindings substituted — so `?- person(N, A), A >= 18.` answers in
-  `person` facts, and a filter alongside the atom does not change that;
+- **name the query and the answer wears that name**: `?- adult: person(N, A), A >=
+  18.` prints `adult(...)` facts. Optional, but it is the right default when the
+  output will be read by anything other than you — see the warning below;
+- an unnamed query whose atoms account for every variable you asked about re-emits
+  **those atoms** with bindings substituted — so `?- person(N, A), A >= 18.`
+  answers in `person` facts, and a filter alongside the atom does not change that;
 - otherwise you get synthesized `answer(...)` facts over the query's variables —
   which happens when something outside the atoms binds a column, such as an
   aggregate result;
 - a question with no variables answers **`holds(true).`** if it holds and prints
-  nothing if it does not.
+  nothing if it does not — or `name(true).` when you named it.
 
-**Reading `person` facts back does not mean you have all of them** — an answer is
-the rows your query matched, under the real relation's name. To make a result
-travel under a name of its own, define it: `-q 'adult(N) :- person(N, A), A >= 18.'`
+**Reading `person` facts back does not mean you have all of them** — an unnamed
+answer is the rows your query matched, under the real relation's name, and nothing
+in the output says so. **Name the query** and that ambiguity is gone:
+`-q 'adult: person(N, A), A >= 18'` answers in `adult` facts, which no source
+relation wears. A name is also a real relation, so a later `-q` can read it. Note
+it publishes **every** variable the body binds — that one is `adult/2`; to choose
+the columns, write the rule (`-q 'adult(N) :- person(N, A), A >= 18'`).
 
 ## Datalog in 30 seconds
 

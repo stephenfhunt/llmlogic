@@ -449,6 +449,7 @@ compared keyed by predicate *name*, not `PredId`.
   | a computed argument ≡ its value | unit test only (facts) | `bugs/005` (closed 2026-07-27) |
   | `<` ≡ `min`/`max` on one value order | nothing (unwritable — `<` was rejected) | `bugs/006` (closed 2026-07-27) |
   | a substituted answer ≡ the synthesized one | property, written with the change (2026-08-17) | — |
+  | a named query ≡ a rule over the projection | property, written with the change (2026-08-17) | — |
 
   - **`c8_an_answer_shape_neither_drops_nor_collapses_a_row`** over
     `testgen::arb_answer_shape_case` — the §14 shape rule: an answer printed under a
@@ -466,6 +467,25 @@ compared keyed by predicate *name*, not `PredId`.
     the change replaced, which is mutation **M1**. Also killed: emitting only the
     first atom of a ground conjunction, dropping the canonical sort, and refusing
     the ground-conjunction branch.
+
+  - **`c8_a_named_query_matches_its_desugared_rule`** over the same generator —
+    `?- name: body.` answers exactly as `name(<projection>) :- body.` plus
+    `?- name(<projection>).` (§14, §17 2026-08-17). **The oracle is the
+    desugaring**, written out as program text, so the property compares two
+    spellings rather than a spelling against a restatement of the rule.
+
+    That is only sound because the generator **writes down the projection it
+    emitted** rather than asking lowering for it — recovering the variable order
+    from the code under test would have made the oracle circular, which is the
+    corollary below reached from a new direction. The second assertion is
+    independent of both spellings: the rows come from the generator's own fact
+    list. Four mutations killed — a head one column short of the projection
+    (caught by the existing IR well-formedness check, not by this property's
+    comparison), querying the original body instead of the synthesized head,
+    dropping the empty-projection `true` so the answer prints the unparseable
+    `ans().`, and dropping the collision guard, whose kill is the unit test
+    `naming_a_query_after_a_defined_relation_is_rejected` and whose failure output
+    is the hazard itself: `age(N, A) :- age(N, A), A >= 18.`
 
   - **A15** `a15_inline_and_hoisted_arguments_agree` — an inline compound atom
     argument lowers to the same program as the hand-written `=`-assignment

@@ -246,19 +246,28 @@ them. Except where noted these are documented v1 limits rather than defects.
   shapes and not one. `answer/N` stays; silence still means no. Property **C8**,
   example **§16.10**, four mutations recorded. — §5/§14,
   `notes/query-answer-shape.md`.
-- **Naming a query where it is asked** — `?- conflict: p(X), q(X).`, exact sugar
-  for a rule whose head is the projection. **The fix for the projection hazard**,
-  which 2026-08-16 recorded as unsolved in both engines: named output wears no
-  source relation's name. A *language* form, not `-q` sugar — the name must survive
-  lowering, and a file program has the same hazard. Naming stays optional; it is
-  also the prerequisite for ever making an unnameable query an error. _designing
-  (own session; brief written)._ — §5/§14, `notes/query-answer-shape.md`.
+- **Naming a query where it is asked** — ✅ **2026-08-17**, closing the projection
+  hazard that 2026-08-16 recorded as unsolved in both engines. `?- adult: p(X), q(X).`
+  desugars **in lowering** to a rule whose head is the projection, so the name is a
+  real relation a later rule can read and the answer-shape function needed no new
+  arm; `ir::Query` and `api.rs` were untouched. Arity is the projection's length, an
+  empty projection heads `name(true)`, and a name the program *defines* is rejected
+  while one merely *referenced* is free. Property **C8**
+  `c8_a_named_query_matches_its_desugared_rule` (oracle = the desugaring), example
+  **§16.11**, four mutations recorded. — §5/§14, `notes/query-answer-shape.md`.
+  - Now unblocked, and *not* taken: **making an unnameable query an error** (axis 1).
+    Recovery is "prepend a word" rather than "rewrite it as a rule", which is what
+    made strictness unaffordable before. Naming stays optional today. _queued._
+  - A named query publishes **every** variable its body binds, so it does not
+    replace a rule that projects fewer columns. Documented, not a defect.
 - **A synthesized answer does not say which query it answers.** Two boolean queries
   in one run both print `holds(true).` and `answer/N` collides the same way across
-  same-width projections. The fix is a **`%` comment**, not an extra argument — the
-  text is unusable by any program (string ops rejected) and an argument is the same
-  move 2026-08-16 rejected for provenance-as-facts. **Sequence with §11's comment
-  rendering** so the format is designed once. _queued._ — §11/§14.
+  same-width projections. **Narrowed 2026-08-17 to the *unnamed* case** — naming
+  both queries already tells them apart, so this is now an ergonomic gap rather
+  than the only route. The fix is still a **`%` comment**, not an extra argument —
+  the text is unusable by any program (string ops rejected) and an argument is the
+  same move 2026-08-16 rejected for provenance-as-facts. **Sequence with §11's
+  comment rendering** so the format is designed once. _queued._ — §11/§14.
   - *Rejected 2026-08-17, and recorded so it is not re-proposed:* a **warning when
     a program reads `answer` facts**. The hazard is a two-run merge, which inside a
     single run is indistinguishable from legitimate single-pipe composition — so it
@@ -408,10 +417,11 @@ but a different kind of work.
   2026-07-20 entry carries the pointer instead. §4's and §11's two standing
   "shares a word, not a concept" disclaimers are gone, which was the point.
 - **Name a test per §16 example.** **§16.9 (the cast) is the worked pattern** ✅
-  2026-08-16 and **§16.10 (the answer shape) is the second** ✅ 2026-08-17 — each
-  names its `tests/system.rs` test and pins its output in a fence compared
-  byte-for-byte. The other **eight** still carry prose in comments and no named
-  test, so a block nobody wired up cannot fail; retrofitting them to that shape is
+  2026-08-16, with **§16.10 (the answer shape)** and **§16.11 (the named query)**
+  following ✅ 2026-08-17 — each names its `tests/system.rs` test and pins its
+  output in a fence compared byte-for-byte, and §16.11 was written that way from
+  the start rather than retrofitted. The other **eight** still carry prose in
+  comments and no named test, so a block nobody wired up cannot fail; retrofitting them to that shape is
   the item. The rule going forward is **no example means no feature**. Add a
   diagnostic example while doing it: none of them exercises an error, so nothing
   checks what the engine prints when a program is wrong. _queued._ — §16,

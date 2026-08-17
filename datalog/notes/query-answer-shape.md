@@ -322,3 +322,40 @@ Decided 2026-08-17 (§17), deliberately not built. `?- conflict: p(X), q(X).` is
   `print_query` (`src/print.rs:109`) for the round trip; `ir::Query`; §5's grammar;
   a §16 example. Naming stays **optional** — requiring it would make the language
   partial — but it is the prerequisite for ever revisiting axis 1's strictness.
+
+## What shipped, 2026-08-17 — the named query
+
+The brief above, executed the same day, with one of its sites turning out not to be
+one. §17 has the decision; §16.11 and
+`tests/system.rs::named_query_program_publishes_its_own_relation` are the example.
+
+- **`ir::Query` gained nothing, and neither did `api.rs`.** The desugaring happens
+  in `lower_query`: it synthesizes an `ir::Rule` over the body it has just lowered
+  and leaves the one-atom query `name(<projection>)` behind, reusing the same
+  `VarScope` — no re-lowering, no second scope. That query is then a single atom
+  whose variables equal the projection, which is precisely the substituted-atom case
+  the shape rule settled earlier the same day, so **the answer-shape function needed
+  no third arm**. The empty projection falls out too: the head is the ground
+  `name(true)`, printed by that same path.
+- **The brief's "must survive lowering to reach the printer" understated its own
+  conclusion.** Once lowering desugars to a rule, nothing needs to reach the
+  printer at all. Carrying an `Option<Ident>` into the IR and branching in
+  `answer_lines` would have been a *different, weaker* feature — it prints the same
+  bytes, but the relation would not exist, so `eligible(N) :- adult(N, _).` could
+  not read it and provenance would have nothing to explain.
+- **The guard's third case had to be decided here**: reject a name the program
+  **defines or declares**, allow one it merely **references**. Rejecting a
+  referenced-only name would make the sugar inexact, since defining it is exactly
+  what the equivalent hand-written rule does. This needed a `defined` set in
+  lowering's pass 1, `by_name` alone conflating the two.
+- **C8 carries `c8_a_named_query_matches_its_desugared_rule`**, whose oracle *is*
+  the desugaring, written as program text. Sound only because the generator writes
+  down the projection it emitted — reading the variable order back out of lowering
+  would have made the oracle circular. Four mutations killed (`testing.md`).
+- **One limit worth stating to consumers, and now stated**: a named query publishes
+  *every* variable its body binds, so it is not a drop-in for a rule that projects
+  fewer columns — `adult: person(name: N, age: A), A >= 18` is `adult/2` where
+  `adult(N) :- …` chose `adult/1`. In `skill/SKILL.md` and `docs/agent-skill.md`.
+- **Swept**: §5's grammar, §14's shape rule and hazard paragraphs and its footer,
+  §16.10's closing line (its missing half is now §16.11), §16.11 with its named
+  test, `testing.md` C8, the two agent-facing restatements.
