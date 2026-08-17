@@ -620,7 +620,8 @@ E1–E4 were pulled forward to roadmap step 2 (decided 2026-07-19, spec §17):
 provenance recording lands inside the evaluator's fixpoint, so its properties
 are tested the session it is written. E3's replay deliberately reuses the
 naive oracle's matcher, keeping the check independent of the semi-naive join
-loop that recorded the derivation. Only E5 waits on the step-6 surface design.
+loop that recorded the derivation. E5 waits on the §11/§14 output surface, and E6
+is a coverage hole in E3 rather than a new claim.
 
 - [x] **E1** Every derived fact has at least one derivation, and at least one
   is *well-founded* — every fact premise first appeared strictly earlier than
@@ -631,8 +632,13 @@ loop that recorded the derivation. Only E5 waits on the step-6 surface design.
 - [x] **E3** Replay: each derivation node's rule instance applied to its child
   facts rederives exactly the fact (and every premise holds in the model).
 - [x] **E4** A base fact's provenance is a leaf.
-- [ ] **E5** Once provenance-as-facts is designed (§17 open question),
-  provenance output itself satisfies D1 closure.
+- [ ] **E5** **Comment-stripping is the closure guard.** Proof trees are *not*
+  facts (§17, 2026-08-16 — decided in the negative), so there is no fact-shaped
+  provenance output to run D1 over. What replaces it: a proof rides in `%`
+  comments, so stripping every comment from a program's output must leave
+  **byte-for-byte** what the same program prints without its goals. That is what
+  keeps Datalog-out-is-Datalog-in true in the presence of provenance, and it is
+  cheaper than the closure test it replaces. Waits on the §11/§14 output surface.
 - [ ] **E6** Extend **E3 to §8 builtins**. E3 passes today only because
   `arb_program_with_edb` emits no comparisons — `monotype` makes every column a
   symbol, so arithmetic cannot appear — and its `replay` helper rebuilds the

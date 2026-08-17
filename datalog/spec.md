@@ -1407,11 +1407,12 @@ entry it amends, with a date and a pointer:
 | ***Amended …*** | the decision stands with its scope or detail changed |
 | ***Reopened …*** | the decision stands and is *under review*: nothing is overturned, but it is not to be built on until the question it points at is answered |
 | ***Consequences …*** | nothing changed — what it cost, whether the rationale held, whether the rejected alternative still looks rejected |
+| ***Answered …*** | **open questions only** — the question is settled; say which decision settled it, in the affirmative or the negative, and what narrower question (if any) survives |
 
-The last is the one that needs deliberate effort: it has no triggering change, so
-`AGENTS.md`'s session-end checkpoint prompts for it. It is also the only marker
-that records a decision working out *well*, which the log would otherwise never
-say.
+***Consequences*** is the one that needs deliberate effort: it has no triggering
+change, so `AGENTS.md`'s session-end checkpoint prompts for it. It is also the only
+marker that records a decision working out *well*, which the log would otherwise
+never say.
 
 ### Decisions
 
@@ -2756,6 +2757,10 @@ say.
   obvious workaround. §14 records this as a closure gap; the sharper reading is
   that a yes/no question has no answer. A single *ground atom* is distinguishable
   (output vs. none), so the hole is specifically the conjunction. — §5/§14.
+
+  ***Amended 2026-08-16*** — this is **axis 4** of the answer-shape question at the
+  top of this section, not a separate item, and it is the axis with no real
+  opposition. Answer it there.
 - **Should `declare` define a predicate?** A `declare`d but factless relation
   still warns "referenced but never defined" (§12, 2026-07-23), so there is no way
   to say "intentionally empty" — even though `declare` is precisely the user
@@ -2908,16 +2913,32 @@ say.
   (Aggregate syntax `op { Expr | Goal }` and grouping resolved 2026-07-24, §9.)
 - **Provenance query syntax:** `?why <fact>` is provisional across CLI and API; also
   decide proof-tree JSON encoding. (§16.6) — §11/§14.
+
+  ***Answered 2026-08-16*** — the surface is decided (Decisions above): one union of
+  `proof` / `underivable` / `unknown`, the sigil a cost hint, a near-miss a rule.
+  What stays open is the **rendering**, the **JSON encoding**, and sequencing
+  against the truncation contract, whose distinction `unknown` is.
 - **Semiring provenance under negation:** parked research thread with a worked
   sketch in `notes/semiring-provenance.md` — the derivation store is already a
   boolean provenance circuit, `Premise::Absent` a factored dual token; candidate
   work: `?whynot` with minimal repairs, tropical cheapest-proof selection for
   token economy. — §11.
+
+  ***Amended 2026-08-16*** — `?whynot` with minimal repairs left this thread: it was
+  designed **without** a semiring, a near-miss being a *rule* rather than a binding,
+  which is what bounds it. What stays parked is the algebra and tropical
+  cheapest-proof selection.
 - **Provenance as facts:** the Datalog-in/Datalog-out closure property suggests
   `?why` output should also have a fact-shaped form (e.g. derivation edges as
   ground facts), so provenance can itself be piped back in and queried with
   Datalog — not just rendered as a tree or JSON. Design alongside §11; exercise
   with a §16 example. — §11/§14.
+
+  ***Answered 2026-08-16 — in the negative*** (Decisions above). A proof tree is not
+  a fact and joins a fact stream on no terms; emitting it as derivation edges invents
+  relations the program never declared or flattens a tree into rows that no longer
+  compose. It rides in `%` comments instead, which keeps the closure property
+  byte-for-byte.
 - **`--format json` scope:** the only surviving §14 CLI question — a documented
   future *edge* feature (structured errors §12, provenance §11), deferred as
   low-value 2026-07-23 with the data path staying Datalog-native. (`-q`
