@@ -24,6 +24,59 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-17 — The named query ships, and one of its planned sites turns out not to be one
+
+The brief frozen earlier the same day, built. 439 pass (was 426), 1 ignored, clippy
+and rustfmt clean, `--no-default-features` still builds. The projection hazard —
+recorded 2026-08-16 as unsolved in both engines — is closed for any query that
+takes a name.
+
+**Done**
+- **`?- adult: person(N, A), A >= 18.`**, desugared in `lower_query` to the rule
+  `adult(N, A) :- …` plus the one-atom query `?- adult(N, A)`, reusing the same
+  `VarScope`. One `Option<Ident>` on `ast::Query`, one parser arm, one printer arm.
+- **`ir::Query` and `api.rs` were not touched**, which is the finding: a one-atom
+  query already prints under its atom's name, so the answer-shape rule settled
+  hours earlier needed **no third arm** — empty projection included, where the
+  ground head `name(true)` rides the same path.
+- **C8 gains `c8_a_named_query_matches_its_desugared_rule`**, oracle = the
+  desugaring as program text, over `arb_answer_shape_case` widened to carry the
+  projection *it* emitted. Eight lowering unit tests, three parser tests, **§16.11**
+  with its named system test and output pinned byte-for-byte.
+- **Swept**: §5's grammar, §14's shape rule + both hazard paragraphs + footer,
+  §16.10's closing line, `testing.md` C8, `ROADMAP.md`, the note, both agent docs.
+
+**Decided**
+- **The name is a *definition*, not a label**, and that is the whole feature.
+  Carrying an `Option<Ident>` to the printer emits the same bytes while the relation
+  does not exist — so `eligible(N) :- adult(N, _).` could not read it and provenance
+  would have nothing to explain. §16.11 pins that rule.
+- **The guard's line is *defined or declared*, not *mentioned*.** A name merely
+  referenced in a body stays takeable, defining it being exactly what the equivalent
+  hand-written rule does; rejecting it would make the sugar inexact. Needed a
+  `defined` set in pass 1, `by_name` conflating the two.
+- **Four mutations, two worth keeping**: a head one column short of the projection
+  is caught by the **existing** IR well-formedness check, not by anything added
+  here; and dropping the empty-projection `true` prints `ans().`, which §5 does not
+  accept — so the argument keeping output re-parseable is §5's own, now measured.
+- **A named query publishes *every* variable its body binds** (`adult/2` vs a
+  rule's `adult/1`). Verified, and documented for consumers rather than filed.
+
+**Removed**
+- The 2026-08-16 *`as` cast* entry rotated verbatim to `worklog-archive/2026-08.md`.
+- §14's *Not covered* claim that a query "cannot yet be given a name", and the
+  standing "this hazard is unsolved" sentence — both had stopped being true. The
+  synthesized-answer-collision item narrowed to the *unnamed* case instead of being
+  deleted: naming already tells two queries apart.
+
+**Next up**
+- **Termination** (blocks `bugs/004`), then **§6's extension** — now the head of the
+  queue. **Profile** is unblocked with a ranked list and gates two further items.
+- Newly unblocked, *not* taken: **an unnameable query as an error** (axis 1).
+  Recovery is now "prepend a word", which is what made strictness unaffordable.
+
+---
+
 ## 2026-08-17 — Racing the sibling engine: the benchmark item closes, two of ours break
 
 A for-fun cross-engine comparison against `~/code/tsdl` that came back with three
@@ -129,60 +182,3 @@ still builds.
   the format is designed once.
 - Unchanged and now the head of the queue: **Termination** (blocks `bugs/004`),
   then **§6's extension**. Then the profile, which gates two more items.
-
----
-
-## 2026-08-16 — The `as` cast ships, and its deferred question splits in two
-
-Expressions is now empty: the last queued non-design item is built. 421 tests
-pass (was 410), 1 ignored, clippy and rustfmt clean, `--no-default-features`
-still builds.
-
-**Done**
-- **`Expr as type` end to end** — a `cast` precedence level between `mul` and
-  `primary`, `ast::ExprKind::Cast` / `ir::Expr::Cast` (it survives lowering; a
-  per-row conversion has nothing to hoist), a typecheck arm fixing the result
-  type *without* unioning the operand, `apply_cast`, and a printer that wraps a
-  cast's **operand** — the parenthesization case arithmetic alone cannot reach.
-- **The literal-grammar classifier moved to `lexer.rs`** (its own commit) so
-  `"30" as int` and an imported `30` cell are the same function — §13's "no
-  second classifier exists" is now structural rather than a convention.
-- **§16.9, the first example that names its test** and pins its output in a fence
-  compared byte-for-byte — the shape the other eight should be retrofitted to.
-- **Tests**: B9 (§8's table as an *independent* oracle — `naive.rs` deliberately
-  calls `apply_cast`, so a differential would agree with a wrong table forever),
-  three algebraic laws incl. the `as string as T` round trip, B10 as a
-  biconditional, the printer's acceptance partner, and a non-vacuity guard. Seven
-  mutations run and recorded.
-
-**Decided**
-- **A failed conversion splits, which the question's either/or did not admit**:
-  `absent` where there is *no value to represent* (`"abc" as int`), an error
-  where representing it would be **lossy** (`2.5 as int`, `as float` above 2⁵³).
-  The second half extends §8's ratified widening rule to narrowing unchanged.
-- **The deciding argument was expressibility, not reporting.** With an error rule
-  a dirty column has *no writable query* — this language has no convertibility
-  predicate, string ops having been rejected rather than deferred — so `absent`
-  is what puts the guard back in existing vocabulary. Support: `eval_expr` is
-  `?`-propagated, so an error emits nothing, not even facts already derived. The
-  accepted cost, malformed reclassified as missing, is a new ROADMAP item.
-- **The conversion table was as open as the failure mode**, and needed settling
-  in the same sitting: text is the universal intermediary, and `bool as int` and
-  friends have *no* conversion rather than a debatable one.
-
-**Removed**
-- **ROADMAP's Expressions essay**, 55 lines to 30. Its conclusion — "so the fix
-  is an *explicit* `float(X)`" — had stopped being true the moment `as` was
-  ratified: the exact stale-claim failure `docs/rules/editing-docs.md` exists for.
-- §8's *Still open* bullet and §4's "deliberately still open"; two copies of the
-  i128 exactness test, now one shared function; one of three `type_label`s.
-- The 2026-08-03 entry rotated verbatim to `worklog-archive/2026-08.md` (new).
-
-**Next up**
-- Unchanged and still the user call: **the answer shape** (blocks the widening),
-  then **Termination** (blocks `bugs/004`), then **§6's extension**.
-- New here, both small: making the malformed/missing reclassification visible,
-  and a type-clash diagnostic that names `as` — there is a concrete fix to
-  suggest now, which there was not before. The **§16 retrofit** also got cheaper:
-  §16.9 is a pattern to copy rather than a shape to invent.
-
