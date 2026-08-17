@@ -1,12 +1,15 @@
 # Datalog Language Specification
 
-**Status:** `v0.1-draft` — living document. Sections are drafted, refined, and
-prototype-validated over time. Nothing here is final until its section is marked
-*Stable* and the corresponding decision is recorded in §17.
+`v0.1` — a living document, and both the specification and the design workspace for
+the `datalog` engine. It carries the current design **and** an explicit
+decisions/open-questions log (§17) so the reasoning behind each choice stays visible.
 
-This is both the specification and the design workspace for the `datalog` engine. It
-carries the current design **and** an explicit decisions/open-questions log so the
-reasoning behind each choice stays visible.
+**§§1–16 state present truth and carry no half-state.** A section describes what the
+language is now and ends with ***Not covered***, which is the one home for what it
+defers; a reader wanting to know when something arrived, or why, goes to §17. Which
+source file validated a section is tracked in
+[`notes/spec-traceability.md`](notes/spec-traceability.md) — traceability worth
+keeping, at the wrong altitude for a language definition (§17, 2026-08-16).
 
 The academic literature behind each section is cataloged in
 [`references.md`](references.md), grouped by topic and cross-referenced to spec
@@ -26,20 +29,16 @@ The scope is large (full-featured v1), so we use a disciplined, repeatable proce
   §17 until answered.
 - **Spec-first, prototype-validated.** We specify first (per the project's intent),
   but we validate risky sections — grammar, negation/stratification, provenance —
-  with small Rust prototypes in the crate and feed findings back before marking a
-  section *Stable*. Spec and code co-evolve.
+  with small Rust prototypes in the crate and feed findings back. Spec and code
+  co-evolve.
 - **Versioned.** The spec header carries a version tag so we can track churn.
-- **Sequencing.** Draft §1–5 (goals → grammar) to a stable-enough point first, then
-  §6–11 (semantics through provenance), then §12–14 (errors, sources, API), iterating
-  as needed. §15–16 accrete throughout.
-
-Each section below starts with a **Status** line: `TBD` → `Draft` → `Stable`.
+- **Sequencing.** §1–5 (goals → grammar) first, then §6–11 (semantics through
+  provenance), then §12–14 (errors, sources, API), iterating as needed. §15–16
+  accrete throughout.
 
 ---
 
 ## 1. Overview & goals
-
-*Status: TBD*
 
 A Datalog engine purpose-built for LLM/agent use and for conveniently loading fact
 tables from external sources. Three pillars drive every design decision:
@@ -51,11 +50,12 @@ tables from external sources. Three pillars drive every design decision:
    (skill-based, CLI-first); Datalog is the interchange format in both directions,
    with JSON at the machine-readable edges (errors, provenance). See §14.
 
-*To fill in: concrete goals, non-goals, target users, success criteria.*
+*Not covered:* concrete goals, non-goals, target users and success criteria. The
+three pillars above have driven every decision in §17 and are cited as settled
+authority; the rest of this section has never been written, which is a ROADMAP item
+and not a deferral.
 
 ## 2. Design principles
-
-*Status: TBD*
 
 Candidate principles to ratify:
 - **Prefer familiar, conventional Datalog surface syntax.** LLMs generate standard
@@ -67,9 +67,12 @@ Candidate principles to ratify:
 - **Explainability and the agent API are first-class**, designed in from the start.
 - **Predictable evaluation** — termination and resource behavior an agent can rely on.
 
-## 3. Lexical structure
+*Not covered:* ratification. These are candidates, and one of them is **not
+satisfied** — a program can run forever (`bugs/004`), which is why "predictable
+evaluation" cannot be ratified as written. Ratifying §1 and §2, or softening this
+bullet to what the implementation delivers, is a ROADMAP item.
 
-*Status: Draft — validated by the hand-rolled lexer (`src/lexer.rs`), 2026-07-22.*
+## 3. Lexical structure
 
 - **Comments** — `%` **or `#`** to end of line (the `#` alias is added for LLM
   ergonomics, §17 2026-07-22; `//` is *not* a comment — reserved against a
@@ -110,17 +113,11 @@ Candidate principles to ratify:
   `=<`→`<=`, `\=`→`!=`, `\+`/`!`→`not`, `//`/`/* */`→comment markers. The lexer
   substitutes the intended token so parsing continues (§17, 2026-07-22).
 
-## 4. Data model & types
+*Not covered:* string interpolation, raw or multi-line string literals, and
+non-ASCII identifiers. A string's *contents* may be any Unicode; its delimiters and
+the identifier grammar are ASCII.
 
-*Status: Draft — validated by the AST/IR prototype (`src/ast.rs`, `src/ir.rs`),
-2026-07-19; the named-argument rules below implemented in lowering
-(`src/lower.rs`), 2026-07-20; type inference implemented as a post-lowering pass
-(`src/typecheck.rs`), 2026-07-21; `declare`-signature verification implemented
-(declared types threaded onto `ir::PredicateInfo.field_types`, verified in
-`typecheck`), 2026-07-21. Source (2) imported *inferred* column types needs no
-separate inference channel: imports materialize as column-uniform facts before
-lowering, and source (1) types them — decided with §13, 2026-07-23; lands with
-roadmap step 7.*
+## 4. Data model & types
 
 ### Values and terms
 
@@ -280,10 +277,12 @@ adult(N) :- person(name: N, age: A), A >= 18.
 - In a rule **head**, the named form must supply *all* declared fields (a head
   cannot leave columns unbound).
 
-## 5. Syntax
+*Not covered:* compound and function terms, and collection-valued columns — the
+value model is flat, which is what blocks `collect`/`string_agg` in §9. Also
+temporal types: a date column from §13 arrives as a string or an int, and there is
+no date arithmetic. Both are ROADMAP items.
 
-*Status: Draft — validated by the AST/IR prototype (`src/ast.rs`), 2026-07-19,
-and by the hand-rolled recursive-descent parser (`src/parser.rs`), 2026-07-22.*
+## 5. Syntax
 
 A program is a sequence of statements, each terminated by `.`:
 
@@ -401,9 +400,14 @@ Notes:
 - **URLs need no grammar**: a path is a plain string; a scheme (`http://`,
   `https://`) makes it a URL at resolution time (§13).
 
-## 6. Declarative semantics
+*Not covered:* **one body grammar.** There are three — rule bodies are DNF, while
+queries and aggregate goals are conjunction-only — so a disjunctive filter can only
+be expressed by detouring through the rule form. Whether `;` extends to the other
+two, or the asymmetry is deliberate and gets stated as such here, is a ROADMAP item.
+Also not covered: **0-arity atoms**, which are banned, which is what removes the
+workaround for a yes/no question (§14).
 
-*Status: Draft (positive programs; extension to negation/aggregation arrives with §7/§9)*
+## 6. Declarative semantics
 
 A program's meaning is its **least model** (references.md group 1):
 
@@ -424,12 +428,16 @@ A program's meaning is its **least model** (references.md group 1):
 Stratified negation extends this to the **perfect model** — a least fixpoint
 per stratum, lower strata frozen — in §7.
 
-*Still to fill in: extension to aggregation (§9); semantics of
-comparison/arithmetic literals (§8).*
+*Not covered:* the extension to aggregation (§9), the semantics of
+comparison/arithmetic literals (§8), and `absent` (§4) — so this section accounts
+for a fragment of the language rather than the language. It also states a
+**finiteness premise arithmetic falsified** (`bugs/004`): the Herbrand universe is
+not the set of constants appearing in the program once `N = M + 1` can synthesize
+one. Its own session, and the best-prepared one — the anti-join decision settled
+what `p(X), not p(X)` means, §4 states the four match sites, and the truncation
+contract (§17, 2026-08-16) settles what an incomplete model is worth.
 
 ## 7. Negation
-
-*Status: Draft (semantics ratified; lands with roadmap step 4)*
 
 Negation is **stratified negation-as-failure**. The semantics of record is the
 **perfect model** of Apt/Blair/Walker (references.md group 3); the
@@ -500,15 +508,11 @@ positive programs only, and the principled negation extensions
 (dual-indeterminate and absorptive polynomials, references.md group 5) are
 not adopted in v1.
 
-**Out of scope**: well-founded and stable-model semantics (references.md
-group 3). Stratified programs are the predictable subset for agent-generated
-code; an unstratifiable program is a structured error, never a different
-semantics.
+*Not covered:* well-founded and stable-model semantics (references.md group 3).
+Stratified programs are the predictable subset for agent-generated code; an
+unstratifiable program is a structured error, never a different semantics.
 
 ## 8. Arithmetic & comparison builtins
-
-*Status: Draft — evaluated in the engine and the naive oracle (`src/engine/`),
-lowered with the assignment-safety exception (`src/lower.rs`), 2026-07-21.*
 
 **Operators.** Comparison `= != < <= > >=`; arithmetic `+ - * /`; the postfix
 conversion `as type` (below). Both appear
@@ -618,12 +622,16 @@ guarantees make this a widening rather than a change of meaning:
   circular dependency (`M = N+1, N = M+1`). The two get different messages,
   because only the first can be fixed by adding a binder.
 
-## 9. Aggregation
+*Not covered:* **parenthesized expressions** — `V = (A + B) * C` is a parse error,
+so a non-trivial expression must be hand-decomposed into `=`-chains (a ROADMAP item,
+and an implementation gap rather than a decision). **String operations** — no
+prefix, split or concat, *rejected* rather than deferred (§17, 2026-07-27): string
+construction fails §10's termination test. **Builtin scalar functions** (`abs`,
+`length`, `lower`, `substr`) are deferred until a consumer needs them, and
+user-defined ones are declined — a rule already is one. **Implicit int/float
+widening** does not happen; the import boundary is the only coercion site.
 
-*Status: Ratified 2026-07-24 (design session, §17) — surface syntax, grouping,
-the five reducers and their result types, the skip-count report surface, and the
-recursion interaction are all decided below; the absent interaction (§4) was
-settled 2026-07-24 ahead of this. v1 ships `count`/`sum`/`min`/`max`/`avg`.*
+## 9. Aggregation
 
 **Surface syntax — set-builder pipe.** An aggregate is an **expression** of the
 form `op { Expr | Goal }`, read as set-builder notation ("the `op` of `Expr`
@@ -763,14 +771,17 @@ its binder (§8); `Goal`-local variables are existential (like wildcard variable
 under negation). Recursive/monotonic aggregation (the Zaniolo et al.
 fixpoint semantics, `references.md`) is a deliberate future extension.
 
-*Deferred (§17):* statistical reducers (`median`, `stddev`, `variance`,
-`percentile` — the aggregate node reserves a parameter slot for the last);
-collection-valued reducers (`collect`/`string_agg`, blocked on a first-class
-collection value, §4); recursive aggregation.
+*Not covered:* statistical reducers (`median`, `stddev`, `variance`, `percentile`
+— the aggregate node reserves a parameter slot for the last); collection-valued
+reducers (`collect`/`string_agg`, blocked on a first-class collection value, §4);
+recursive aggregation. **And distinctness has no spelling**: a wildcard inside a
+goal is a witness dimension, so `count { S | e(_, S) }` returns the edge count and
+not the distinct-`S` count — over an imported table the wildcard is not even
+written, since named-argument syntax leaves every unmentioned column implicitly
+wildcarded. Measured 2026-07-27 on a 7-column table: 36 call sites where the
+question wanted 20 callers. Whether v1 gains `count distinct` is a ROADMAP item.
 
 ## 10. Recursion & safety
-
-*Status: Draft (range restriction only; the rest TBD)*
 
 **Range restriction** (enforced by front-end lowering, `src/lower.rs`). **This
 section is the single normative statement of what "bound" means**; §7, §8, §9 and
@@ -800,12 +811,17 @@ existential (like wildcard variables under negation) and never exported. Because
 they are never exported, a goal-local variable is also **not an answer variable**
 of a query that contains the aggregate (§14).
 
-*Still to fill in: termination guarantees; safety/mode conditions for arithmetic
-(§8); recursive/monotonic aggregation semantics (§9).*
+*Not covered:* **the Termination section itself, which is this section's largest
+hole.** The direction is decided — a static semantic error rejecting an
+arithmetic-computed value that flows to the head of a positively recursive
+predicate, and **no runtime budget or fuel** (§17, 2026-07-25 and 2026-08-16) — but
+the rule is not written here and not implemented, so `nat(N) :- nat(M), N = M + 1.`
+is accepted and runs forever. What *is* settled is what the engine owes when a model
+is incomplete however that happened: it does not answer, and it says why (§15).
+Also not covered: safety/mode conditions for arithmetic (§8), and recursive or
+monotonic aggregation semantics (§9).
 
 ## 11. Provenance / explainability
-
-*Status: Draft (data model; the query surface and JSON encoding remain TBD)*
 
 The data model (`src/provenance.rs`, recorded by the engine during the §15
 fixpoint):
@@ -838,14 +854,17 @@ value, and `X is absent` succeeding is an ordinary positive premise. This is
 distinct from the **absence pattern** above — the why-not record for a *negated*
 literal — which shares the word "absence" but not the mechanism.
 
-*Still open (§17): the `?why` query form across CLI and API, the proof-tree
-JSON encoding, and the provenance-as-facts closure question.*
+*Not covered:* the query surface, which is designed but not built — `?why` and
+`?whynot` return one union of `proof` / `underivable` / `unknown`, the sigil being
+a cost hint rather than a selector, and a near-miss is a *rule* and not a binding
+(§17, 2026-08-16). Its rendering and any JSON encoding are open. **Proof trees as
+facts are not coming**: a proof tree is not a fact, so it rides in `%` comments,
+which keeps Datalog-out-is-Datalog-in intact. Also not covered: semiring provenance
+under negation and tropical cheapest-proof selection
+(`notes/semiring-provenance.md`), and lineage annotations on answer rows — Tier 1
+in tsdl's sense — which this engine does not have at all.
 
 ## 12. Error model
-
-*Status: Draft — the shape (category, message, span, position, suggestion,
-severity) is implemented in `src/error.rs`, 2026-07-25; the machine-readable
-**code** vocabulary and spans on semantic/source errors remain open.*
 
 A diagnostic is **data with a rendering**, never a rendering with data attached.
 The prose sentence is one field among several, so a consumer never has to parse
@@ -880,16 +899,17 @@ uppercase relation name, the nearest defined predicate for a typo.
 composed from the fields — so a future `--format json` edge (§14) serializes the
 same data with no message re-parsing.
 
-*Open:* a stable machine-readable **code** per diagnostic (an agent should be
-able to branch on `unsafe-aggregate` without matching prose), and spans on
-semantic errors — lowering reports many from points where the responsible span
-is not threaded, and choosing the right span per diagnostic is a design pass
-rather than a mechanical change. Both tracked in `ROADMAP.md`.
+*Not covered:* a stable machine-readable **code** per diagnostic (an agent should
+be able to branch on `unsafe-aggregate` without matching prose), and spans on
+semantic errors — lowering reports many from points where the responsible span is
+not threaded, and choosing the right span per diagnostic is a design pass rather
+than a mechanical change. Both tracked in `ROADMAP.md`. Nor does this section say
+anything about a `suggestion`'s *content*, which is the field with the sharpest
+known hazard: a model acts on a suggestion literally, so one that cannot be acted
+on costs a round and one that is wrong on correct code is worse than none
+(`notes/tsdl-cross-project-review.md`, measured there).
 
 ## 13. External data / fact sources
-
-*Status: Ratified 2026-07-23 (design deep-dive; decisions in §17) — implementation
-is roadmap step 7.*
 
 `import` has two forms, distinguished by shape: a **data import** binds external
 tabular data to one relation (`as` clause present), and a **module import**
@@ -1009,9 +1029,15 @@ import "lib/family.dl".
   libraries define, they don't ask. Root-file queries are unaffected.
 - Module imports are local files only in v1 (no URL modules).
 
-## 14. Programmatic / agent API
+*Not covered:* **database loading** — the `table "…"` grammar is reserved and
+SQLite/DuckDB/Postgres loading is deferred until a consumer needs it — and **TSV**,
+deferred with it. **Filter pushdown**: every import is eagerly materialized, so a
+large source is read whole; pushing selections into SQL waits on someone hitting
+that wall. **Module namespacing**: v1 shares one global namespace, and qualified
+names and visibility are deferred. A cell the reader cannot represent is a
+structured error, and what that costs the *run* is §15's.
 
-*Status: Draft*
+## 14. Programmatic / agent API
 
 The primary usage pattern is **skill-based**: an agent drives the `datalog`
 executable directly (CLI-first; no server required — a server/MCP layer can wrap
@@ -1126,9 +1152,14 @@ the obvious workaround. A single ground atom *is* distinguishable (output vs. no
 output), so the hole is narrower than "a pure existence check" suggests; it is an
 open roadmap item.
 
-## 15. Evaluation strategy (non-normative)
+*Not covered:* **the answer shape is under review** and the 2026-08-03 widening is
+not built while it is — what a query prints and under what relation name is a §17
+open question as of 2026-08-16, with the existence check above as one of its axes.
+Also not covered: a `--format json` data path (deferred as low-value; JSON stays at
+the machine-readable edges), `serde` on the API types, and streaming or cursored
+results.
 
-*Status: Draft (positive programs; negation joins the loop at roadmap step 4)*
+## 15. Evaluation strategy (non-normative)
 
 `eval` (`src/engine/`) computes the least model (§6) bottom-up:
 
@@ -1156,14 +1187,37 @@ open roadmap item.
 - **Magic sets** remain a future optimization. Join order and indexing are
   evaluator-internal and free to change — the IR never encodes them.
 
+*Not covered:* **what makes the loop stop.** "The stratum stops when a round adds
+no new facts" describes the loop accurately and never says a round must eventually
+add none — which §10's missing Termination section owes it, and which `bugs/004`
+tracks. There is no iteration cap, fact cap or wall-clock budget anywhere, **by
+decision** rather than by omission (§17, 2026-08-16): a static rule is the
+guarantee, a `^C` is the operator's, and a slow program stays slow.
+
+*Also not covered, and decided rather than deferred:* **what an incomplete model is
+worth**. Decided 2026-08-16 and not implemented — an incomplete fixpoint holds
+missing facts and never false ones, so a whole-model dump survives it while
+*answers* do not, because a query solved against it can be wrong rather than
+missing (`not p(X)` over an incomplete `p` succeeds). Where a relation is short by
+rows the discriminator is how the program reads it: projected, answer one row short
+and say so; folded or negated, withhold. §9's skipped aggregate rows and §13's
+unrepresentable cells are the live instances, and both report through a stderr
+warning today.
+
+Also not covered: semi-naive's interaction with anything annotation-shaped, magic
+sets, indexes, parallelism, incremental maintenance.
+
 ## 16. Worked examples
 
-*Status: Draft*
-
-> The core syntax used below — facts, rules, queries, imports, named arguments —
-> is ratified in §3–§5 and §13. The aggregate expression form (§16.4) and the
-> provenance query form (§16.6) remain **provisional**; see §17. Each example calls
-> out the design questions it raised and their status.
+> These are the canonical corpus at every level of the test pyramid
+> (`testing.md`), and the design was driven from them rather than in the abstract.
+> Each example ends with the design questions it settled or still raises.
+>
+> **An example is a claim about the engine, so it should name the test that runs
+> it.** None of them do yet — a ROADMAP item, and the reason a block nobody wired
+> up could quietly stop being true (§17, 2026-08-16). Everything below is ratified
+> in §3–§5, §9 and §13 except §16.6's `?why` form, whose surface was designed
+> 2026-08-16 and is not built.
 
 ### 16.1 Recursion — ancestry / reachability
 
@@ -1267,9 +1321,11 @@ feature, 2026-07-23). *Still open:* database loading and filter pushdown (§17).
 %          ├─ via rule: ancestor(X,Y) :- parent(X,Y)
 %          └─ parent("bob","carol")               [base fact]
 ```
-*Raises:* how provenance is requested (`?why` is provisional) via both CLI and the
-agent API; the proof-tree representation (§11) and its JSON encoding (§14); handling
-of multiple independent derivations of the same fact.
+*Designed (§17, 2026-08-16), not built:* `?why` and `?whynot` answer with one union
+of `proof` / `underivable` / `unknown`, the sigil being a cost hint rather than a
+selector. *Still open:* the rendering above is a sketch, the JSON encoding (§14) is
+undecided, and how a fact with several independent derivations chooses one is
+governed by §11's well-founded order and not by anything the user asks for.
 
 ### 16.7 Named arguments & partial selection
 
@@ -1292,11 +1348,11 @@ literal; partial selection (omitted fields bind to fresh anonymous variables);
 
 *Implemented 2026-07-20* as lowering pass 2 (`src/lower.rs`), with
 `ast::fixtures::example_16_7` / `ir::fixtures::example_16_7` as the contract
-test. One adaptation in the fixture: the `employee` import is written with an
-explicit schema, because header-derived field names need fact sources (§13,
-not yet implemented). Until then, named access to a schema-less import is a
-structured error. *(§13 was ratified 2026-07-23 — the adaptation dissolves
-when roadmap step 7 lands, since imports load before lowering.)*
+test. One adaptation survives in the fixture: the `employee` import is written
+with an explicit schema. It is an artifact of the fixture predating §13's
+implementation and no longer describes a limit — imports load before lowering,
+so a header supplies the field names and named access to a schema-less import
+works.
 
 ### 16.8 Absent — missing data through import, filter, aggregate, provenance
 
@@ -1325,9 +1381,14 @@ skipped-but-reported by aggregates (the skip count via provenance, §11); the
 `absent` literal round-trips (Datalog-out is Datalog-in). The aggregate surface is
 the ratified set-builder `avg { A | Goal }` (§9), grouped globally here.
 
-## 17. Decisions log & open questions
+*Not covered:* **a named test per example**, which is what would make this corpus
+load-bearing rather than illustrative; and the expected output shown in comments is
+prose, not a pinned fence compared byte-for-byte. Both are one ROADMAP item. No
+example exercises a *diagnostic*, so nothing here checks what the engine prints
+when a program is wrong — an example proves a claim about the channels it compares
+and nothing about a channel it is silent on.
 
-*Status: living*
+## 17. Decisions log & open questions
 
 This section is an **append-only record**: history is what it is for. Amend
 entries in place, never rewrite them — a rationale that turned out wrong is the
