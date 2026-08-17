@@ -246,6 +246,33 @@ fn answer_shape_program_prints_each_form() {
     assert!(out.stderr.is_empty(), "{}", out.stderr);
 }
 
+/// §16.11 — a query naming itself, pinned byte-for-byte. The queries are again
+/// the subject, so they live in the corpus file.
+///
+/// The first two blocks are the point: the same question asked twice, printing
+/// narrowed `person` facts unnamed and `adult` facts named — the projection
+/// hazard beside its fix. Then a name replacing the synthesized `answer/N`, an
+/// empty projection answering `name(true)`, and a rule reading the relation a
+/// query defined, which is what makes the name compose rather than label.
+#[test]
+fn named_query_program_publishes_its_own_relation() {
+    let out = run_file("16_11_named_query.dl");
+    assert_eq!(out.code, 0);
+    assert_eq!(
+        out.stdout,
+        "person(\"alice\", 34).\n\
+         person(\"carol\", 29).\n\
+         adult(\"alice\", 34).\n\
+         adult(\"carol\", 29).\n\
+         with_bans(\"alice\", 34, 1).\n\
+         with_bans(\"bob\", 17, 1).\n\
+         with_bans(\"carol\", 29, 1).\n\
+         clean(true).\n\
+         eligible(\"alice\").\n"
+    );
+    assert!(out.stderr.is_empty(), "{}", out.stderr);
+}
+
 #[test]
 fn disjunction_program_runs() {
     let out = run_file("disjunction.dl");

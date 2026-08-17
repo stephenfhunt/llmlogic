@@ -1,0 +1,28 @@
+% §16.11 — naming a query where it is asked (§5/§14).
+% Run by tests/system.rs::named_query_program_publishes_its_own_relation.
+% The queries are the subject, so they live in the file.
+person("alice", 34).
+person("bob", 17).
+person("carol", 29).
+banned("carol").
+
+% The hazard, unchanged: these are real `person` facts over a *subset* of
+% `person`, and nothing downstream can tell them from the whole relation.
+?- person(N, A), A >= 18.
+
+% The fix — the same question, published under a name no source relation wears.
+% Exact sugar for `adult(N, A) :- person(N, A), A >= 18.` plus `?- adult(N, A).`
+?- adult: person(N, A), A >= 18.
+
+% A name also replaces the synthesized `answer/N` the aggregate would otherwise
+% force, `C` being bound by no atom.
+?- with_bans: person(N, A), C = count { X | banned(X) }.
+
+% No answer variables, so there are no columns to publish and the yes carries an
+% argument instead — §5 bans 0-arity atoms, exactly as for `holds(true).`
+?- clean: not banned("bob").
+
+% The name is a *definition*, not a print-time label, which is what makes the
+% answer compose: a rule may read the relation a query named.
+eligible(N) :- adult(N, _), not banned(N).
+?- eligible(N).

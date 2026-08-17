@@ -1529,14 +1529,63 @@ variables and the answer variables. Query 2 is the boundary the one-directional
 test got wrong — every atom argument is projected there too, so substituting
 `person` would silently drop `C`. Query 4 is what the shape owed and did not pay
 before: it printed nothing whether or not it held. What this example cannot show
-is the hazard in query 1 — those are real `person` facts over a subset of `person`,
-and only naming the query removes that.
+is the hazard in query 1 — those are real `person` facts over a subset of
+`person`, which only a name removes; **§16.11 is that half**, over the same
+relation and asking the same question.
+
+### 16.11 Naming a query where it is asked
+
+Run by `tests/system.rs::named_query_program_publishes_its_own_relation` over
+`tests/programs/16_11_named_query.dl`. The queries are the subject, so they are in
+the file; the first two ask the *same question* unnamed and named.
+
+```datalog
+person("alice", 34).  person("bob", 17).  person("carol", 29).
+banned("carol").
+
+% the hazard: real `person` facts over a *subset* of `person`, and nothing
+% downstream can tell them from the whole relation
+?- person(N, A), A >= 18.
+
+% the fix — the same question under a name no source relation wears
+?- adult: person(N, A), A >= 18.
+
+% a name also replaces the synthesized `answer/N` the aggregate would force
+?- with_bans: person(N, A), C = count { X | banned(X) }.
+
+% no answer variables, so no columns: the yes carries an argument instead
+?- clean: not banned("bob").
+
+% the name is a definition, not a label — a rule may read what a query named
+eligible(N) :- adult(N, _), not banned(N).
+?- eligible(N).
+```
+```
+person("alice", 34).
+person("carol", 29).
+adult("alice", 34).
+adult("carol", 29).
+with_bans("alice", 34, 1).
+with_bans("bob", 17, 1).
+with_bans("carol", 29, 1).
+clean(true).
+eligible("alice").
+```
+*Resolved (§5/§14, 2026-08-17):* `?- name: body.` is exact sugar for a rule whose
+head is the projection, desugared during lowering — which is why `eligible` can
+read `adult`, and why the answer needs no new print rule. Arity is the
+projection's length, so a body with no answer variables heads the ground
+`name(true)` (§5 bans 0-arity atoms). The head is range-safe by construction, the
+projection being what the body binds. One guard: a name the program already
+**defines** is rejected, since predicates intern by name alone and the answer
+would silently extend that relation — a name merely *referenced* is free to take,
+because defining it is what the equivalent hand-written rule does.
 
 *Not covered:* **a named test per example**, which is what would make this corpus
 load-bearing rather than illustrative; and the expected output shown in comments is
 prose, not a pinned fence compared byte-for-byte. Both are one ROADMAP item —
-§§16.9 and 16.10 are done the new way, and the pattern the other **eight** should
-be retrofitted to. No example exercises a *diagnostic*, so nothing here checks
+§§16.9, 16.10 and 16.11 are done the new way, and the pattern the other **eight**
+should be retrofitted to. No example exercises a *diagnostic*, so nothing here checks
 what the engine prints when a program is wrong — an example proves a claim about
 the channels it compares and nothing about a channel it is silent on.
 
