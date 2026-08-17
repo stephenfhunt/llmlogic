@@ -6,3 +6,4 @@
 # everyone who runs the test benefits from these saved cases.
 cc 41dcb8fae17903ebdad1a72f41a501fdae4e7c336722d79aee635204b8fc0339 # shrinks to (base, rule, head) = ("", "d(K) :- n(K, V), V = 0 ; n(K, V), V = 0", "d(K)")
 cc 85a0443d8e106ad8d5e514865cb66714987b5ada0ec9d3d01f6b2731415567d7 # shrinks to (computed, folded) = ("n(\"b\", 2).\n?- n(K, 0 + 2).\n", "n(\"b\", 2).\n?- n(K, 2).\n")
+cc 5ed4371a32ab6591466fe484a843904c01ff321b9e3ecdae2c5c3056fbb25648 # shrinks to case = AnswerShapeCase { program: "n(\"a\", 0).\n?- n(K, V), S = V + 1.\n", expected: ["answer(\"a\", 0, 1)."], shape: 3 }

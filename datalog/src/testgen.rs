@@ -545,6 +545,123 @@ pub(crate) fn arb_ground_query_spellings() -> impl Strategy<Value = (String, Str
     )
 }
 
+/// A program whose query exercises one §14 answer shape, paired with the answer
+/// computed independently of the engine.
+#[derive(Debug, Clone)]
+pub(crate) struct AnswerShapeCase {
+    /// The whole program, query included.
+    pub program: String,
+    /// The canonical lines the query must print, in order — filtered and sorted
+    /// from the generator's own fact list, never by asking the engine.
+    pub expected: Vec<String>,
+    /// Which shape was built (0 single atom, 1 atom + filter, 2 ground
+    /// conjunction, 3 an extra variable no atom carries), for the non-vacuity
+    /// guard to count coverage.
+    pub shape: u8,
+}
+
+/// A query built **backwards from facts the EDB contains**, so it is guaranteed
+/// to answer, over the shapes §14's rule discriminates: a single atom carrying
+/// the whole projection, that atom beside a non-binding filter (the 2026-08-03
+/// widening), a ground conjunction (2026-08-17), and — the discriminating one —
+/// a body binding a variable **no atom mentions**, which must keep `answer/N`.
+///
+/// That last shape is why the property guards the rule rather than merely
+/// describing it: the one-directional "every argument is projected" test accepts
+/// it too, and substituting there drops a column. Without it every case would
+/// pass under either guard.
+///
+/// Backwards deliberately. The cautionary precedent is
+/// `a_computed_query_argument_answers_like_its_value`, whose rewrite-based first
+/// version **passed unfixed**, because over arbitrary programs a query that both
+/// computes and matches almost never occurs. The oracle here filters a `Vec`, so
+/// it cannot agree with a wrong engine the way one calling `answer_lines` would.
+pub(crate) fn arb_answer_shape_case() -> impl Strategy<Value = AnswerShapeCase> {
+    (
+        proptest::collection::vec((0u8..4, -3i64..=3), 1..=6),
+        0u8..4,
+        any::<prop::sample::Index>(),
+        any::<prop::sample::Index>(),
+        -3i64..=3,
+    )
+        .prop_map(|(pairs, shape, pick, pick2, threshold)| {
+            // Distinct facts, so deduplication is never what makes the
+            // comparison pass.
+            let facts: Vec<(String, i64)> = pairs
+                .iter()
+                .map(|(key, value)| (key_name(*key).to_string(), *value))
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect();
+            let edb: String = facts
+                .iter()
+                .map(|(key, value)| format!("n(\"{key}\", {value}).\n"))
+                .collect();
+
+            // Canonical order is the derived `Vec<Value>` order, which for an
+            // `n(string, int)` tuple is key then value — and the keys are ASCII,
+            // so Rust's string order is the printed order.
+            let (query, mut answered) = match shape {
+                0 => {
+                    // Single atom, the value pinned to a fact's own value.
+                    let value = facts[pick.index(facts.len())].1;
+                    (
+                        format!("?- n(K, {value}).\n"),
+                        facts
+                            .iter()
+                            .filter(|(_, v)| *v == value)
+                            .cloned()
+                            .collect::<Vec<_>>(),
+                    )
+                }
+                1 => (
+                    // The atom beside a filter, which binds nothing.
+                    format!("?- n(K, V), V >= {threshold}.\n"),
+                    facts
+                        .iter()
+                        .filter(|(_, v)| *v >= threshold)
+                        .cloned()
+                        .collect(),
+                ),
+                2 => {
+                    // Two ground atoms, both drawn from the EDB.
+                    let first = facts[pick.index(facts.len())].clone();
+                    let second = facts[pick2.index(facts.len())].clone();
+                    (
+                        format!(
+                            "?- n(\"{}\", {}), n(\"{}\", {}).\n",
+                            first.0, first.1, second.0, second.1
+                        ),
+                        vec![first, second],
+                    )
+                }
+                // `S` is bound by the assignment, not by the atom, so no atom
+                // accounts for it and the answer keeps the synthesized name.
+                _ => ("?- n(K, V), S = V + 1.\n".to_string(), facts.clone()),
+            };
+            // Sorted as *tuples*, which is the order the canonical printer's
+            // `Vec<Value>` comparison produces — not as printed strings, whose
+            // agreement with it holds only for these single-digit values.
+            answered.sort();
+            answered.dedup();
+            let expected = answered
+                .iter()
+                .map(|(key, value)| {
+                    if shape == 3 {
+                        format!("answer(\"{key}\", {value}, {}).", value + 1)
+                    } else {
+                        format!("n(\"{key}\", {value}).")
+                    }
+                })
+                .collect();
+            AnswerShapeCase {
+                program: format!("{edb}{query}"),
+                expected,
+                shape,
+            }
+        })
+}
+
 /// A base program plus one rule, for the `-q` ≡ file-program claim (§14: `-q`
 /// is sugar for appending to the loaded program). Returns
 /// `(base, rule_text, head_text)` so the property can build both spellings.

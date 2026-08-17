@@ -847,6 +847,60 @@ banned(\"carol\").
         }
     }
 
+    proptest! {
+        /// **C8**: a substituted answer is the *same answer* the synthesized form
+        /// would have given — every row present, under the real relation's name.
+        ///
+        /// The oracle filters the generator's own fact list, so it never calls
+        /// `answer_lines` and cannot agree with a wrong shape rule
+        /// (`testing.md`'s oracle corollary). What it catches is a **dropped
+        /// column or a collapsed row**: substituting an atom that does not
+        /// account for every answer variable maps two distinct answer rows to one
+        /// output line, which is a silently smaller answer — the failure the
+        /// one-directional guard admitted and set equality closes.
+        #[test]
+        fn c8_an_answer_shape_neither_drops_nor_collapses_a_row(
+            case in crate::testgen::arb_answer_shape_case()
+        ) {
+            let result = run(&case.program).expect("generated programs run");
+            prop_assert_eq!(
+                &result.answers,
+                &vec![case.expected.clone()],
+                "shape {} disagreed\n--- program ---\n{}",
+                case.shape, &case.program
+            );
+        }
+    }
+
+    /// The non-vacuity guard for the generator above: it must reach all three
+    /// shapes and must actually *answer*, since a generator whose cases answered
+    /// nothing would satisfy the property forever.
+    #[test]
+    fn answer_shape_cases_reach_every_shape_and_answer() {
+        use proptest::strategy::{Strategy, ValueTree};
+        use proptest::test_runner::TestRunner;
+
+        let mut runner = TestRunner::deterministic();
+        let strategy = crate::testgen::arb_answer_shape_case();
+        let mut seen = [0usize; 4];
+        let mut answered = 0;
+        for _ in 0..300 {
+            let case = strategy.new_tree(&mut runner).expect("generates").current();
+            seen[case.shape as usize] += 1;
+            if !case.expected.is_empty() {
+                answered += 1;
+            }
+        }
+        assert!(
+            seen.iter().all(|count| *count > 0),
+            "generator missed a shape: {seen:?}"
+        );
+        assert!(
+            answered > 200,
+            "only {answered}/300 cases answered — the property would be near-vacuous"
+        );
+    }
+
     #[test]
     fn constant_folding_in_a_fact() {
         let result = run("p(1 + 1).\n?- p(X).").expect("runs");
