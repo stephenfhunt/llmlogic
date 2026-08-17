@@ -24,6 +24,60 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-16 — The `as` cast ships, and its deferred question splits in two
+
+Expressions is now empty: the last queued non-design item is built. 421 tests
+pass (was 410), 1 ignored, clippy and rustfmt clean, `--no-default-features`
+still builds.
+
+**Done**
+- **`Expr as type` end to end** — a `cast` precedence level between `mul` and
+  `primary`, `ast::ExprKind::Cast` / `ir::Expr::Cast` (it survives lowering; a
+  per-row conversion has nothing to hoist), a typecheck arm fixing the result
+  type *without* unioning the operand, `apply_cast`, and a printer that wraps a
+  cast's **operand** — the parenthesization case arithmetic alone cannot reach.
+- **The literal-grammar classifier moved to `lexer.rs`** (its own commit) so
+  `"30" as int` and an imported `30` cell are the same function — §13's "no
+  second classifier exists" is now structural rather than a convention.
+- **§16.9, the first example that names its test** and pins its output in a fence
+  compared byte-for-byte — the shape the other eight should be retrofitted to.
+- **Tests**: B9 (§8's table as an *independent* oracle — `naive.rs` deliberately
+  calls `apply_cast`, so a differential would agree with a wrong table forever),
+  three algebraic laws incl. the `as string as T` round trip, B10 as a
+  biconditional, the printer's acceptance partner, and a non-vacuity guard. Seven
+  mutations run and recorded.
+
+**Decided**
+- **A failed conversion splits, which the question's either/or did not admit**:
+  `absent` where there is *no value to represent* (`"abc" as int`), an error
+  where representing it would be **lossy** (`2.5 as int`, `as float` above 2⁵³).
+  The second half extends §8's ratified widening rule to narrowing unchanged.
+- **The deciding argument was expressibility, not reporting.** With an error rule
+  a dirty column has *no writable query* — this language has no convertibility
+  predicate, string ops having been rejected rather than deferred — so `absent`
+  is what puts the guard back in existing vocabulary. Support: `eval_expr` is
+  `?`-propagated, so an error emits nothing, not even facts already derived. The
+  accepted cost, malformed reclassified as missing, is a new ROADMAP item.
+- **The conversion table was as open as the failure mode**, and needed settling
+  in the same sitting: text is the universal intermediary, and `bool as int` and
+  friends have *no* conversion rather than a debatable one.
+
+**Removed**
+- **ROADMAP's Expressions essay**, 55 lines to 30. Its conclusion — "so the fix
+  is an *explicit* `float(X)`" — had stopped being true the moment `as` was
+  ratified: the exact stale-claim failure `docs/rules/editing-docs.md` exists for.
+- §8's *Still open* bullet and §4's "deliberately still open"; two copies of the
+  i128 exactness test, now one shared function; one of three `type_label`s.
+- The 2026-08-03 entry rotated verbatim to `worklog-archive/2026-08.md` (new).
+
+**Next up**
+- Unchanged and still the user call: **the answer shape** (blocks the widening),
+  then **Termination** (blocks `bugs/004`), then **§6's extension**.
+- New here, both small: making the malformed/missing reclassification visible,
+  and a type-clash diagnostic that names `as` — there is a concrete fix to
+  suggest now, which there was not before. The **§16 retrofit** also got cheaper:
+  §16.9 is a pattern to copy rather than a shape to invent.
+
 ## 2026-08-16 — Building the decided backlog: one shipped, one renamed, one falsified
 
 Three sessions of design had left five items *decided, not built*, and `src/` had
@@ -134,55 +188,3 @@ Docs only — 407 pass, 1 ignored, unchanged; nothing under `src/` or `tests/` m
 - New, both from the review: **temporal types**, and **making `EXPERIMENTS.md` a
   measuring instrument** — which the parked "other agent-exposure forms" decision
   is explicitly waiting on.
-
-## 2026-08-03 — The query answer shape: one atom, not one literal
-
-Design session, prompted by a user question about §14's synthesized `answer/N`
-output. Docs only — no engine or test change; 407 pass, 1 ignored, unchanged. The
-decision ships as a ROADMAP item with its property specified first, per the
-2026-07-22 entry's own *Consequences* note about untested output-shape widenings.
-
-**Done**
-- **`spec.md` §14** — a paragraph stating that substituted-atom output is a
-  **projection, not the relation**: it prints a real predicate's name over a
-  subset of its rows with nothing marking it as one, so composing it onward
-  narrows that predicate. Present truth, undocumented since 2026-07-22.
-- **`notes/query-answer-shape.md`** (new) — the overflow: the measured boundary
-  table, the Soufflé survey, both rejected alternatives, an implementation brief.
-- **`spec.md` §17** — the decision, pointing at the note; plus an ***Amended
-  2026-08-03*** marker on the 2026-07-22 entry whose output-shape rule this moves
-  for the third time.
-- **`ROADMAP.md`** — the widening as its own item; **`testing.md`** — a C8
-  sub-claim specified, `#[ignore]`d-and-failing, generator built backwards from
-  an EDB fact.
-
-**Decided**
-- **The atom form keys on one positive *atom*, not one *literal*** — plus any
-  number of non-binding literals, and the atom's variables must **equal** the
-  answer variables. The trigger was not the opaque name: `?- person("bob", 17).`
-  prints the fact and `?- person("bob", 17), 1 < 2.` prints **nothing**, which is
-  `bugs/005`'s shape reached by a filter instead of by hoisting. Variable-set
-  equality is a genuinely new condition — today's check is one-directional and
-  survives only because a one-literal body has no other binder.
-- **Inference is for reading one query's output; naming is for composing it.**
-  Soufflé settled this by having no `?-` at all — goals are `.output` directives,
-  so the user always names the relation, which is define-and-select, already
-  shipped. An inferred name is wrong for composition either way: `person`
-  collides with the relation it was projected from, `answer` with every query.
-- **The narrowing hazard cut in favour of widening**, because `answer/N` marks
-  *unnameable*, not *projection* — the atom form has carried the same hazard
-  since 2026-07-22. The answer was §14 prose, not more anonymous queries.
-
-**Removed**
-- The 2026-07-27 *Source-analysis dogfood* entry rotated verbatim to
-  `worklog-archive/2026-07.md`.
-- The existence-check ROADMAP item trimmed 8 lines → 5: its `bugs/005` history was
-  narration a current-state document should not carry, and §17 has it. Its section
-  intro lost a hardcoded "all three" that had already stopped counting correctly.
-
-**Next up**
-- **Implement the widening**: `answer_lines` (`src/api.rs`), syntactic over
-  `ir::Query`, no evaluator or IR work; land C8 by deleting its `#[ignore]`. Sweep
-  `skill/SKILL.md` and `docs/agent-skill.md`, which each restate the rule.
-- Unchanged: the **Termination** design session, the **§17 restructure**, **CI**.
-  `bugs/004` still blocked on Termination.

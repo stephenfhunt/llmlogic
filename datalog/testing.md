@@ -343,6 +343,36 @@ compared keyed by predicate *name*, not `PredId`.
   mechanically checked; under the Phase-C generator this extends to negated
   query bodies. (Added by the 2026-07-20 coverage audit — queries were the
   one near-untested half of the algebra.)
+- [x] **B9** **§8's conversion table, as an independent oracle**
+  (`the_conversion_table_matches_section_8`, 2026-08-16). Every cell of the 5×5
+  grid plus `absent` and each column's edge values, with the expected outcome —
+  a value, `absent`, *lossy*, or *undefined* — transcribed from §8 rather than
+  derived from the code. It has to be independent: `naive.rs` deliberately
+  **calls** `apply_cast` rather than reimplementing it (what that oracle varies
+  is the fixpoint strategy, and a second copy of the table would be one more
+  thing to drift), so a differential over casts would agree with a wrong table
+  forever. *Mutation*: dropping `ir::f64_as_exact_i64`'s fractional-part guard
+  turns `2.5 as int` from *lossy* into `2`; moving `apply_cast`'s absent
+  short-circuit below the undefined-pair check reddens the `absent` row.
+  - Three algebraic laws beside it, none of which asks a second evaluator
+    anything: **`V as string as T == V`** (`casting_through_string_is_the_identity`)
+    — D1's closure property at the value level, holding because the renderer is
+    §14's canonical spelling and the reader is §3's literal grammar; **`absent as
+    T == absent` for all five** (`absent_survives_every_cast`); and **casting to
+    a value's own type is the identity** (`casting_to_a_values_own_type_is_the_identity`).
+    *Mutations*: `print_f64` emitting `{}` rather than `{:?}` reddens the first
+    (`2.0` prints as `2` and reads back an int); dropping the `String` arm's
+    early return reddens the third (the string is re-rendered *with* its quotes).
+- [x] **B10** **The cast's typing claim, as a biconditional** (testing rule 4's
+  corollary, 2026-08-16). Accepting: `a_cast_types_as_its_target_over_every_operand_type`
+  — the same cast typechecks over an operand of every primitive type and its
+  column comes out as the target, which is §4's "inference never flows `T` back
+  into the operand". Rejecting: `a_casts_result_type_conflicts_like_any_other` —
+  the result type is a real type, not a free variable, so joining it against a
+  different column still conflicts. *Mutation*: unioning the operand into the
+  result reddens **only** the accepting half, which is what shows both directions
+  are load-bearing; dropping `set_type` reddens both and so discriminates
+  nothing.
 
 ### Phase C — negation + type inference (roadmap step 4) — generalizes §16.2, §16.3
 
@@ -579,14 +609,26 @@ that list that cannot drift.
   `generator_emits_expression_shapes_that_need_parentheses`, which asserts the
   generator emits right-nesting and mixed precedence; the pre-grouping generator
   produced neither by construction.
+
+  Widened again over the **`as` cast** (2026-08-16), which is a parenthesization
+  case arithmetic alone cannot reach: it is postfix and binds tightest, so the
+  parentheses that must survive sit on its *operand*
+  (`(A + B) as int`). Second guard,
+  `generator_emits_casts_over_shapes_that_need_parentheses`, counting three
+  shapes against the sentence it certifies — a compound operand, a chain, and a
+  cast *inside* arithmetic (the arm asserting a cast goes **un**parenthesized as
+  an operand). *Mutation*: flattening `print_cast_operand` reddens D2 as well as
+  the acceptance test, which is the evidence the widening reached D2 at all.
 - [x] **D3** Canonical fixpoint: `print(parse(print(ast)))` equals
   `print(ast)` (`d3_canonical_print_is_a_fixpoint`) — the printed form is a
   stable canonical representative. Also `print::tests::corpus_round_trips`
   over §16.
-  - Concrete acceptance partner: `grouping_survives_the_print_round_trip` pins
-    the seven shapes by hand, both directions — five that must keep their
-    parentheses and two that must not (testing rule 4, for the generator
-    widening that grouping required).
+  - Concrete acceptance partners, both testing rule 4 for the generator
+    widenings they follow: `grouping_survives_the_print_round_trip` pins seven
+    shapes by hand — five that must keep their parentheses and two that must
+    not — and `casts_survive_the_print_round_trip` pins eight the same way, four
+    each side, including the case where dropping the parentheses re-parses
+    `(A + B) as int` into `A + (B as int)` and so silently changes the type.
 - [x] **D4** Lexer/parser never panic on arbitrary text or bytes
   (`d4_parse_never_panics_on_{text,bytes}`). *Found a genuine bug*: a
   multi-byte escape (`"\¡`) advanced the string scanner off a char boundary;

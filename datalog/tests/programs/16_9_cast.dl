@@ -1,0 +1,21 @@
+% §16.9 — explicit conversion with the `as` cast (§4/§5/§8).
+% Run by tests/system.rs::cast_program_converts_and_guards.
+
+% Two int columns. `1 / 3` is integer division, so a ratio needs the cast.
+serving(oats, 3).
+total(9).
+share(F, R) :- serving(F, N), total(T), R = (N as float) / (T as float).
+
+% A column of text that is only mostly numeric — the CSV case. Converting
+% yields `absent` where there is no number to read, so the rows that DID
+% convert are selected with the ordinary presence test, and the ones that did
+% not are just as reachable.
+raw("30").
+raw("7").
+raw("n/a").
+amount(V)  :- raw(X), V = X as int, V is not absent.
+unparsed(X) :- raw(X), V = X as int, V is absent.
+
+% Rendering is total and is §14's canonical spelling, so `as string` and
+% printing agree — which makes the round trip back through `as int` exact.
+label(S) :- total(T), S = T as string.

@@ -184,6 +184,41 @@ fn feature_program_prints_floats_and_symbols() {
     assert!(out.stderr.is_empty());
 }
 
+/// §16.9 — the `as` cast, end to end through the real binary. The first §16
+/// example to name its own test (`ROADMAP.md`: no example means no feature), and
+/// the output is pinned byte-for-byte rather than described in prose, which is
+/// what the retrofit item wants for the other eight.
+///
+/// Three claims in one run: a cast is the only way two int columns produce a
+/// ratio; an unrepresentable conversion is `absent` and so stays *queryable*
+/// from both sides; and rendering to `string` is total.
+#[test]
+fn cast_program_converts_and_guards() {
+    let out = run_file_args(
+        "16_9_cast.dl",
+        &[
+            "-q",
+            "share(F, R).",
+            "-q",
+            "amount(V).",
+            "-q",
+            "unparsed(X).",
+            "-q",
+            "label(S).",
+        ],
+    );
+    assert_eq!(out.code, 0);
+    assert_eq!(
+        out.stdout,
+        "share(oats, 0.3333333333333333).\n\
+         amount(7).\n\
+         amount(30).\n\
+         unparsed(\"n/a\").\n\
+         label(\"9\").\n"
+    );
+    assert!(out.stderr.is_empty(), "{}", out.stderr);
+}
+
 #[test]
 fn disjunction_program_runs() {
     let out = run_file("disjunction.dl");

@@ -70,59 +70,37 @@ each; detail in §17 and `docs/worklog.md`.
 
 ### Expressions (§5/§8)
 
-One finding from the 2026-07-25 spec review remains. Its sibling —
-**parenthesized expressions** — shipped ✅ 2026-08-16: `primary → "(" expr ")"`,
-with precedence-aware printing, an arbitrarily-shaped expression generator, and
-`grouping_survives_the_print_round_trip` as the concrete acceptance partner. The
-two were **deliberately not bundled**, one being a small task and the other an
-open design question; that is why the fix did not wait.
+**Both findings from the 2026-07-25 spec review have shipped.** Parenthesized
+expressions ✅ 2026-08-16 (`primary → "(" expr ")"`, precedence-aware printing,
+`grouping_survives_the_print_round_trip`), and the **`as` cast** ✅ 2026-08-16 —
+`Expr as type`, postfix, binding tightest, chaining left-to-right, with the
+result type fixed unconditionally and the operand left unconstrained. The two
+were deliberately not bundled, one being a small task and the other carrying an
+open design question.
 
-- **Implement the `as` cast** — `Expr as type`, the conversion form (**design
-  ratified 2026-07-25**, §17; written into §4/§5/§8). Postfix, binds tighter than
-  `*` `/`, chains left-to-right; result type is the named type unconditionally;
-  `absent as T` is `absent`; a lossy `i64 → f64` widening above 2⁵³ is an error,
-  mirroring §13's import rule. Touches: the parser (a `cast` level between `mul`
-  and `primary` — `as` is already `TokenKind::As`, and `type` is an existing
-  production, so no lexer change), `ast::ExprKind::Cast`, `ir::Expr::Cast`, a
-  `typecheck` arm (`set_type(result, T)` without unioning the operand — §9's `Avg`
-  arm at `typecheck.rs:317` is the precedent), an `eval_expr` arm
-  (`engine/mod.rs:960`) plus the naive oracle, and a `print_expr` arm. **One
-  decision deferred to implementation time:** whether a failed conversion
-  (`"abc" as int`) errors or yields `absent` — see the §17 open question, which
-  states the trade-off. _queued._ — §4/§5/§8.
+**Strict numerics stand, and now have their escape hatch in-language**: `int` and
+`float` still never meet implicitly — `1 / 3` is `0`, and `V = A + B` across an
+int and a float column is a type error — but `(A as float) / (B as float)` asks
+for the ratio, keeping the widening visible in the source text. Two decisions
+came with the implementation (§17, 2026-08-16): the **conversion table** (§8),
+and **`absent` for an unrepresentable conversion, an error for a lossy one**.
 
-  *Supersedes the former "scalar-function call form" item.* User-defined scalar
-  functions were **declined** 2026-07-25 (a rule already is one; §17), and what
-  remains open is only *builtin* scalars with no relational spelling (`abs`,
-  `length`, `lower`, `substr`), deferred until a consumer needs them — §17's open
-  questions. If those ever land they must solve the `ident (` atom-vs-call
-  ambiguity that ruled out `float(A)`; scan-ahead is the candidate.
+- **Make the malformed/missing reclassification visible.** `"abc" as int` is now
+  `absent`, so a dirty column reads as a sparse one and nothing says otherwise.
+  §9's skip-and-report (`AggOutcome.skipped`) is the shape, but it rides on the
+  aggregate literal and an `=`-assignment has no equivalent. Sequence with the
+  **truncation contract**, which is the same question — what does a run owe when
+  its answer is short? _queued._ — §8/§9/§11, §17 2026-08-16.
+- **A type-clash diagnostic that names the conversion.** `V = A + B` over mixed
+  numerics reports the clash and stops; now that `as` exists there is a concrete
+  fix to suggest, which there was not when this was first noted. _queued._ — §12.
 
-**Strict numerics stay; conversion is the motivating case for the call form**
-(user call, 2026-07-25). Verified: `int` and `float` never meet — `V = A + B`
-across an int and a float column is a type error, `1 / 3` is `0`, and the only
-conversion escape hatch is the import boundary (an explicit `as t(a: float)`
-schema coerces cells; typed Parquet/DB sources carry their own types, so the
-inference problem is really CSV-only). Two reasons not to fix that by widening
-`int + float → float` implicitly:
-
-- **This is a data-analysis language, not a general-purpose one.** When source
-  data carries both an int and a float column there is usually a reason — a count
-  vs. a measurement, an identifier vs. an amount — and that distinction is part of
-  the data model the engine should respect rather than dissolve.
-- **It reintroduces the hazard the import path just closed.** Widening a large
-  `i64` to `f64` loses precision above 2⁵³, which §13 made a structured error
-  2026-07-25 precisely because large integers in real data are usually
-  identifiers. `id + 0.0` would silently round in expressions what `import` now
-  refuses.
-
-So the fix is an *explicit* `float(X)`, which keeps the widening visible in the
-source text: `float(1) / float(3)` asks for a ratio, `1 / 3` stays honest integer
-division. (SQL parity is the one real argument the other way. Note `avg`'s
-`int → float` result type already shows the language will widen where a *declared
-result type* says so — as distinct from coercing operands silently.) Open
-sub-question: whether a rule this strict wants a diagnostic that names the
-conversion, since today's message only reports a type clash.
+*Superseding the former "scalar-function call form" item*: user-defined scalar
+functions were **declined** 2026-07-25 (a rule already is one; §17), and
+conversion is the cast. What remains is only *builtin* scalars with no relational
+spelling (`abs`, `length`, `lower`, `substr`), deferred until a consumer needs
+them — §17's open questions. If those land they must solve the `ident (`
+atom-vs-call ambiguity that ruled out `float(A)`; scan-ahead is the candidate.
 
 ### The value model (§4)
 
@@ -405,12 +383,14 @@ but a different kind of work.
   keep it, an append-only record being exactly what a rename does not touch. The
   2026-07-20 entry carries the pointer instead. §4's and §11's two standing
   "shares a word, not a concept" disclaimers are gone, which was the point.
-- **Name a test per §16 example.** No example names the test that runs it, and the
-  expected output is prose in a comment rather than a fence compared byte-for-byte —
-  so a block nobody wired up cannot fail. The rule going forward is **no example
-  means no feature**; retrofitting the eight is the item. Add a diagnostic example
-  while doing it: none of them exercises an error, so nothing checks what the engine
-  prints when a program is wrong. _queued._ — §16, `testing.md`.
+- **Name a test per §16 example.** **§16.9 (the cast) is the worked pattern** ✅
+  2026-08-16 — it names `tests/system.rs::cast_program_converts_and_guards` and
+  pins its output in a fence compared byte-for-byte. The other **eight** still
+  carry prose in comments and no named test, so a block nobody wired up cannot
+  fail; retrofitting them to §16.9's shape is the item. The rule going forward is
+  **no example means no feature**. Add a diagnostic example while doing it: none
+  of them exercises an error, so nothing checks what the engine prints when a
+  program is wrong. _queued._ — §16, `testing.md`.
 - **Normalize §17's chronology.** Reverse-chronological for 08-16 back to 07-25,
   then it jumps to 07-03 and runs *forward* through 07-21, so a reader cannot tell
   which end is current. _queued._ — §17.

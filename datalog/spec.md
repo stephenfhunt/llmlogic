@@ -235,8 +235,9 @@ share(F, R) :- count(food: F, n: N), total(t: T), R = (N as float) / (T as float
   silently. Implicit widening would also reintroduce in expressions the >2⁵³
   precision loss §13 rejects at the import boundary. The cast makes the widening
   visible in the source text instead.
-- Whether a **failed** conversion (`"abc" as int`) is a structured error or yields
-  `absent` is deliberately still open (§8, §17).
+- **A conversion that cannot succeed splits two ways** (§8 has the table): one
+  that would be *lossy* is a structured error, and one with no value to represent
+  (`"abc" as int`) is `absent`.
 
 Conversion is also available at the **import boundary** — an explicit schema
 (`import "t.csv" as t(a: float)`) coerces cells as they load (§13) — and typed
@@ -595,19 +596,57 @@ r(V) :- p(A, B), V = (A as float) / (B as float).   % a real ratio, not A / B
   back into the operand (§4).
 - **`absent as T` is `absent`** — annihilation, at the same choke point as
   arithmetic's, so it takes precedence over any conversion check.
-- **Numeric widening is exact or it is an error**, mirroring §13's import rule
-  (2026-07-25): `X as float` on an `i64` above 2⁵³ has no exact `f64`, and silently
-  rounding an identifier is the failure mode §13 already refuses.
 - **Governance.** A cast creates no new *reachable* values in the sense that
   matters for termination: it maps a finite value set to a finite value set with no
   accumulation, so casts are exempt from the value-creating-recursion restriction
   (`bugs/004`, `ROADMAP.md`). This was checked before adopting the form.
-- **Still open (§17):** whether a conversion that *cannot* succeed — `"abc" as int`
-  — is a structured error (consistent with the div-by-zero rule above) or yields
-  `absent` (consistent with §4/§9, where aggregates skip absents and report the
-  count, so it would not be silent). The second answer only became available when
-  the absent value shipped; it did not exist when the edge-case rule above was
-  written. Decided with the implementation.
+
+**Which conversions exist.** `T as T` is the identity for all five, and text is
+the universal intermediary — every value renders to `string`, and `string`
+converts to anything its *literal grammar* reads:
+
+| from ↓ / to → | `int` | `float` | `string` | `symbol` | `bool` |
+|---|---|---|---|---|---|
+| `int` | identity | exact or error | render | — | — |
+| `float` | exact or error | identity | render | — | — |
+| `string` | read or `absent` | read or `absent` | identity | read or `absent` | read or `absent` |
+| `symbol` | — | — | render | identity | — |
+| `bool` | — | — | render | — | identity |
+
+A `—` is a pair with **no conversion at all**, and writing one is a structured
+error naming both types — a program mistake, like arithmetic over two
+non-numbers. `bool as int` is the shape this excludes; nothing in the value model
+(§4) says which integer a boolean is.
+
+"Render" is §14's canonical spelling and "read" is §3's literal grammar — the
+same one §13 types an untyped CSV cell with. The two directions are therefore
+inverse: `V as string as T` recovers `V`, and `"30" as int` is `30` exactly when
+writing `30` would be that literal.
+
+**Two failure modes, and the line between them** (2026-08-16). Both are reachable
+only in the conversions the table defines:
+
+- **Lossy — a structured error.** A value exists and no exact representation of
+  it does, so converting would corrupt it: `X as float` on an `i64` above 2⁵³,
+  and `2.5 as int`. `as` neither rounds nor truncates, in either direction. This
+  mirrors §13's import rule (2026-07-25): a silently rounded identifier breaks
+  every join built on it, and large integers in real data are usually
+  identifiers.
+- **Unrepresentable — `absent`.** There is no value to represent: `"abc" as int`.
+  This is the *data* being dirty rather than the program being wrong, and the
+  language offers no way to ask "does this parse?" — string operations are
+  rejected (§17, 2026-07-27) — so an error would leave such a column with no
+  writable query at all. Yielding `absent` keeps the guard in the program's own
+  vocabulary:
+
+  ```datalog
+  clean(X, V) :- raw(X), V = X as int, V is not absent.
+  ```
+
+  The cost is real and accepted: this reclassifies *malformed* as *missing*, and
+  the two are not the same thing. It is bounded by where untyped data enters —
+  Parquet, JSONL and databases carry their own types, so only CSV arrives
+  unclassified (§13).
 
 **Mode / safety (§10).** Every comparison operand variable, and every named
 variable of a negated atom, must be bound by the body in the sense §10 defines —
@@ -1221,10 +1260,10 @@ sets, indexes, parallelism, incremental maintenance.
 > Each example ends with the design questions it settled or still raises.
 >
 > **An example is a claim about the engine, so it should name the test that runs
-> it.** None of them do yet — a ROADMAP item, and the reason a block nobody wired
-> up could quietly stop being true (§17, 2026-08-16). Everything below is ratified
-> in §3–§5, §9 and §13 except §16.6's `?why` form, whose surface was designed
-> 2026-08-16 and is not built.
+> it.** Only §16.9 does — a ROADMAP item for the other eight, and the reason a
+> block nobody wired up could quietly stop being true (§17, 2026-08-16).
+> Everything below is ratified in §3–§5, §8, §9 and §13 except §16.6's `?why`
+> form, whose surface was designed 2026-08-16 and is not built.
 
 ### 16.1 Recursion — ancestry / reachability
 
@@ -1388,12 +1427,47 @@ skipped-but-reported by aggregates (the skip count via provenance, §11); the
 `absent` literal round-trips (Datalog-out is Datalog-in). The aggregate surface is
 the ratified set-builder `avg { A | Goal }` (§9), grouped globally here.
 
+### 16.9 Conversion — the `as` cast
+
+Run by `tests/system.rs::cast_program_converts_and_guards` over
+`tests/programs/16_9_cast.dl`.
+
+```datalog
+% two int columns — `1 / 3` is integer division, so a ratio needs the cast
+serving(oats, 3).
+total(9).
+share(F, R) :- serving(F, N), total(T), R = (N as float) / (T as float).
+
+% text that is only mostly numeric (the CSV case): an unreadable cell converts
+% to `absent`, so both halves stay reachable with the ordinary presence test
+raw("30").  raw("7").  raw("n/a").
+amount(V)   :- raw(X), V = X as int, V is not absent.
+unparsed(X) :- raw(X), V = X as int, V is absent.
+
+% rendering is total, and is §14's canonical spelling
+label(S) :- total(T), S = T as string.
+```
+```
+share(oats, 0.3333333333333333).
+amount(7).
+amount(30).
+unparsed("n/a").
+label("9").
+```
+*Resolved (§4/§5/§8, 2026-08-16):* conversion is postfix `Expr as type`, binding
+tightest and chaining left-to-right, with the result type fixed unconditionally —
+so the cast terminates inference for its operand. A conversion with no value to
+read is `absent` rather than an error, which is what keeps `unparsed` writable at
+all: the language has no convertibility predicate, so `is absent` *is* the guard.
+A *lossy* conversion stays an error (§8's table).
+
 *Not covered:* **a named test per example**, which is what would make this corpus
 load-bearing rather than illustrative; and the expected output shown in comments is
-prose, not a pinned fence compared byte-for-byte. Both are one ROADMAP item. No
-example exercises a *diagnostic*, so nothing here checks what the engine prints
-when a program is wrong — an example proves a claim about the channels it compares
-and nothing about a channel it is silent on.
+prose, not a pinned fence compared byte-for-byte. Both are one ROADMAP item —
+§16.9 is the first example done the new way, and the pattern the other eight
+should be retrofitted to. No example exercises a *diagnostic*, so nothing here
+checks what the engine prints when a program is wrong — an example proves a claim
+about the channels it compares and nothing about a channel it is silent on.
 
 ## 17. Decisions log & open questions
 
@@ -1422,6 +1496,44 @@ marker that records a decision working out *well*, which the log would otherwise
 never say.
 
 ### Decisions
+
+- **2026-08-16** — **A failed `as` conversion is `absent` when there is no value
+  to represent, and an error when representing it would be lossy.** The piece the
+  2026-07-25 ratification left to implementation time. `"abc" as int` is
+  `absent`; `2.5 as int` and `as float` above 2⁵³ are structured errors — so §8's
+  already-ratified widening rule extends to the narrowing direction unchanged,
+  and this adds one distinction rather than a second principle.
+
+  The deciding argument is **expressibility, not reporting**: this language has
+  no convertibility predicate — string operations were *rejected* (2026-07-27),
+  not deferred — so under an error rule there is no way to write "the rows where
+  `X` parses as an int", and a column with one bad cell has no valid query at
+  all. `absent` puts the guard back in the existing vocabulary (`V = X as int, V
+  is not absent`). Two supporting measurements: `eval_expr` is `?`-propagated, so
+  an error aborts the run and emits *nothing*, not even facts already derived;
+  and the exposure is one format, since Parquet/JSONL/databases carry their own
+  types and only CSV arrives unclassified.
+
+  **Rejected: a hard error throughout**, which matches §13's import `coerce`
+  exactly and would have kept §8's failure rule single. It loses on the above,
+  and the import precedent is weaker than it looks — an import schema is optional
+  and applied once at load, where a cast is per-row and mid-fixpoint. **Rejected:
+  a strict/`try_` pair**, which doubles the vocabulary for a distinction the
+  `is absent` guard already expresses. **Rejected: truncating `float as int`**
+  (SQL's answer) — it needs a rounding rule where exactness needs none.
+
+  **The cost, recorded because it is real:** this reclassifies *malformed* as
+  *missing*, and §17's usual mitigation does not come free — "skipped *and
+  reported*" is `AggOutcome.skipped`, which rides on the **aggregate** literal;
+  an `=`-assignment has no such report. Making the reclassification visible is a
+  ROADMAP item, not something this decision inherited.
+
+  The conversion **table** was settled in the same sitting (§8): text is the
+  universal intermediary, `bool as int` and friends have no conversion at all,
+  and the text direction reuses the literal-grammar classifier rather than
+  growing a second one — so `"30" as int` and an imported `30` cell cannot
+  disagree. That classifier moved from `sources/table.rs` to `lexer.rs` to make
+  the sharing structural instead of a convention. — §4/§8/§13.
 
 - **2026-08-16** — **Cross-project review of `~/code/tsdl`: six things declined**
   (survey; `notes/tsdl-cross-project-review.md`). That engine is this design run
@@ -1718,6 +1830,17 @@ never say.
       expressions the >2⁵³ precision loss §13 refuses at the import boundary.
     - **Deliberately left open:** whether a failed conversion errors or yields
       `absent` (below). Decided with the implementation, not here.
+      - ***Amended 2026-08-16*** — built, and the deferral was the right call:
+        deciding it needed a fact this entry could not have had, that
+        `eval_expr`'s error path aborts the whole run rather than the row. The
+        answer is **both** — `absent` where there is no value to represent, an
+        error where representing it would be lossy — which is a distinction this
+        bullet's either/or framing did not admit (2026-08-16 entry). Two things
+        this entry did not anticipate: the conversion **table** was as open as the
+        failure mode and needed settling in the same sitting, and the text
+        direction is not new code at all — §13's literal-grammar classifier
+        already *was* the conversion, and now lives in `lexer.rs` where both
+        callers reach it.
   - **User-defined scalar functions: declined — but not for the obvious reason.**
     The question arose from a governance concern: functions might make the language
     Turing-complete, losing the guaranteed bounds that make a logic engine safe to
@@ -2779,6 +2902,16 @@ never say.
   makes dirty columns queryable but quietly reclassifies "malformed" as "missing". A
   strict/`try_` pair is the third option and doubles the vocabulary. Decide with the
   implementation. — §4/§8/§9.
+  - ***Answered 2026-08-16*** — settled by the 2026-08-16 decision, and in
+    **neither** of the two forms this question offered: the answer is `absent` for
+    an *unrepresentable* conversion and an error for a *lossy* one, so the
+    question's either/or was the wrong shape. Its own framing is what shows why —
+    it names `"abc" as int` and the 170k-row import, both unrepresentable cases,
+    and never asks what `2.5 as int` should do. The `try_` pair stays rejected.
+    The narrower question that survives is **making the reclassification
+    visible**: this trades "malformed" for "missing", and the skip-and-report
+    machinery it would need rides on the aggregate literal, not on an
+    `=`-assignment. That is a ROADMAP item.
 - **Builtin scalar functions with no relational spelling** — `abs`, `length`,
   `lower`, `substr`. *User-defined* scalar functions were declined 2026-07-25 (a
   rule already is one), and conversion is now the `as` cast, so what remains is the
