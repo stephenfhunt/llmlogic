@@ -250,6 +250,16 @@ impl ArithOp {
             ArithOp::Div => "/",
         }
     }
+
+    /// Binding strength: `*` `/` bind tighter than `+` `-` (§5). Higher binds
+    /// tighter. All four are left-associative, so the printer needs only this
+    /// plus the child's side to decide a parenthesis (`crate::print`).
+    pub fn precedence(self) -> u8 {
+        match self {
+            ArithOp::Add | ArithOp::Sub => 1,
+            ArithOp::Mul | ArithOp::Div => 2,
+        }
+    }
 }
 
 /// The canonical source spelling of an arithmetic operator.

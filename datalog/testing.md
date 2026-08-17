@@ -571,12 +571,22 @@ that list that cannot drift.
   Datalog-in, mechanically checked.
 - [x] **D2** `parse(print(ast)) == ast` modulo spans, over generated
   parse-reachable ASTs incl. named-argument and arithmetic forms
-  (`d2_ast_round_trip` over `arb_ast_program`; expressions generated in
-  canonical left-leaning shape so printing re-parses to the same tree).
+  (`d2_ast_round_trip` over `arb_ast_program`; expressions are **arbitrarily
+  shaped** binary trees, so the printer's parenthesization is what it holds).
+  **D2 is the one that bites, not D3**: measured by mutation, a flat printer
+  leaves D3 green — dropping parentheses is still a *fixpoint*, it just
+  re-parses to a different tree. Non-vacuity is
+  `generator_emits_expression_shapes_that_need_parentheses`, which asserts the
+  generator emits right-nesting and mixed precedence; the pre-grouping generator
+  produced neither by construction.
 - [x] **D3** Canonical fixpoint: `print(parse(print(ast)))` equals
   `print(ast)` (`d3_canonical_print_is_a_fixpoint`) — the printed form is a
   stable canonical representative. Also `print::tests::corpus_round_trips`
   over §16.
+  - Concrete acceptance partner: `grouping_survives_the_print_round_trip` pins
+    the seven shapes by hand, both directions — five that must keep their
+    parentheses and two that must not (testing rule 4, for the generator
+    widening that grouping required).
 - [x] **D4** Lexer/parser never panic on arbitrary text or bytes
   (`d4_parse_never_panics_on_{text,bytes}`). *Found a genuine bug*: a
   multi-byte escape (`"\¡`) advanced the string scanner off a char boundary;

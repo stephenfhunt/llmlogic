@@ -330,7 +330,7 @@ expr        = add ;
 add         = mul { ( "+" | "-" ) mul } ;       (* left-assoc *)
 mul         = cast { ( "*" | "/" ) cast } ;     (* binds tighter, left-assoc *)
 cast        = primary { "as" type } ;           (* postfix conversion, §8; binds tightest *)
-primary     = [ "-" ] number | aggregate | term ;  (* prefix "-" folds onto a literal *)
+primary     = [ "-" ] number | aggregate | term | "(" expr ")" ;  (* prefix "-" folds onto a literal *)
 
 aggregate   = agg_op "{" expr "|" conjunction "}" ;  (* set-builder, §9 *)
 agg_op      = "count" | "sum" | "min" | "max" | "avg" ;  (* contextual: ident before "{" *)
@@ -341,6 +341,13 @@ Notes:
   left-associative (precedence climbing); comparisons are non-associative and do
   **not** chain — `0 <= X <= 9` is a targeted error suggesting `0 <= X, X <= 9`
   (§17, 2026-07-22).
+- **Parentheses group an expression** and are unambiguous: an atom must start
+  with an identifier, so a body literal opening with `(` can only be a
+  comparison. Canonical printing (§14) emits them only where dropping them would
+  re-parse to a different tree — a child binding looser than its parent, or an
+  equal-precedence child on the right (`A - (B - C)` keeps them, `(A - B) - C`
+  does not). Prefix `-` is unaffected: it still folds onto a numeric *literal*
+  only, so `-(A + B)` remains a parse error.
 - **Atom arguments are full expressions**, so inline arithmetic parses
   (`succ(N, N+1)`); lowering hoists a compound argument to an `=`-assignment, so
   the IR is unchanged (§17, 2026-07-22). A compound argument is instead
@@ -622,9 +629,7 @@ guarantees make this a widening rather than a change of meaning:
   circular dependency (`M = N+1, N = M+1`). The two get different messages,
   because only the first can be fixed by adding a binder.
 
-*Not covered:* **parenthesized expressions** — `V = (A + B) * C` is a parse error,
-so a non-trivial expression must be hand-decomposed into `=`-chains (a ROADMAP item,
-and an implementation gap rather than a decision). **String operations** — no
+*Not covered:* **String operations** — no
 prefix, split or concat, *rejected* rather than deferred (§17, 2026-07-27): string
 construction fails §10's termination test. **Builtin scalar functions** (`abs`,
 `length`, `lower`, `substr`) are deferred until a consumer needs them, and

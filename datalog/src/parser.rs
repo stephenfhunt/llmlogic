@@ -616,17 +616,21 @@ impl Parser<'_> {
                  (one of count, sum, min, max, avg) before the `{`",
             ));
         }
-        // Grouping parens are not in the v1 grammar (`primary = [ "-" ] number |
-        // term`, §5). Catch them here with the decomposition workaround rather
-        // than letting `parse_term` report a bare "expected a term" — the reader
-        // is often an agent, and the actionable form is self-healing.
+        // Grouping: `primary → "(" expr ")"` (§5). Unambiguous — an atom must
+        // start with an identifier, so a body literal opening with `(` can only
+        // be a comparison.
         if matches!(self.kind(), TokenKind::LParen) {
-            let span = self.span();
-            return Err(self.error(
-                span,
-                "parentheses are not supported in expressions; introduce an intermediate \
-                 variable instead (e.g. `(A + B) * C` becomes `T = A + B, X = T * C`)",
-            ));
+            let open = self.span();
+            self.bump();
+            let inner = self.parse_expr()?;
+            let close = self.expect(
+                &TokenKind::RParen,
+                "`)` to close a parenthesized expression",
+            )?;
+            return Ok(Expr {
+                kind: inner.kind,
+                span: join(open, close.span),
+            });
         }
         let term = self.parse_term()?;
         let span = term.span;
@@ -891,6 +895,7 @@ fn lowercase_first(name: &str) -> String {
 mod tests {
     use super::*;
     use crate::ast::fixtures;
+    use crate::print::print_program;
 
     /// Zeroes every span in a program so parsed output (real spans) can be
     /// compared structurally against the hand-built fixtures (which use
@@ -1455,21 +1460,54 @@ adult(N) :- person(name: N, age: A), A >= 18.
         asserts_message("p(f(1)).", "compound terms are not supported");
     }
 
+    /// Grouping parses on both entry paths — a comparison operand and an inline
+    /// atom argument (`primary → "(" expr ")"`, §5). Unambiguous because an atom
+    /// must start with an identifier.
     #[test]
-    fn grouped_expression_is_rejected_with_the_decomposition_hint() {
-        // Grouping parens aren't in the v1 expression grammar (`primary =
-        // [ "-" ] number | term`, §5). Both entry paths — a comparison operand
-        // and an inline atom argument — must surface the actionable hint, not a
-        // bare "expected a term".
+    fn grouped_expression_parses_on_both_entry_paths() {
+        parse_ok("r(X) :- n(Y), X = (Y + 1) * 2.");
+        parse_ok("double(N, (N + N)) :- n(N).");
+    }
+
+    /// An unclosed group is a targeted error, not a bare "expected a term".
+    #[test]
+    fn unclosed_group_names_the_missing_paren() {
         asserts_message(
-            "r(X) :- n(Y), X = (Y + 1) * 2.",
-            "parentheses are not supported in expressions",
+            "r(X) :- n(Y), X = (Y + 1.",
+            "`)` to close a parenthesized expression",
         );
-        asserts_message("r(X) :- n(Y), X = (Y + 1) * 2.", "T = A + B, X = T * C");
-        asserts_message(
-            "double(N, (N + N)) :- n(N).",
-            "parentheses are not supported",
-        );
+    }
+
+    /// The acceptance property for the printer half (testing.md rule 4, D2/D3
+    /// scoped concretely). Each shape's grouping is **not** the one flat
+    /// printing would recover, so a printer that dropped parens would re-parse
+    /// it into a different tree — silently, and with a different value.
+    #[test]
+    fn grouping_survives_the_print_round_trip() {
+        // (source, the expression as it must print)
+        for (src, expected) in [
+            ("X = (A + B) * C", "(A + B) * C"),
+            ("X = A - (B - C)", "A - (B - C)"),
+            ("X = A / (B / C)", "A / (B / C)"),
+            ("X = A * (B + C)", "A * (B + C)"),
+            ("X = A + (B + C)", "A + (B + C)"),
+            // The converse, so the printer is not simply parenthesizing
+            // everything: a grouping flat printing already recovers stays bare.
+            ("X = (A + B) - C", "A + B - C"),
+            ("X = (A * B) + C", "A * B + C"),
+        ] {
+            let src = format!("r(X) :- n(A), n(B), n(C), {src}.");
+            let printed = print_program(&parse(&src).expect("parses"));
+            assert!(
+                printed.contains(expected),
+                "printing {src:?} should render the expression as {expected:?}: {printed}"
+            );
+            assert_eq!(
+                parse_ok(&printed),
+                parse_ok(&src),
+                "round trip changed the tree for {src:?} (printed as {printed})"
+            );
+        }
     }
 
     #[test]

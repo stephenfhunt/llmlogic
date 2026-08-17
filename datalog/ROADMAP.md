@@ -70,34 +70,12 @@ each; detail in §17 and `docs/worklog.md`.
 
 ### Expressions (§5/§8)
 
-Two findings from the 2026-07-25 spec review. They touch the same production —
-`primary = [ "-" ] number | aggregate | term` admits neither grouping nor calls —
-and are otherwise unrelated. **Deliberately not bundled:** the first is a small
-task, the second an open design question, and pairing them would make the fix wait
-on the question.
-
-- **Parenthesized expressions — just add them.** `V = (A + B) * C` is a parse
-  error, so any non-trivial expression must be hand-decomposed into `=`-chains.
-  Verified 2026-07-25 that this is an implementation gap, not a design decision:
-  **§17 has no entry on it** (the "deliberately flat" claim lives only in commit
-  a7d1ff1's message, and the Phase D entry that ratified precedence, signed
-  literals, and inline arithmetic never mentions grouping). Nothing semantic
-  moves — `ast::ExprKind::Binary` and `ir::Expr::Binary` are already general
-  trees, so lowering, typecheck, engine, safety, and provenance are untouched —
-  and there is no ambiguity, since an atom must start with an identifier, so a
-  body literal beginning with `(` can only be a comparison. Two edits:
-  - `src/parser.rs:619-628` — the rejection block is *longer* than the
-    `primary → "(" expr ")"` production that replaces it.
-  - `src/print.rs:169` — the real work. `print_expr` documents its dependence on
-    the current state ("No parentheses are emitted (the v1 grammar has
-    none)… flat printing re-parses to the same tree"), which parens falsify.
-    Printing becomes precedence-aware: parenthesize a looser-binding child, plus
-    the right child of a left-associative operator at equal precedence so
-    `A - (B - C)` survives. D2/D3 are already the right properties — they are
-    scoped to parse-reachable ASTs, so widening `arb_ast_program` is what makes
-    them exercise the new path.
-
-  _queued (small)._ — §5/§14.
+One finding from the 2026-07-25 spec review remains. Its sibling —
+**parenthesized expressions** — shipped ✅ 2026-08-16: `primary → "(" expr ")"`,
+with precedence-aware printing, an arbitrarily-shaped expression generator, and
+`grouping_survives_the_print_round_trip` as the concrete acceptance partner. The
+two were **deliberately not bundled**, one being a small task and the other an
+open design question; that is why the fix did not wait.
 
 - **Implement the `as` cast** — `Expr as type`, the conversion form (**design
   ratified 2026-07-25**, §17; written into §4/§5/§8). Postfix, binds tighter than

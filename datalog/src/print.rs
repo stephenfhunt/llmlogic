@@ -166,17 +166,22 @@ fn print_named_arg(arg: &NamedArg) -> String {
     format!("{}: {}", arg.field.name, print_expr(&arg.value))
 }
 
-/// Prints an expression. No parentheses are emitted (the v1 grammar has none):
-/// a parse-produced tree is left-associative and precedence-nested, so flat
-/// printing re-parses to the same tree.
+/// Prints an expression, parenthesizing exactly where the grouping would
+/// otherwise be lost on re-parse (`testing.md` D2/D3).
+///
+/// A binary child is wrapped when it binds **looser** than its parent, and —
+/// since all four operators are left-associative — when it binds *equally* and
+/// sits on the **right**: `A - (B - C)` must keep its parentheses, while
+/// `(A - B) - C` is what flat printing already re-parses to. Terms and
+/// aggregates are atomic and never wrapped.
 fn print_expr(expr: &Expr) -> String {
     match &expr.kind {
         ExprKind::Term(term) => print_term(term),
         ExprKind::Binary { op, lhs, rhs } => format!(
             "{} {} {}",
-            print_expr(lhs),
+            print_operand(lhs, *op, Side::Left),
             crate::ast::arith_symbol(*op),
-            print_expr(rhs)
+            print_operand(rhs, *op, Side::Right)
         ),
         // A set-builder aggregate `op { expr | goal }` (§9). `params` is empty for
         // the v1 five; when parameterised reducers land they render before `{`.
@@ -186,6 +191,32 @@ fn print_expr(expr: &Expr) -> String {
             print_expr(&agg.expr),
             print_body(&agg.goal)
         ),
+    }
+}
+
+/// Which operand of its parent a sub-expression is. Left-associativity makes
+/// the two sides differ at equal precedence.
+#[derive(Clone, Copy, PartialEq)]
+enum Side {
+    Left,
+    Right,
+}
+
+/// Prints `expr` as an operand of `parent`, adding parentheses only when
+/// omitting them would re-parse to a different tree.
+fn print_operand(expr: &Expr, parent: crate::ast::ArithOp, side: Side) -> String {
+    let text = print_expr(expr);
+    let needs_parens = match &expr.kind {
+        ExprKind::Binary { op, .. } => {
+            op.precedence() < parent.precedence()
+                || (op.precedence() == parent.precedence() && side == Side::Right)
+        }
+        ExprKind::Term(_) | ExprKind::Aggregate(_) => false,
+    };
+    if needs_parens {
+        format!("({text})")
+    } else {
+        text
     }
 }
 

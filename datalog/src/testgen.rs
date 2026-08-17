@@ -966,33 +966,34 @@ fn arb_printable_term() -> impl Strategy<Value = Term> {
     ]
 }
 
-/// A term, or a left-associative chain over one operator class (additive or
-/// multiplicative) — both round-trip through the parser's precedence climbing.
+/// A term, or an arbitrarily nested binary tree over all four operators —
+/// **any** shape, including right-leaning and mixed-precedence ones.
+///
+/// The shape is unrestricted because grouping is now in the grammar (`primary →
+/// "(" expr ")"`, §5), so every tree here is parse-reachable and D2/D3 are the
+/// properties that hold the printer to it. Before grouping landed this generated
+/// left-leaning chains over one operator class only, which was the largest shape
+/// the flat printer could round-trip.
 fn arb_printable_expr() -> impl Strategy<Value = Expr> {
-    let term = arb_printable_term().prop_map(|t| dummy_expr(ExprKind::Term(t)));
-    let additive = arb_chain(prop_oneof![Just(ArithOp::Add), Just(ArithOp::Sub)]);
-    let multiplicative = arb_chain(prop_oneof![Just(ArithOp::Mul), Just(ArithOp::Div)]);
-    prop_oneof![3 => term, 1 => additive, 1 => multiplicative]
+    let leaf = arb_printable_term().prop_map(|t| dummy_expr(ExprKind::Term(t)));
+    leaf.prop_recursive(3, 12, 2, |inner| {
+        (arb_arith_op(), inner.clone(), inner).prop_map(|(op, lhs, rhs)| {
+            dummy_expr(ExprKind::Binary {
+                op,
+                lhs: Box::new(lhs),
+                rhs: Box::new(rhs),
+            })
+        })
+    })
 }
 
-/// A left-leaning binary chain `((t op t) op t) …` over one operator class.
-fn arb_chain(op: impl Strategy<Value = ArithOp> + Clone) -> impl Strategy<Value = Expr> {
-    (
-        arb_printable_term(),
-        proptest::collection::vec((op, arb_printable_term()), 1..=2),
-    )
-        .prop_map(|(first, rest)| {
-            let mut expr = dummy_expr(ExprKind::Term(first));
-            for (op, term) in rest {
-                let rhs = dummy_expr(ExprKind::Term(term));
-                expr = dummy_expr(ExprKind::Binary {
-                    op,
-                    lhs: Box::new(expr),
-                    rhs: Box::new(rhs),
-                });
-            }
-            expr
-        })
+fn arb_arith_op() -> impl Strategy<Value = ArithOp> {
+    prop_oneof![
+        Just(ArithOp::Add),
+        Just(ArithOp::Sub),
+        Just(ArithOp::Mul),
+        Just(ArithOp::Div),
+    ]
 }
 
 fn arb_printable_atom() -> impl Strategy<Value = Atom> {
@@ -2177,6 +2178,73 @@ mod tests {
             under_negation > 0,
             "generator never produced a compound argument under `not` — A15 \
              would not have caught bugs/001"
+        );
+    }
+
+    /// The non-vacuity guard for the widened [`arb_printable_expr`] (testing
+    /// rule 2 + rule 4). D2/D3 only exercise the printer's parenthesization if
+    /// the generator emits shapes flat printing cannot recover: a **right**
+    /// child that is itself binary, and a child binding *looser* than its
+    /// parent. The pre-grouping generator produced neither by construction, so
+    /// widening it is what turns D2/D3 into a test of the new code.
+    #[test]
+    fn generator_emits_expression_shapes_that_need_parentheses() {
+        fn walk(expr: &Expr, right_nested: &mut usize, looser_child: &mut usize) {
+            let ExprKind::Binary { op, lhs, rhs } = &expr.kind else {
+                return;
+            };
+            if matches!(rhs.kind, ExprKind::Binary { .. }) {
+                *right_nested += 1;
+            }
+            for child in [lhs, rhs] {
+                if let ExprKind::Binary { op: child_op, .. } = &child.kind
+                    && child_op.precedence() < op.precedence()
+                {
+                    *looser_child += 1;
+                }
+                walk(child, right_nested, looser_child);
+            }
+        }
+
+        let mut runner = TestRunner::deterministic();
+        let strategy = arb_ast_program();
+        let (mut right_nested, mut looser_child) = (0, 0);
+        for _ in 0..200 {
+            let program = strategy
+                .new_tree(&mut runner)
+                .expect("strategy produces a value")
+                .current();
+            for statement in &program.statements {
+                let StatementKind::Clause(clause) = &statement.kind else {
+                    continue;
+                };
+                for literal in &clause.body {
+                    match &literal.kind {
+                        LiteralKind::Atom { atom, .. } => {
+                            let exprs: Vec<&Expr> = match &atom.args {
+                                Args::Positional(exprs) => exprs.iter().collect(),
+                                Args::Named(named) => named.iter().map(|a| &a.value).collect(),
+                            };
+                            for expr in exprs {
+                                walk(expr, &mut right_nested, &mut looser_child);
+                            }
+                        }
+                        LiteralKind::Comparison(cmp) => {
+                            walk(&cmp.lhs, &mut right_nested, &mut looser_child);
+                            walk(&cmp.rhs, &mut right_nested, &mut looser_child);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        assert!(
+            right_nested > 0,
+            "generator never nested on the right — D2/D3 never see `A - (B - C)`"
+        );
+        assert!(
+            looser_child > 0,
+            "generator never mixed precedence — D2/D3 never see `(A + B) * C`"
         );
     }
 
