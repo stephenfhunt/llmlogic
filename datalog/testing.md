@@ -44,6 +44,59 @@ error-message quality and span exactness, type-inference *precision* (which
 programs should be rejected is spec judgment; PBT checks only the soundness
 direction), proof-tree rendering and JSON encodings, CLI ergonomics.
 
+## Four rules
+
+Their normative home; `AGENTS.md` points here. Each was paid for by a defect in
+`bugs/`, and each is cheap to state and was expensive to learn.
+
+1. **An equivalence claim ships as a property, not a unit test.** Any "these two
+   spellings mean the same thing" claim — surface sugar, a desugaring, an
+   IR-identity claim — gets a generated-input property *in the same sitting*. The
+   record is exact: every such claim carrying a property has held; both that
+   shipped with only a unit test became defects (`bugs/resolved/001`, `002`).
+2. **Every generator carries a non-vacuity guard**, and the guard is checked
+   against **the property's sentence** — not the generator's breadth, and not the
+   assertion's reach. Those are the two ways a guard passes while certifying
+   nothing: one that certifies the *data* where the claim is about what the **run**
+   carried, and one that certifies breadth *no property reads* — which is exactly
+   what `arb_comparison_program`'s six drawn operators did until `bugs/006` made
+   something read an answer. Auditing a guard means reading it against its
+   property's sentence; nothing mechanical substitutes, and a guard may live inside
+   the property it guards. `testgen::tests` is where most of ours live.
+3. **Mutation-verify a property before keeping it, and write the mutation on its
+   catalog line in the same sitting.** Revert the fix, watch it go red, put the fix
+   back. A property never observed failing may be asserting nothing — and *a
+   mutation nobody recorded is a check that happened once*, since the run is
+   momentary and the next session has no way to tell a verified property from an
+   unverified one. This stays a manual habit and does not become a mutation-testing
+   tool: the informative outcomes are "the mutation was aimed wrong, a sibling
+   property reddened" and "this one hangs", neither of which a runner can assign.
+4. **Widening a generator needs a matching acceptance property.** A wider
+   differential is not a wider check — two evaluators sharing one semantics agree
+   whether or not that semantics is sound, so a differential can never catch a
+   type-checker defect (`bugs/resolved/006`, measured: the extended
+   `b1_comparison_programs_agree` stays green with the fix reverted). If a generator
+   starts emitting a new shape, something must assert the **checker** accepts or
+   rejects it correctly.
+
+Two corollaries about the shape of a check, both learned the same way:
+
+- **An oracle that calls the engine's own function agrees with a wrong engine
+  forever.** A *differential* oracle compares two implementations of one semantics
+  and catches a one-sided change and nothing else; an **independent** oracle
+  re-derives the rule *from the spec's words*, and is the only kind that can catch
+  a soundness bug. Ours that qualify are named as such in the catalog —
+  `aggregation_matches_an_independent_group_by` restates §9's fold table, and C2 is
+  a hand-rolled set difference touching neither evaluator. When writing one,
+  restate the spec section; do not
+  call the function under test, and do not consult the *generator's* intent either,
+  since a generator and an oracle sharing one misconception agree forever too.
+- **A rejection claim wants a biconditional property.** "The checker rejects X" is
+  half a claim: a checker that rejects *everything* satisfies it. State it as
+  *rejected exactly when* — `bugs/resolved/006` is this failure in the wild, where
+  the checker refused comparisons §8 orders and no property was looking at the
+  accepting direction.
+
 ## Tooling
 
 - **proptest** is the crate's first dev-dependency (§17, 2026-07-19). Decisive
@@ -142,6 +195,14 @@ it. A future audit starts here.
 Status: `[x]` implemented and green; `[ ]` specified, waiting on its layer.
 Each phase names the roadmap step that unblocks it and the §16 examples it
 generalizes.
+
+**Every entry added from 2026-08-16 states its mutation** — the change that was
+made to watch it go red, per rule 3, in the sitting the property was written.
+Entries predating that rule are **not** retrofitted: a mutation reconstructed
+afterwards records what someone believes would have failed, which is the thing
+rule 3 exists to stop being taken for evidence. The catalog will therefore be
+mixed for a while, and an entry with no mutation line means "written before the
+rule", not "unverified".
 
 ### Phase A — types + lowering (roadmap step 1) — generalizes §16.1
 

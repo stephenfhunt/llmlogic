@@ -79,11 +79,11 @@ implementing a language feature:
    with nothing to notice.
 4. Validate risky sections (grammar, negation, provenance) with small prototypes
    and feed findings back into the spec.
-5. **An equivalence claim ships as a property, not a unit test.** Any "these two
-   spellings mean the same thing" claim — surface sugar, a desugaring, an
-   IR-identity claim — gets a generated-input property. The record is exact: every
-   such claim carrying a property has held (named ≡ positional, body order); both
-   carrying only a unit test became defects (`bugs/001`, `bugs/002`).
+5. Follow **`testing.md`'s four rules** — an equivalence claim ships as a
+   property; every generator carries a non-vacuity guard; mutation-verify a
+   property and record the mutation; widening a generator needs a matching
+   acceptance property. Each was paid for by a `bugs/` file, and `testing.md` is
+   their normative home along with the two corollaries about oracle construction.
 
 Testing conventions and the property catalog live in `testing.md`, their single
 normative home — consult it and implement the relevant phase as each layer lands.
