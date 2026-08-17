@@ -219,6 +219,33 @@ fn cast_program_converts_and_guards() {
     assert!(out.stderr.is_empty(), "{}", out.stderr);
 }
 
+/// §16.10 — every answer shape in one run, pinned byte-for-byte. The queries live
+/// in the corpus file rather than in `-q` flags, because here they are the subject.
+///
+/// Four claims: a non-binding filter keeps the atom's own name; an aggregate
+/// binding a variable no atom carries falls to `answer/N` — the boundary the
+/// one-directional guard got wrong, since every atom argument *is* projected
+/// there; a ground conjunction prints all its atoms in name order; and a body
+/// with no answer variables answers `holds(true)` where it used to print nothing
+/// whether or not it held.
+#[test]
+fn answer_shape_program_prints_each_form() {
+    let out = run_file("16_10_answer_shape.dl");
+    assert_eq!(out.code, 0);
+    assert_eq!(
+        out.stdout,
+        "person(\"alice\", 34).\n\
+         person(\"carol\", 29).\n\
+         answer(\"alice\", 34, 1).\n\
+         answer(\"bob\", 17, 1).\n\
+         answer(\"carol\", 29, 1).\n\
+         banned(\"carol\").\n\
+         person(\"bob\", 17).\n\
+         holds(true).\n"
+    );
+    assert!(out.stderr.is_empty(), "{}", out.stderr);
+}
+
 #[test]
 fn disjunction_program_runs() {
     let out = run_file("disjunction.dl");

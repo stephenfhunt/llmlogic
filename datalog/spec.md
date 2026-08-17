@@ -1487,13 +1487,58 @@ read is `absent` rather than an error, which is what keeps `unparsed` writable a
 all: the language has no convertibility predicate, so `is absent` *is* the guard.
 A *lossy* conversion stays an error (§8's table).
 
+### 16.10 The answer shape — what a query prints, and under what name
+
+Run by `tests/system.rs::answer_shape_program_prints_each_form` over
+`tests/programs/16_10_answer_shape.dl`. The queries are in the file here, because
+they are the subject.
+
+```datalog
+% §14's answer shape: what a query prints depends on whether its positive atoms
+% account for every answer variable
+person("alice", 34).  person("bob", 17).  person("carol", 29).
+banned("carol").
+
+% one atom beside a filter that binds nothing — answers in `person` facts
+?- person(N, A), A >= 18.
+
+% the aggregate binds a variable no atom carries, so the columns need a name of
+% their own and the answer is synthesized
+?- person(N, A), C = count { X | banned(X) }.
+
+% a ground conjunction has no matched combinations to lose, so both atoms print
+% under their own names — and in name order, whichever order they were written
+?- person("bob", 17), banned("carol").
+
+% nothing to substitute and no answer variables: the body's whole content is a
+% yes, and §5's ban on 0-arity atoms is why it carries an argument
+?- not banned("bob").
+```
+```
+person("alice", 34).
+person("carol", 29).
+answer("alice", 34, 1).
+answer("bob", 17, 1).
+answer("carol", 29, 1).
+banned("carol").
+person("bob", 17).
+holds(true).
+```
+*Resolved (§5/§14, 2026-08-17):* the rule is set **equality** between the atoms'
+variables and the answer variables. Query 2 is the boundary the one-directional
+test got wrong — every atom argument is projected there too, so substituting
+`person` would silently drop `C`. Query 4 is what the shape owed and did not pay
+before: it printed nothing whether or not it held. What this example cannot show
+is the hazard in query 1 — those are real `person` facts over a subset of `person`,
+and only naming the query removes that.
+
 *Not covered:* **a named test per example**, which is what would make this corpus
 load-bearing rather than illustrative; and the expected output shown in comments is
 prose, not a pinned fence compared byte-for-byte. Both are one ROADMAP item —
-§16.9 is the first example done the new way, and the pattern the other eight
-should be retrofitted to. No example exercises a *diagnostic*, so nothing here
-checks what the engine prints when a program is wrong — an example proves a claim
-about the channels it compares and nothing about a channel it is silent on.
+§§16.9 and 16.10 are done the new way, and the pattern the other **eight** should
+be retrofitted to. No example exercises a *diagnostic*, so nothing here checks
+what the engine prints when a program is wrong — an example proves a claim about
+the channels it compares and nothing about a channel it is silent on.
 
 ## 17. Decisions log & open questions
 

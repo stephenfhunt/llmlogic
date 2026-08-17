@@ -1,0 +1,19 @@
+% §14's answer shape: what a query prints depends on whether its positive atoms
+% account for every answer variable
+person("alice", 34).  person("bob", 17).  person("carol", 29).
+banned("carol").
+
+% one atom beside a filter that binds nothing — answers in `person` facts
+?- person(N, A), A >= 18.
+
+% the aggregate binds a variable no atom carries, so the columns need a name of
+% their own and the answer is synthesized
+?- person(N, A), C = count { X | banned(X) }.
+
+% a ground conjunction has no matched combinations to lose, so both atoms print
+% under their own names — and in name order, whichever order they were written
+?- person("bob", 17), banned("carol").
+
+% nothing to substitute and no answer variables: the body's whole content is a
+% yes, and §5's ban on 0-arity atoms is why it carries an argument
+?- not banned("bob").
