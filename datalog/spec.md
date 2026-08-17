@@ -1671,6 +1671,19 @@ never say.
   - **Performance as an explicit non-goal**; **one `number` type** (they rejected
     our int/float split because JS has one type, which is not an argument here);
     their **zero-dependency, ES-library-only build discipline**.
+  - ***Consequences 2026-08-17*** — **the naive-first decline is measured, and it
+    was an exponent.** One corpus run on both engines
+    (`notes/cross-engine-benchmark.md`): chain closure scales ~n^2.4 here against
+    ~n^3.8 there, where the closure output is itself n². So "their profile concedes
+    the exponent is unchanged" held, and the rejected alternative would have cost a
+    factor of n rather than a constant. Two things the entry did not anticipate.
+    The **front ends are within ~4×** (480k vs 110k facts/s), so nothing about the
+    gap is attributable to the runtime choice outside the fixpoint — the decline was
+    load-bearing exactly where it was aimed. And a comparison run for their sake
+    found **two shapes where this engine is the worse one**, neither visible from
+    inside this project: aggregation that does not scale with the aggregated
+    relation, and a cyclic-graph cliff. Being "strong evidence and a poor authority"
+    cuts both ways, and the second direction is the one that had not been used.
 
 - **2026-08-16** — **An incomplete model does not answer, and the whole-model
   surface survives it** (§6/§9/§15; `notes/tsdl-cross-project-review.md`).
@@ -2719,6 +2732,19 @@ never say.
     against, and `notes/performance-baseline.md` names this recorder as its top
     hypothesis for the 35× cliff while never having measured it. **The profiling
     item now has a concrete architecture to profile against**, which is what changes.
+  - ***Consequences 2026-08-17*** — **the third option has now been priced, from the
+    outside.** tsdl run under its lineage semiring against its own boolean default
+    costs **13×** on a cyclic graph, 6× on a negated stratum and ~1.3× on flat
+    shapes (`notes/cross-engine-benchmark.md`). That is not our number — different
+    engine, and theirs annotates where ours records edges — but it is the first
+    evidence of any kind that the recorder is expensive in the shape that matters,
+    and it lands on the same workload where this engine's own cliff appeared
+    (`sparse_800`: 65 s and 1.2 GB, against 3.8 s for a chain of the same size).
+    The 2026-07-19 rationale is undisturbed — all-derivations is still what `?why`
+    needs — but "one integer per row for a run nobody interrogates" now has a price
+    tag on the other side of it. Ours stays unmeasured, and still needs a temporary
+    build: **there is no flag to disable recording**, which is now the single
+    cheapest thing standing between the profiling item and its top hypothesis.
 - **2026-07-19** — **Step-2 comparison policy**: the core evaluator reports
   comparison literals as a structured "not yet supported" error (the same
   pattern lowering uses for negation and named arguments). §8 semantics —
