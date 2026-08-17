@@ -41,11 +41,14 @@ each; detail in §17 and `docs/worklog.md`.
 
 > **Open defects live in [`bugs/`](bugs/)** — currently only `004` (§6 asserts a
 > finiteness that arithmetic falsified), out of the 2026-07-25 spec review and the
-> design session that followed it (§17). It is blocked on "Termination &
-> value-creating recursion" below, so **the queue has nothing unblocked in it**.
-> The remaining design sessions are **Termination** (which unblocks `004`) and
-> **§6's extension**, now one unknown lighter — milestone 4's second follow-on
-> settled the `absent` half of "what does `p(X), not p(X)` mean" on 2026-07-29.
+> design session that followed it (§17). It is **partly unblocked as of
+> 2026-08-16**: three of its five acceptance criteria are now answerable, since §6,
+> §10 and §15 state what they do not cover and §15 says a budget's absence is a
+> decision. What it still waits on is the Termination *rule* being written and
+> built. The remaining design sessions are **Termination** and **§6's extension**,
+> the latter now two unknowns lighter — the anti-join settled `p(X), not p(X)` on
+> 2026-07-29, and the truncation contract settled what an incomplete model is worth
+> on 2026-08-16.
 >
 > Five are resolved in `bugs/resolved/`: `001` (a compound argument in a negated
 > atom silently misread as a wildcard), **fixed 2026-07-25** by milestone 4's
@@ -143,6 +146,20 @@ result type* says so — as distinct from coercing operands silently.) Open
 sub-question: whether a rule this strict wants a diagnostic that names the
 conversion, since today's message only reports a type clash.
 
+### The value model (§4)
+
+- **Temporal types — `date`, `timestamp`, `duration`.** The value model has five
+  primitives and nothing temporal, so a date column out of §13's CSV/JSONL/Parquet
+  lands as a string or an int and there is no arithmetic over it. This engine needs
+  them *more* than a semantic-layer engine does, because it imports real files where
+  date columns are ubiquitous. **Read the sibling engine's finding before designing
+  it** (`notes/tsdl-cross-project-review.md`): a subject asked for "days" got
+  `172800000` with no error, because the cast it wrote was not wrong — it yielded
+  milliseconds — and they closed it by *deleting* the cast in favour of
+  `duration / duration → number`, so the divisor is where a program names its unit.
+  A unit that has to be documented is the design being wrong. _queued (own
+  session)._ — §4/§8/§13.
+
 ### Termination & value-creating recursion (§6/§10) — a design session
 
 **The language does not terminate, and has not since milestone 4.** This is
@@ -163,7 +180,10 @@ LLM-generated programs this is a live denial-of-service vector, and it is why
 
 **Direction chosen (user call, 2026-07-25): a static semantic error, not runtime
 fuel.** Fuel was considered and rejected as hacky — a budget is not a guarantee,
-and the point of this property is that it should be a theorem.
+and the point of this property is that it should be a theorem. **Reaffirmed
+2026-08-16** against a sibling engine that ships both: a budget's forcing case is a
+hung browser tab, and a CLI has `^C`, so a slow program stays slow. The exposure
+that argument does *not* cover is a hosted surface (MCP, API harness) — both parked.
 
 **Rule sketch** — precise enough to start from, not settled:
 
@@ -211,8 +231,23 @@ session rather than a patch.
 
 The session must also **write §10's missing Termination section**, and then either
 ratify §2's "predictable evaluation" pillar in a form the implementation satisfies
-or soften it — including deciding what it promises about merely *slow* programs,
-which a static rule does not address at all. _designing._ — §2/§6/§8/§10.
+or soften it. What it no longer owes: an answer about *slow* programs, which
+2026-08-16 settled as "a slow program stays slow", and an account of what an
+incomplete model is worth, which is the item below. _designing._ — §2/§6/§8/§10.
+
+### The truncation contract (§9/§13/§15) — decided, not built
+
+**An incomplete model does not answer, and the whole-model surface survives it**
+(§17, 2026-08-16). Decided, with three live instances that report through a stderr
+warning today: §9's skipped aggregate rows, §13's unrepresentable import cells, and
+an external signal. The discriminating rule is how the program reads the short
+relation — projected, one row short and say so; folded or negated, withhold.
+
+The design question the decision leaves open is **the CLI shape**: a shell pipeline
+reads stdout and cannot see a stderr warning at all, so "withhold" has to mean an
+exit code and a stdout discipline, not a return field. Sequence it with §11's
+`?why`, whose `unknown` arm is the same distinction reached from the other side.
+_queued — decided, not built._ — §15, `notes/tsdl-cross-project-review.md`.
 
 ### Aggregation follow-ons (§9)
 
@@ -225,7 +260,11 @@ which a static rule does not address at all. _designing._ — §2/§6/§8/§10.
   sites where the question wanted 20 callers. Decide whether v1 gets
   `count_distinct` / a `distinct` modifier, or whether the trap is documented
   harder; §13's wide machine-generated tables are the case that makes it urgent
-  (§17, 2026-07-24 *Consequences*). _queued._ — §9/§13.
+  (§17, 2026-07-24 *Consequences*). A sibling engine spelled `count distinct`
+  citing this measurement, then measured the **warning** beside it firing on
+  correct programs and leading with a destructive fix — read
+  `notes/tsdl-cross-project-review.md` before designing the diagnostic, not after.
+  _queued._ — §9/§13.
 - **Statistical reducers** — `median`/`stddev`/`variance`/`percentile`. The
   aggregate node reserves a parameter slot for `percentile(p)`; each is a reducer
   registration + a typecheck arm, no evaluator restructure. _queued._ — §9.
@@ -275,13 +314,22 @@ them. Except where noted these are documented v1 limits rather than defects.
 
 ### Provenance surface (§11)
 
-- **Provenance query syntax** — `?why <fact>` is provisional across CLI + API;
-  also decide the proof-tree JSON encoding. Now also the surface §9's
-  skip-but-report rule was designed around: an interim stderr warning covers the
-  aggregate skip count (2026-07-25), but `?why` is what makes the rest of the
-  recorded derivation readable. _queued._ — §11/§14.
-- **Provenance as facts** — emit `?why` output as ground derivation-edge facts
-  so provenance itself pipes back in (the Datalog-in/out closure). _queued._ — §11/§14.
+- **Provenance query syntax — designed 2026-08-16, not built.** One union of
+  `proof` / `underivable` / `unknown`; the sigil is a cost hint; a near-miss is a
+  *rule*, not a binding; a repair is a step, not a promise; the trace re-solves
+  through the scheduler the fixpoint uses. §17 has the decision. What remains open
+  is the rendering, the JSON encoding, and sequencing against the truncation
+  contract, whose distinction `unknown` is. _queued — decided, not built._ — §11/§14.
+- **First appearance, not first round** — §11's proof extraction stamps the fixpoint
+  *round*, which cannot separate two facts derived in the same one, so a proof that
+  exists is not always found. A monotone per-fact sequence number costs the same
+  `u32` (§17 amendment, 2026-08-16). Independent of the store question below.
+  _queued (small)._ — §11.
+- **Provenance as facts.** A proof tree is not a fact, so emitting it as ground
+  derivation-edge facts either invents relations the program never declared or
+  flattens a tree into rows that no longer compose. It rides in `%` comments
+  instead, which keeps Datalog-out-is-Datalog-in intact byte-for-byte.
+  _rejected — §17, 2026-08-16._ — §11/§14.
 - **E3 replay does not cover §8 builtins** — a coverage hole, not a defect, but
   the one place provenance is least checked. `e3_derivations_replay` reapplies
   each derivation's rule instance to its premises and asserts it rederives the
@@ -300,9 +348,19 @@ them. Except where noted these are documented v1 limits rather than defects.
   self-justifying leaf records the *values*, not the expression, so replay has to
   re-evaluate rather than re-check. Catalogued as **E6** in `testing.md`.
   _queued._ — §11/§15.
-- **Semiring provenance under negation** — `?whynot` with minimal repairs,
-  tropical cheapest-proof selection; sketch in `notes/semiring-provenance.md`.
-  _parked (research)._ — §11.
+- **Semiring provenance under negation** — tropical cheapest-proof selection and
+  the algebra behind it; sketch in `notes/semiring-provenance.md`. **`?whynot` with
+  minimal repairs is no longer part of this item**: it was designed 2026-08-16
+  without a semiring, a near-miss being a *rule* rather than a binding, which is
+  what bounds it. What stays parked is the algebra. _parked (research)._ — §11.
+- **Does the derivation store earn its cost?** A sibling engine extracts a proof
+  *backwards* from the retained model — no recorder in the fixpoint, no re-run — so
+  a run nobody questions pays one integer per row. It is not a free swap: we record
+  *all* derivations (§17, 2026-07-19) and backwards extraction yields one. But
+  `notes/performance-baseline.md` names this recorder as its top hypothesis for the
+  35× cliff and has never measured it, so **the profiling item below now has a
+  concrete architecture to profile against.** Sequence after the profile, never
+  before. _queued (after profiling)._ — §11/engine.
 
 ### Import follow-ons (§13)
 
@@ -351,44 +409,39 @@ but a different kind of work.
   ratified semantics to describe rather than one to decide. Its remaining unknowns
   are aggregation and the finiteness claim `bugs/004` owns (blocked on
   Termination). _queued._ — §6.
-- **Ratify §1 and §2.** Both are still `TBD` — the doc opens on "*To fill in:
-  concrete goals, non-goals, target users, success criteria*" and "candidate
-  principles to ratify", while those pillars have driven every decision for three
-  weeks and §2 is cited as settled authority at least four times. _queued._ — §1/§2.
-- **Fix the status vocabulary.** Declared `TBD → Draft → Stable`; actual usage adds
-  `Ratified` (§9, §13) and `living` (§17), and **nothing has ever reached
-  `Stable`** despite §4/§5/§7/§8/§9/§13 being implemented, tested, and dogfooded.
-  So the top rung is dead and "Draft" now spans "unwritten" (§6, §10) and "shipped
-  and hardened" (§5, §8). _queued._ — all.
-- **Clear the stale forward pointers.** All verified shipped: §4 "lands with
-  roadmap step 7", §7 "lands with roadmap step 4", §15 "negation joins the loop at
-  roadmap step 4", §6 "arrives with §7/§9", §13 "implementation is roadmap step
-  7". §16.7 still explains a workaround in the present tense ("Until then, named
-  access to a schema-less import is a structured error") that dissolved when step 7
-  landed, and §16's preamble calls §16.4 "provisional" while §16.4's own footer
-  says ratified. _queued._ — §4/§6/§7/§13/§15/§16.
-- **Move the implementation audit trail out of normative text.** Status lines and
-  body prose name Rust modules and dates ("validated by the hand-rolled lexer
-  (`src/lexer.rs`), 2026-07-22"). Valuable traceability at the wrong altitude — a
-  language spec should not need to know the engine has a file called `lower.rs`. A
-  per-section footer or one traceability table keeps it without diluting the spec.
-  _queued._ — all.
-- **Normalize §17's chronology.** Reverse-chronological for 07-25/24/23/22, then it
-  jumps to 07-03 and runs *forward* through 07-21, so a reader cannot tell which
-  end is current. _queued._ — §17.
-- **Restructure the §17 decisions log** — 48% of `spec.md`, growing 36× faster
-  than the body, driven by 9 oversized entries rather than by decision count.
+- **Ratify §1 and §2.** §1's goals, non-goals, target users and success criteria
+  have never been written, and §2's principles are still candidates — one of which,
+  "predictable evaluation", the implementation does not satisfy. Both now say so in
+  their own *Not covered* footers instead of behind a status marker. _queued._ — §1/§2.
+- **Rename the provenance "absence pattern" → `no-match pattern`**, with the
+  explanation of a missing answer being a **failure trace** (§17, 2026-08-16 — three
+  names, adopted verbatim from a sibling engine). Counted: **31 sites over 8 files**,
+  nothing frozen, so the sweep is total. _queued — decided, not built._ — §4/§7/§11.
+- **Name a test per §16 example.** No example names the test that runs it, and the
+  expected output is prose in a comment rather than a fence compared byte-for-byte —
+  so a block nobody wired up cannot fail. The rule going forward is **no example
+  means no feature**; retrofitting the eight is the item. Add a diagnostic example
+  while doing it: none of them exercises an error, so nothing checks what the engine
+  prints when a program is wrong. _queued._ — §16, `testing.md`.
+- **Normalize §17's chronology.** Reverse-chronological for 08-16 back to 07-25,
+  then it jumps to 07-03 and runs *forward* through 07-21, so a reader cannot tell
+  which end is current. _queued._ — §17.
+- **Restructure the §17 decisions log** — **53% of `spec.md`** as of 2026-08-16
+  (1 538 lines against §§1–16's 1 390; it was 48% on 2026-07-26), growing far faster
+  than the body, driven by oversized entries rather than by decision count.
   Topic-keyed rewrite proposed; measurements, what is already decided, and the
   open questions are in
   [`notes/decisions-log-restructure.md`](notes/decisions-log-restructure.md).
-  Pairs with the stale-pointer items below.
-  _queued (user call; own session)._ — §17.
-- **Rename the provenance "absence pattern".** §4 and §11 each carry a footnote
-  apologizing for the collision with the `absent` *value* ("the two share a word,
-  not a concept"). Two standing disclaimers is the signal to rename the provenance
-  one — `why-not pattern`, or `no-match record`. Cheap, and it removes a permanent
-  snag for the LLM readers who are the target audience. Touches
-  `provenance::AbsentPattern` and `Premise::Absent`. _queued._ — §4/§7/§11.
+  **Moving it to its own file** is the option a sibling engine took and this should
+  weigh — their spec holds no decisions at all. _queued (user call; own session)._ — §17.
+
+*Closed 2026-08-16, by the hygiene pass in §17's entry of that date:* the status
+vocabulary (deleted — §§1–16 carry no status markers, and each ends with a single
+***Not covered*** footer, which is also where the six different deferral labels went);
+the implementation audit trail (moved to
+[`notes/spec-traceability.md`](notes/spec-traceability.md)); and the stale forward
+pointers, five of which lived in the deleted status lines, with §16.7's dissolved
+workaround and §16's preamble-vs-§16.4 contradiction fixed alongside.
 
 ### Errors & API edges (§12/§14)
 
@@ -411,8 +464,22 @@ but a different kind of work.
   package-skill`, so `recipes/` is now a shipped part of the skill. ✅ 2026-07-27.
 - **"Big external fact base" demo** — the motivating import demo; unblocked by
   §13 (the USDA dogfood is a first pass). _queued._ — skill.
+- **Make `EXPERIMENTS.md` a measuring instrument.** It is an honest checklist
+  eyeballed in a session, run twice — which is not enough to gate the decision below
+  that explicitly waits on it. The controls that transfer from a sibling engine's
+  harness (`notes/tsdl-cross-project-review.md`): a fixture in a domain the skill's
+  docs never use; a prompt assembled by a tool from the fixture's own schemas; the
+  **first program recorded before any feedback**; every task run at **two model
+  strengths**, since the strongest subject routes around gaps instead of falling
+  into them; a doc line measured by *cutting* it from one cell's prompt; reference
+  programs pinned byte-exact in CI. What must **not** be lost in the redesign is the
+  finding their setup cannot produce — the questions our subject answered with
+  `grep` because the engine could not express them. A skill that cannot say
+  something loses the question silently. _queued._ — skill, `EXPERIMENTS.md`.
 - **Other agent-exposure forms** — a Claude API agent-loop harness, and an MCP
   server. Both are deliberately waiting on a trigger: the skill (2026-07-23) is
   the first experiment, and how well a model actually drives it is what should
-  decide whether a second form is worth building. _parked (awaiting the skill
-  experiment)._ — skill.
+  decide whether a second form is worth building — **which is a decision gated on
+  the item above**, not on elapsed time. A hosted surface is also the one place the
+  no-budget termination call does not cover (see Termination). _parked (awaiting the
+  skill experiment)._ — skill.
