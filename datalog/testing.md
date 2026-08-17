@@ -421,6 +421,24 @@ compared keyed by predicate *name*, not `PredId`.
     `comparison_generator_is_well_typed`. **Widening a generator therefore needs
     a matching acceptance property, not just a wider differential.**
 
+  - **One answer set, two output shapes**
+    `filtered_atom_query_answers_like_its_unfiltered_shape` — **specified, not
+    yet green**; the acceptance criterion for §14's widening (§17 2026-08-03,
+    `notes/query-answer-shape.md`). For a body of one positive atom plus literals
+    that bind nothing, the rows are the same set whichever shape §14 selects;
+    only the functor differs. Written `#[ignore]`d and failing, the way
+    `dash_q_rule_equals_the_same_rule_in_a_file` was written for `bugs/002` —
+    deleting the `#[ignore]` is what closing the item looks like.
+
+    Its generator must be built **backwards from a fact the EDB contains**, and
+    then filtered by a comparison chosen to hold on that fact. This is the
+    `bugs/005` lesson applied before the fact rather than after: three things
+    must coincide before the shapes can differ — one positive atom, a
+    non-binding literal beside it, and a matching fact — and over arbitrary
+    programs the third almost never holds, so both shapes print nothing and
+    agree. The non-vacuity guard asserts the generated queries **answer**, not
+    merely that they type-check.
+
   Non-vacuity is guarded in `testgen::tests`, per the generator-coverage
   convention above:
   `generator_emits_compound_atom_arguments_that_hoisting_rewrites` asserts the

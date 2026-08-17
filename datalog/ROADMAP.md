@@ -238,10 +238,13 @@ which a static rule does not address at all. _designing._ — §2/§6/§8/§10.
 
 ### Surface uniformity & the agent edge (§5/§14)
 
-From the 2026-07-25 spec review. Each is a documented v1 limit rather than a
-defect, but all three land on the agent surface, which is the one consumer least
-able to work around them.
+Items landing on the agent surface, the one consumer least able to work around
+them. Except where noted these are documented v1 limits rather than defects.
 
+- **The answer shape reads one *literal*, not one *atom*.** `?- p("a"), 1 < 2.`
+  answers nothing where `?- p("a").` answers. Decided 2026-08-03: widen to one
+  positive atom whose variables are exactly the answer variables; C8 property
+  first. _queued — decided, not built._ — §14, `notes/query-answer-shape.md`.
 - **Three different body grammars.** Rule bodies are DNF; queries and aggregate
   goals are conjunction-only (all three verified). So a disjunctive filter can be
   expressed only by detouring through the rule form — which `bugs/002` made
@@ -249,14 +252,11 @@ able to work around them.
   Decide whether `;` extends to queries and goals, or whether the asymmetry is
   deliberate and gets stated as such in §5 (it currently reads as an aside:
   "Queries stay conjunctive"). _queued._ — §5.
-- **An existence check has no answer.** `?- p("a"), q("b").` prints nothing and
-  exits 0 whether or not it holds (verified both ways, still true 2026-07-27).
-  §14 files this as a closure gap, but the sharper framing is that the engine
-  cannot answer a yes/no question — and §5's ban on 0-arity atoms removes the
-  obvious workaround. A single *ground atom* is distinguishable (output vs. no
-  output), but a conjunction is not. This is now all that is left of that gap:
-  `bugs/005` was the case where an ordinary single-atom query fell into it by
-  accident, closed 2026-07-27. _queued._ — §5/§14.
+- **A multi-atom existence check has no answer.** `?- p("a"), q("b").` prints
+  nothing and exits 0 whether or not it holds: the engine cannot answer a yes/no
+  question, and §5's ban on 0-arity atoms removes the workaround. A single ground
+  atom is distinguishable, and the 2026-08-03 widening extends that to one atom
+  plus filters, so only the conjunction is left. _queued._ — §5/§14.
 - **No string operations.** No prefix, split or concat, so reducing `lower::tests`
   to `lower` is unwritable and the fact producer must do it (2026-07-27). Closed:
   string construction fails §5's own termination test and would widen the hole the

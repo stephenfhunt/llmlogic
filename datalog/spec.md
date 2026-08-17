@@ -1055,6 +1055,16 @@ sub-join (§9) and have no value in the answer row, so they are not projected:
 one a rule head is checked against (§10), applied to the query body and never by
 descending into an aggregate's goal.
 
+**Answers are a projection, not the relation.** The substituted-atom form prints
+a real predicate's name over only the rows the query matched, and nothing in the
+output marks it as a subset. Composing it onward therefore *narrows* that
+predicate: `?- ancestor("alice", W).` piped into a program reasoning about
+`ancestor` presents an `ancestor` holding only alice's rows. The closure above is
+unaffected — the output is valid input, and every row of it is true — but it
+answers a question rather than dumping a relation. A result meant to travel under
+a name of its own should be given one, which is what the `-q` rule form below is
+for.
+
 **Binary contract** (2026-07-22; `-q` completed 2026-07-23, roadmap step 6).
 Invocation is `datalog [<file> | -] [-q <query>]…`. The positional source is a
 program file, `-` for stdin, or **omitted** (empty base program); at most one is
@@ -1342,6 +1352,25 @@ that records a decision working out *well*, which the log would otherwise never
 say.
 
 ### Decisions
+
+- **2026-08-03** — **The substituted-atom shape widens to one positive atom plus
+  non-binding literals** (§14; *decided, not implemented* — ROADMAP item, C8
+  property first). The atom form applies when a body has **exactly one positive
+  atom** whose variables are **exactly** the answer variables; everything else
+  still emits `answer/N`. The trigger was not the opaque name but a `bugs/005`
+  re-run: `?- person("bob", 17).` prints the fact and `?- person("bob", 17), 1 <
+  2.` prints **nothing** — this section's own "as written" principle, defeated by
+  a filter rather than by hoisting. Variable-set **equality** is a new condition,
+  not a relaxation: today's check is one-directional and suffices only because a
+  one-literal body has no other binder; once an aggregate binds alongside the
+  atom, the missing direction drops that column.
+  - **`notes/query-answer-shape.md`** holds the boundary table, the Soufflé
+    survey, and two rejected alternatives: adopting Soufflé's shape (it has no
+    `?-`), and keeping `answer/N` *as* a projection marker — it never was one,
+    the atom form having carried the same narrowing hazard since 2026-07-22. That
+    hazard is pre-existing, is enlarged here, and cut in favour; §14 gained prose
+    instead. Soufflé settled the division of labour: **inference is for reading
+    one query's output, naming is for composing it** (§14).
 
 - **2026-07-29** — **The anti-join is a structural membership test** (§4/§7;
   `src/provenance.rs`). `q(X) :- p(X), not p(X).` derived `q(absent)` — P ∧ ¬P.
@@ -2104,6 +2133,16 @@ say.
   *Consequences* note already draws twice: what this entry ratified was checked
   against the IR, and both later defects were about what a *different* section
   reads off the same structure.
+
+  ***Amended 2026-08-03.*** The **query answer shape** ratified here keys on a
+  body of one *literal*; it widens to one positive *atom* plus non-binding
+  literals (decision of that date). Third time this entry's output-shape rule has
+  moved, and the third time the defect was the same one: `?- p("a"), 1 < 2.`
+  answers nothing for the reason `bugs/005`'s hoisted query did. What this entry
+  got right was the *principle* — the shape follows the query as written — and
+  wrong was encoding it as a literal count, which only coincided with the
+  principle while bodies had one literal. Also recorded here because the
+  *Consequences* note above is the reason the widening ships as a property first.
 
 - **2026-07-03** — Language scope for v1 is **full-featured**: facts, rules,
   recursion, stratified negation, arithmetic/comparison builtins, and aggregation.
