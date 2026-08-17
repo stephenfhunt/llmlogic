@@ -24,6 +24,61 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-17 — The answer shape settles, and axis 4 turns out to decide axis 2
+
+The design session the last three entries deferred to the user. Five axes settled,
+the shape built, and one axis deliberately left unbuilt with its brief written.
+426 pass (was 421), 1 ignored, clippy and rustfmt clean, `--no-default-features`
+still builds.
+
+**Done**
+- **The shape, in `answer_lines` alone** — set **equality** between the positive
+  atoms' variables and the projection, replacing a one-directional check. Three
+  forms: one atom substitutes beside any number of non-binding literals (the
+  2026-08-03 widening, unfrozen); a **ground conjunction** emits all its atoms,
+  sorted by name then value so body order cannot change the bytes; a body with no
+  answer variables and nothing to substitute answers **`holds(true).`**
+- **C8's property** (`arb_answer_shape_case`), oracle filtering the generator's own
+  fact list. **Four mutations killed**, including restoring the one-directional
+  guard — caught only because the generator has a fourth shape binding a variable no
+  atom mentions. Without it the property restates the rule instead of guarding it.
+- **§16.10 with its named test**, the second example done §16.9's way; §14's rule,
+  hazard paragraph and footer; two §17 decisions and three amendments; the note's
+  axis-by-axis outcome; `testing.md`; the two agent-facing restatements.
+
+**Decided**
+- **Axis 4 settled axis 2, which is why the axes were taken one at a time.**
+  `-q 'flag(_, X), truthy(X)'` already prints `answer(true).`, so adopting tsdl's
+  boolean `answer` would have made two meanings byte-identical — a collision they
+  do not have (theirs is boolean-only) and we would have created. Hence `holds/1`,
+  and **no `holds(false)`**: silence has meant no since 2026-07-22.
+- **Axis 5 is the fix for axis 3**, which nobody in either project had connected:
+  named output wears no source relation's name. A *language* form, not `-q` sugar —
+  the name must survive lowering, and recomputing the projection in `api.rs` is the
+  second classifier §13's lexer move exists to prevent. Its own session.
+- **The lost question was three shapes wide, not one.** A bare comparison, a
+  negation-only body, and `?- p(_).` all printed nothing either way; the last
+  appears in neither project's discussion and is the likeliest to be hand-typed.
+- **Rejected, reversing this session's own recommendation**: a warning when a
+  program reads `answer` facts. The hazard is a two-run merge, indistinguishable
+  inside one run from legitimate composition, so it would fire on correct code.
+
+**Removed**
+- §14's *multi-atom existence check* paragraph and its "the answer shape is under
+  review" footer, both closed by what shipped; the note's *"no recommendation is
+  recorded, deliberately"* and its frozen implementation brief.
+- Two ROADMAP items closed as one (the widening and the existence check).
+- The 2026-08-16 tsdl entry rotated verbatim to `worklog-archive/2026-08.md`.
+
+**Next up**
+- **Named queries**, brief written, and the **`%` comment** naming which query a
+  synthesized answer answers — sequence the latter with §11's comment rendering so
+  the format is designed once.
+- Unchanged and now the head of the queue: **Termination** (blocks `bugs/004`),
+  then **§6's extension**. Then the profile, which gates two more items.
+
+---
+
 ## 2026-08-16 — The `as` cast ships, and its deferred question splits in two
 
 Expressions is now empty: the last queued non-design item is built. 421 tests
@@ -131,60 +186,3 @@ question. 410 tests pass (was 407), 1 ignored, clippy and rustfmt clean.
 - The `as` cast is the cheapest remaining non-design item; Expressions holds
   nothing else. **Parallelism** is now the change most likely to break E1's
   batching assumption — written down where it would be violated.
-
-## 2026-08-16 — Reading a sibling engine: three decisions taken, one question reopened
-
-Cross-project review of `~/code/tsdl`, a Datalog engine in TypeScript that names
-this project as its prior art and derives its testing rules from our `bugs/` files.
-Docs only — 407 pass, 1 ignored, unchanged; nothing under `src/` or `tests/` moved.
-
-**Done**
-- **`notes/tsdl-cross-project-review.md`** (new) — the survey and the overflow
-  target: what was adopted with its evidence, what was declined with its reason.
-- **§17 gained four decisions**: the **truncation contract** (an incomplete model
-  does not answer; the whole-model surface survives it), the **provenance query
-  surface** (`?why`/`?whynot` as one union, a bounded why-not), the **three names**,
-  and the **declines**. Four existing entries amended — 2026-07-25 Termination,
-  2026-07-19 first-round stamping and all-derivations recording, 2026-08-03 answer
-  shape. §17's marker table gained ***Reopened***.
-- **The spec hygiene pass**, closing three ROADMAP items: **every status marker
-  deleted** from §§1–16, each section now ending with one ***Not covered*** footer
-  — which is also where six different deferral labels went — and the audit trail
-  moved to **`notes/spec-traceability.md`** (new).
-- **`testing.md` gained its Four rules section**, the normative home, with rules 2
-  and 3 stated for the first time plus two corollaries: an oracle calling the
-  engine's own function agrees with a wrong engine forever, and a rejection claim
-  wants a **biconditional** property. `AGENTS.md`'s item 5 became a pointer.
-
-**Decided**
-- **No budget and no fuel — but truncation gets a contract.** 2026-07-25 stays the
-  whole guarantee (a hung browser tab is their forcing case; a CLI has `^C`). What
-  it never asked is what the engine owes when the model is short *anyway*: the store
-  only grows, so an incomplete fixpoint holds missing facts and never false ones —
-  but a **query** solved against it can be *wrong* rather than missing, since
-  `not p(X)` over an incomplete `p` succeeds. Three live instances, none a budget.
-- **Proof trees are not facts**, closing "provenance as facts" in the negative; they
-  ride in `%` comments, keeping Datalog-out-is-Datalog-in byte-for-byte.
-- **First appearance beats first round** for proof extraction — a round cannot
-  separate two facts derived in the same one, and a sequence number costs the same
-  `u32`. Whether the recorder earns its keep at all is a question for *after* the
-  profile, not before.
-
-**Removed**
-- All 16 `*Status:` lines in `spec.md` and the paragraph declaring the vocabulary;
-  §16's contradiction with §16.4 over "provisional"; §16.7's present-tense
-  workaround, which dissolved when step 7 landed.
-- Two ROADMAP items absorbed into the answer-shape question (the 2026-08-03 widening
-  and the multi-atom existence check — one question with five axes, not three
-  items), and three hygiene items closed outright.
-- The 2026-07-27 `bugs/006` entry rotated verbatim to `worklog-archive/2026-07.md`.
-
-**Next up**
-- **The answer shape is a design session, and the widening is not built until it
-  happens** — user call. Five axes in §17's open question, long form in
-  `notes/query-answer-shape.md`; axis 4 (yes/no) can be settled early.
-- **Termination** still blocks `bugs/004`, now with three of its five acceptance
-  criteria answerable. Then §6's extension, two unknowns lighter.
-- New, both from the review: **temporal types**, and **making `EXPERIMENTS.md` a
-  measuring instrument** — which the parked "other agent-exposure forms" decision
-  is explicitly waiting on.
