@@ -361,11 +361,17 @@ Deliberately sequenced **after** aggregation and the absent value (both shipped
 semantics change (both added evaluation paths that would move the hotspots). Now
 the highest-signal next item.
 
-- **Profile the engine** — never profiled; first measurements and the leads they
-  suggest are in [`notes/performance-baseline.md`](notes/performance-baseline.md)
-  (import is 0.32 s and not the problem; ~15k derived tuples/s; a 35× cliff from
-  bottom-up materialisation). Stand up a repeatable benchmark and a profile
-  *before* optimizing anything. _queued (after feature-complete)._ — engine.
+- **Profile the engine** — never profiled. The benchmark half is now done:
+  [`notes/cross-engine-benchmark.md`](notes/cross-engine-benchmark.md) stands up a
+  regenerating corpus and ranks the leads, first among them the derivation recorder
+  (a second engine measures 13× for its own on a cyclic graph). Earlier one-off
+  numbers: [`notes/performance-baseline.md`](notes/performance-baseline.md).
+  _queued — profile next, benchmark no longer blocking._ — engine.
+- **Aggregation does not scale with the aggregated relation** — 2.5× the rows at a
+  fixed group count costs 9.6×, and it is the one shape where `tsdl` wins outright;
+  groups scale sublinearly, so the suspect is a rescan rather than a group-key
+  reach. Measured in [`notes/cross-engine-benchmark.md`](notes/cross-engine-benchmark.md).
+  _queued (after profiling)._ — §9/engine.
 - **Parallelism** — assess how much of semi-naive evaluation and joins can go
   parallel (independent rules within a stratum, partitioned/hash joins) while
   preserving the deterministic canonical output and full provenance recording,
