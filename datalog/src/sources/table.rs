@@ -399,17 +399,17 @@ fn new_float(f: f64) -> Option<Value> {
 /// and Parquet files carry, and one float cell elsewhere in the column is enough
 /// to drag the whole column to `float`. Silently rounding an ID would corrupt
 /// every join on it, so it is a structured source error naming the cell instead
-/// (§13, 2026-07-25). The exactness test round-trips through `i128`, which —
-/// unlike `as i64` — cannot saturate and call a lossy conversion exact.
+/// (§13, 2026-07-25). The exactness test itself is
+/// [`crate::ir::i64_as_exact_f64`], shared with §8's `as` cast; only the message
+/// is this path's own.
 fn widen_int(n: i64) -> Result<Value, String> {
-    let widened = n as f64;
-    if widened as i128 != i128::from(n) {
-        return Err(format!(
+    let widened = crate::ir::i64_as_exact_f64(n).ok_or_else(|| {
+        format!(
             "`{n}` cannot be widened to a float without losing precision (this column \
              mixes integers and floats, so it is float; give the column an explicit \
              `int` type, or keep the values below 2^53)"
-        ));
-    }
+        )
+    })?;
     new_float(widened).ok_or_else(|| format!("`{n}` widens to a non-finite float"))
 }
 

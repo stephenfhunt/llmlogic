@@ -126,6 +126,33 @@ impl F64 {
     }
 }
 
+/// `n` as an `f64`, or `None` when no `f64` represents it exactly.
+///
+/// The single implementation of §8's **numeric conversion is exact or it is an
+/// error** rule, shared by the `as` cast and §13's import coercion so the two
+/// cannot disagree about which values survive. Above 2⁵³ an `i64` generally has
+/// no exact `f64`, and silently rounding an identifier corrupts every join built
+/// on it — which is why this is a refusal rather than a rounding.
+///
+/// The test round-trips through `i128`, which — unlike `as i64` — cannot
+/// saturate and so cannot report a lossy conversion as exact.
+pub(crate) fn i64_as_exact_f64(n: i64) -> Option<f64> {
+    let widened = n as f64;
+    (widened as i128 == i128::from(n)).then_some(widened)
+}
+
+/// `f` as an `i64`, or `None` when it has a fractional part or falls outside
+/// the `i64` range. The narrowing direction of the same rule.
+pub(crate) fn f64_as_exact_i64(f: f64) -> Option<i64> {
+    if !f.is_finite() || f.fract() != 0.0 {
+        return None;
+    }
+    // `as i128` cannot saturate over any finite `f64` (i128's range dwarfs the
+    // exactly-representable integers), so the bounds check below is real.
+    let n = f as i128;
+    (n >= i128::from(i64::MIN) && n <= i128::from(i64::MAX)).then_some(n as i64)
+}
+
 impl PartialEq for F64 {
     fn eq(&self, other: &Self) -> bool {
         // Total given the no-NaN invariant.
@@ -308,6 +335,13 @@ pub enum Expr {
         op: ArithOp,
         lhs: Box<Expr>,
         rhs: Box<Expr>,
+    },
+    /// An explicit conversion `expr as type` (§8, ratified 2026-07-25). Unlike
+    /// a surface aggregate this survives lowering: the conversion is per-row, so
+    /// there is nothing to hoist and the evaluator applies it in place.
+    Cast {
+        expr: Box<Expr>,
+        ty: TypeName,
     },
 }
 

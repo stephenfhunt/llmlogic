@@ -174,9 +174,18 @@ fn print_named_arg(arg: &NamedArg) -> String {
 /// sits on the **right**: `A - (B - C)` must keep its parentheses, while
 /// `(A - B) - C` is what flat printing already re-parses to. Terms and
 /// aggregates are atomic and never wrapped.
+///
+/// A cast binds tightest of all (§5), so it never needs wrapping as an operand;
+/// what it does need is a wrapped **operand** of its own, since the grammar
+/// admits only a `primary` there — see [`print_cast_operand`].
 fn print_expr(expr: &Expr) -> String {
     match &expr.kind {
         ExprKind::Term(term) => print_term(term),
+        // `expr as type` (§8). Left-to-right chaining means a nested cast on the
+        // left needs no parentheses: `X as int as float` re-parses as itself.
+        ExprKind::Cast { expr, ty, .. } => {
+            format!("{} as {}", print_cast_operand(expr), ty.keyword())
+        }
         ExprKind::Binary { op, lhs, rhs } => format!(
             "{} {} {}",
             print_operand(lhs, *op, Side::Left),
@@ -211,12 +220,29 @@ fn print_operand(expr: &Expr, parent: crate::ast::ArithOp, side: Side) -> String
             op.precedence() < parent.precedence()
                 || (op.precedence() == parent.precedence() && side == Side::Right)
         }
-        ExprKind::Term(_) | ExprKind::Aggregate(_) => false,
+        // A cast binds tighter than every arithmetic operator, so it is never
+        // wrapped as one's operand.
+        ExprKind::Term(_) | ExprKind::Aggregate(_) | ExprKind::Cast { .. } => false,
     };
     if needs_parens {
         format!("({text})")
     } else {
         text
+    }
+}
+
+/// Prints the operand of a cast. The grammar is `cast = primary { "as" type }`,
+/// so anything looser than a `primary` must be parenthesized or the `as` would
+/// re-parse as binding to the operand's *last* factor: `A + B as int` is
+/// `A + (B as int)`, which is a different tree from `(A + B) as int`.
+///
+/// A nested cast is exempt — chaining is left-to-right, so it is already a legal
+/// left operand — as are terms and aggregates, which are atomic.
+fn print_cast_operand(expr: &Expr) -> String {
+    let text = print_expr(expr);
+    match &expr.kind {
+        ExprKind::Binary { .. } => format!("({text})"),
+        ExprKind::Term(_) | ExprKind::Aggregate(_) | ExprKind::Cast { .. } => text,
     }
 }
 

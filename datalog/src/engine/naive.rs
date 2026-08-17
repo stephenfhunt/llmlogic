@@ -245,6 +245,16 @@ fn eval_expr(expr: &Expr, env: &HashMap<Var, Value>) -> Result<Value> {
             let b = eval_expr(rhs, env)?;
             arith(*op, a, b)
         }
+        // Deliberately *not* reimplemented, unlike `arith` below. What this
+        // oracle varies is the fixpoint strategy — naive against semi-naive —
+        // and §8's conversion table is value semantics, identical under both; a
+        // second copy would be one more place for the table to drift rather
+        // than a second opinion about it. The check that can actually catch a
+        // wrong table is the independent one restating §8 in
+        // `engine::tests::the_conversion_table_matches_section_8`
+        // (`testing.md`'s "an oracle that calls the engine's own function agrees
+        // with a wrong engine forever").
+        Expr::Cast { expr, ty } => super::apply_cast(eval_expr(expr, env)?, *ty),
     }
 }
 

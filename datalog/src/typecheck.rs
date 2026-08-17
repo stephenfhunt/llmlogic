@@ -79,14 +79,10 @@ fn is_absent_literal(expr: &ir::Expr) -> bool {
     matches!(expr, ir::Expr::Term(ir::Term::Const(ir::Value::Absent)))
 }
 
+/// A type's name in a diagnostic — the canonical source spelling, so a message
+/// quotes the word the user would write.
 fn type_label(ty: TypeName) -> &'static str {
-    match ty {
-        TypeName::Symbol => "symbol",
-        TypeName::String => "string",
-        TypeName::Int => "int",
-        TypeName::Float => "float",
-        TypeName::Bool => "bool",
-    }
+    ty.keyword()
 }
 
 /// A union-find over "type slots" — one per predicate column, plus fresh slots
@@ -352,6 +348,22 @@ impl<'a> TypeChecker<'a> {
                 self.union(l, r);
                 self.numeric.push(l);
                 l
+            }
+            // `X as T` has type `T` **unconditionally** (§4/§8): a fresh node
+            // fixed to `T`, deliberately *not* unioned with the operand, so
+            // nothing about `T` flows back into `X`'s column and the cast both
+            // satisfies and terminates inference for its subexpression. §9's
+            // `Avg` arm above is the precedent — a result type independent of
+            // the operand's.
+            //
+            // The operand is still typed, so arithmetic errors inside it
+            // surface; which conversions are *defined* is a value-level question
+            // §8 settles at evaluation, exactly as mixed-operand arithmetic is.
+            ir::Expr::Cast { expr, ty } => {
+                let _ = self.expr_slot(expr, vars);
+                let node = self.fresh(format!("cast to {}", type_label(*ty)));
+                self.set_type(node, *ty);
+                node
             }
         }
     }
@@ -736,5 +748,89 @@ mod tests {
         declare_schema(&mut program, thing, &[("kind", Some(TypeName::Symbol))]);
         let env = typecheck(&program).expect("declared-only column is unrefuted");
         assert_eq!(env.column_type(thing, 0), Some(TypeName::Symbol));
+    }
+
+    /// Typechecks source text, returning the environment alongside the lowered
+    /// program so a test can name a column by predicate name. The cast tests
+    /// below read as the programs a user writes rather than as hand-built IR.
+    fn typecheck_src(src: &str) -> std::result::Result<(TypeEnv, Program), Vec<Error>> {
+        let ast = crate::parse(src).expect("parses");
+        let program = crate::lower::lower(&ast).expect("lowers");
+        typecheck(&program).map(|env| (env, program))
+    }
+
+    fn pred_named(program: &Program, name: &str) -> ir::PredId {
+        let index = program
+            .predicates
+            .iter()
+            .position(|p| p.name == name)
+            .expect("predicate is in the program");
+        ir::PredId(index as u32)
+    }
+
+    /// **The acceptance half** of the `as` cast's typing claim (testing rule 4,
+    /// and the biconditional corollary — "the checker rejects X" is half a
+    /// claim).
+    ///
+    /// §4: `X as T` has type `T` *unconditionally*, and inference never flows
+    /// `T` back into the operand. So the same cast expression must typecheck
+    /// over an operand of **every** primitive type, and the column it feeds must
+    /// come out as `T` in every one of those programs.
+    ///
+    /// **Mutation-verified**: replacing the `expr_slot` cast arm's fresh node
+    /// with `self.union(operand, node)` reddens this — the operand's type and
+    /// `T` collide for four of the five source types.
+    #[test]
+    fn a_cast_types_as_its_target_over_every_operand_type() {
+        // One fact per primitive type, so `src(V)` takes each in turn.
+        for fact in [
+            r#"src("text")."#,
+            "src(sym).",
+            "src(30).",
+            "src(2.5).",
+            "src(true).",
+        ] {
+            for (ty, expected) in [
+                ("int", TypeName::Int),
+                ("float", TypeName::Float),
+                ("string", TypeName::String),
+                ("symbol", TypeName::Symbol),
+                ("bool", TypeName::Bool),
+            ] {
+                let src = format!("{fact}\nout(C) :- src(V), C = V as {ty}.");
+                let (env, program) = typecheck_src(&src)
+                    .unwrap_or_else(|e| panic!("a cast constrained its operand in {src:?}: {e:?}"));
+                assert_eq!(
+                    env.column_type(pred_named(&program, "out"), 0),
+                    Some(expected),
+                    "wrong result type for {src:?}"
+                );
+            }
+        }
+    }
+
+    /// **The rejecting half.** The result type is a real `T`, not a free
+    /// variable that unifies with anything: joining a cast's result against a
+    /// column of a different type is the same conflict any other type clash is.
+    /// Without this, a cast arm that returned an *unconstrained* node would
+    /// satisfy the acceptance test above and constrain nothing.
+    ///
+    /// **Mutation-verified**: dropping the `set_type` call from the cast arm
+    /// reddens it. Note it reddens the *acceptance* test above too — an
+    /// unconstrained result has no type to report — so that mutation does not
+    /// discriminate between the two halves. The one that does is the converse,
+    /// M6 above: unioning the operand into the result leaves this test green and
+    /// reddens only the acceptance half. Both directions are therefore load
+    /// bearing, which is the point of stating the claim as a biconditional.
+    #[test]
+    fn a_casts_result_type_conflicts_like_any_other() {
+        // `C` is int by the cast, and string by `label`'s column.
+        let errors =
+            typecheck_src("src(30).\nlabel(\"a\").\nbad(C) :- src(V), C = V as int, label(C).")
+                .expect_err("int result joined against a string column");
+        assert!(
+            errors.iter().any(|e| e.to_string().contains("type")),
+            "unexpected errors: {errors:?}"
+        );
     }
 }

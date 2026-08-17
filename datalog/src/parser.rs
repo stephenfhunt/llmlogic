@@ -539,7 +539,7 @@ impl Parser<'_> {
 
     fn parse_multiplicative(&mut self) -> PResult<Expr> {
         use crate::ast::ArithOp;
-        let mut lhs = self.parse_primary()?;
+        let mut lhs = self.parse_cast()?;
         loop {
             let op = match self.kind() {
                 TokenKind::Star => ArithOp::Mul,
@@ -547,10 +547,34 @@ impl Parser<'_> {
                 _ => break,
             };
             self.bump();
-            let rhs = self.parse_primary()?;
+            let rhs = self.parse_cast()?;
             lhs = fold_binary(op, lhs, rhs);
         }
         Ok(lhs)
+    }
+
+    /// `cast = primary { "as" type }` (§5) — the explicit conversion form,
+    /// binding tighter than `*` `/` and chaining left-to-right.
+    ///
+    /// The keyword is the *same reserved word* as an import clause's `as`,
+    /// disambiguated by position and needing no lookahead: an import's `as`
+    /// follows a path string at statement level, and `as` can never begin a
+    /// statement or a body literal, so reaching one here can only be a cast.
+    fn parse_cast(&mut self) -> PResult<Expr> {
+        let mut expr = self.parse_primary()?;
+        while self.eat(&TokenKind::As) {
+            let (ty, ty_span) = self.parse_type()?;
+            let span = join(expr.span, ty_span);
+            expr = Expr {
+                kind: ExprKind::Cast {
+                    expr: Box::new(expr),
+                    ty,
+                    ty_span,
+                },
+                span,
+            };
+        }
+        Ok(expr)
     }
 
     /// A primary expression: a term, or a prefix `-` folded onto a numeric
@@ -979,6 +1003,10 @@ mod tests {
             ExprKind::Binary { lhs, rhs, .. } => {
                 zero_expr(lhs);
                 zero_expr(rhs);
+            }
+            ExprKind::Cast { expr, ty_span, .. } => {
+                *ty_span = Span::DUMMY;
+                zero_expr(expr);
             }
             ExprKind::Aggregate(agg) => {
                 zero_expr(&mut agg.expr);
@@ -1508,6 +1536,78 @@ adult(N) :- person(name: N, age: A), A >= 18.
                 "round trip changed the tree for {src:?} (printed as {printed})"
             );
         }
+    }
+
+    /// The cast's own precedence cases (§5: `cast = primary { "as" type }`,
+    /// binding tighter than `*` `/`, chaining left-to-right).
+    #[test]
+    fn cast_binds_tighter_than_arithmetic_and_chains_left_to_right() {
+        // `as` grabs only the adjacent primary, never the surrounding sum.
+        parse_ok("r(X) :- n(A), n(B), X = A + B as int.");
+        // …so reaching the sum needs a group, and a chain needs no delimiter.
+        parse_ok("r(X) :- n(A), n(B), X = (A + B) as int.");
+        parse_ok("r(X) :- n(A), X = A as int as float.");
+        // A cast composes wherever an expression does: an inline atom argument,
+        // and either side of a comparison.
+        parse_ok("wide(N, (N as float)) :- n(N).");
+        parse_ok("r(A) :- n(A), A as float < 2.5.");
+    }
+
+    /// The acceptance partner for the cast half of the [`arb_printable_expr`]
+    /// widening (testing.md rule 4), in the shape
+    /// [`grouping_survives_the_print_round_trip`] established.
+    ///
+    /// A cast is **postfix and binds tightest**, which is a parenthesization
+    /// case arithmetic alone cannot reach: the parentheses that must survive sit
+    /// on the cast's *operand*, and a printer that dropped them would re-parse
+    /// `(A + B) as int` as `A + (B as int)` — a different tree, and under §8's
+    /// strict typing usually a different type as well.
+    ///
+    /// [`arb_printable_expr`]: crate::testgen
+    #[test]
+    fn casts_survive_the_print_round_trip() {
+        // (source, the expression as it must print)
+        for (src, expected) in [
+            // Kept: the operand binds looser than the cast.
+            ("X = (A + B) as int", "(A + B) as int"),
+            ("X = (A * B) as float", "(A * B) as float"),
+            ("X = (A - B) as int as float", "(A - B) as int as float"),
+            // Kept: a cast inside arithmetic, where the *sibling* grouping is
+            // what a flat printer loses.
+            ("X = A * (B + C as int)", "A * (B + C as int)"),
+            // Dropped: a cast never needs wrapping as an arithmetic operand,
+            // since it binds tightest…
+            ("X = (A as int) + B", "A as int + B"),
+            ("X = (A as float) / (B as float)", "A as float / B as float"),
+            // …and chaining is left-to-right, so a nested cast on the left of
+            // another is already a legal operand.
+            ("X = (A as int) as float", "A as int as float"),
+            // Dropped: an atomic operand never needs them.
+            ("X = (A) as int", "A as int"),
+        ] {
+            let src = format!("r(X) :- n(A), n(B), n(C), {src}.");
+            let printed = print_program(&parse(&src).expect("parses"));
+            assert!(
+                printed.contains(expected),
+                "printing {src:?} should render the expression as {expected:?}: {printed}"
+            );
+            assert_eq!(
+                parse_ok(&printed),
+                parse_ok(&src),
+                "round trip changed the tree for {src:?} (printed as {printed})"
+            );
+        }
+    }
+
+    /// `as` must be followed by one of the five type names — the same
+    /// production a declaration's field type uses, so the message is the one
+    /// `parse_type` already gives.
+    #[test]
+    fn a_cast_to_a_non_type_names_the_five() {
+        asserts_message(
+            "r(X) :- n(A), X = A as widget.",
+            "a type name (int, float, string, symbol, or bool)",
+        );
     }
 
     #[test]

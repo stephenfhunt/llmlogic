@@ -32,7 +32,7 @@ use crate::ast::fixtures::{
 };
 use crate::ast::{
     Args, ArithOp, Atom, CmpOp, Comparison, Constant, Expr, ExprKind, Literal, LiteralKind,
-    Program, Span, Statement, StatementKind, Term, TermKind,
+    Program, Span, Statement, StatementKind, Term, TermKind, TypeName,
 };
 use crate::ir;
 
@@ -339,6 +339,7 @@ fn monotype_expr(expr: &mut Expr) {
             monotype_body(&mut agg.goal);
             agg.params.iter_mut().for_each(monotype_expr);
         }
+        ExprKind::Cast { expr, .. } => monotype_expr(expr),
     }
 }
 
@@ -966,25 +967,51 @@ fn arb_printable_term() -> impl Strategy<Value = Term> {
     ]
 }
 
-/// A term, or an arbitrarily nested binary tree over all four operators —
-/// **any** shape, including right-leaning and mixed-precedence ones.
+/// A term, or an arbitrarily nested tree over all four arithmetic operators and
+/// the `as` cast — **any** shape, including right-leaning and mixed-precedence
+/// ones.
 ///
 /// The shape is unrestricted because grouping is now in the grammar (`primary →
 /// "(" expr ")"`, §5), so every tree here is parse-reachable and D2/D3 are the
 /// properties that hold the printer to it. Before grouping landed this generated
 /// left-leaning chains over one operator class only, which was the largest shape
 /// the flat printer could round-trip.
+///
+/// Casts join it because they bind tighter than everything else and are
+/// **postfix**, which is a parenthesization case arithmetic alone cannot
+/// produce: a cast over a compound operand needs parentheses the operand would
+/// not need under any binary parent (`(A + B) as int`). Chained and
+/// cast-inside-arithmetic shapes both fall out of the recursion.
 fn arb_printable_expr() -> impl Strategy<Value = Expr> {
     let leaf = arb_printable_term().prop_map(|t| dummy_expr(ExprKind::Term(t)));
     leaf.prop_recursive(3, 12, 2, |inner| {
-        (arb_arith_op(), inner.clone(), inner).prop_map(|(op, lhs, rhs)| {
-            dummy_expr(ExprKind::Binary {
-                op,
-                lhs: Box::new(lhs),
-                rhs: Box::new(rhs),
-            })
-        })
+        prop_oneof![
+            3 => (arb_arith_op(), inner.clone(), inner.clone()).prop_map(|(op, lhs, rhs)| {
+                dummy_expr(ExprKind::Binary {
+                    op,
+                    lhs: Box::new(lhs),
+                    rhs: Box::new(rhs),
+                })
+            }),
+            1 => (arb_type_name(), inner).prop_map(|(ty, expr)| {
+                dummy_expr(ExprKind::Cast {
+                    expr: Box::new(expr),
+                    ty,
+                    ty_span: Span::DUMMY,
+                })
+            }),
+        ]
     })
+}
+
+fn arb_type_name() -> impl Strategy<Value = TypeName> {
+    prop_oneof![
+        Just(TypeName::Int),
+        Just(TypeName::Float),
+        Just(TypeName::String),
+        Just(TypeName::Symbol),
+        Just(TypeName::Bool),
+    ]
 }
 
 fn arb_arith_op() -> impl Strategy<Value = ArithOp> {
@@ -1710,6 +1737,10 @@ pub(crate) fn fold_ground_atom_args(program: &Program) -> Program {
                 lhs: Box::new(ground_ir(lhs)?),
                 rhs: Box::new(ground_ir(rhs)?),
             }),
+            ExprKind::Cast { expr, ty, .. } => Some(ir::Expr::Cast {
+                expr: Box::new(ground_ir(expr)?),
+                ty: *ty,
+            }),
             ExprKind::Aggregate(_) => None,
         }
     }
@@ -1717,7 +1748,7 @@ pub(crate) fn fold_ground_atom_args(program: &Program) -> Program {
     fn fold_expr(expr: &Expr) -> Expr {
         // Only a *compound* argument is a rewrite; a bare term already is its
         // own value, and folding it would make the non-vacuity guard lie.
-        if !matches!(expr.kind, ExprKind::Binary { .. }) {
+        if !matches!(expr.kind, ExprKind::Binary { .. } | ExprKind::Cast { .. }) {
             return expr.clone();
         }
         let folded = ground_ir(expr)
@@ -1861,6 +1892,9 @@ impl Renaming {
                     rhs: d,
                 },
             ) => p == q && self.expr(a, c) && self.expr(b, d),
+            (ir::Expr::Cast { expr: a, ty: s }, ir::Expr::Cast { expr: b, ty: t }) => {
+                s == t && self.expr(a, b)
+            }
             _ => false,
         }
     }
@@ -2248,6 +2282,93 @@ mod tests {
         );
     }
 
+    /// The non-vacuity guard for the **cast** half of [`arb_printable_expr`]
+    /// (testing rule 2 + rule 4), audited against the sentence it certifies:
+    /// D2/D3 see the cast's parenthesization only if the generator emits a cast
+    /// whose *operand* is compound, which is the one shape a cast needs
+    /// parentheses for and no binary parent produces.
+    ///
+    /// Two further counts, because a cast that only ever wrapped a bare term
+    /// would leave the interesting arms of `print_cast_operand` untouched: a
+    /// cast **chain** (the left-to-right arm), and a cast sitting *inside*
+    /// arithmetic (the arm asserting a cast is never wrapped as an operand).
+    #[test]
+    fn generator_emits_casts_over_shapes_that_need_parentheses() {
+        fn walk(
+            expr: &Expr,
+            compound_operand: &mut usize,
+            chained: &mut usize,
+            inside: &mut usize,
+        ) {
+            match &expr.kind {
+                ExprKind::Cast { expr: operand, .. } => {
+                    match &operand.kind {
+                        ExprKind::Binary { .. } => *compound_operand += 1,
+                        ExprKind::Cast { .. } => *chained += 1,
+                        _ => {}
+                    }
+                    walk(operand, compound_operand, chained, inside);
+                }
+                ExprKind::Binary { lhs, rhs, .. } => {
+                    for child in [lhs, rhs] {
+                        if matches!(child.kind, ExprKind::Cast { .. }) {
+                            *inside += 1;
+                        }
+                        walk(child, compound_operand, chained, inside);
+                    }
+                }
+                ExprKind::Term(_) | ExprKind::Aggregate(_) => {}
+            }
+        }
+
+        let mut runner = TestRunner::deterministic();
+        let strategy = arb_ast_program();
+        let (mut compound_operand, mut chained, mut inside) = (0, 0, 0);
+        for _ in 0..200 {
+            let program = strategy
+                .new_tree(&mut runner)
+                .expect("strategy produces a value")
+                .current();
+            for statement in &program.statements {
+                let StatementKind::Clause(clause) = &statement.kind else {
+                    continue;
+                };
+                for literal in &clause.body {
+                    match &literal.kind {
+                        LiteralKind::Atom { atom, .. } => {
+                            let exprs: Vec<&Expr> = match &atom.args {
+                                Args::Positional(exprs) => exprs.iter().collect(),
+                                Args::Named(named) => named.iter().map(|a| &a.value).collect(),
+                            };
+                            for expr in exprs {
+                                walk(expr, &mut compound_operand, &mut chained, &mut inside);
+                            }
+                        }
+                        LiteralKind::Comparison(cmp) => {
+                            walk(&cmp.lhs, &mut compound_operand, &mut chained, &mut inside);
+                            walk(&cmp.rhs, &mut compound_operand, &mut chained, &mut inside);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        assert!(
+            compound_operand > 0,
+            "generator never cast a compound operand — D2/D3 never see `(A + B) as int`, \
+             the only shape a cast needs parentheses for"
+        );
+        assert!(
+            chained > 0,
+            "generator never chained casts — D2/D3 never see `X as int as float`"
+        );
+        assert!(
+            inside > 0,
+            "generator never put a cast inside arithmetic — D2/D3 never check that a \
+             cast goes *un*parenthesized as an operand"
+        );
+    }
+
     /// [`arb_ground_query_spellings`] must generate queries that **match a
     /// fact**, not merely queries that compute. This is the whole reason the
     /// generator is targeted: two spellings of a query that answers nothing
@@ -2357,10 +2478,12 @@ mod tests {
                 match &expr.kind {
                     ExprKind::Term(term) => matches!(term.kind, TermKind::Constant(_)),
                     ExprKind::Binary { lhs, rhs, .. } => all_constant(lhs) && all_constant(rhs),
+                    ExprKind::Cast { expr, .. } => all_constant(expr),
                     ExprKind::Aggregate(_) => false,
                 }
             }
-            matches!(expr.kind, ExprKind::Binary { .. }) && all_constant(expr)
+            matches!(expr.kind, ExprKind::Binary { .. } | ExprKind::Cast { .. })
+                && all_constant(expr)
         }
 
         fn atom_exprs(atom: &Atom) -> Vec<&Expr> {

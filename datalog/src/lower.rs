@@ -871,6 +871,15 @@ impl Lowerer {
                 rhs: Box::new(self.lower_expr(rhs, scope, hoisted)),
             },
             ast::ExprKind::Aggregate(agg) => self.lower_aggregate(agg, expr.span, scope, hoisted),
+            // A cast is per-row, so it survives into the IR rather than hoisting
+            // (§8). Its operand still lowers normally — an aggregate inside one
+            // hoists exactly as it would anywhere else.
+            ast::ExprKind::Cast {
+                expr: operand, ty, ..
+            } => ir::Expr::Cast {
+                expr: Box::new(self.lower_expr(operand, scope, hoisted)),
+                ty: *ty,
+            },
         }
     }
 
@@ -1373,6 +1382,7 @@ fn expr_vars(expr: &ir::Expr) -> Vec<ir::Var> {
             vars.extend(expr_vars(rhs));
             vars
         }
+        ir::Expr::Cast { expr, .. } => expr_vars(expr),
     }
 }
 

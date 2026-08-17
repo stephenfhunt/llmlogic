@@ -42,12 +42,13 @@ pub(crate) mod naive;
 use std::collections::{BTreeSet, HashMap};
 
 use crate::Result;
-use crate::ast::{AggOp, ArithOp, CmpOp};
+use crate::ast::{AggOp, ArithOp, CmpOp, TypeName};
 use crate::error::Error;
 use crate::ir::{
     Atom, BodyLiteral, BodyLiteralKind, Expr, F64, Fact, PredId, Program, Query, Rule, RuleId,
-    Term, Tuple, Value,
+    Term, Tuple, Value, f64_as_exact_i64, i64_as_exact_f64,
 };
+use crate::lexer::{CellClass, classify_cell, classify_symbol};
 use crate::provenance::{Derivation, NoMatchPattern, Premise};
 
 /// The result of evaluation: every predicate's full extent, plus provenance.
@@ -1009,7 +1010,118 @@ pub(crate) fn eval_expr(expr: &Expr, bindings: &[Option<Value>]) -> Result<Value
             let r = eval_expr(rhs, bindings)?;
             apply_arith(*op, l, r)
         }
+        Expr::Cast { expr, ty } => apply_cast(eval_expr(expr, bindings)?, *ty),
     }
+}
+
+/// Applies an explicit conversion `value as ty` (§8, ratified 2026-07-25;
+/// failure semantics decided 2026-08-16).
+///
+/// Three outcomes, and which one applies is the whole design:
+///
+/// - **`absent` in, `absent` out** — annihilation, checked first, at the same
+///   choke point as arithmetic's. A cast never manufactures a value for missing
+///   data.
+/// - **The conversion is undefined for this pair** (`true as int`) — a
+///   structured error, exactly like [`apply_arith`]'s mixed-operand arm. This is
+///   a program mistake, not a data failure.
+/// - **The conversion is defined but this value fails it** — and here the two
+///   failures part:
+///   - *lossy*: a value exists and representing it would corrupt it
+///     (`9007199254740993 as float`, `2.5 as int`) — a structured **error**,
+///     the rule §13 already applies at the import boundary.
+///   - *unrepresentable*: there is no value to represent (`"abc" as int`) —
+///     **`absent`**. Erroring here would make a dirty column unqueryable, since
+///     the language has no convertibility predicate to filter on (string
+///     operations were *rejected*, §17 2026-07-27). Yielding absent puts the
+///     guard back in the user's hands: `V = X as int, V is not absent`.
+pub(super) fn apply_cast(value: Value, ty: TypeName) -> Result<Value> {
+    // Absent annihilates (§8), *ahead* of every conversion check — including the
+    // undefined-pair one, since `absent` inhabits any column and so belongs to
+    // no source type.
+    if value.is_absent() {
+        return Ok(Value::Absent);
+    }
+    let undefined = || {
+        Err(Error::semantic(format!(
+            "type error: there is no conversion from {} to {}; `as` converts \
+             between numbers, and between text and any other type",
+            value_type_name(&value),
+            ty.keyword(),
+        )))
+    };
+    match ty {
+        TypeName::Int => match &value {
+            Value::Int(_) => Ok(value),
+            Value::Float(f) => f64_as_exact_i64(f.get())
+                .map(Value::Int)
+                .ok_or_else(|| lossy(&value, ty)),
+            Value::String(s) => Ok(match classify_cell(s) {
+                CellClass::Int(n) => Value::Int(n),
+                _ => Value::Absent,
+            }),
+            _ => undefined(),
+        },
+        TypeName::Float => match &value {
+            Value::Float(_) => Ok(value),
+            Value::Int(n) => widen(*n, &value),
+            Value::String(s) => match classify_cell(s) {
+                CellClass::Float(f) => F64::new(f).map(Value::Float),
+                // An integral string widens under the same exactness rule a
+                // literal int does — §13's import coercion reads a float column
+                // the same way.
+                CellClass::Int(n) => widen(n, &value),
+                _ => Ok(Value::Absent),
+            },
+            _ => undefined(),
+        },
+        TypeName::Bool => match &value {
+            Value::Bool(_) => Ok(value),
+            Value::String(s) => Ok(match classify_cell(s) {
+                CellClass::Bool(b) => Value::Bool(b),
+                _ => Value::Absent,
+            }),
+            _ => undefined(),
+        },
+        // Every typed value has a canonical spelling, so rendering is total:
+        // this is the one column of the table with no failure mode. It is also
+        // the §14 spelling, so `V as string` and printing `V` agree.
+        TypeName::String => Ok(Value::String(match &value {
+            Value::String(_) => return Ok(value),
+            other => crate::print::print_value(other),
+        })),
+        TypeName::Symbol => match &value {
+            Value::Symbol(_) => Ok(value),
+            // Not every string is a legal symbol — `"two words"` and `"Cap"`
+            // are not identifiers — so this one can be unrepresentable.
+            Value::String(s) => Ok(match classify_symbol(s) {
+                Some(name) => Value::Symbol(name),
+                None => Value::Absent,
+            }),
+            _ => undefined(),
+        },
+    }
+}
+
+/// `n` widened to a float, or the lossy-conversion error. `original` is the
+/// value as written, so a string operand is reported as the string it was.
+fn widen(n: i64, original: &Value) -> Result<Value> {
+    match i64_as_exact_f64(n) {
+        Some(f) => F64::new(f).map(Value::Float),
+        None => Err(lossy(original, TypeName::Float)),
+    }
+}
+
+/// The error for a conversion that exists but would not be exact (§8). Distinct
+/// from `absent` on purpose: a value *is* here, and the engine refuses to
+/// corrupt it rather than quietly reporting it missing.
+fn lossy(value: &Value, ty: TypeName) -> Error {
+    Error::semantic(format!(
+        "conversion error: `{}` has no exact {} representation, and `as` does not \
+         round (a rounded value silently breaks every join on it)",
+        crate::print::print_value(value),
+        ty.keyword(),
+    ))
 }
 
 /// Applies an arithmetic operator. Strict (§4, spec §17 2026-07-21): `int op
@@ -1622,6 +1734,183 @@ mod tests {
         });
         program.strata = vec![vec![RuleId(0)]];
         eval(&program).unwrap_err()
+    }
+
+    /// What §8 says a conversion yields, restated here so this test can
+    /// disagree with the engine.
+    #[derive(Debug, PartialEq)]
+    enum Conversion {
+        /// The named value.
+        Is(Value),
+        /// `absent` — the conversion is defined but there is no value to
+        /// represent (`"abc" as int`).
+        Missing,
+        /// A value exists and representing it would corrupt it (`2.5 as int`).
+        Lossy,
+        /// No conversion exists between these two types (`true as int`).
+        Undefined,
+    }
+
+    /// §8's conversion table, transcribed from the spec rather than derived from
+    /// the code — the *independent* oracle `testing.md` asks for, since a
+    /// differential against another evaluator would agree with a wrong table
+    /// forever. Every cell of the 5×5 grid is reached, plus `absent` and the
+    /// edge values each column can fail on.
+    ///
+    /// **Mutation-verified**: dropping the `f.fract() != 0.0` guard in
+    /// `ir::f64_as_exact_i64` turns the `2.5 as int` row from `Lossy` into
+    /// `Is(Int(2))` and reddens this test; so does swapping the `absent` arm of
+    /// `apply_cast` below the undefined-pair check.
+    #[test]
+    fn the_conversion_table_matches_section_8() {
+        use Conversion::*;
+        use TypeName::*;
+
+        fn float(f: f64) -> Value {
+            Value::Float(F64::new(f).unwrap())
+        }
+        fn string(s: &str) -> Value {
+            Value::String(s.to_string())
+        }
+        fn symbol(s: &str) -> Value {
+            Value::Symbol(s.to_string())
+        }
+
+        // 2^53 + 1: the smallest positive integer with no exact `f64`.
+        let inexact: i64 = 9_007_199_254_740_993;
+
+        // (value, [int, float, string, symbol, bool])
+        let table: Vec<(Value, [Conversion; 5])> = vec![
+            // `absent` annihilates into every column (§4/§8) — it inhabits any
+            // type, so it is never an undefined pair.
+            (Value::Absent, [Missing, Missing, Missing, Missing, Missing]),
+            (
+                Value::Int(30),
+                [
+                    Is(Value::Int(30)),
+                    Is(float(30.0)),
+                    Is(string("30")),
+                    Undefined,
+                    Undefined,
+                ],
+            ),
+            (
+                Value::Int(inexact),
+                [
+                    Is(Value::Int(inexact)),
+                    // Above 2⁵³ the widening is not exact, and §8 refuses rather
+                    // than rounds — §13's import rule, in-language.
+                    Lossy,
+                    Is(string("9007199254740993")),
+                    Undefined,
+                    Undefined,
+                ],
+            ),
+            (
+                float(2.0),
+                [
+                    Is(Value::Int(2)),
+                    Is(float(2.0)),
+                    Is(string("2.0")),
+                    Undefined,
+                    Undefined,
+                ],
+            ),
+            (
+                float(2.5),
+                [
+                    // Narrowing obeys the same rule as widening: exact or error.
+                    // `as` does not truncate and does not round.
+                    Lossy,
+                    Is(float(2.5)),
+                    Is(string("2.5")),
+                    Undefined,
+                    Undefined,
+                ],
+            ),
+            // Text converts by the language's own literal grammar: `"30" as int`
+            // is `30` exactly when writing `30` would be that literal. What that
+            // grammar does not read is `absent`, never an error.
+            (
+                string("30"),
+                [
+                    Is(Value::Int(30)),
+                    Is(float(30.0)),
+                    Is(string("30")),
+                    Missing,
+                    Missing,
+                ],
+            ),
+            (
+                string("2.5"),
+                [Missing, Is(float(2.5)), Is(string("2.5")), Missing, Missing],
+            ),
+            (
+                string("true"),
+                [
+                    Missing,
+                    Missing,
+                    Is(string("true")),
+                    // `true` lexes as the reserved literal, not an identifier.
+                    Missing,
+                    Is(Value::Bool(true)),
+                ],
+            ),
+            (
+                string("abc"),
+                [
+                    Missing,
+                    Missing,
+                    Is(string("abc")),
+                    Is(symbol("abc")),
+                    Missing,
+                ],
+            ),
+            (
+                // Not an identifier, so not a symbol either.
+                string("two words"),
+                [Missing, Missing, Is(string("two words")), Missing, Missing],
+            ),
+            (
+                symbol("red"),
+                [
+                    Undefined,
+                    Undefined,
+                    Is(string("red")),
+                    Is(symbol("red")),
+                    Undefined,
+                ],
+            ),
+            (
+                Value::Bool(true),
+                [
+                    Undefined,
+                    Undefined,
+                    Is(string("true")),
+                    Undefined,
+                    Is(Value::Bool(true)),
+                ],
+            ),
+        ];
+
+        for (value, expected) in table {
+            for (ty, want) in [Int, Float, String, Symbol, Bool].into_iter().zip(expected) {
+                let got = match apply_cast(value.clone(), ty) {
+                    Ok(Value::Absent) => Missing,
+                    Ok(v) => Is(v),
+                    Err(e) if e.to_string().contains("conversion error") => Lossy,
+                    Err(e) if e.to_string().contains("type error") => Undefined,
+                    Err(e) => panic!("unclassified error for {value:?} as {ty:?}: {e}"),
+                };
+                assert_eq!(
+                    got,
+                    want,
+                    "`{} as {}` disagrees with spec.md §8",
+                    crate::print::print_value(&value),
+                    ty.keyword()
+                );
+            }
+        }
     }
 
     #[test]
@@ -3605,6 +3894,78 @@ mod tests {
                 let program = aggregate_ir(op, &edges);
                 let model = eval(&program).unwrap();
                 prop_assert_eq!(model_facts(&model), naive_eval(&program).unwrap());
+            }
+        }
+
+        proptest! {
+            /// **The `as` cast's round-trip law** (§8, 2026-08-16): rendering a
+            /// value to `string` and reading it back recovers it exactly.
+            ///
+            /// This is D1's closure property at the *value* level, and it holds
+            /// for the same reason: `V as string` is §14's canonical spelling,
+            /// and `string as T` is the literal grammar that spelling is written
+            /// in, so the two are inverse by construction — one classifier, one
+            /// printer, no second opinion (`lexer::classify_cell`). An
+            /// independent law rather than a differential: it never asks a
+            /// second evaluator what it thinks, it asks whether the composition
+            /// is the identity.
+            ///
+            /// **Mutation-verified**: making `print_f64` emit `{}` instead of
+            /// `{:?}` reddens the float arm (`2.0` prints as `2`, which reads
+            /// back an int, so the cast yields `absent`).
+            #[test]
+            fn casting_through_string_is_the_identity(
+                n in any::<i64>(),
+                f in proptest::num::f64::NORMAL,
+                b in any::<bool>(),
+            ) {
+                for value in [Value::Int(n), Value::Float(F64::new(f).unwrap()), Value::Bool(b)] {
+                    let ty = match value {
+                        Value::Int(_) => TypeName::Int,
+                        Value::Float(_) => TypeName::Float,
+                        _ => TypeName::Bool,
+                    };
+                    let text = apply_cast(value.clone(), TypeName::String).unwrap();
+                    prop_assert!(matches!(text, Value::String(_)), "rendering is total");
+                    prop_assert_eq!(
+                        apply_cast(text, ty).unwrap(),
+                        value.clone(),
+                        "`{:?} as string as {}` lost the value",
+                        value,
+                        ty.keyword()
+                    );
+                }
+            }
+
+            /// `absent as T` is `absent` for **every** `T` (§4/§8) — annihilation
+            /// ahead of every other check, so it holds even for the pairs that
+            /// have no conversion at all.
+            ///
+            /// **Mutation-verified**: the same mutation as the table test —
+            /// moving `apply_cast`'s absent short-circuit below the
+            /// undefined-pair check turns three of the five arms into errors.
+            #[test]
+            fn absent_survives_every_cast(
+                ty in prop::sample::select(vec![
+                    TypeName::Int, TypeName::Float, TypeName::String,
+                    TypeName::Symbol, TypeName::Bool,
+                ]),
+            ) {
+                prop_assert_eq!(apply_cast(Value::Absent, ty).unwrap(), Value::Absent);
+            }
+
+            /// A cast is **idempotent at its own type**: `V as T` where `V`
+            /// already has type `T` is `V`, for every one of the five. Pins the
+            /// identity diagonal of §8's table, which is the part most easily
+            /// broken by a reorganisation of `apply_cast`'s match arms.
+            ///
+            /// **Mutation-verified**: dropping `TypeName::String`'s
+            /// `Value::String(_) => return Ok(value)` early return reddens it —
+            /// the string is re-rendered *with* its quotes.
+            #[test]
+            fn casting_to_a_values_own_type_is_the_identity(value in arb_value()) {
+                let ty = value_type(&value);
+                prop_assert_eq!(apply_cast(value.clone(), ty).unwrap(), value);
             }
         }
     }

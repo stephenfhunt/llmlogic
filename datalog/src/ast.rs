@@ -122,6 +122,22 @@ pub enum TypeName {
     Bool,
 }
 
+impl TypeName {
+    /// The canonical source spelling, as the parser's contextual `type`
+    /// production reads it. Load-bearing for the §14 closure property since the
+    /// `as` cast prints one: what comes out here must parse back to the same
+    /// [`TypeName`].
+    pub fn keyword(self) -> &'static str {
+        match self {
+            TypeName::Symbol => "symbol",
+            TypeName::String => "string",
+            TypeName::Int => "int",
+            TypeName::Float => "float",
+            TypeName::Bool => "bool",
+        }
+    }
+}
+
 /// A clause: a fact when `body` is empty, otherwise a rule (§5).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Clause {
@@ -290,6 +306,20 @@ pub enum ExprKind {
     /// `=`-assignment binding an [`crate::ir::BodyLiteralKind::Aggregate`] literal,
     /// so the engine only ever sees the resolved result variable.
     Aggregate(Aggregate),
+    /// An explicit conversion `expr as type` (§4/§5/§8, ratified 2026-07-25).
+    /// Postfix, binding tighter than `*` `/`, chaining left-to-right — so the
+    /// operand is a `primary` and anything looser must be parenthesized.
+    ///
+    /// The result type is `ty` **unconditionally**: inference never flows it
+    /// back into the operand (§4), which makes this the first expression form
+    /// whose type is independent of its subexpression's.
+    Cast {
+        expr: Box<Expr>,
+        ty: TypeName,
+        /// Span of the type name alone, for a diagnostic that points at the
+        /// conversion rather than the whole expression.
+        ty_span: Span,
+    },
 }
 
 /// A set-builder aggregate expression `op { expr | goal }` (§9, ratified

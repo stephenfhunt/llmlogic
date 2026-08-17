@@ -437,6 +437,10 @@ pub fn expr_vars(expr: &Expr) -> Vec<Var> {
             vars.extend(expr_vars(rhs));
             vars
         }
+        // The scheduler must see *through* a cast to the variables it consumes,
+        // or `V = X as int` would look input-free and be placed before whatever
+        // binds `X`.
+        Expr::Cast { expr, .. } => expr_vars(expr),
     }
 }
 
