@@ -1103,21 +1103,41 @@ itself**:
 **Canonical output form** (resolved 2026-07-22). Values print in the §4
 cross-type order (symbol < string < int < float < bool); strings are
 double-quoted with the §3 escapes; a float always carries a decimal point
-(`1.0`, not `1`) so it re-lexes as a float. The **query answer shape** is:
+(`1.0`, not `1`) so it re-lexes as a float. The **query answer shape** keys on
+whether the body's positive atoms account for **every** answer variable:
 
-- a **single positive-atom** query re-emits that atom with the answer bindings
-  substituted (`?- ancestor("alice", Who).` → `ancestor("alice", "bob").` …)
-  when every variable position is a projected variable; a ground such query
-  prints the atom once if it holds;
+- when they do, the query re-emits those atoms with the answer bindings
+  substituted (`?- ancestor("alice", Who).` → `ancestor("alice", "bob").` …).
+  This covers a **single atom** carrying the whole projection, however many
+  non-binding literals — comparisons, negated atoms, presence tests, an aggregate
+  used only as a filter — sit beside it; and a **ground** conjunction, whose
+  atoms print once if the body holds;
+- a body with **no answer variables** and nothing substitutable to show answers
+  `holds(true).` when it holds — a multi-atom existence check, a bare comparison
+  (`?- 1 < 2.`), a negation-only body (`?- not banned("bob").`), or an atom whose
+  only variable is a wildcard (`?- p(_).`);
 - any **other** body emits synthesized `answer/N` facts over the query's
   **answer variables**;
-- rows are deduplicated and sorted.
+- facts are deduplicated and sorted, by relation name then value — so a ground
+  conjunction's output does not depend on the order its atoms were written in.
+
+**Silence means an empty answer**, and for a body with no answer variables it
+means **no**: the substituted form says yes by printing its atoms and no by
+printing nothing, which is what `?- p("a").` has always done. Only a body with
+nothing to substitute needs `holds/1`, and §5's ban on 0-arity atoms is why its
+yes carries an argument.
+
+Why set *equality* and not "every atom argument is projected": a body can bind a
+variable no atom mentions — an aggregate's result, an `=`-assignment — and
+substituting the atoms would silently drop that column, an answer with a missing
+field. The one-directional test was sufficient only while the shape rule also
+required a single-literal body (§17, 2026-08-03 and 2026-08-17).
 
 This is a rule about the query *as written*, and lowering must keep it that way:
 a query constant-folds a ground compound argument (§5) precisely so that
 `?- p("a", 1 + 1).` is still the single atom it reads as. Hoisting it produced a
-two-literal body with no named variables — the uncovered shape below — so the
-query printed nothing (`bugs/005`, §17 2026-07-27).
+two-literal body with no named variables, which then printed nothing
+(`bugs/005`, §17 2026-07-27).
 
 The **answer variables** are the named variables the query body *binds* — which
 is not the same as every named variable (clarified 2026-07-25). An aggregate's
@@ -1135,7 +1155,15 @@ predicate: `?- ancestor("alice", W).` piped into a program reasoning about
 unaffected — the output is valid input, and every row of it is true — but it
 answers a question rather than dumping a relation. A result meant to travel under
 a name of its own should be given one, which is what the `-q` rule form below is
-for.
+for; **the division of labour is that inference is for reading one query's output
+and naming is for composing it**, because an inferred name is the wrong name for
+composition either way — a source relation's name collides with the relation it
+was projected from, and `answer` collides with every other query's answer.
+
+This hazard is **unsolved for unnamed queries**, here and in every engine
+surveyed (§17, 2026-08-16): re-emitting a substituted atom is what a reader
+wants, and it is a subset by construction. Naming the query is what removes it,
+since named output wears no source relation's name.
 
 **Binary contract** (2026-07-22; `-q` completed 2026-07-23, roadmap step 6).
 Invocation is `datalog [<file> | -] [-q <query>]…`. The positional source is a
@@ -1153,10 +1181,12 @@ hand-rolled loop in `src/main.rs`; the logic lives in the library
 # bare-atom query: sugar for appending `?- ...` to the loaded program
 datalog family.dl -q 'ancestor("alice", X)'
 
-# comma-body query: also just a query body (answered by the answer/N shape)
+# comma-body query: also just a query body — the filter binds nothing, so this
+# answers in `person` facts
 datalog people.dl -q 'person(name: N, age: A), A >= 18'
 
-# define-and-select: append the rule, then a synthesized `?- <head>.`
+# define-and-select: append the rule, then a synthesized `?- <head>.` — and the
+# way to make a result travel under a name of its own
 datalog family.dl -q 'grandparent(X, Z) :- parent(X, Y), parent(Y, Z)'
 
 # composition over pipes ("-" reads stdin)
@@ -1190,19 +1220,15 @@ LLM consumer than JSON codes), and provenance (§11), if ever surfaced, should b
 json` therefore stays a documented future *edge* feature only — hand-rolled if it
 ever lands, keeping the zero-runtime-dependency stance.
 
-One shape the closure does not yet cover: a body with no named variables that is
-not a substitutable single atom produces no fact-shaped output in v1. What
-remains in that shape is the **multi-atom existence check** — `?- p("a"), q("b").`
-answers nothing whether or not it holds, and §5's ban on 0-arity atoms removes
-the obvious workaround. A single ground atom *is* distinguishable (output vs. no
-output), so the hole is narrower than "a pure existence check" suggests; it is an
-open roadmap item.
-
-*Not covered:* **the answer shape is under review** and the 2026-08-03 widening is
-not built while it is — what a query prints and under what relation name is a §17
-open question as of 2026-08-16, with the existence check above as one of its axes.
-Also not covered: a `--format json` data path (deferred as low-value; JSON stays at
-the machine-readable edges), `serde` on the API types, and streaming or cursored
+*Not covered:* **a query cannot yet be given a name at the point it is asked.**
+`?- conflict: p(X), q(X).` is designed and not built (§17, 2026-08-17): the name
+would replace the whole answer relation rather than rename a column, making it the
+fix for the projection hazard above. Also not covered: **which query a synthesized
+answer answers** — two boolean queries in one run both print `holds(true).` with
+nothing to tell them apart, and the fix is a `%` comment rather than an extra
+argument, sequenced with §11's comment rendering. Also not covered: a
+`--format json` data path (deferred as low-value; JSON stays at the
+machine-readable edges), `serde` on the API types, and streaming or cursored
 results.
 
 ## 15. Evaluation strategy (non-normative)
@@ -1497,6 +1523,55 @@ never say.
 
 ### Decisions
 
+- **2026-08-17** — **The answer shape: the positive atoms must account for
+  *every* answer variable, and a body with none still owes a yes.** Settles the
+  five axes reopened 2026-08-16, closing the question in the affirmative for
+  synthesis (a query that cannot be named still answers). Set **equality**
+  between the atoms' variables and the projection replaces the one-directional
+  "every atom argument is projected" test, which was sufficient only while the
+  rule also required a single-literal body. Three forms follow, stated in §14.
+
+  Two things the question's framing did not anticipate. **The substituted form
+  extends to ground conjunctions**, because with no variables there are no
+  matched combinations to lose, so `?- p("a"), q("b").` can answer in real
+  relation names — and multi-row multi-atom bodies cannot, since a filter that
+  pruned rows leaves no trace in the atoms' tuples. And **the truth value needed
+  a name of its own**: `answer(true).` is already reachable from a 1-column bool
+  projection, so reusing `answer` would have made two meanings byte-identical —
+  a collision tsdl avoids only because their `answer` is boolean-only. Hence
+  `holds/1`, and silence keeps meaning *no* rather than gaining a `holds(false)`.
+
+  **Rejected: a warning when a program reads `answer` facts.** Proposed in this
+  same session as what would make keeping the name substantive, and withdrawn on
+  the evidence: the hazard is a *two-run merge*, which inside a single run is
+  indistinguishable from legitimate single-pipe composition, so the diagnostic
+  would fire on correct programs and stay silent on the case that matters. That
+  is the inverted `invisible-witness` warning recorded 2026-08-16, reached from
+  the other side. The hazard stays documented in §14 and naming is its fix.
+  `testing.md` **C8** carries the property; long form in
+  `notes/query-answer-shape.md`.
+
+- **2026-08-17** — **A query may be given a name where it is asked, and the name
+  replaces the answer relation.** *Decided, not built — its own session.*
+  `?- conflict: p(X), q(X).` is exact sugar for a rule whose head is the
+  projection: `adult(N, A) :- person(name: N, age: A), A >= 18.` plus
+  `?- adult(N, A).` So the arity is the projection's length — precisely the
+  columns `answer/N` prints — and it is **always range-safe**, the projection
+  being by definition the variables the body binds.
+
+  A **language** form, not `-q` sugar: the name has to survive lowering to reach
+  the printer, and recomputing the projection in `api.rs` would be a second
+  classifier of the kind §13's lexer move exists to prevent — where it diverged
+  the user would get a range-restriction error instead of an answer. The decisive
+  argument for taking it at all is that it **fixes the projection hazard**, which
+  2026-08-16 recorded as unsolved in both engines: named output wears no source
+  relation's name, so nothing is silently narrowed. Naming stays **optional** —
+  requiring it would make the language partial, and the unnamed filtered query
+  already answers usefully — but it is the prerequisite for ever making an
+  unnameable query an error, since recovery becomes "prepend a word" rather than
+  "rewrite it as a rule". One guard: reject a name the program already defines,
+  predicates interning by name alone.
+
 - **2026-08-16** — **A failed `as` conversion is `absent` when there is no value
   to represent, and an error when representing it would be lossy.** The piece the
   2026-07-25 ratification left to implementation time. `"abc" as int` is
@@ -1646,6 +1721,17 @@ never say.
     invented relation name) with an argument this entry never weighed. **The
     widening is not to be implemented while the shape it widens is under review**,
     which is what this marker exists to tell a reader who arrives via the ROADMAP.
+  - ***Amended 2026-08-17*** — the review closed in this widening's favour and it
+    is now built, with its scope enlarged twice. "Exactly one positive atom" was
+    the wrong bound: **ground conjunctions** substitute too, the single-atom limit
+    having stood in for "the atoms determine the answer", which is what set
+    equality actually says. And the entry's own prediction about the missing
+    direction was **confirmed by test rather than by argument** — restoring the
+    one-directional check is mutation M1 of C8's property and it drops a column,
+    which is why the property's generator had to include a body binding a variable
+    no atom mentions. What this entry did not foresee: two of its rows converge, so
+    `?- V = 1 + 1, p("a", V).` and `?- p(X, 1 + 1).` now print identically, and
+    `bugs/005`'s acceptance 3 moved to a case that still discriminates.
 
 - **2026-07-29** — **The anti-join is a structural membership test** (§4/§7;
   `src/provenance.rs`). `q(X) :- p(X), not p(X).` derived `q(absent)` — P ∧ ¬P.
@@ -2437,6 +2523,16 @@ never say.
   principle while bodies had one literal. Also recorded here because the
   *Consequences* note above is the reason the widening ships as a property first.
 
+  ***Consequences 2026-08-17.*** The output-shape rule moved a **fourth** time,
+  and the part of this entry that has never moved is *"a ground such query prints
+  the atom once if it holds"* — reviewed deliberately this session and kept, twice
+  over. It is why silence still means no rather than gaining a `holds(false)`, and
+  it is the precedent that let ground *conjunctions* answer in real relation names
+  instead of a synthesized one. So the entry's instinct about the ground case
+  outlived three revisions of the rule wrapped around it; what kept failing was
+  every attempt to state the *general* condition, which is now set equality
+  between the atoms' variables and the projection.
+
 - **2026-07-03** — Language scope for v1 is **full-featured**: facts, rules,
   recursion, stratified negation, arithmetic/comparison builtins, and aggregation.
 - **2026-07-03** — LLM-targeting pillars are provenance/explainability, LLM-friendly
@@ -2889,6 +2985,22 @@ never say.
   **No recommendation is recorded**, deliberately: one would turn a question the
   user asked to have thought through into a decision with a default.
   — §5/§14, `notes/query-answer-shape.md`, `notes/tsdl-cross-project-review.md`.
+  - ***Answered 2026-08-17*** — by the two decisions of that date, and taking the
+    axes one at a time was load-bearing rather than procedural: **4 settled 1**.
+    Emitting `answer(true)` for the yes/no case collides with a 1-column bool
+    projection, which is only visible once the two axes are held apart, and it is
+    what forced `holds/1` and left `answer/N` in place (axis 2). Axis 1 answered
+    *synthesize*, on the ground that erroring's measured support covers its
+    prevention and never its recovery. Axis 5 was taken, and turned out to be the
+    **fix for axis 3** rather than an ergonomic extra — which is also why the
+    question's own framing of it as a CLI option was wrong: it belongs in the
+    grammar, since a file program carries the same hazard.
+    - Two narrower questions **survive**, both in §14's *Not covered*: the named
+      form's grammar and printing, and **which query a synthesized answer answers**
+      — found while reviewing this session's work, since two boolean queries in one
+      run both print `holds(true).` A `%` comment is the direction, an extra
+      argument having been rejected for the reason 2026-08-16 rejected
+      provenance-as-facts.
 
 - **Does a failed `as` conversion error, or yield `absent`?** The one piece of the
   cast left undecided (2026-07-25). `"abc" as int` can be a structured error,
