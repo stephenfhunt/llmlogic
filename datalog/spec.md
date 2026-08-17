@@ -1353,6 +1353,81 @@ say.
 
 ### Decisions
 
+- **2026-08-16** — **Cross-project review of `~/code/tsdl`: six things declined**
+  (survey; `notes/tsdl-cross-project-review.md`). That engine is this design run
+  forward in TypeScript — it names this repo as prior art and derives its testing
+  rules from our `bugs/` files — which makes it strong evidence and a poor
+  authority: its forcing constraints are a browser tab, a host-supplied fact base
+  and zero dependencies. Three decisions were taken (below) and one question
+  reopened; these were **declined**, each because a premise of theirs is not ours:
+  - **`FactSource`-only ingest**, which deletes §13 — a browser has no filesystem,
+    and their own entry concedes imports are "genuinely convenient for a CLI".
+  - **Dropping `ROADMAP.md` and `bugs/`** — the defect record is what taught *them*
+    their four testing rules; location-is-status has closed six defects here.
+  - **Naive-first evaluation** — correct where evaluator performance is a non-goal,
+    which for us it is not; their own profile concedes the exponent is unchanged.
+  - **Performance as an explicit non-goal**; **one `number` type** (they rejected
+    our int/float split because JS has one type, which is not an argument here);
+    their **zero-dependency, ES-library-only build discipline**.
+
+- **2026-08-16** — **An incomplete model does not answer, and the whole-model
+  surface survives it** (§6/§9/§15; `notes/tsdl-cross-project-review.md`).
+  Termination keeps the 2026-07-25 static rule as its *only* guarantee — **no
+  budget, no fuel** — and gains the half that decision never stated: what the engine
+  owes when the model is short anyway. Unblocks `bugs/004`.
+  - **Truncation costs soundness and not only completeness**, and the route is the
+    query. The store only grows, so a cut-short fixpoint holds missing facts and
+    never false ones — but a query solved against it can be *wrong* rather than
+    missing, because `not p(X)` over an incomplete `p` succeeds.
+  - **So the split is by surface**: a whole-model dump survives truncation, answers
+    do not. Where a relation is short by rows the discriminator is how the program
+    reads it — **projected**, one row short and say so; **folded or negated**,
+    withhold. That is §9's skip-but-report rule decided on a principle. Three live
+    sources today, none a budget: an external signal, §9's skips, §13's cells.
+  - **Rejected: a runtime budget** — tsdl ships one because a hung browser tab is
+    its forcing case; a CLI has `^C`, so a slow program stays slow and the real
+    exposure is a *hosted* surface (MCP, API harness — both parked). **Rejected:
+    their five-way `verdict`**, a library's return field where ours must be an exit
+    code and a stdout discipline.
+
+- **2026-08-16** — **The provenance query surface: one union, and a bounded
+  why-not** (§11/§14; `notes/tsdl-cross-project-review.md`). Adopted from tsdl
+  `spec.md` §13, which built both tiers. Design only — the ROADMAP item stays open.
+  - **The sigil is a cost hint, not a selector**: a form that could only answer one
+    way makes a reader know the answer before asking, so `?why` over a fact that does
+    not hold is an ordinary question. **`unknown` keeps the other two honest** —
+    over a model cut short, *not derivable* and *not derived yet* are the same
+    silence, so an explanation is withheld exactly where an answer is (the entry
+    above, reached from the other side).
+  - **A near-miss is a rule, not a binding, and that is the whole bound.** One entry
+    per rule whose head unifies, carrying the longest prefix any binding satisfies
+    and the first binding reaching it; nothing truncates. It re-solves through the
+    scheduler the fixpoint uses — an extractor choosing its own literal order would
+    be a second evaluator (cf. 2026-07-25).
+  - **A repair is a step, not a promise**, the literals past the block never having
+    been evaluated; a blocked *derived* premise's repair is the next question to ask.
+  - **Rejected: proof trees as facts** — closing the ROADMAP item in the negative. A
+    proof tree is not a fact and joins a fact stream on no terms; it rides in `%`
+    comments, so stripping them leaves byte-for-byte what the same program without
+    its goals prints. That is a property, and the guard.
+
+- **2026-08-16** — **Three names, because one word doing two jobs needs a footnote
+  at every use** (§4/§7/§11; adopted verbatim from tsdl `spec.md` §13). The
+  missing-data value is **`absent`**; the premise justifying a negated literal is a
+  **no-match pattern**; the explanation of a missing answer is a **failure trace**.
+  Closes the ROADMAP rename item, which has carried §4's and §11's two standing
+  disclaimers since the 2026-07-25 review.
+  - **The sweep is the work, and it is a follow-on session.** Counted 2026-08-16:
+    **31 sites over 8 files** — 21 code (`provenance::AbsentPattern`,
+    `Premise::Absent` and their doc comments, in `provenance.rs`, `ir.rs`,
+    `engine/mod.rs`, `engine/naive.rs`) and 10 prose (§4 ×1, §7 ×1, §11 ×3,
+    `testing.md` ×3, `references.md` ×1, `ROADMAP.md` ×1). **Nothing frozen holds
+    the old name** — no §17 entry and no `bugs/` file uses it — so the sweep is
+    total, with no carve-out to argue about.
+  - **Why verbatim rather than our own coinage:** both engines put the same kind of
+    guide in front of the same kind of reader, so divergent vocabulary between them
+    has a cost of its own. `bugs/resolved/003` is what a partial sweep costs.
+
 - **2026-08-03** — **The substituted-atom shape widens to one positive atom plus
   non-binding literals** (§14; *decided, not implemented* — ROADMAP item, C8
   property first). The atom form applies when a body has **exactly one positive
@@ -1591,6 +1666,13 @@ say.
       theorem. The sketch, the soundness argument, and its cost (it rejects
       cost-accumulating transitive closure) are in `ROADMAP.md`; it needs its own
       session and is explicitly not to be patched ahead of one.
+      - ***Amended 2026-08-16*** — the static rule stands and the budget stays
+        rejected (2026-08-16 entry). What this bullet did not say is what the engine
+        owes when the model is short **anyway**, which a static rule never
+        addresses: an incomplete fixpoint is missing facts and never false ones, but
+        a *query* solved against it can be wrong rather than missing. The question
+        "should there be a budget" was answered here; "what does an incomplete run
+        print" was not asked, and it is the half with live instances today.
     - **Casts are exempt**, checked before `as` was adopted: a cast maps a finite
       value set to a finite value set with no accumulation.
     - Note the actual **exfiltration** surface is unrelated to any of this: URL
@@ -2276,6 +2358,15 @@ say.
   from day one — which is exactly why provenance is designed in early rather
   than retrofitted. (Considered first-witness-only recording; rejected as a
   retrofit trap inside the fixpoint loop.)
+  - ***Consequences 2026-08-16*** — a third option existed and was not on the table:
+    **record nothing, and extract a proof backwards from the retained model.** tsdl
+    ships that (`notes/tsdl-cross-project-review.md`), so the cost of a proof lands
+    on the question and a run nobody interrogates pays one integer per row. It is
+    not a free swap — this decision buys *all* derivations, and backwards extraction
+    yields one — but the rejected alternative here was the wrong one to weigh
+    against, and `notes/performance-baseline.md` names this recorder as its top
+    hypothesis for the 35× cliff while never having measured it. **The profiling
+    item now has a concrete architecture to profile against**, which is what changes.
 - **2026-07-19** — **Step-2 comparison policy**: the core evaluator reports
   comparison literals as a structured "not yet supported" error (the same
   pattern lowering uses for negation and named arguments). §8 semantics —
@@ -2291,6 +2382,14 @@ say.
   justifications (`a` via `b` and `b` via `a`); a well-founded selection rule
   is required for `?why` to terminate, and the round stamp is one `u32` per
   fact captured for free inside the fixpoint.
+  - ***Amended 2026-08-16*** — **first *appearance* is the sharper order, at the
+    same price.** A round cannot separate two facts derived in the same one, so a
+    derivation whose premises all arrived earlier *within* the round is rejected and
+    a proof that exists is not found. A monotone per-fact sequence number is also one
+    `u32` captured inside the fixpoint, and is a genuine topological order of
+    support: the solver reads the store live, so every premise was stored before its
+    head went in. Adopted from tsdl (`notes/tsdl-cross-project-review.md`), where it
+    replaced this same round-based rule for this same reason.
 - **2026-07-19** — **The naive oracle is facts-only.** It computes the least
   model's fact set (its ~70 obviously-correct lines are the point) and does
   not record provenance; provenance correctness is instead checked by replay —
