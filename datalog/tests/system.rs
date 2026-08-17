@@ -174,12 +174,12 @@ fn a_query_in_a_module_exits_one_naming_the_file() {
 #[test]
 fn feature_program_prints_floats_and_symbols() {
     // Proves value formatting survives the real binary: floats keep a decimal
-    // point, symbols print bare, answer/N and multiple queries concatenate.
+    // point, symbols print bare, and multiple queries concatenate.
     let out = run_file("features.dl");
     assert_eq!(out.code, 0);
     assert_eq!(
         out.stdout,
-        "scaled(a, 3.0).\nscaled(b, 6.0).\nanswer(b, 3.0).\n"
+        "scaled(a, 3.0).\nscaled(b, 6.0).\nmeasure(b, 3.0).\n"
     );
     assert!(out.stderr.is_empty());
 }

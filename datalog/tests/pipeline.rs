@@ -118,9 +118,13 @@ fn an_aggregate_in_a_query_projects_only_body_bound_variables() {
         answers(&format!("{facts}?- N = count {{ C | m(T, C) }} + 1.")),
         vec!["answer(4)."]
     );
+    // As a *filter* the aggregate binds only a fresh unnamed slot, so the atom
+    // still accounts for every answer variable and the substituted form holds
+    // (§17, 2026-08-17) — unlike the group-key case above, where `N` is named
+    // and no atom carries it.
     assert_eq!(
         answers(&format!("{facts}?- thing(T), count {{ C | m(T, C) }} > 1.")),
-        vec!["answer(\"a\")."]
+        vec!["thing(\"a\")."]
     );
 }
 
@@ -260,8 +264,8 @@ fn a_malformed_program_reports_multiple_errors_in_one_run() {
 #[test]
 fn features_program_output_shapes() {
     // One program exercising several end-to-end gaps at once: inline
-    // arithmetic in a head arg, float + symbol value formatting, the `answer/N`
-    // fallback for a multi-literal query, and two queries in one program.
+    // arithmetic in a head arg, float + symbol value formatting, a filtered
+    // query, and two queries in one program.
     let result = datalog::run(&corpus("features.dl")).expect("runs");
     assert_eq!(
         result.answers,
@@ -269,8 +273,9 @@ fn features_program_output_shapes() {
             // Query 1 (single atom): substituted, floats keep their decimal
             // point, symbols print bare.
             vec!["scaled(a, 3.0).".to_string(), "scaled(b, 6.0).".to_string()],
-            // Query 2 (multi-literal): synthesized answer/N.
-            vec!["answer(b, 3.0).".to_string()],
+            // Query 2 (atom + a non-binding filter): also substituted, under
+            // the source relation's name (§17, 2026-08-17).
+            vec!["measure(b, 3.0).".to_string()],
         ]
     );
 }

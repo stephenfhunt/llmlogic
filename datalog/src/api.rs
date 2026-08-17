@@ -5,37 +5,42 @@
 //! form of what the `datalog` binary does; integration and system tests drive
 //! it directly.
 //!
-//! ## Query output shape (spec §14, decision, Phase D)
+//! ## Query output shape (spec §14)
 //!
 //! Answers print as **valid Datalog facts** so output composes as input (the
 //! Datalog-in/Datalog-out closure, `testing.md` D1):
 //!
-//! - A **single positive-atom** query re-emits that atom with the answer
-//!   bindings substituted — `?- ancestor("alice", Who).` yields
-//!   `ancestor("alice", "bob").` … — provided every variable position is a
-//!   named (projected) variable. A fully ground such query prints the atom once
-//!   if it holds, nothing otherwise.
-//! - Any **other** body (multiple literals, or a wildcard in the sole atom)
-//!   emits synthesized `answer/N` facts over the query's named variables.
-//! - A body with **no named variables** that is not a substitutable single atom
-//!   produces no fact-shaped output in v1 — a *multi-atom* existence check like
-//!   `?- p("a"), q("b").`, which has nowhere to put its yes/no. This is the
-//!   shape the closure does not cover, and §5's ban on 0-arity atoms removes the
-//!   obvious workaround; it is an open roadmap item.
+//! - A query whose positive atoms account for **every** answer variable
+//!   re-emits those atoms with the bindings substituted —
+//!   `?- ancestor("alice", Who).` yields `ancestor("alice", "bob").` … — which
+//!   covers a single atom carrying the whole projection (with any number of
+//!   non-binding literals beside it) and a **ground** conjunction, whose atoms
+//!   print once if the body holds.
+//! - A body with **no answer variables** and nothing substitutable to show
+//!   answers `holds(true).` when it holds. §5's ban on 0-arity atoms is why the
+//!   yes carries an argument.
+//! - Any **other** body emits synthesized `answer/N` facts over the query's
+//!   answer variables.
 //!
-//! A computed argument reaches the **first** case, not the third: a query
-//! constant-folds a *ground* compound argument rather than hoisting it
+//! **Silence means an empty answer, and for a body with no answer variables it
+//! means no** — the ground form says yes by printing its atoms and no by
+//! printing nothing, as `?- p("a").` always has (§17, 2026-08-17).
+//!
+//! A computed argument reaches the **first** case: a query constant-folds a
+//! *ground* compound argument rather than hoisting it
 //! (`lower::ArgMode::FoldGround`), so `?- p("a", 1 + 1).` stays the single atom
 //! it reads as. Hoisting made the body two literals with no named variables, so
 //! an ordinary-looking query printed nothing (`bugs/005`).
 //!
-//! Rows are deduplicated and printed in the canonical value order.
+//! Facts are deduplicated and printed in the canonical order, by relation name
+//! then value — so a ground conjunction's output does not depend on the order
+//! its atoms were written in.
 //!
 //! The full agent CLI — `-q`, `--format json`, the skill definition — is
 //! roadmap step 6; JSON stays reserved for the machine-readable edges (§12
 //! errors, §11 provenance).
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 
 use crate::ast::StatementKind;
@@ -261,7 +266,9 @@ fn absent_skip_warnings(model: &Model, program: &ir::Program) -> Vec<Warning> {
 
 /// Renders one query's answer rows to canonical fact lines per the §14 output
 /// shape. `rows` are the projected answer-variable bindings (in
-/// [`ir::Query::projection`] order), as returned by [`Model::answer`].
+/// [`ir::Query::projection`] order), as returned by [`Model::answer`]. An empty
+/// projection makes `rows` the body's **truth value**: one empty row when it
+/// holds, none when it does not.
 fn answer_lines(query: &ir::Query, rows: &[Vec<ir::Value>], program: &ir::Program) -> Vec<String> {
     // Row position of each projected slot — this is the order `Model::answer`
     // lays out each row.
@@ -272,41 +279,76 @@ fn answer_lines(query: &ir::Query, rows: &[Vec<ir::Value>], program: &ir::Progra
         .map(|(position, &slot)| (slot, position))
         .collect();
 
-    // Substituted-atom form: a single positive atom whose every variable is a
-    // projected one.
-    if let [literal] = &query.body[..]
-        && let ir::BodyLiteralKind::Atom(atom) = &literal.kind
-        && atom.args.iter().all(|term| match term {
-            ir::Term::Const(_) => true,
-            ir::Term::Var(var) => position_of.contains_key(&var.0),
+    let atoms: Vec<&ir::Atom> = query
+        .body
+        .iter()
+        .filter_map(|literal| match &literal.kind {
+            ir::BodyLiteralKind::Atom(atom) => Some(atom),
+            _ => None,
         })
-    {
-        let name = &program.pred_info(atom.pred).name;
-        let mut tuples: Vec<Vec<ir::Value>> = rows
+        .collect();
+    let atom_vars: BTreeSet<u32> = atoms
+        .iter()
+        .flat_map(|atom| atom.args.iter())
+        .filter_map(|term| match term {
+            ir::Term::Var(var) => Some(var.0),
+            ir::Term::Const(_) => None,
+        })
+        .collect();
+    let projected: BTreeSet<u32> = query.projection.iter().copied().collect();
+
+    // Substituted-atom form. Printing a real predicate's name is only honest
+    // when the atoms account for **every** answer variable, so this is set
+    // equality rather than the one-directional "every argument is projected":
+    // a body can bind a variable no atom mentions (an aggregate result, an
+    // `=`-assignment), and emitting the atoms would silently drop that column.
+    //
+    // One atom may carry a whole projection; several may carry only a ground
+    // yes, which `atom_vars` being empty is exactly the test for. The
+    // combination that matched a *multi-row* answer is not recoverable from
+    // several atoms' tuples alone — a filter that pruned rows leaves no trace
+    // in them — so those bodies fall through to `answer/N` (§17, 2026-08-17).
+    if !atoms.is_empty() && atom_vars == projected && (atoms.len() == 1 || atom_vars.is_empty()) {
+        let position_of = &position_of;
+        let mut facts: Vec<(&str, Vec<ir::Value>)> = rows
             .iter()
-            .map(|row| {
-                atom.args
-                    .iter()
-                    .map(|term| match term {
-                        ir::Term::Const(value) => value.clone(),
-                        ir::Term::Var(var) => row[position_of[&var.0]].clone(),
-                    })
-                    .collect()
+            .flat_map(|row| {
+                atoms.iter().map(move |atom| {
+                    let tuple = atom
+                        .args
+                        .iter()
+                        .map(|term| match term {
+                            ir::Term::Const(value) => value.clone(),
+                            ir::Term::Var(var) => row[position_of[&var.0]].clone(),
+                        })
+                        .collect();
+                    (program.pred_info(atom.pred).name.as_str(), tuple)
+                })
             })
             .collect();
-        tuples.sort();
-        tuples.dedup();
-        return tuples
+        // By name then value, so a ground conjunction prints the same bytes
+        // however its atoms were ordered.
+        facts.sort();
+        facts.dedup();
+        return facts
             .iter()
-            .map(|values| print_ground_fact(name, values))
+            .map(|(name, values)| print_ground_fact(name, values))
             .collect();
     }
 
-    // Otherwise: synthesized `answer/N` facts over the answer variables. With
-    // none there is nothing fact-shaped to emit.
-    if query.projection.is_empty() {
-        return Vec::new();
+    // No answer variables, and nothing substitutable to show: the body's whole
+    // content is a yes. Withholding it is what made an existence check
+    // indistinguishable from a failing one — `?- p("a"), q("b").` printed
+    // nothing either way, and so did `?- not banned("bob").` and `?- p(_).`.
+    if projected.is_empty() {
+        return if rows.is_empty() {
+            Vec::new()
+        } else {
+            vec![print_ground_fact("holds", &[ir::Value::Bool(true)])]
+        };
     }
+
+    // Otherwise: synthesized `answer/N` facts over the answer variables.
     rows.iter()
         .map(|row| print_ground_fact("answer", row))
         .collect()
@@ -336,8 +378,11 @@ ancestor(X, Y) :- parent(X, Z), ancestor(Z, Y).
         );
     }
 
+    /// A non-binding filter beside the atom keeps the substituted form: the
+    /// atom still accounts for every answer variable, and `>=` binds nothing
+    /// (§17, 2026-08-03, built 2026-08-17).
     #[test]
-    fn multi_literal_query_emits_answer_facts() {
+    fn a_filtered_single_atom_query_still_substitutes() {
         let src = "\
 age(\"alice\", 30).
 age(\"bob\", 15).
@@ -346,7 +391,24 @@ age(\"bob\", 15).
         let result = run(src).expect("runs");
         assert_eq!(
             result.answers,
-            vec![vec!["answer(\"alice\", 30).".to_string()]]
+            vec![vec!["age(\"alice\", 30).".to_string()]]
+        );
+    }
+
+    /// The widening's own boundary: an aggregate binds a variable no atom
+    /// mentions, so substituting the atom would drop that column. Set equality
+    /// is what catches it — the old one-directional test did not.
+    #[test]
+    fn an_aggregate_bound_variable_falls_to_the_synthesized_form() {
+        let src = "\
+age(\"alice\", 30).
+banned(\"carol\").
+?- age(N, A), C = count { X | banned(X) }.
+";
+        let result = run(src).expect("runs");
+        assert_eq!(
+            result.answers,
+            vec![vec!["answer(\"alice\", 30, 1).".to_string()]]
         );
     }
 
@@ -817,11 +879,24 @@ age(\"bob\", 15).
 
     /// The difference that must *survive* the fix (`bugs/005`, acceptance 3):
     /// naming a value is a request to see it, so a hand-written assignment
-    /// makes the value an answer column. This is the projection difference that
-    /// keeps A15's query exclusion load-bearing.
+    /// makes the value visible. Under the 2026-08-17 shape the atom accounts
+    /// for `V`, so it is visible in the column it occupies and the two
+    /// spellings of this question converge — which is the widening working, not
+    /// a loss: no information is dropped, only a distinction between spellings.
+    /// Where the assignment's variable sits *outside* every atom the projection
+    /// difference is still observable, and the case below is that one.
     #[test]
-    fn a_hand_written_assignment_still_projects_its_variable() {
+    fn a_hand_written_assignment_still_shows_its_value() {
         let result = run("p(\"a\", 2).\n?- V = 1 + 1, p(\"a\", V).").expect("runs");
+        assert_eq!(result.answers, vec![vec!["p(\"a\", 2).".to_string()]]);
+    }
+
+    /// An assignment-bound variable no atom mentions: the atom cannot carry it,
+    /// so the synthesized form keeps the column. This is what keeps A15's query
+    /// exclusion load-bearing now that the case above converged.
+    #[test]
+    fn an_assignment_outside_every_atom_keeps_the_synthesized_form() {
+        let result = run("p(\"a\").\n?- V = 1 + 1, p(\"a\").").expect("runs");
         assert_eq!(result.answers, vec![vec!["answer(2).".to_string()]]);
     }
 
