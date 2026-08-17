@@ -19,24 +19,25 @@ use crate::ast::{AggOp, CmpOp};
 use crate::engine::Model;
 use crate::ir::{Fact, PredId, RuleId, Tuple, Value};
 
-/// A ground-but-for-wildcards pattern whose *absence* satisfied a negated
-/// body literal (§7): the negated atom under the rule's bindings, with `None`
-/// for wildcard-fresh slots (existential under the negation).
+/// A ground-but-for-wildcards pattern that **no fact matched**, which is what
+/// satisfied a negated body literal (§7): the negated atom under the rule's
+/// bindings, with `None` for wildcard-fresh slots (existential under the
+/// negation).
 ///
 /// `root("alice")` holds *because no `parent(_, "alice")` fact exists* — the
 /// pattern is what makes that sentence renderable (the explainability
 /// pillar). Deliberately a proof-tree-level why-not record, not a semiring
 /// construction (§17, 2026-07-20).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct AbsentPattern {
+pub struct NoMatchPattern {
     pub pred: PredId,
     /// One entry per column: `Some` closes the slot to that value, `None`
     /// leaves it open (matches anything).
     pub args: Vec<Option<Value>>,
 }
 
-impl AbsentPattern {
-    /// Does `tuple` fall under the pattern? A match *refutes* the absence:
+impl NoMatchPattern {
+    /// Does `tuple` fall under the pattern? A match *refutes* the no-match:
     /// the engine's anti-join prunes on it, and replay (testing.md E3)
     /// asserts no model tuple satisfies it.
     ///
@@ -64,10 +65,10 @@ pub enum Premise {
     /// The fact that matched a positive literal.
     Fact(Fact),
     /// The pattern no fact matched, satisfying a negated literal.
-    Absent(AbsentPattern),
+    NoMatch(NoMatchPattern),
     /// A satisfied comparison/assignment builtin (§8), carrying the operator
     /// and the evaluated operand values (for an assignment `N = expr`, both
-    /// values are the assigned value). Self-justifying — like [`Premise::Absent`]
+    /// values are the assigned value). Self-justifying — like [`Premise::NoMatch`]
     /// it carries no fixpoint round and recurses into nothing.
     Builtin { op: CmpOp, lhs: Value, rhs: Value },
     /// A satisfied presence test `expr is [not] absent` (§4/§8), carrying the
@@ -106,14 +107,14 @@ pub struct Derivation {
 }
 
 /// A finite proof of one fact: recursive derivations bottoming out at base
-/// (EDB/imported) facts and absence patterns.
+/// (EDB/imported) facts and no-match patterns.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProofTree {
     /// A base fact — asserted in the program (or, later, imported).
     Leaf(Fact),
     /// A satisfied negation: no fact matches the pattern (§7). Terminates its
-    /// branch — an absence needs no sub-proof.
-    Absent(AbsentPattern),
+    /// branch — a no-match needs no sub-proof.
+    NoMatch(NoMatchPattern),
     /// A satisfied comparison/assignment builtin (§8). Terminates its branch —
     /// a builtin holds on its evaluated operands and needs no sub-proof.
     Builtin { op: CmpOp, lhs: Value, rhs: Value },
@@ -163,7 +164,7 @@ impl ProofTree {
         let derivation = model.derivations_of(fact).find(|d| {
             d.premises.iter().all(|premise| match premise {
                 Premise::Fact(f) => model.first_round(f).is_some_and(|r| r < round),
-                Premise::Absent(_)
+                Premise::NoMatch(_)
                 | Premise::Builtin { .. }
                 | Premise::Presence { .. }
                 | Premise::Aggregate { .. } => true,
@@ -174,7 +175,7 @@ impl ProofTree {
             .iter()
             .map(|premise| match premise {
                 Premise::Fact(f) => ProofTree::explain(model, f),
-                Premise::Absent(pattern) => Some(ProofTree::Absent(pattern.clone())),
+                Premise::NoMatch(pattern) => Some(ProofTree::NoMatch(pattern.clone())),
                 Premise::Builtin { op, lhs, rhs } => Some(ProofTree::Builtin {
                     op: *op,
                     lhs: lhs.clone(),
@@ -204,15 +205,15 @@ impl ProofTree {
         })
     }
 
-    /// The fact this tree proves — `None` for an [`ProofTree::Absent`] node,
-    /// which proves the absence of anything matching its pattern rather than
-    /// a fact. (The root of an [`ProofTree::explain`] result is never
-    /// `Absent`.)
+    /// The fact this tree proves — `None` for a [`ProofTree::NoMatch`] node,
+    /// which proves that nothing matches its pattern rather than proving a
+    /// fact. (The root of an [`ProofTree::explain`] result is never
+    /// `NoMatch`.)
     pub fn fact(&self) -> Option<&Fact> {
         match self {
             ProofTree::Leaf(fact) => Some(fact),
             ProofTree::Derived { fact, .. } => Some(fact),
-            ProofTree::Absent(_)
+            ProofTree::NoMatch(_)
             | ProofTree::Builtin { .. }
             | ProofTree::Presence { .. }
             | ProofTree::Aggregate { .. } => None,

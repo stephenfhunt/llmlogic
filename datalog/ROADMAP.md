@@ -397,10 +397,14 @@ but a different kind of work.
   have never been written, and §2's principles are still candidates — one of which,
   "predictable evaluation", the implementation does not satisfy. Both now say so in
   their own *Not covered* footers instead of behind a status marker. _queued._ — §1/§2.
-- **Rename the provenance "absence pattern" → `no-match pattern`**, with the
-  explanation of a missing answer being a **failure trace** (§17, 2026-08-16 — three
-  names, adopted verbatim from a sibling engine). Counted: **31 sites over 8 files**,
-  nothing frozen, so the sweep is total. _queued — decided, not built._ — §4/§7/§11.
+- **The provenance "absence pattern" is now the `no-match pattern`** ✅ 2026-08-16,
+  with the explanation of a missing answer named a **failure trace** (§17 — three
+  names, adopted verbatim from a sibling engine). The decision's site count was
+  wrong in both directions: ~40 non-frozen lines over 9 files, not 31 over 8, and
+  **§17 was not "nothing frozen"** — six of its entries hold the old identifier and
+  keep it, an append-only record being exactly what a rename does not touch. The
+  2026-07-20 entry carries the pointer instead. §4's and §11's two standing
+  "shares a word, not a concept" disclaimers are gone, which was the point.
 - **Name a test per §16 example.** No example names the test that runs it, and the
   expected output is prose in a comment rather than a fence compared byte-for-byte —
   so a block nobody wired up cannot fail. The rule going forward is **no example

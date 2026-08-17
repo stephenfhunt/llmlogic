@@ -187,9 +187,10 @@ bindings. Two consequences follow, both intended:
   keeps the semantic notion. This is the direct price of `NULL ≠ NULL`, and SQL
   pays it on a self-join for the same reason.
 
-`absent` (the missing-data value) is unrelated to the **absence pattern** of
+`absent` (the missing-data value) is unrelated to the **no-match pattern** of
 negation-as-failure (§7/§11), which is a provenance record for a satisfied
-negated goal; the two share a word, not a concept.
+negated goal. Both were called "absence" until 2026-08-16; the rename is why
+this paragraph no longer has to warn about a shared word.
 
 ### Static typing via inference
 
@@ -505,7 +506,7 @@ above is an implementation detail, not a semantic commitment.
 over the finished model, where every relation is complete.
 
 **Provenance** (§11): the derivation premise for a negated literal is the
-**absence pattern** — the atom instantiated with the rule's bindings,
+**no-match pattern** — the atom instantiated with the rule's bindings,
 wildcard slots left open: `root("alice")` holds *because no `parent(_,
 "alice")` fact exists*. A closed slot reads under the same structural rule as
 the anti-join above, so the pattern is refuted by exactly what refutes the
@@ -834,7 +835,7 @@ fixpoint):
 - A **derivation** is a ground rule instance: a rule identity plus one
   premise per body literal, aligned index-for-index (the IR's stable
   `RuleId`/`BodyIdx` coordinates, §17) — the matched **fact** for a positive
-  literal, the **absence pattern** for a negated one (§7): the negated atom
+  literal, the **no-match pattern** for a negated one (§7): the negated atom
   under the rule's bindings, wildcard slots left open.
 - The engine records **all derivations of every derived fact**, deduplicated
   by rule instance (§17): one fact, many proofs. Base facts have no
@@ -842,10 +843,10 @@ fixpoint):
   that asserted them.
 - A **proof tree** is one finite proof of one fact: derived nodes carry the
   fact, its rule, and child proofs for each premise; **leaves are base facts
-  or absence patterns** (an absence terminates a branch — "no such fact
+  or no-match patterns** (a no-match terminates a branch — "no such fact
   exists" needs no sub-proof). Extraction picks, per fact, a derivation whose
   fact premises all first appeared strictly earlier in the fixpoint (§17
-  first-round stamping; absence premises always qualify), so proofs stay
+  first-round stamping; no-match premises always qualify), so proofs stay
   finite even when facts support each other cyclically.
 - Names for rendering recover from the IR's retained tables: predicate names,
   per-rule variable names, field names (when the predicate has a schema), and
@@ -856,8 +857,9 @@ fixpoint):
 
 An **absent value** (§4) appearing in a fact is provenance-anchored like any other
 value, and `X is absent` succeeding is an ordinary positive premise. This is
-distinct from the **absence pattern** above — the why-not record for a *negated*
-literal — which shares the word "absence" but not the mechanism.
+distinct from the **no-match pattern** above, the why-not record for a *negated*
+literal. The explanation of a *missing answer* is a third thing again — a
+**failure trace** (§17, 2026-08-16, which named all three).
 
 *Not covered:* the query surface, which is designed but not built — `?why` and
 `?whynot` return one union of `proof` / `underivable` / `unknown`, the sigil being
@@ -1495,6 +1497,17 @@ never say.
   - **Why verbatim rather than our own coinage:** both engines put the same kind of
     guide in front of the same kind of reader, so divergent vocabulary between them
     has a cost of its own. `bugs/resolved/003` is what a partial sweep costs.
+  - ***Amended 2026-08-16 — done, and the count above was wrong in both
+    directions.*** Measured while sweeping: **~40 non-frozen lines over 9 files**,
+    not 31 over 8. More importantly, "**nothing frozen** holds the old name — no
+    §17 entry ... uses it — so the sweep is total, with no carve-out to argue
+    about" is **false**: six §17 entries hold it (the 2026-07-20 `AbsentPattern`
+    entry, the 2026-07-19 `Premise` pre-decision, and four more). They keep it —
+    an append-only record is precisely what a rename must not touch — so the
+    carve-out this bullet denied is the one thing the sweep needed. The
+    2026-07-20 entry carries the pointer. The lesson is not about counting: a
+    scope claim asserted *from* a grep should have been checked *against* the
+    document-kind table before it was written down as "nothing to argue about".
 
 - **2026-08-03** — **The substituted-atom shape widens to one positive atom plus
   non-binding literals** (§14; *decided, not implemented* — ROADMAP item, C8
@@ -2620,6 +2633,12 @@ never say.
   remains a dedup key. Proof trees terminate at `Absent` leaves; the
   first-round guard applies only to fact premises (absences carry no round
   and always qualify).
+  - ***Amended 2026-08-16*** — **renamed.** `AbsentPattern` is now
+    `NoMatchPattern`, `Premise::Absent`/`ProofTree::Absent` are now `NoMatch`,
+    and "absence pattern" is "no-match pattern" in prose (the three-names entry
+    above). Nothing structural moved. This entry and five others in §17 keep the
+    old spelling, being an append-only record; everything outside §17 carries the
+    new one, and this bullet is the pointer between them.
 - **2026-07-20** — **Negation evaluates as an anti-join filter, scheduled
   after the positives** — evaluator-internal ordering only; IR body order is
   untouched and premises are recorded at their true `BodyIdx`. Negated

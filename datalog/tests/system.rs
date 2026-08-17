@@ -122,7 +122,7 @@ fn named_and_negation_programs_run() {
 
 /// `absent` under negation through the real binary (§4/§7, 2026-07-29): the
 /// anti-join is a structural membership test, so a stored `absent` refutes an
-/// absence pattern closed to `absent`.
+/// no-match pattern closed to `absent`.
 ///
 /// Both lines of this assertion are the behaviour change, measured on the §16.8
 /// sparse-table shape. Before: `unmeasured(absent).` — a food whose id is

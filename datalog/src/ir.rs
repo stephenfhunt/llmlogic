@@ -181,7 +181,7 @@ impl Ord for F64 {
 /// compares structurally — `not p(X)` with `X` bound to `absent` asks whether
 /// `p(absent)` is in the relation, and it is. The blowup the semantic notion
 /// prevents is a property of joins bringing in new bindings, which membership
-/// never does. The single site is [`crate::provenance::AbsentPattern::matches`].
+/// never does. The single site is [`crate::provenance::NoMatchPattern::matches`].
 ///
 /// **If you are matching two values, you almost certainly want
 /// `unifies_with`, not `==`.** The rule lives here, as a method, precisely so

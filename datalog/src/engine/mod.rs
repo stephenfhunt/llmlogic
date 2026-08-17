@@ -31,7 +31,7 @@
 //! strata are strictly lower, so the relation is complete and frozen; validated
 //! here as an IR contract), and is scheduled after the body's positive atoms
 //! (evaluator-internal ordering; premises land at their true `BodyIdx`). The
-//! satisfied absence is recorded as a [`crate::provenance::Premise::Absent`]
+//! satisfied negation is recorded as a [`crate::provenance::Premise::NoMatch`]
 //! pattern.
 //!
 //! Still ahead here: magic sets are a future optimization.
@@ -48,7 +48,7 @@ use crate::ir::{
     Atom, BodyLiteral, BodyLiteralKind, Expr, F64, Fact, PredId, Program, Query, Rule, RuleId,
     Term, Tuple, Value,
 };
-use crate::provenance::{AbsentPattern, Derivation, Premise};
+use crate::provenance::{Derivation, NoMatchPattern, Premise};
 
 /// The result of evaluation: every predicate's full extent, plus provenance.
 ///
@@ -619,10 +619,10 @@ fn enumerate_from(
             }
         }
         BodyLiteralKind::NegAtom(atom) => {
-            // Instantiate the absence pattern: constants and bound variables
+            // Instantiate the no-match pattern: constants and bound variables
             // close a slot; an unbound slot is wildcard-fresh (validated)
             // and stays open — existential under the negation (§7).
-            let pattern = AbsentPattern {
+            let pattern = NoMatchPattern {
                 pred: atom.pred,
                 args: atom
                     .args
@@ -636,7 +636,7 @@ fn enumerate_from(
             // Always the full relation, never a delta view: the negated
             // predicate's strata are strictly lower (validated), so its
             // relation is complete and frozen here. A match refutes the
-            // negation; no match records the absence and moves on. Negated
+            // negation; no match records the no-match pattern and moves on. Negated
             // atoms bind nothing.
             if cx
                 .model
@@ -646,7 +646,7 @@ fn enumerate_from(
             {
                 return Ok(());
             }
-            premises[idx] = Some(Premise::Absent(pattern));
+            premises[idx] = Some(Premise::NoMatch(pattern));
             let result = enumerate_from(cx, order, depth + 1, bindings, premises, on_match);
             premises[idx] = None;
             result?;
@@ -1706,10 +1706,10 @@ mod tests {
     }
 
     /// Spec §16.2 end-to-end: the model, the exact recorded derivation with
-    /// its absence pattern, and the proof tree terminating at an `Absent`
+    /// its no-match pattern, and the proof tree terminating at a `NoMatch`
     /// leaf. "alice" is the only person no `parent(_, x)` fact points at.
     #[test]
-    fn example_16_2_evaluates_with_absence_provenance() {
+    fn example_16_2_evaluates_with_no_match_provenance() {
         let program = crate::ir::fixtures::example_16_2();
         let person = PredId(0);
         let parent = PredId(1);
@@ -1726,7 +1726,7 @@ mod tests {
         // The derivation records the matched person fact and the pattern
         // whose absence satisfied `not parent(_, X)`: wildcard slot open,
         // `X` closed to "alice".
-        let absent = AbsentPattern {
+        let absent = NoMatchPattern {
             pred: parent,
             args: vec![None, Some(string_value("alice"))],
         };
@@ -1740,7 +1740,7 @@ mod tests {
                         pred: person,
                         tuple: Tuple(vec![string_value("alice")]),
                     }),
-                    Premise::Absent(absent.clone()),
+                    Premise::NoMatch(absent.clone()),
                 ],
             }]
         );
@@ -1756,7 +1756,7 @@ mod tests {
                         pred: person,
                         tuple: Tuple(vec![string_value("alice")]),
                     }),
-                    ProofTree::Absent(absent),
+                    ProofTree::NoMatch(absent),
                 ],
             })
         );
@@ -2295,16 +2295,16 @@ mod tests {
     }
 
     /// A negation over a *computed* argument records the argument's **value**
-    /// in its absence pattern, not an open slot (§7/§11, `bugs/001`).
+    /// in its no-match pattern, not an open slot (§7/§11, `bugs/001`).
     ///
     /// This is the provenance half of the fix and the half that is easiest to
-    /// get silently wrong: `AbsentPattern` uses `None` for a slot left open
+    /// get silently wrong: `NoMatchPattern` uses `None` for a slot left open
     /// (wildcard, existential) and `Some` for one the bindings closed. The bug
     /// was exactly a slot that *should* have been closed being recorded — and
     /// evaluated — as open, so "why does `r(1)` hold?" must answer "because no
     /// `q(2)` exists", never the far stronger "because no `q` fact exists".
     #[test]
-    fn a_computed_negated_argument_is_recorded_as_a_closed_absence() {
+    fn a_computed_negated_argument_is_recorded_as_a_closed_no_match() {
         let src = "p(1).\np(2).\np(3).\nq(3).\nr(X) :- p(X), not q(X + 1).\n";
         let ast = crate::parser::parse(src).expect("parses");
         let program = crate::lower::lower(&ast).expect("lowers");
@@ -2332,7 +2332,7 @@ mod tests {
                     .derivations_of(&fact)
                     .flat_map(|d| d.premises.iter())
                     .filter_map(move |premise| match premise {
-                        Premise::Absent(pattern) if pattern.pred == q => {
+                        Premise::NoMatch(pattern) if pattern.pred == q => {
                             Some((x, pattern.args.clone()))
                         }
                         _ => None,
@@ -2427,7 +2427,7 @@ mod tests {
             for (literal, premise) in rule.body.iter().zip(&derivation.premises) {
                 match (&literal.kind, premise) {
                     (BodyLiteralKind::Atom(_), Premise::Fact(_)) => {}
-                    (BodyLiteralKind::NegAtom(atom), Premise::Absent(pattern)) => {
+                    (BodyLiteralKind::NegAtom(atom), Premise::NoMatch(pattern)) => {
                         if atom.pred != pattern.pred {
                             return None;
                         }
@@ -2460,15 +2460,15 @@ mod tests {
                 ProofTree::Leaf(fact) => {
                     prop_assert!(model.is_base(fact), "non-base leaf {fact:?}");
                 }
-                ProofTree::Absent(pattern) => {
-                    // An absence leaf must actually be absent: no tuple of
+                ProofTree::NoMatch(pattern) => {
+                    // An no-match leaf must actually be absent: no tuple of
                     // the predicate falls under the pattern.
                     prop_assert!(
                         !model
                             .relation(pattern.pred)
                             .iter()
                             .any(|tuple| pattern.matches(tuple)),
-                        "absence leaf {pattern:?} is refuted by the model"
+                        "no-match leaf {pattern:?} is refuted by the model"
                     );
                 }
                 ProofTree::Builtin { .. }
@@ -2556,7 +2556,7 @@ mod tests {
         /// `q(X) :- p(X), not p(X).` used to derive `q(absent)` when `p(absent)`
         /// was stored — P ∧ ¬P, in an engine whose advertised uses include
         /// consistency checking. The anti-join's structural membership test
-        /// (§7) is what refutes the absence: `p(absent)` *is* in the relation.
+        /// (§7) is what refutes the no-match: `p(absent)` *is* in the relation.
         #[test]
         fn a_fact_never_satisfies_its_own_negation() {
             let answers = answers_of("p(1).\np(absent).\n", "q(X) :- p(X), not p(X).\n", "q");
@@ -3010,7 +3010,7 @@ mod tests {
             /// E1 — every derived fact has at least one derivation, and at
             /// least one of them is *well-founded*: every fact premise first
             /// appeared in a strictly earlier round than the fact itself
-            /// (absence premises exempt — they carry no round). This is the
+            /// (no-match premises exempt — they carry no round). This is the
             /// invariant `ProofTree::explain` selects by, stated directly
             /// rather than transitively via E2, and it pins first-round
             /// stamping's monotonicity across strata.
@@ -3032,7 +3032,7 @@ mod tests {
                                 Premise::Fact(f) => model
                                     .first_round(f)
                                     .is_some_and(|r| r < round),
-                                Premise::Absent(_)
+                                Premise::NoMatch(_)
                                 | Premise::Builtin { .. }
                                 | Premise::Presence { .. }
                                 | Premise::Aggregate { .. } => true,
@@ -3055,7 +3055,7 @@ mod tests {
             }
 
             /// E3 — replaying any recorded derivation rederives exactly the
-            /// fact; fact premises all hold and absence premises are genuine
+            /// fact; fact premises all hold and no-match premises are genuine
             /// non-matches against the model (checked with this test's own
             /// scan, independent of the engine's matcher).
             #[test]
@@ -3066,14 +3066,14 @@ mod tests {
                         for premise in &derivation.premises {
                             match premise {
                                 Premise::Fact(f) => prop_assert!(model.contains(f)),
-                                Premise::Absent(pattern) => {
+                                Premise::NoMatch(pattern) => {
                                     let refuted = model
                                         .relation(pattern.pred)
                                         .iter()
                                         .any(|tuple| pattern.matches(tuple));
                                     prop_assert!(
                                         !refuted,
-                                        "absence premise {pattern:?} is refuted"
+                                        "no-match premise {pattern:?} is refuted"
                                     );
                                 }
                                 Premise::Builtin { .. }
@@ -3194,7 +3194,7 @@ mod tests {
             /// differential agrees with itself while the law is broken — the
             /// same blindness `bugs/006` found in a differential over a type
             /// error. The law has to be asserted directly against the model.
-            /// Reverting `AbsentPattern::matches` to `unifies_with` must make
+            /// Reverting `NoMatchPattern::matches` to `unifies_with` must make
             /// this fail.
             #[test]
             fn c9_a_body_and_its_negation_derive_nothing(
@@ -3236,7 +3236,7 @@ mod tests {
             };
             let model = eval(&program).expect("evaluates");
             // `p(absent, 0)` binds X := absent, so the negated literal is an
-            // absence pattern closed to `absent` — the discriminating case.
+            // no-match pattern closed to `absent` — the discriminating case.
             assert_eq!(
                 model.relation(pred("unmatched")),
                 &BTreeSet::from([Tuple(vec![Value::Absent])]),

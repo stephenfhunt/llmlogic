@@ -398,12 +398,12 @@ compared keyed by predicate *name*, not `PredId`.
   carries the arbitrary-permutation half — `arb_program_with_edb` cannot, being
   all-symbol — compared only when both orders evaluate, since pruning ahead of a
   `/ 0` is the one way order is legitimately observable. And
-  `a_computed_negated_argument_is_recorded_as_a_closed_absence` pins the
-  **provenance** half: the absence pattern must record `Some(2)`, not an open
+  `a_computed_negated_argument_is_recorded_as_a_closed_no_match` pins the
+  **provenance** half: the no-match pattern must record `Some(2)`, not an open
   slot, or "why?" answers the far stronger "because no `q` fact exists".
 
   *Known gap:* derivation **replay** does not reach a deferred negation, whose
-  absence pattern depends on an assignment-bound value — see **E6** below.
+  no-match pattern depends on an assignment-bound value — see **E6** below.
 - [ ] **C8** **Surface-spelling equivalence** — the language's "form A means the
   same as form B" claims, each as a property rather than a unit test. This group
   exists because the record was unambiguous: every such claim carrying a property
@@ -538,7 +538,7 @@ compared keyed by predicate *name*, not `PredId`.
   nothing over row sets whose key column never holds `absent`, so the guard pins
   that `absent_ir` reaches the discriminating case (`unmatched` derives
   `(absent)` from the same positive prefix). The three plus B1 were all confirmed
-  red with `AbsentPattern::matches` reverted before being kept — `bugs/005`'s
+  red with `NoMatchPattern::matches` reverted before being kept — `bugs/005`'s
   discipline.
 
   Its counterpart in the other direction is
@@ -661,7 +661,7 @@ is a coverage hole in E3 rather than a new claim.
   environment from *fact* premises alone, returning `None` on any
   `Premise::Builtin`. The strongest provenance property has therefore never seen
   an `=`-assignment, a presence test or an aggregate, and by extension never sees
-  a **deferred negation**, whose absence pattern is closed by an assignment-bound
+  a **deferred negation**, whose no-match pattern is closed by an assignment-bound
   value (§7/§10, 2026-07-25). The work: fold builtin premises into the replayed
   environment in schedule order, then run E3 over `arb_comparison_program`, which
   is int-typed and already emits them. Note what replay has to become — a

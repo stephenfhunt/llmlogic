@@ -1,7 +1,7 @@
 % Absent under negation, in the §16.8 sparse-table shape: a `food` row whose id
 % is missing, and a `measurement` row whose food key is missing too. This is the
 % case that discriminates the two notions of "same" (§4) at the anti-join — the
-% absence pattern closes a slot to `absent`, and whether a stored `absent` cell
+% no-match pattern closes a slot to `absent`, and whether a stored `absent` cell
 % refutes it is exactly the question. See spec §7 and §17 (2026-07-29).
 food(absent).
 food("apple").

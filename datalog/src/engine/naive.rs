@@ -317,7 +317,7 @@ fn match_positives(
 /// The one match site here that does *not* use [`same_value`], which is the
 /// design and not an oversight: joining and negating use different notions of
 /// "same". Written out rather than calling the engine's
-/// `AbsentPattern::matches`, per this module's rule — the oracle's value is
+/// `NoMatchPattern::matches`, per this module's rule — the oracle's value is
 /// that it *can* disagree, and under a one-sided revert it does.
 fn refutes(atom: &Atom, tuple: &Tuple, env: &HashMap<Var, Value>) -> bool {
     atom.args
