@@ -872,6 +872,52 @@ banned(\"carol\").
         }
     }
 
+    proptest! {
+        /// **C8**: a **named** query means exactly the rule whose head is the
+        /// projection, plus a query over that head (§14, §17 2026-08-17). The
+        /// claim is an equivalence between two spellings, so it ships as a
+        /// property — and its oracle is the desugaring itself, written out
+        /// textually here rather than obtained by asking lowering what the
+        /// projection was.
+        ///
+        /// The second assertion is the independent half: the rows come from the
+        /// generator's own fact list, so a desugaring that dropped a column or a
+        /// row would have to fool both spellings *and* the fact list.
+        #[test]
+        fn c8_a_named_query_matches_its_desugared_rule(
+            case in crate::testgen::arb_answer_shape_case()
+        ) {
+            let named = format!("{}?- ans: {}.\n", case.edb, case.body);
+            // §5 bans a 0-arity atom, so a body with no answer variables
+            // desugars to the ground head `ans(true)` — the one place the head
+            // is not simply the projection.
+            let desugared = if case.projection.is_empty() {
+                format!("{}ans(true) :- {}.\n?- ans(true).\n", case.edb, case.body)
+            } else {
+                let head = format!("ans({})", case.projection.join(", "));
+                format!("{}{head} :- {}.\n?- {head}.\n", case.edb, case.body)
+            };
+            let named_answers = run(&named)
+                .map(|r| r.answers)
+                .unwrap_or_else(|e| panic!("the named form runs: {e:?}"));
+            let desugared_answers = run(&desugared)
+                .map(|r| r.answers)
+                .unwrap_or_else(|e| panic!("the desugared form runs: {e:?}"));
+            prop_assert_eq!(
+                &named_answers,
+                &desugared_answers,
+                "shape {} disagreed between spellings\n--- named ---\n{}\n--- desugared ---\n{}",
+                case.shape, &named, &desugared
+            );
+            prop_assert_eq!(
+                &named_answers,
+                &vec![case.expected_named.clone()],
+                "shape {} did not publish the projection\n--- named ---\n{}",
+                case.shape, &named
+            );
+        }
+    }
+
     /// The non-vacuity guard for the generator above: it must reach all three
     /// shapes and must actually *answer*, since a generator whose cases answered
     /// nothing would satisfy the property forever.

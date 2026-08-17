@@ -558,6 +558,19 @@ pub(crate) struct AnswerShapeCase {
     /// conjunction, 3 an extra variable no atom carries), for the non-vacuity
     /// guard to count coverage.
     pub shape: u8,
+    /// The EDB alone, so a caller can build a *second* spelling of the same
+    /// question over the same facts.
+    pub edb: String,
+    /// The query's body text, without the `?-` or the terminating `.`.
+    pub body: String,
+    /// The body's answer variables in projection order — the head a **named**
+    /// query synthesizes (§14). Empty for the ground conjunction, whose named
+    /// head is the ground `name(true)`. Written down by the generator, which
+    /// knows what it emitted, rather than read back out of lowering.
+    pub projection: Vec<&'static str>,
+    /// The lines the same query must print when it is *named* `ans`, likewise
+    /// derived from the fact list alone.
+    pub expected_named: Vec<String>,
 }
 
 /// A query built **backwards from facts the EDB contains**, so it is guaranteed
@@ -601,27 +614,32 @@ pub(crate) fn arb_answer_shape_case() -> impl Strategy<Value = AnswerShapeCase> 
             // Canonical order is the derived `Vec<Value>` order, which for an
             // `n(string, int)` tuple is key then value — and the keys are ASCII,
             // so Rust's string order is the printed order.
-            let (query, mut answered) = match shape {
+            // The body text, the rows it answers, and its answer variables in
+            // projection order — the last written down here rather than read out
+            // of lowering, so a caller can hand-desugar the named form (§14).
+            let (body, mut answered, projection) = match shape {
                 0 => {
                     // Single atom, the value pinned to a fact's own value.
                     let value = facts[pick.index(facts.len())].1;
                     (
-                        format!("?- n(K, {value}).\n"),
+                        format!("n(K, {value})"),
                         facts
                             .iter()
                             .filter(|(_, v)| *v == value)
                             .cloned()
                             .collect::<Vec<_>>(),
+                        vec!["K"],
                     )
                 }
                 1 => (
                     // The atom beside a filter, which binds nothing.
-                    format!("?- n(K, V), V >= {threshold}.\n"),
+                    format!("n(K, V), V >= {threshold}"),
                     facts
                         .iter()
                         .filter(|(_, v)| *v >= threshold)
                         .cloned()
                         .collect(),
+                    vec!["K", "V"],
                 ),
                 2 => {
                     // Two ground atoms, both drawn from the EDB.
@@ -629,16 +647,23 @@ pub(crate) fn arb_answer_shape_case() -> impl Strategy<Value = AnswerShapeCase> 
                     let second = facts[pick2.index(facts.len())].clone();
                     (
                         format!(
-                            "?- n(\"{}\", {}), n(\"{}\", {}).\n",
+                            "n(\"{}\", {}), n(\"{}\", {})",
                             first.0, first.1, second.0, second.1
                         ),
                         vec![first, second],
+                        // No answer variables: a named form heads `ans(true)`.
+                        Vec::new(),
                     )
                 }
                 // `S` is bound by the assignment, not by the atom, so no atom
                 // accounts for it and the answer keeps the synthesized name.
-                _ => ("?- n(K, V), S = V + 1.\n".to_string(), facts.clone()),
+                _ => (
+                    "n(K, V), S = V + 1".to_string(),
+                    facts.clone(),
+                    vec!["K", "V", "S"],
+                ),
             };
+            let query = format!("?- {body}.\n");
             // Sorted as *tuples*, which is the order the canonical printer's
             // `Vec<Value>` comparison produces — not as printed strings, whose
             // agreement with it holds only for these single-digit values.
@@ -654,10 +679,31 @@ pub(crate) fn arb_answer_shape_case() -> impl Strategy<Value = AnswerShapeCase> 
                     }
                 })
                 .collect();
+            // Named `ans`, the answer is the projection under that relation —
+            // one row per answered row, or the single `ans(true).` where the body
+            // has no answer variables at all.
+            let expected_named = if answered.is_empty() {
+                Vec::new()
+            } else if projection.is_empty() {
+                vec!["ans(true).".to_string()]
+            } else {
+                answered
+                    .iter()
+                    .map(|(key, value)| match shape {
+                        0 => format!("ans(\"{key}\")."),
+                        3 => format!("ans(\"{key}\", {value}, {}).", value + 1),
+                        _ => format!("ans(\"{key}\", {value})."),
+                    })
+                    .collect()
+            };
             AnswerShapeCase {
                 program: format!("{edb}{query}"),
                 expected,
                 shape,
+                edb,
+                body,
+                projection,
+                expected_named,
             }
         })
 }
