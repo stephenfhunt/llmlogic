@@ -2295,6 +2295,14 @@ never say.
         `K = M + 1, N = K` passes it and still diverges.
     - **Casts are exempt**, checked before `as` was adopted: a cast maps a finite
       value set to a finite value set with no accumulation.
+      - ***Consequences 2026-08-18*** — **the check paid, and it was the only part
+        of this bullet that survived implementation unchanged.** `as` shipped three
+        weeks before the termination rule, and had the exemption been wrong the
+        cast would have had to be re-litigated with a language feature already in
+        the field. It needed one refinement rather than a reversal: a cast is
+        exempt as a *creator* and not as a *carrier*, so `N = K as int` over a
+        computed `K` still counts (§10). Nothing in this bullet implied the
+        distinction, and only writing the transitive rule surfaced it.
     - Note the actual **exfiltration** surface is unrelated to any of this: URL
       imports are ungated by explicit decision (2026-07-23), so an
       LLM-generated program can reach the network through §13, not through §8.
@@ -2358,6 +2366,14 @@ never say.
   aggregation plus a finiteness claim blocked on `bugs/004`. So §6 is now a
   session of its own with one fewer unknown, not a gap this one closed. The
   entry's *diagnosis* stands — it is a §6 question — only its sequencing changed.
+
+  ***Consequences 2026-08-18.*** The sequencing call held twice over: §6 now has
+  **two** fewer unknowns than when it was deferred, not one. The truncation
+  contract (2026-08-16) settled what an incomplete model is worth, and Termination
+  (2026-08-18) settled the finiteness claim, which §6 now states conditionally on
+  §10's certified fragment. Had §6 been written into the negation session it would
+  have committed to a finiteness premise that was false at the time and would have
+  had to be rewritten twice. Its remaining unknown is aggregation alone.
 
 - **2026-07-25** — **Correctness review of milestones 8–9** (the absent value and
   aggregation, both shipped 2026-07-24). Re-derived their semantics against
