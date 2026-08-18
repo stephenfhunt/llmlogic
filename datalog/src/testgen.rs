@@ -431,6 +431,152 @@ fn arb_edb_text() -> impl Strategy<Value = String> {
     })
 }
 
+/// Where a program puts its arithmetic relative to its recursion — the axis
+/// §10's termination rule turns on. The first five shapes create a value inside
+/// a positive cycle; the last five do not, and every one of those five still
+/// contains both arithmetic and a positive cycle, which is what stops **C10**
+/// from being a property about arithmetic-free Datalog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ArithShape {
+    /// `acc(N) :- acc(M), N = M + 1.` — the `bugs/004` shape.
+    Direct,
+    /// The same computation with the assignment hoisted, so the head variable is
+    /// bound by a *bare* variable. Only transitive taint sees it.
+    Hoisted,
+    /// The hoisted form with a cast on the way to the head: a cast propagates.
+    Casted,
+    /// The cast written *over* the arithmetic instead of after it, so the
+    /// arithmetic sits under a `Cast` node rather than in an earlier literal.
+    CastedInline,
+    /// `path_cost` — accumulation bounded by an EDB relation. Diverges exactly
+    /// when the generated graph has a cycle, which is why it is never evaluated.
+    Cost,
+    /// Value creation in a rule outside every positive cycle, consumed by one
+    /// inside it.
+    Outside,
+    /// A cast with no arithmetic under it: finite set to finite set (§8).
+    CastOnly,
+    /// A ground expression, which yields one value however often it runs.
+    Ground,
+    /// An aggregate result: a function of a relation stratified strictly below.
+    Aggregated,
+    /// A computed value that is only ever compared, so it never reaches a head.
+    FilterOnly,
+}
+
+impl ArithShape {
+    /// The rules this shape contributes, on top of [`arb_recursive_arithmetic_program`]'s base.
+    fn rules(self) -> &'static str {
+        match self {
+            ArithShape::Direct => "acc(V) :- step(_, _, V).\nacc(N) :- acc(M), N = M + 1.\n",
+            ArithShape::Hoisted => {
+                "acc(V) :- step(_, _, V).\nacc(N) :- acc(M), K = M + 1, N = K.\n"
+            }
+            ArithShape::Casted => {
+                "acc(V) :- step(_, _, V).\nacc(N) :- acc(M), K = M + 1, N = K as int.\n"
+            }
+            ArithShape::CastedInline => {
+                "acc(V) :- step(_, _, V).\nacc(N) :- acc(M), N = (M + 1) as int.\n"
+            }
+            ArithShape::Cost => {
+                "cost(A, B, C) :- step(A, B, C).\n\
+                 cost(A, C, T) :- cost(A, B, T1), step(B, C, T2), T = T1 + T2.\n"
+            }
+            ArithShape::Outside => {
+                "gen(N) :- step(_, _, M), N = M + 1.\nacc(V) :- gen(V).\nacc(N) :- acc(_), gen(N).\n"
+            }
+            ArithShape::CastOnly => "acc(V) :- step(_, _, V).\nacc(N) :- acc(M), N = M as int.\n",
+            ArithShape::Ground => "acc(V) :- step(_, _, V).\nacc(N) :- acc(_), N = 1 + 1.\n",
+            ArithShape::Aggregated => {
+                "acc(V) :- step(_, _, V).\nacc(N) :- acc(M), N = count { C | step(M, _, C) }.\n"
+            }
+            ArithShape::FilterOnly => {
+                "acc(V) :- step(_, _, V).\nacc(V) :- acc(V), K = V + 1, K < 100.\n"
+            }
+        }
+    }
+}
+
+fn arb_arith_shape() -> impl Strategy<Value = ArithShape> {
+    prop_oneof![
+        Just(ArithShape::Direct),
+        Just(ArithShape::Hoisted),
+        Just(ArithShape::Casted),
+        Just(ArithShape::CastedInline),
+        Just(ArithShape::Cost),
+        Just(ArithShape::Outside),
+        Just(ArithShape::CastOnly),
+        Just(ArithShape::Ground),
+        Just(ArithShape::Aggregated),
+        Just(ArithShape::FilterOnly),
+    ]
+}
+
+/// A program pairing a small — and freely **cyclic** — `step` graph with one
+/// [`ArithShape`], for §10's termination properties.
+///
+/// The base is always the same positive recursion, so a positive cycle exists
+/// whatever the shape adds:
+///
+/// ```datalog
+/// reach(A, B) :- step(A, B, _).
+/// reach(A, C) :- reach(A, B), step(B, C, _).
+/// ```
+///
+/// The graph is generated cyclic-or-not on purpose: a certified program must
+/// terminate on **every** input, and the shapes that are not certified are
+/// exactly the ones a cycle in `step` would run forever. Returns the source too,
+/// since a shrunk counterexample is only readable as text.
+pub(crate) fn arb_recursive_arithmetic_program()
+-> impl Strategy<Value = (String, ir::Program, ArithShape)> {
+    let edges = proptest::collection::vec((0u8..4, 0u8..4, -2i64..=3), 1..=6);
+    (edges, arb_arith_shape()).prop_map(|(edges, shape)| {
+        let mut src = String::new();
+        for (from, to, cost) in &edges {
+            src.push_str(&format!("step({from}, {to}, {cost}).\n"));
+        }
+        src.push_str("reach(A, B) :- step(A, B, _).\n");
+        src.push_str("reach(A, C) :- reach(A, B), step(B, C, _).\n");
+        src.push_str(shape.rules());
+        let ast = crate::parser::parse(&src).expect("generated source parses");
+        let program =
+            crate::lower::lower(&ast).expect("generated programs are safe by construction");
+        (src, program, shape)
+    })
+}
+
+/// The same value-creating recursion in its four spellings — inline, hoisted
+/// through a bare variable, hoisted through a cast, and with the cast written
+/// over the arithmetic — over one generated graph.
+///
+/// One computation written four ways, so §10's classification must not depend on
+/// which way. It is the mutation guard for both halves of taint propagation: a
+/// check reading only the literal that binds the head variable sees arithmetic in
+/// the first spelling and a bare variable in the next two, and a check that does
+/// not look under a `Cast` node misses the fourth.
+pub(crate) fn arb_taint_spellings() -> impl Strategy<Value = [(String, ir::Program); 4]> {
+    let edges = proptest::collection::vec((0u8..4, 0u8..4, -2i64..=3), 1..=6);
+    edges.prop_map(|edges| {
+        let mut edb = String::new();
+        for (from, to, cost) in &edges {
+            edb.push_str(&format!("step({from}, {to}, {cost}).\n"));
+        }
+        [
+            ArithShape::Direct,
+            ArithShape::Hoisted,
+            ArithShape::Casted,
+            ArithShape::CastedInline,
+        ]
+        .map(|shape| {
+            let src = format!("{edb}{}", shape.rules());
+            let ast = crate::parser::parse(&src).expect("generated source parses");
+            let program =
+                crate::lower::lower(&ast).expect("every spelling is safe by construction");
+            (src, program)
+        })
+    })
+}
+
 /// A rule written **disjunctively** and as **separate rules** — the same
 /// program under §5's `;`, which the parser expands into one clause per
 /// disjunct (§17 2026-07-22). Both strings are complete programs ending in the

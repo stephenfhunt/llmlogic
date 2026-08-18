@@ -2711,8 +2711,13 @@ mod tests {
 
         use super::super::lower;
         use crate::ast;
+        use crate::error::Warning;
         use crate::ir;
-        use crate::testgen::{arb_ast_program, arb_defect, arb_safe_program, inject_defect};
+        use crate::testgen::{
+            arb_ast_program, arb_defect, arb_safe_program, arb_taint_spellings, inject_defect,
+        };
+
+        use super::super::check_program;
 
         /// The AST rule statements, in source order (the generator emits
         /// facts first, then rules — mirrored by `ir::Program::rules`).
@@ -2990,6 +2995,50 @@ mod tests {
                     if let Some(fields) = &info.fields {
                         prop_assert_eq!(fields.len(), info.arity as usize, "for `{}`", &info.name);
                     }
+                }
+            }
+
+            /// C8 — **the three spellings of one value-creating recursion
+            /// classify alike.** `N = M + 1`, `K = M + 1, N = K` and
+            /// `K = M + 1, N = K as int` are the same computation written three
+            /// ways, so §10's termination lint may not depend on which way, any
+            /// more than evaluation may (C7, `bugs/001`).
+            ///
+            /// This is the acceptance half of transitive taint: the first
+            /// spelling binds the head variable by arithmetic and the other two
+            /// bind it by a bare variable, so a check reading only the binding
+            /// literal splits them. *Mutation verified*: drop the `=`-chain
+            /// propagation and the second spelling stops warning; drop the cast
+            /// propagation and the third does.
+            #[test]
+            fn c8_the_taint_spellings_classify_alike(spellings in arb_taint_spellings()) {
+                let mut verdicts = Vec::new();
+                for (src, program) in &spellings {
+                    let warnings: Vec<_> = check_program(program)
+                        .into_iter()
+                        .filter_map(|warning| match warning {
+                            Warning::ValueCreatingRecursion { pred, cycle, vars, .. } => {
+                                Some((pred, cycle, vars))
+                            }
+                            _ => None,
+                        })
+                        .collect();
+                    verdicts.push((src.clone(), warnings));
+                }
+                // Non-vacuity: all three must actually warn, or the property
+                // would be satisfied by a lint that never fires.
+                for (src, warnings) in &verdicts {
+                    prop_assert_eq!(warnings.len(), 1, "expected one warning for:\n{}", src);
+                }
+                let (first_src, first) = &verdicts[0];
+                for (src, warnings) in &verdicts[1..] {
+                    prop_assert_eq!(
+                        first,
+                        warnings,
+                        "spellings classify differently:\n{}\nvs\n{}",
+                        first_src,
+                        src
+                    );
                 }
             }
 

@@ -191,15 +191,52 @@ impl Model {
 }
 
 /// Evaluates a lowered program to its least model.
+///
+/// Runs until the fixpoint, with no round cap, fact cap or wall-clock budget —
+/// **by decision** (§17, 2026-08-16), not by omission. What stops the loop is
+/// §10's finiteness argument for programs the termination lint certifies; for
+/// the ones it warns about, the interrupt is the operator's.
 pub fn eval(program: &Program) -> Result<Model> {
-    validate(program)?;
+    eval_capped(program, u32::MAX).map_err(|error| match error {
+        Capped::Failed(error) => error,
+        Capped::Diverged => unreachable!("u32::MAX rounds is not a cap anyone reaches"),
+    })
+}
+
+/// How [`eval_capped`] can fail: an ordinary evaluation error, or the round cap.
+#[derive(Debug)]
+pub(crate) enum Capped {
+    Failed(Error),
+    /// The cap was reached with the fixpoint still growing.
+    Diverged,
+}
+
+impl From<Error> for Capped {
+    fn from(error: Error) -> Self {
+        Capped::Failed(error)
+    }
+}
+
+/// [`eval`] with a ceiling on fixpoint rounds, for **tests only** — nothing
+/// shipped passes anything but `u32::MAX`.
+///
+/// C10 needs it: the property is that a certified program *terminates*, and a
+/// wrong certification would otherwise hang the suite instead of failing it. A
+/// deterministic round cap fails it, where a wall-clock timeout would also flake
+/// under load. Its existence is not a budget and must not be read as one — see
+/// [`eval`].
+pub(crate) fn eval_capped(
+    program: &Program,
+    max_rounds: u32,
+) -> std::result::Result<Model, Capped> {
+    validate(program).map_err(Capped::Failed)?;
     let mut model = Model::new(program.predicates.len());
     for fact in &program.facts {
         model.insert_base(fact.clone());
     }
     let mut round = 0;
     for stratum in &program.strata {
-        round = eval_stratum(program, stratum, &mut model, round)?;
+        round = eval_stratum(program, stratum, &mut model, round, max_rounds)?;
     }
     Ok(model)
 }
@@ -399,7 +436,8 @@ fn eval_stratum(
     stratum: &[RuleId],
     model: &mut Model,
     mut round: u32,
-) -> Result<u32> {
+    max_rounds: u32,
+) -> std::result::Result<u32, Capped> {
     // Seed pass: every rule against the full current relations. This finds
     // every instance derivable from base facts and earlier strata.
     round += 1;
@@ -435,6 +473,10 @@ fn eval_stratum(
         }
         if delta.is_empty() {
             return Ok(round);
+        }
+        // The fixpoint is still growing. Test-only: `eval` passes `u32::MAX`.
+        if round >= max_rounds {
+            return Err(Capped::Diverged);
         }
 
         // Delta round: for each rule and each body position i, join the delta
@@ -2650,13 +2692,16 @@ mod tests {
         use super::super::naive::{ground, match_atom, naive_eval};
         use super::super::*;
         use crate::ast::TypeName;
+        use crate::error::Warning;
         use crate::ir::fixtures::example_16_1;
+        use crate::lower::check_program;
         use crate::lower::lower;
         use crate::provenance::ProofTree;
         use crate::testgen::{
-            arb_comparison_program, arb_extension_pair, arb_neg_shift_spellings, arb_parent_edges,
-            arb_program_with_edb, arb_value, arb_well_typed_program, with_duplicated_facts,
-            with_extra_fact, with_swapped_body, with_swapped_stratum_rules,
+            ArithShape, arb_comparison_program, arb_extension_pair, arb_neg_shift_spellings,
+            arb_parent_edges, arb_program_with_edb, arb_recursive_arithmetic_program, arb_value,
+            arb_well_typed_program, with_duplicated_facts, with_extra_fact, with_swapped_body,
+            with_swapped_stratum_rules,
         };
         use crate::typecheck::typecheck;
 
@@ -2921,6 +2966,76 @@ mod tests {
                     &inline,
                     &model_facts(&eval(&binder_last).unwrap()),
                     "inline and binder-last disagree"
+                );
+            }
+
+            /// C10 — **the termination guarantee itself**: a program the §10
+            /// lint does not warn about reaches its fixpoint, on every input.
+            ///
+            /// The generated `step` graph is freely cyclic, which is the whole
+            /// point: a certified program has to terminate on the graphs that
+            /// make an uncertified one run forever. The oracle is a round cap,
+            /// so a wrong certification **fails** here rather than hanging the
+            /// suite, and it is deterministic where a wall-clock timeout would
+            /// flake. The naive differential rides along, so certification
+            /// cannot buy termination by computing the wrong model.
+            ///
+            /// *Mutation verified* (testing.md rule 3): dropping transitive
+            /// taint from `schedule::computed_vars` — so that
+            /// `K = M + 1, N = K` reads as a bare-variable assignment —
+            /// certifies `ArithShape::Hoisted`, and this property fails on the
+            /// cap. Dropping cast propagation does the same through
+            /// `ArithShape::Casted`.
+            #[test]
+            fn c10_a_certified_program_reaches_its_fixpoint(
+                generated in arb_recursive_arithmetic_program()
+            ) {
+                let (src, program, _) = generated;
+                let warned = check_program(&program).iter().any(|warning| {
+                    matches!(warning, Warning::ValueCreatingRecursion { .. })
+                });
+                prop_assume!(!warned);
+                // Well above what any generated program needs: 4 nodes, 6 edges.
+                let model = match eval_capped(&program, 200) {
+                    Ok(model) => model,
+                    Err(Capped::Failed(_)) => return Ok(()),
+                    Err(Capped::Diverged) => {
+                        prop_assert!(
+                            false,
+                            "certified as terminating, then did not terminate:\n{}",
+                            src
+                        );
+                        unreachable!("prop_assert!(false) returns")
+                    }
+                };
+                prop_assert_eq!(model_facts(&model), naive_eval(&program).unwrap());
+            }
+
+            /// C10's non-vacuity guard (testing.md rule 2). Without it the
+            /// property could hold over nothing but arithmetic-free programs,
+            /// which have never been in doubt: what has to be certified *and*
+            /// evaluated is a program with arithmetic **and** a positive cycle.
+            #[test]
+            fn c10_generator_certifies_programs_that_do_arithmetic_in_a_cycle(
+                generated in arb_recursive_arithmetic_program()
+            ) {
+                let (_, program, shape) = generated;
+                let warned = check_program(&program).iter().any(|warning| {
+                    matches!(warning, Warning::ValueCreatingRecursion { .. })
+                });
+                let certified_with_arithmetic = matches!(
+                    shape,
+                    ArithShape::Outside
+                        | ArithShape::CastOnly
+                        | ArithShape::Ground
+                        | ArithShape::Aggregated
+                        | ArithShape::FilterOnly
+                );
+                prop_assert_eq!(
+                    !warned,
+                    certified_with_arithmetic,
+                    "shape {:?} changed sides",
+                    shape
                 );
             }
 
