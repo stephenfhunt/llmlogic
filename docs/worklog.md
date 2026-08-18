@@ -24,6 +24,58 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-18 — Termination ships as a *warning*, and the roadmap's own direction loses
+
+The last blocking design session, and it reversed the decision it was convened to
+implement. `bugs/004` closes; the open-defect set is **empty for the first time
+since the 2026-07-25 spec review**. 386 lib tests (was 383), clippy/rustfmt clean.
+
+**Done**
+- **The classification** — `schedule::computed_vars` finds head variables bound to
+  an arithmetic-computed value, **transitively**; `lower::value_creating_recursion`
+  pairs it with a positive-cycle walk over the stratification edges and warns. Ten
+  hand cases pin the table.
+- **Eager emission**, without which the design does not work. `api::run_at_reporting`
+  reports static warnings *before* `eval` — answers print after the fixpoint, so
+  `bugs/004`'s "no output at all" applied to its own diagnostic. A system test reads
+  stderr off a live non-terminating process.
+- **C10 + a C8 spelling equivalence**, both mutation-verified. C10's oracle is a
+  **test-only round cap** (`eval_capped`): a wrong certification fails instead of
+  hanging the suite — the shape for any property whose negation diverges.
+- **§10's Termination section** (its largest hole), §6's premise made conditional,
+  §15's stopping condition, **§2's pillar ratified** scoped, and **§16.12** — the
+  first example to exercise a *diagnostic*, half its output on stderr.
+  `notes/termination.md` has the proof; `references.md` gains limit Datalog.
+
+**Decided**
+- **Classify, do not reject** (user call, reversing 2026-07-25). `path_cost` is
+  valid on every acyclic graph, so rejecting it is a false positive on a property
+  of the **data**. Three supports found rather than assumed: `bugs/004`'s criteria
+  always offered "rejected **or** documented as in-scope"; 2026-08-16's "a slow
+  program stays slow" already discounts the DoS argument; and the only checkable
+  line between `nat` and `path_cost` over-accepts `p(N) :- p(M), q(_), N = M+1.`
+- **The roadmap's rule sketch was unsound**, not merely imprecise:
+  `nat(N) :- nat(M), K = M + 1, N = K.` binds the head from a bare variable and
+  still diverges. Taint must be transitive; that is what both properties guard.
+- **The hatch is deferred with a name**: limit predicates (Kaminski et al., IJCAI
+  2017), `declare path_cost(from, to, min cost)` as the surface — a milestone,
+  since §6's `T_P`, §9 and §11 all move. A bounded-counter recognizer was rejected
+  (cannot reach `path_cost`). Soufflé, checked rather than recalled, is the
+  opposite pole: `.limitsize` is documented as a *debugging* directive.
+
+**Removed**
+- The whole "Termination & value-creating recursion" ROADMAP item — sketch,
+  discrimination table and open question, all superseded by shipped text. §6's
+  false finiteness bullet; §10's, §15's and §2's *Not covered* paragraphs on
+  termination; §16's "no example exercises a diagnostic" claim.
+- `bugs/004` to `bugs/resolved/`; the 2026-08-17 answer-shape entry rotated
+  verbatim to `worklog-archive/2026-08.md`.
+
+**Next up**
+- **§6's extension** — the last design session, three unknowns lighter and down to
+  aggregation alone. Then the **profile**, still gating two items.
+- Open: **limit predicates** (new, queued); the benchmark harness's home.
+
 ## 2026-08-17 — The named query ships, and one of its planned sites turns out not to be one
 
 The brief frozen earlier the same day, built. 439 pass (was 426), 1 ignored, clippy
@@ -129,56 +181,3 @@ the repo at `~/datalog-cross-engine-bench-2026-08-17/`.
   `bugs/004`), then **§6's extension**.
 - Open, not taken: whether the harness belongs in the repo — it needs a `tsdl`
   checkout for the full sweep, though the generator and our half stand alone.
-
-## 2026-08-17 — The answer shape settles, and axis 4 turns out to decide axis 2
-
-The design session the last three entries deferred to the user. Five axes settled,
-the shape built, and one axis deliberately left unbuilt with its brief written.
-426 pass (was 421), 1 ignored, clippy and rustfmt clean, `--no-default-features`
-still builds.
-
-**Done**
-- **The shape, in `answer_lines` alone** — set **equality** between the positive
-  atoms' variables and the projection, replacing a one-directional check. Three
-  forms: one atom substitutes beside any number of non-binding literals (the
-  2026-08-03 widening, unfrozen); a **ground conjunction** emits all its atoms,
-  sorted by name then value so body order cannot change the bytes; a body with no
-  answer variables and nothing to substitute answers **`holds(true).`**
-- **C8's property** (`arb_answer_shape_case`), oracle filtering the generator's own
-  fact list. **Four mutations killed**, including restoring the one-directional
-  guard — caught only because the generator has a fourth shape binding a variable no
-  atom mentions. Without it the property restates the rule instead of guarding it.
-- **§16.10 with its named test**, the second example done §16.9's way; §14's rule,
-  hazard paragraph and footer; two §17 decisions and three amendments; the note's
-  axis-by-axis outcome; `testing.md`; the two agent-facing restatements.
-
-**Decided**
-- **Axis 4 settled axis 2, which is why the axes were taken one at a time.**
-  `-q 'flag(_, X), truthy(X)'` already prints `answer(true).`, so adopting tsdl's
-  boolean `answer` would have made two meanings byte-identical — a collision they
-  do not have (theirs is boolean-only) and we would have created. Hence `holds/1`,
-  and **no `holds(false)`**: silence has meant no since 2026-07-22.
-- **Axis 5 is the fix for axis 3**, which nobody in either project had connected:
-  named output wears no source relation's name. A *language* form, not `-q` sugar —
-  the name must survive lowering, and recomputing the projection in `api.rs` is the
-  second classifier §13's lexer move exists to prevent. Its own session.
-- **The lost question was three shapes wide, not one.** A bare comparison, a
-  negation-only body, and `?- p(_).` all printed nothing either way; the last
-  appears in neither project's discussion and is the likeliest to be hand-typed.
-- **Rejected, reversing this session's own recommendation**: a warning when a
-  program reads `answer` facts. The hazard is a two-run merge, indistinguishable
-  inside one run from legitimate composition, so it would fire on correct code.
-
-**Removed**
-- §14's *multi-atom existence check* paragraph and its "the answer shape is under
-  review" footer, both closed by what shipped; the note's *"no recommendation is
-  recorded, deliberately"* and its frozen implementation brief.
-- Two ROADMAP items closed as one (the widening and the existence check).
-- The 2026-08-16 tsdl entry rotated verbatim to `worklog-archive/2026-08.md`.
-
-**Next up**
-- **Named queries**, brief written, and the **`%` comment** naming which query a
-  synthesized answer answers — sequence the latter with §11's comment rendering so
-  the format is designed once.
-- Unchanged and now the head of the queue: **Termination** (blocks `bugs/004`),
-  then **§6's extension**. Then the profile, which gates two more items.

@@ -111,6 +111,15 @@ the columns, write the rule (`-q 'adult(N) :- person(N, A), A >= 18'`).
   ```
 - **Negation**: `not covered(X)` (stratified — no recursion through negation).
 - **Comparisons/arithmetic**: `A >= 18`, `M = N + 1`; strict numeric types.
+- **Arithmetic inside a recursion can run forever**, and the engine says so on
+  stderr before it starts rather than refusing to run:
+  ```
+  cost(X, Z, C) :- cost(X, Y, C1), edge(Y, Z, C2), C = C1 + C2.
+  ```
+  This is correct on an acyclic graph and never finishes on a cyclic one, so if
+  you see `warning: value-creating recursion`, either be sure the relation it
+  names is acyclic or move the arithmetic out of the recursive rule. A recursion
+  that only passes stored values along (`ancestor` above) always terminates.
 - **Aggregation**: `N = count { C | parent(P, C) }` — set-builder `op { Expr | Goal }`,
   `op` one of `count`/`sum`/`min`/`max`/`avg`. Grouping is implicit: one result per
   binding of the rule's *other* variables (here `P`, so it's children-per-parent).
