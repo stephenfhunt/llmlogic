@@ -39,18 +39,17 @@ each; detail in §17 and `docs/worklog.md`.
 
 ## Open backlog
 
-> **Open defects live in [`bugs/`](bugs/)** — currently only `004` (§6 asserts a
-> finiteness that arithmetic falsified), out of the 2026-07-25 spec review and the
-> design session that followed it (§17). It is **partly unblocked as of
-> 2026-08-16**: three of its five acceptance criteria are now answerable, since §6,
-> §10 and §15 state what they do not cover and §15 says a budget's absence is a
-> decision. What it still waits on is the Termination *rule* being written and
-> built. The remaining design sessions are **Termination** and **§6's extension**,
-> the latter now two unknowns lighter — the anti-join settled `p(X), not p(X)` on
-> 2026-07-29, and the truncation contract settled what an incomplete model is worth
-> on 2026-08-16.
+> **Open defects live in [`bugs/`](bugs/)** — the set is **empty as of
+> 2026-08-18**, for the first time since the 2026-07-25 spec review. The one
+> remaining design session is **§6's extension**, now three unknowns lighter: the
+> anti-join settled `p(X), not p(X)` on 2026-07-29, the truncation contract settled
+> what an incomplete model is worth on 2026-08-16, and Termination settled the
+> finiteness premise §6 rests on (2026-08-18).
 >
-> Five are resolved in `bugs/resolved/`: `001` (a compound argument in a negated
+> Six are resolved in `bugs/resolved/`: `004` (§6 asserted a finiteness arithmetic
+> falsified), **fixed 2026-08-18** by the Termination session — §6's premise is now
+> conditional on the fragment §10 certifies, and the non-terminating program takes
+> the criteria's *documented-as-in-scope* branch rather than being rejected; `001` (a compound argument in a negated
 > atom silently misread as a wildcard), **fixed 2026-07-25** by milestone 4's
 > scheduling follow-on; `002` (`-q` rejected a disjunctive rule), **fixed 2026-07-26**;
 > `005` (a ground query with a computed argument printed nothing), **fixed
@@ -116,80 +115,24 @@ atom-vs-call ambiguity that ruled out `float(A)`; scan-ahead is the candidate.
   A unit that has to be documented is the design being wrong. _queued (own
   session)._ — §4/§8/§13.
 
-### Termination & value-creating recursion (§6/§10) — a design session
+### Termination & value-creating recursion (§6/§10) — shipped
 
-**The language does not terminate, and has not since milestone 4.** This is
-accepted today and runs forever — no output, no partial results, no cap:
+**✅ 2026-08-18.** A static classification, shipped as a **warning** and not an
+error: a rule binding a head variable to an arithmetic-computed value while its
+head predicate lies on a positive cycle is named before the run, and still runs.
+Certified programs terminate (§6/§10; proof in `notes/termination.md`), which
+closed `bugs/004` and ratified §2's *predictable evaluation* pillar. The
+2026-07-25 direction — a static *error* — was reversed on the user's call, since
+`path_cost` is valid on every acyclic graph; §17 2026-08-18 carries the argument.
 
-```datalog
-nat(0).
-nat(N) :- nat(M), N = M + 1.
-```
+### An accumulating recursion that terminates: limit predicates (§4/§6/§9/§10)
 
-`N` is bound by the `=`-assignment, which §10 accepts as a binder; `nat` depends on
-itself positively, which stratification allows. There is no iteration cap,
-fact-count cap, or wall-clock budget anywhere in the engine. Pure Datalog's
-guarantee rests on a finite Herbrand universe — no way to synthesise values absent
-from the input — and §8 arithmetic ended that. On the surface that runs
-LLM-generated programs this is a live denial-of-service vector, and it is why
-`bugs/004` (§6 still asserts the finiteness) is blocked on this item.
-
-**Direction chosen (user call, 2026-07-25): a static semantic error, not runtime
-fuel.** Fuel was considered and rejected as hacky — a budget is not a guarantee,
-and the point of this property is that it should be a theorem. **Reaffirmed
-2026-08-16** against a sibling engine that ships both: a budget's forcing case is a
-hung browser tab, and a CLI has `^C`, so a slow program stays slow. The exposure
-that argument does *not* cover is a hosted surface (MCP, API harness) — both parked.
-
-**Rule sketch** — precise enough to start from, not settled:
-
-> Reject a program in which an **arithmetic-computed** value flows to the head of a
-> **positively recursive** predicate: a rule whose head contains a variable bound
-> by an `=`-assignment over arithmetic rather than by a positive body atom, where
-> the head predicate participates in a positive cycle of the dependency graph.
-
-**Where it lives.** `stratify` (`src/lower.rs`) already builds the graph with the
-edge kinds needed — `Dep::Positive` is a distinct variant (`lower.rs:1139`) and
-`strict()` separates it from `Negated`/`Aggregated`. One correction to the natural
-assumption: `dependency_path` walks *all* edges regardless of kind, since it exists
-to report a cycle after stratification diverges, so positive-cycle detection needs a
-kind-filtered variant — a small addition, not a verbatim reuse.
-`stratification_error` is the precedent for naming a concrete cycle in the message.
-
-**The sketch discriminates correctly on the cases that matter** (verified
-2026-07-25):
-
-| program | behaviour | verdict |
-|---|---|---|
-| `succ(M,N) :- nat(M), N = M+1.` + `nat(N) :- succ(M,N).` | **hangs** | rejected — the assignment-bound head var sits on a rule in the positive cycle `succ → nat → succ` |
-| `gen(M,N) :- base(M), N = M+1.` + `nat(N) :- nat(M), gen(M,N).` | terminates | accepted — `gen` is outside every positive cycle, and `nat`'s recursive rule binds `N` from a positive atom |
-
-Informal soundness argument to make rigorous or refute: unbounded growth requires
-arithmetic value creation, and if every value-creating assignment lies outside all
-positive cycles then its predicate's extent is bounded by strictly lower strata and
-is finite. Range restriction already helps — a pure generator
-(`succ(M,N) :- N = M+1.`) is rejected today because `M` is unbound, so value
-creation cannot occur without a positive atom supplying an input.
-
-**Cases to confirm:** `next_year(X,N) :- age(X,A), N = A+1.` accepted (not
-recursive); `Y = X as float` in a recursive rule accepted (casts map a finite set to
-a finite set with no accumulation, §8); aggregates and negation already covered by
-stratification, so the new rule need only cover arithmetic.
-
-**The main open question — and the real cost.**
-`path_cost(X,Z,C) :- path_cost(X,Y,C1), edge(Y,Z,C2), C = C1 + C2.` is **rejected**.
-Cost-accumulating transitive closure is a legitimate, common idiom and directly
-relevant to source analysis (call depth, cost propagation). The rejection is correct
-in general — a cyclic graph makes it diverge — but it also blocks the acyclic case
-users legitimately want. Whether that needs an escape hatch (an explicit bound, an
-opt-in annotation, or "hoist it out of the recursion") is what makes this a design
-session rather than a patch.
-
-The session must also **write §10's missing Termination section**, and then either
-ratify §2's "predictable evaluation" pillar in a form the implementation satisfies
-or soften it. What it no longer owes: an answer about *slow* programs, which
-2026-08-16 settled as "a slow program stays slow", and an account of what an
-incomplete model is worth, which is the item below. _designing._ — §2/§6/§8/§10.
+**The escape hatch the warning above leaves open.** `declare path_cost(from, to,
+min cost)` would keep only the extremum per key group, making cost-accumulating
+transitive closure finite rather than merely warned about — Kaminski et al.'s
+limit Datalog (references.md group 1). A milestone, not a rider: §6's `T_P`, §9's
+aggregation and §11's provenance all move. _queued (own session)._ — §17 open
+questions, `notes/termination.md`.
 
 ### The truncation contract (§9/§13/§15) — decided, not built
 
@@ -286,7 +229,9 @@ them. Except where noted these are documented v1 limits rather than defects.
 - **No string operations.** No prefix, split or concat, so reducing `lower::tests`
   to `lower` is unwritable and the fact producer must do it (2026-07-27). Closed:
   string construction fails §5's own termination test and would widen the hole the
-  Termination session has not yet closed. _rejected — §17, 2026-07-27._ — §8/§10.
+  Termination session closed on 2026-08-18 — a string-building recursion has no
+  `i64` ceiling at all, so the finite-state-space argument that keeps arithmetic
+  honest would not apply to it. _rejected — §17, 2026-07-27._ — §8/§10.
   (Ordered comparison over strings was the separate, opposite call: widened,
   `bugs/006`, closed 2026-07-27.)
 - **`declare` does not count as defining a predicate.** `declare banned(name:
@@ -402,12 +347,14 @@ but a different kind of work.
   session, and now the best-prepared one:** the anti-join decision settled what
   `p(X), not p(X)` *means* on 2026-07-29 and §4 states the four match sites, so §6 has a
   ratified semantics to describe rather than one to decide. Its remaining unknowns
-  are aggregation and the finiteness claim `bugs/004` owns (blocked on
-  Termination). _queued._ — §6.
+  are aggregation alone: the finiteness claim `bugs/004` owned was settled
+  2026-08-18, and §6 now states it conditionally on §10's certified fragment.
+  _queued._ — §6.
 - **Ratify §1 and §2.** §1's goals, non-goals, target users and success criteria
-  have never been written, and §2's principles are still candidates — one of which,
-  "predictable evaluation", the implementation does not satisfy. Both now say so in
-  their own *Not covered* footers instead of behind a status marker. _queued._ — §1/§2.
+  have never been written; §2's principles are still candidates **except
+  "predictable evaluation"**, ratified 2026-08-18 in the scoped form the
+  implementation delivers. Both sections say so in their own *Not covered* footers
+  instead of behind a status marker. _queued._ — §1/§2.
 - **The provenance "absence pattern" is now the `no-match pattern`** ✅ 2026-08-16,
   with the explanation of a missing answer named a **failure trace** (§17 — three
   names, adopted verbatim from a sibling engine). The decision's site count was
@@ -484,5 +431,7 @@ workaround and §16's preamble-vs-§16.4 contradiction fixed alongside.
   the first experiment, and how well a model actually drives it is what should
   decide whether a second form is worth building — **which is a decision gated on
   the item above**, not on elapsed time. A hosted surface is also the one place the
-  no-budget termination call does not cover (see Termination). _parked (awaiting the
+  no-budget termination call does not cover — and now the one place the
+  warn-don't-reject call does not cover either, since a hosted caller cannot press
+  `^C` (§17, 2026-08-18). _parked (awaiting the
   skill experiment)._ — skill.

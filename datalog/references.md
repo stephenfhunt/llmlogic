@@ -12,7 +12,8 @@ relying on it deeply.
 
 ## 1. Surveys & foundations
 
-*Informs: overall design; spec §6 (declarative semantics), §10 (safety).*
+*Informs: overall design; spec §6 (declarative semantics), §10 (safety and
+termination).*
 
 - **Ceri, Gottlob, Tanca — “What You Always Wanted to Know About Datalog (And Never
   Dared to Ask)”**, IEEE TKDE 1(1), 1989. *The* classic survey: syntax, least-model
@@ -28,6 +29,17 @@ relying on it deeply.
 - **Maier, Tekle, Kifer, Warren — “Datalog: Concepts, History, and Outlook”**, in
   *Declarative Logic Programming*, ACM Books 2018. Historical arc plus a candid
   account of what implementations got right and wrong.
+- **Kaminski, Cuenca Grau, Kostylev, Motik, Horrocks — “Foundations of Declarative
+  Data Analysis Using Limit Datalog Programs”**, IJCAI 2017
+  (https://www.ijcai.org/proceedings/2017/0156.pdf); journal-length version
+  **“Limit Datalog: A Declarative Query Language for Data Analysis”**, SIGMOD
+  Record 48(4), 2019. The literature for §10's termination problem, and the
+  candidate escape hatch. Datalog with integer arithmetic is undecidable in
+  general; restricting numeric predicates to **limit** predicates — which retain
+  only the least (or greatest) value per group of key arguments — recovers
+  decidability, and makes cost-accumulating transitive closure terminate rather
+  than merely be warned about. `notes/termination.md` records why this is the
+  named successor to the warning that ships.
 
 ## 2. Evaluation algorithms
 
@@ -113,7 +125,12 @@ relying on it deeply.
   2016; and **Scholz et al. — “On Fast Large-Scale Program Analysis in Datalog”**,
   CC 2016. The reference high-performance Datalog (C++); its language docs
   (https://souffle-lang.github.io/) are also a useful syntax data point (`.decl`,
-  typed columns).
+  typed columns). **On termination it is the opposite pole from us**: the docs
+  state outright that arithmetic functors make the language Turing-equivalent, so
+  `A(0). A(i+1) :- A(i).` runs forever, and nothing static objects. The escape is
+  `.limitsize`, presented as a *debugging* directive for inspecting a
+  non-terminating program rather than as a guarantee — which is the same reading
+  of a budget that §17 2026-08-16 reached independently.
 - **Aref et al. — “Design and Implementation of the LogicBlox System”**, SIGMOD
   2015. Industrial Datalog with types, aggregation, and incrementality.
 - **Whaley, Lam — bddbddb**, PLDI 2004. Datalog for program analysis via BDDs;

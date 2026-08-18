@@ -153,6 +153,13 @@ Design rules (Csmith lessons):
   positives-then-negations, over unrestricted predicate pools (queries read
   the finished model, §7). Queries binding no named variable are skipped —
   B8's query≡rule projection needs at least one.
+- **Source text is a legitimate generator output.** `arb_recursive_arithmetic_program`
+  and `arb_taint_spellings` (C10, C8) emit `.dl` **text** and parse-then-lower it,
+  rather than building `ir::` values directly. They are about how a program is
+  *written* — where the arithmetic sits relative to the recursion, and which of
+  four spellings expresses it — so going through the front end is the point, not a
+  shortcut, and a shrunk counterexample is readable. They return the source
+  alongside the program for exactly that reason.
 - **Generator coverage is itself guarded.** `testgen::tests` asserts that
   sampling produces both argument forms, partial selection, negated atoms,
   wildcards under negation, multi-stratum programs, queries, and negated
@@ -188,6 +195,7 @@ it. A future audit starts here.
 | Comparisons / arithmetic (§8) | `arb_comparison_program` (filter/assign/join on the int column **and the string key**) | B1 extended (incl. error path); `comparison_generator_is_well_typed` — the acceptance half, which is what B1 cannot be (`bugs/006`); §16.3 hand test |
 | Value order across constructs (§4/§8/§9) | `arb_order_agreement_spellings` (two distinct constants of one type, over all five primitives, both ends of the order) | **C8** `ordered_comparison_and_minmax_agree_on_every_type`; `order_agreement_spellings_reach_every_type_and_both_ends` |
 | Aggregation (§9) | `aggregate_ir` (grouped, one relation); `grouped_ir` (group keys from a *second* relation, empty groups, absent witnesses); `aggregate_goal_ir` (multi-atom + negated goal, all 6 goal orderings) | **independent group-by oracle** (`aggregation_matches_an_independent_group_by`); B1 differentials (`b1_aggregate_programs_agree`, `b1_aggregate_goal_shapes_agree`); body-order invariance (`b5_aggregate_body_order_does_not_change_the_model`); fold laws (absent-skip, empty→absent, count=witnesses, sum oracle, min/max bounds); §16.4 hand test; query-position and nested/assignment-bound goals in `tests/pipeline.rs` |
+| Termination (§10) | `arb_recursive_arithmetic_program` (ten placements of arithmetic relative to a positive cycle, over a freely cyclic graph); `arb_taint_spellings` (four spellings of one value-creating recursion) | **C10** `c10_a_certified_program_reaches_its_fixpoint` on a test-only round cap, with the B1 differential; `c10_generator_certifies_programs_that_do_arithmetic_in_a_cycle` — the non-vacuity half, without which C10 is a claim about arithmetic-free Datalog; **C8** `c8_the_taint_spellings_classify_alike`; §16.12 hand test (the diagnostic, on stderr) |
 | Absent value (§4/§8) | `arb_fact_constant` (absent in *data*, ~1 in 10) + `absent_ir` (join / self-join / anti-join / comparison / arithmetic / presence over a `{0, 1, absent}` pool) | B1 absent differential (`b1_absent_programs_agree`); value laws (annihilation, comparison-false, unify-vs-eq, sorts-first); `generator_emits_absent_in_facts_only` |
 
 ## Property catalog
@@ -450,6 +458,18 @@ compared keyed by predicate *name*, not `PredId`.
   | `<` ≡ `min`/`max` on one value order | nothing (unwritable — `<` was rejected) | `bugs/006` (closed 2026-07-27) |
   | a substituted answer ≡ the synthesized one | property, written with the change (2026-08-17) | — |
   | a named query ≡ a rule over the projection | property, written with the change (2026-08-17) | — |
+  | four spellings of one value-creating recursion ≡ each other | property, written with the change (2026-08-18) | — |
+
+  - **`c8_the_taint_spellings_classify_alike`** over
+    `testgen::arb_taint_spellings` — §10's termination classification does not
+    depend on how the computation is written. `N = M + 1`, `K = M + 1, N = K`,
+    `K = M + 1, N = K as int` and `N = (M + 1) as int` are one computation in four
+    spellings, and the first binds the head variable by arithmetic while the rest
+    bind it by a bare variable or hide the arithmetic under a cast. Non-vacuity is
+    inside the property: all four must actually warn, or a lint that never fires
+    would satisfy it. **Mutations killed:** dropping the `=`-chain propagation from
+    `schedule::computed_vars` (spellings 2 and 3 stop warning) and making
+    `has_arithmetic` stop at a `Cast` node (spelling 4 does). Both also kill C10.
 
   - **`c8_an_answer_shape_neither_drops_nor_collapses_a_row`** over
     `testgen::arb_answer_shape_case` — the §14 shape rule: an answer printed under a
@@ -613,6 +633,32 @@ compared keyed by predicate *name*, not `PredId`.
   `repeating_a_body_literal_drops_absent_rows` (Phase B above): the law C9 does
   *not* generalize to, kept so the asymmetry is a decision on the record rather
   than a gap.
+- [x] **C10** **Termination** (§10, 2026-08-18) — *the guarantee itself, and the
+  one property whose failure mode is an infinite loop.*
+  `c10_a_certified_program_reaches_its_fixpoint` over
+  `testgen::arb_recursive_arithmetic_program`: a program the value-creating-recursion
+  lint does not warn about reaches its fixpoint, with the B1 naive differential
+  riding along so certification cannot buy termination by computing the wrong
+  model. The generated `step` graph is **freely cyclic** — a certified program has
+  to terminate on the graphs an uncertified one runs forever on.
+
+  **The oracle is a round cap** (`engine::eval_capped`, test-only; no budget ships
+  — §17 2026-08-16), so a wrong certification *fails* rather than hanging the
+  suite, and it is deterministic where a wall-clock timeout would flake under
+  load. This is the general shape for any property whose negation does not
+  terminate: bound the computation in the test, never in the engine.
+
+  **Non-vacuity** is `c10_generator_certifies_programs_that_do_arithmetic_in_a_cycle`,
+  and it is not optional here — without it C10 holds over arithmetic-free Datalog,
+  which was never in doubt. Five of the generator's ten shapes are certified *and*
+  contain both arithmetic and a positive cycle (a cast alone, a ground expression,
+  an aggregate result, a computed value that never reaches a head, and value
+  creation hoisted outside the cycle); the guard pins each shape to its side.
+
+  **Mutations killed:** both of C8's, above — dropping transitive taint through an
+  `=`-chain, and a check that does not look under a `Cast` node. Each certifies a
+  program that then runs to the cap, which is exactly the failure the property
+  exists to catch.
 
 ### Phase D — lexer + parser (roadmap step 5) — generalizes all §16 source texts
 

@@ -57,7 +57,7 @@ and not a deferral.
 
 ## 2. Design principles
 
-Candidate principles to ratify:
+Candidate principles to ratify, except where a bullet says otherwise:
 - **Prefer familiar, conventional Datalog surface syntax.** LLMs generate standard
   Prolog-/Datalog-style syntax reliably because it is well represented in training
   data — a strong reason to stay conventional rather than invent novel syntax.
@@ -65,12 +65,17 @@ Candidate principles to ratify:
 - **Every error is structured and actionable** (machine-readable, with spans and,
   where possible, suggested fixes).
 - **Explainability and the agent API are first-class**, designed in from the start.
-- **Predictable evaluation** — termination and resource behavior an agent can rely on.
+- **Predictable evaluation** — *ratified 2026-08-18, and scoped.* Termination is
+  decided **statically and reported before the run**: a program the engine
+  certifies terminates, and one it cannot is named, with the reason, on stderr
+  before evaluation begins (§10). What an agent can rely on is knowing which of
+  the two it has, not that the second never happens — the shapes in the second
+  class are legitimate programs whose termination depends on their data.
+  *Resource* behaviour carries no guarantee at all and deliberately none: no
+  budget, no cap, and a slow program stays slow (§15, §17 2026-08-16).
 
-*Not covered:* ratification. These are candidates, and one of them is **not
-satisfied** — a program can run forever (`bugs/004`), which is why "predictable
-evaluation" cannot be ratified as written. Ratifying §1 and §2, or softening this
-bullet to what the implementation delivers, is a ROADMAP item.
+*Not covered:* ratification of the other four, which stay candidates; that is a
+ROADMAP item covering §1 and §2 together.
 
 ## 3. Lexical structure
 
@@ -420,17 +425,29 @@ workaround for a yes/no question (§14).
 
 A program's meaning is its **least model** (references.md group 1):
 
-- The **Herbrand universe** is the finite set of constants appearing in the
-  program (facts, rule constants, and later imported values); the **Herbrand
-  base** is the set of all ground atoms formable from the program's predicates
-  over it.
+- The **Herbrand universe** is the set of constants appearing in the program
+  (facts, rule constants, imported values) together with the values §8 arithmetic
+  computes from them; the **Herbrand base** is the set of all ground atoms
+  formable from the program's predicates over it.
 - The **immediate-consequence operator** `T_P` maps a fact set `I` to the
   program's facts plus every ground rule head whose body atoms all hold in
   `I`.
-- For positive programs `T_P` is monotone over a finite lattice, so it has a
-  least fixpoint, reached in finitely many steps — the **least Herbrand
-  model**. That model is what evaluation computes (§15) and what queries are
-  answered against, as projections.
+- For positive programs `T_P` is monotone, so it has a least fixpoint — the
+  **least Herbrand model**. That model is what evaluation computes (§15) and what
+  queries are answered against, as projections.
+- **The universe is finite, and the fixpoint therefore reached in finitely many
+  steps, exactly when the program is *certified terminating* (§10).** Arithmetic
+  is what makes this conditional: `N = M + 1` synthesizes a value appearing
+  nowhere in the program, so the universe is not the program's constants and the
+  lattice it induces need not be finite. §10's rule is the condition under which
+  it is — no computed value reaches the head of a positively recursive predicate —
+  and under that condition the classical results return, including PTIME data
+  complexity. The proof is in `notes/termination.md`.
+- **Outside that fragment the least model may be infinite**, and then the fixpoint
+  is a limit that evaluation approaches without reaching. Such a program is
+  **not rejected**: it is valid, it is often correct on the data it will actually
+  see (`path_cost` over an acyclic graph), and §10 names it before the run
+  instead.
 - **Set semantics** throughout (§17): the model is a set of facts; a fact
   derivable several ways is one fact with several derivations (§11).
 
@@ -439,12 +456,7 @@ per stratum, lower strata frozen — in §7.
 
 *Not covered:* the extension to aggregation (§9), the semantics of
 comparison/arithmetic literals (§8), and `absent` (§4) — so this section accounts
-for a fragment of the language rather than the language. It also states a
-**finiteness premise arithmetic falsified** (`bugs/004`): the Herbrand universe is
-not the set of constants appearing in the program once `N = M + 1` can synthesize
-one. Its own session, and the best-prepared one — the anti-join decision settled
-what `p(X), not p(X)` means, §4 states the four match sites, and the truncation
-contract (§17, 2026-08-16) settles what an incomplete model is worth.
+for a fragment of the language rather than the language.
 
 ## 7. Negation
 
@@ -856,15 +868,78 @@ existential (like wildcard variables under negation) and never exported. Because
 they are never exported, a goal-local variable is also **not an answer variable**
 of a query that contains the aggregate (§14).
 
-*Not covered:* **the Termination section itself, which is this section's largest
-hole.** The direction is decided — a static semantic error rejecting an
-arithmetic-computed value that flows to the head of a positively recursive
-predicate, and **no runtime budget or fuel** (§17, 2026-07-25 and 2026-08-16) — but
-the rule is not written here and not implemented, so `nat(N) :- nat(M), N = M + 1.`
-is accepted and runs forever. What *is* settled is what the engine owes when a model
-is incomplete however that happened: it does not answer, and it says why (§15).
-Also not covered: safety/mode conditions for arithmetic (§8), and recursive or
-monotonic aggregation semantics (§9).
+### Termination
+
+**This section is the single normative statement of what the engine guarantees
+about a program stopping.** §6 states the semantic consequence, §15 the
+evaluation one, and both refer here.
+
+The engine **classifies** every program and **rejects none** for this.
+
+> A program is **certified terminating** when no rule binds a **head** variable to
+> an arithmetic-computed value while its **head predicate lies on a cycle of
+> positive dependency edges**.
+
+A **certified program terminates**: its Herbrand universe is finite, so the
+fixpoint is reached in finitely many rounds (§6; the proof is
+`notes/termination.md`). An uncertified one **may or may not** — the condition is
+sufficient, not necessary — and the engine says so before evaluation starts, with
+a warning (§12) rather than an error.
+
+**Arithmetic-computed** is taken transitively, and the transitivity is
+load-bearing rather than a detail. A variable is computed when an `=`-assignment
+binds it to an expression that contains an arithmetic operator and mentions a
+variable, **or** to an expression mentioning an already-computed variable. So all
+of these compute `N`:
+
+```datalog
+nat(N) :- nat(M), N = M + 1.
+nat(N) :- nat(M), K = M + 1, N = K.          % through a bare variable
+nat(N) :- nat(M), N = (M + 1) as int.        % under a cast
+```
+
+Two constructs deliberately do **not** compute a value. An `as` **cast**
+propagates but never creates — it maps a finite value set to a finite value set
+with no accumulation (§8) — so `N = M as int` over an uncomputed `M` is certified.
+An **aggregate** result is a function of a relation stratified strictly below
+(§9), so its range is already finite. A ground expression (`N = 1 + 1`) yields one
+value however often it runs.
+
+**Why a warning and not an error.** The uncertified shape is written on purpose
+and is usually right:
+
+```datalog
+path_cost(X, Z, C) :- path_cost(X, Y, C1), edge(Y, Z, C2), C = C1 + C2.
+```
+
+This terminates on every acyclic `edge` and diverges on every cyclic one — a
+property of the **data**, which no static rule can see. Rejecting it would be a
+false positive on call graphs, build dependencies and every other DAG. So the
+engine reports and runs (§17, 2026-08-18, which reversed the 2026-07-25 direction;
+`notes/termination.md` carries the argument and the four rejected alternatives,
+including the runtime budget rejected twice).
+
+The warning distinguishes the two cases it can distinguish. Where the recursive
+rule reads a relation from **outside** its own cycle, that relation's finiteness
+is what consumes a step, and the warning names it — termination holds while it has
+no cycle reachable through the rule, which is a claim the program itself can
+check. Where it reads none, nothing can stop the growth on any input:
+
+```
+warning: value-creating recursion: `path_cost` grows by arithmetic (`C`) inside
+the positive cycle `path_cost -> path_cost`; it terminates only while `edge` has
+no cycle reachable through this rule
+```
+
+**Timing is part of the contract.** Answers print after the fixpoint, so this
+warning is emitted *before* evaluation begins — a diagnostic delivered with the
+results would never reach the program that needs it most (§14).
+
+*Not covered:* safety/mode conditions for arithmetic (§8), and recursive or
+monotonic aggregation semantics (§9) — the latter would reopen the
+aggregate-results-are-finite exclusion above. An **escape hatch** that made
+`path_cost` terminate rather than merely warned about is a ROADMAP item, with
+limit predicates (§17 open questions; references.md group 1) as the candidate.
 
 ## 11. Provenance / explainability
 
@@ -1268,12 +1343,15 @@ results.
 - **Magic sets** remain a future optimization. Join order and indexing are
   evaluator-internal and free to change — the IR never encodes them.
 
-*Not covered:* **what makes the loop stop.** "The stratum stops when a round adds
-no new facts" describes the loop accurately and never says a round must eventually
-add none — which §10's missing Termination section owes it, and which `bugs/004`
-tracks. There is no iteration cap, fact cap or wall-clock budget anywhere, **by
-decision** rather than by omission (§17, 2026-08-16): a static rule is the
-guarantee, a `^C` is the operator's, and a slow program stays slow.
+**What makes the loop stop** is §10's finiteness argument, not anything in the
+loop. For a **certified** program the Herbrand universe is finite (§6), so the
+relations can only grow finitely often and a round must eventually add nothing.
+For an **uncertified** one nothing does, and the loop runs until the operator
+interrupts it: there is no iteration cap, fact cap or wall-clock budget anywhere,
+**by decision** rather than by omission (§17, 2026-08-16 and 2026-08-18) — a static
+classification is the guarantee, a `^C` is the operator's, and a slow program stays
+slow. The engine's only obligation on the uncertified path is to say so first,
+which §10 discharges before this loop starts.
 
 *Also not covered, and decided rather than deferred:* **what an incomplete model is
 worth**. Decided 2026-08-16 and not implemented — an incomplete fixpoint holds
@@ -1594,9 +1672,59 @@ because defining it is what the equivalent hand-written rule does.
 load-bearing rather than illustrative; and the expected output shown in comments is
 prose, not a pinned fence compared byte-for-byte. Both are one ROADMAP item —
 §§16.9, 16.10 and 16.11 are done the new way, and the pattern the other **eight**
-should be retrofitted to. No example exercises a *diagnostic*, so nothing here checks
-what the engine prints when a program is wrong — an example proves a claim about
-the channels it compares and nothing about a channel it is silent on.
+should be retrofitted to. An example proves a claim about
+the channels it compares and nothing about a channel it is silent on — which
+§16.12 is the first to take seriously, half its expected output being stderr.
+
+### 16.12 Termination — which side of the line, and what the engine says
+
+Run by `tests/system.rs::termination_program_certifies_one_half_and_warns_on_the_other`
+over `tests/programs/16_12_termination.dl`. **The first example that exercises a
+diagnostic**: half its expected output is on stderr, and the claim is about which
+channel each half arrives on.
+
+```datalog
+step("a", "b", 3).  step("b", "c", 4).  step("c", "d", 5).
+
+% value creation outside every positive cycle — nothing reads `doubled` back,
+% so its extent is fixed before anything recurses
+doubled(X, Y, D) :- step(X, Y, C), D = C * 2.
+
+% recursion with no value creation at all: the classical Datalog case
+reach(X, Y) :- step(X, Y, _).
+reach(X, Z) :- reach(X, Y), step(Y, Z, _).
+
+% value creation *inside* a positive cycle — correct here, and on every acyclic
+% graph, which is why this warns instead of being rejected
+path_cost(X, Y, C) :- step(X, Y, C).
+path_cost(X, Z, C) :- path_cost(X, Y, C1), step(Y, Z, C2), C = C1 + C2.
+
+?- reach("a", To).
+?- doubled("a", "b", Twice).
+?- path_cost("a", "d", Total).
+```
+stdout:
+```
+reach("a", "b").
+reach("a", "c").
+reach("a", "d").
+doubled("a", "b", 6).
+path_cost("a", "d", 12).
+```
+stderr:
+```
+warning: value-creating recursion: `path_cost` grows by arithmetic (`C`) inside
+the positive cycle `path_cost -> path_cost`; it terminates only while `step` has
+no cycle reachable through this rule
+```
+
+*Resolved (§2/§6/§10/§15, 2026-08-18):* the certified half is silent and the
+uncertified half runs, answers correctly, and exits 0 — the warning is the whole
+of the engine's objection. `doubled` is the discriminator the example exists for:
+it computes exactly as `path_cost` does, and says nothing, because no rule feeds
+it back. What the example cannot show is the timing, since a program that answers
+has necessarily terminated; `tests/programs/nonterminating.dl` carries that half,
+and only a live process can observe it.
 
 ## 17. Decisions log & open questions
 
@@ -1625,6 +1753,28 @@ marker that records a decision working out *well*, which the log would otherwise
 never say.
 
 ### Decisions
+
+- **2026-08-18** — **Termination is *classified*, not enforced: the rule ships as
+  a warning** (§2/§6/§10/§15; `notes/termination.md` for the proof and the four
+  rejected alternatives). A program is **certified terminating** when no rule binds
+  a head variable to an arithmetic-computed value while its head predicate lies on
+  a positive cycle; a certified program has a finite Herbrand universe, which
+  restores §6's finiteness argument and PTIME data complexity for that fragment.
+  Everything outside it **still runs**. Closes `bugs/004`; ratifies §2's pillar.
+  - **Reverses 2026-07-25's static *error*** (user call). `path_cost` accumulating
+    a cost terminates on every acyclic graph, so rejecting it is a false positive
+    on a property of the **data**. `bugs/004`'s criteria offered "rejected **or**
+    documented as in-scope"; 2026-08-16 already discounted the DoS case; and the
+    only checkable line between `nat` and `path_cost` over-accepts
+    `p(N) :- p(M), q(_), N = M+1.`
+  - **Taint is transitive, and the 2026-07-25 sketch was unsound without it** —
+    `K = M + 1, N = K` binds the head from a bare variable and still diverges.
+    Guarded by **C10** (`c10_a_certified_program_reaches_its_fixpoint`) and **C8**
+    (`c8_the_taint_spellings_classify_alike`), both mutation-verified.
+  - **Emission moved ahead of `eval`** (`api::run_at_reporting`): answers print
+    after the fixpoint, so the diagnostic for a non-terminating program was itself
+    never printed. **No budget ships** — `eval_capped` is C10's oracle and nothing
+    else. — §2/§6/§10/§15.
 
 - **2026-08-17** — **The named query desugars in *lowering*, and the guard's line
   is *defined*, not *mentioned*.** The two choices building the form above left
@@ -1796,6 +1946,18 @@ never say.
     exposure is a *hosted* surface (MCP, API harness — both parked). **Rejected:
     their five-way `verdict`**, a library's return field where ours must be an exit
     code and a stdout discipline.
+  - ***Consequences 2026-08-18*** — the no-budget argument **held, and did more
+    work than it was written for**. Termination (2026-08-18) reused it verbatim
+    against *rejection*, not just against fuel: if "a slow program stays slow, `^C`
+    is the operator's" is right, then a non-terminating program is the operator's
+    too, and refusing to run it buys nothing that a warning does not. The rejected
+    alternative still looks rejected, and outside evidence arrived — Soufflé's
+    `.limitsize` is documented as a *debugging* directive for inspecting a
+    non-terminating program, which is this entry's reading of a budget reached
+    independently (references.md group 6). The one thing the entry got slightly
+    wrong: it called the static rule Termination's "only guarantee", and the
+    guarantee that shipped is narrower and better stated — the rule certifies a
+    fragment, and everything outside it is *classified* rather than prevented.
 
 - **2026-08-16** — **The provenance query surface: one union, and a bounded
   why-not** (§11/§14; `notes/tsdl-cross-project-review.md`). Adopted from tsdl
@@ -2120,6 +2282,17 @@ never say.
         a *query* solved against it can be wrong rather than missing. The question
         "should there be a budget" was answered here; "what does an incomplete run
         print" was not asked, and it is the half with live instances today.
+      - ***Amended 2026-08-18*** — **the analysis stands; the *rejection* does
+        not** (2026-08-18 entry, user call). The rule ships as a **warning**. The
+        reasoning above survives intact where it argues against fuel and for a
+        theorem, and the theorem is what shipped — what it got wrong is treating
+        "not provably terminating" as "wrong". `path_cost` terminates on every
+        acyclic graph, so rejection is a false positive on a property of the
+        **data**; and this bullet's own pointer at "its cost (it rejects
+        cost-accumulating transitive closure)" is the finding, recorded here and
+        then not weighed. Note also that the sketch it points at was **unsound**:
+        it reads only the literal binding the head variable, so
+        `K = M + 1, N = K` passes it and still diverges.
     - **Casts are exempt**, checked before `as` was adopted: a cast maps a finite
       value set to a finite value set with no accumulation.
     - Note the actual **exfiltration** surface is unrelated to any of this: URL
@@ -3187,6 +3360,26 @@ never say.
     visible**: this trades "malformed" for "missing", and the skip-and-report
     machinery it would need rides on the aggregate literal, not on an
     `=`-assignment. That is a ROADMAP item.
+- **Should an accumulating recursion be able to *terminate* rather than merely be
+  warned about?** Opened 2026-08-18 by the decision above, which chose to classify
+  and not reject, and so left `path_cost` running exactly as long as its data lets
+  it. **Limit predicates** are the candidate and the literature is settled
+  (Kaminski, Cuenca Grau, Kostylev, Motik, Horrocks, IJCAI 2017; references.md
+  group 1): restrict a numeric column to keep only the least or greatest value per
+  group of key arguments, and cost-accumulating transitive closure becomes finite
+  and decidable — it computes shortest paths instead of enumerating every path's
+  cost. §4's `declare` is the obvious surface, since it already exists and already
+  says extra things per column:
+
+  ```datalog
+  declare path_cost(from, to, min cost).
+  ```
+
+  What makes it a milestone rather than a rider: the fixpoint no longer accumulates
+  a set but a per-group extremum, so §6's `T_P`, §9's aggregation and §11's
+  provenance (which derivation survives when a better value replaces it?) all move.
+  The rejected cheaper alternative is a bounded-counter recognizer, and why it does
+  not reach this case is in `notes/termination.md`. — §4/§6/§9/§10.
 - **Builtin scalar functions with no relational spelling** — `abs`, `length`,
   `lower`, `substr`. *User-defined* scalar functions were declined 2026-07-25 (a
   rule already is one), and conversion is now the `as` cast, so what remains is the

@@ -1,0 +1,25 @@
+% §16.12 — Termination: which side of §10's line a program falls on, and what
+% the engine says about it. Both halves compute with arithmetic; only one of
+% them does it inside a positive cycle.
+
+step("a", "b", 3).
+step("b", "c", 4).
+step("c", "d", 5).
+
+% Value creation outside every positive cycle: `doubled` reads `step` and
+% nothing reads `doubled` back, so its extent is fixed before anything recurses.
+doubled(X, Y, D) :- step(X, Y, C), D = C * 2.
+
+% Recursion with no value creation at all: the classical Datalog case.
+reach(X, Y) :- step(X, Y, _).
+reach(X, Z) :- reach(X, Y), step(Y, Z, _).
+
+% Value creation *inside* a positive cycle. Correct here, and on every acyclic
+% graph — which is why §10 warns about it instead of rejecting it. `step` is
+% what bounds the recursion, and the warning names it.
+path_cost(X, Y, C) :- step(X, Y, C).
+path_cost(X, Z, C) :- path_cost(X, Y, C1), step(Y, Z, C2), C = C1 + C2.
+
+?- reach("a", To).
+?- doubled("a", "b", Twice).
+?- path_cost("a", "d", Total).

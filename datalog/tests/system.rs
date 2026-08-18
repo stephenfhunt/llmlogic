@@ -561,13 +561,21 @@ fn a_malformed_dash_q_is_a_program_error() {
 // --- §10 Termination: the lint, and when it is allowed to speak ---
 
 #[test]
-fn a_bounded_value_creating_recursion_warns_and_still_answers() {
-    // `path_cost` is the case the design refuses to reject: valid on every
-    // acyclic graph, so it runs, answers, and exits 0 — with the warning naming
-    // the relation whose acyclicity termination now rests on.
-    let out = run_file("path_cost.dl");
+fn termination_program_certifies_one_half_and_warns_on_the_other() {
+    // §16.12. `doubled` computes exactly as `path_cost` does and says nothing,
+    // because no rule feeds it back — that contrast is what the example is for.
+    // The uncertified half still runs, answers correctly and exits 0: the
+    // warning is the whole of the engine's objection.
+    let out = run_file("16_12_termination.dl");
     assert_eq!(out.code, 0);
-    assert_eq!(out.stdout, "path_cost(\"a\", \"d\", 12).\n");
+    assert_eq!(
+        out.stdout,
+        "reach(\"a\", \"b\").\n\
+         reach(\"a\", \"c\").\n\
+         reach(\"a\", \"d\").\n\
+         doubled(\"a\", \"b\", 6).\n\
+         path_cost(\"a\", \"d\", 12).\n"
+    );
     assert!(
         out.stderr.contains("value-creating recursion"),
         "{}",
@@ -578,7 +586,9 @@ fn a_bounded_value_creating_recursion_warns_and_still_answers() {
         "{}",
         out.stderr
     );
-    assert!(out.stderr.contains("`edge`"), "{}", out.stderr);
+    assert!(out.stderr.contains("`step`"), "{}", out.stderr);
+    // Exactly one warning: the certified rules are silent.
+    assert_eq!(out.stderr.lines().count(), 1, "{}", out.stderr);
 }
 
 #[test]

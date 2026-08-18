@@ -5,7 +5,13 @@ severity: doc
 area: spec
 spec: ["§2", "§6", "§8", "§10", "§15"]
 found: 2026-07-25
-resolution:
+resolved: 2026-08-18
+resolution: |
+  §6 now states its finiteness premise conditionally — finite exactly for the
+  fragment §10 certifies — and §10 gained the Termination section that defines
+  the condition. The behavioural half took the criteria's **second** branch:
+  `nat` is not rejected, its non-termination is in-scope and documented, and the
+  engine names it before the run. See §17, 2026-08-18.
 ---
 
 §6 grounds the language's declarative semantics in a finiteness claim that stopped
@@ -107,3 +113,43 @@ inherits this defect.
   to a finite value set with no accumulation, so they create no new reachable
   values and are exempt from the termination rule. This was checked *before*
   choosing `as`.
+
+---
+
+## Resolution (2026-08-18)
+
+Closed by the Termination design session (§17, 2026-08-18;
+`notes/termination.md`), against all five acceptance criteria:
+
+- **§6's finiteness premise** is now conditional and true as written: the Herbrand
+  universe includes the values arithmetic computes, and is *finite exactly when*
+  the program is certified terminating (§10). The proof is in the note; the
+  fragment restores the least-fixpoint-in-finitely-many-steps claim and the PTIME
+  data complexity this file said was forfeit with it.
+- **§10 says what happens outside the fragment** — the new *Termination* section,
+  which is now the single normative statement.
+- **§15 says what makes the loop stop**: §10's finiteness argument for a certified
+  program, and nothing at all otherwise, the interrupt being the operator's.
+- **§2's pillar is ratified, scoped**: termination is decided statically and
+  reported before the run. What an agent relies on is knowing which side it is on.
+- **The `nat` program takes this file's second branch, not its first.** It is
+  *not* rejected. Its non-termination is documented as in-scope behaviour, and it
+  is no longer silently accepted: the warning reaches stderr before evaluation
+  starts. That branch was in the criteria from the day they were written, and the
+  session chose it — rejecting `nat` would have meant rejecting `path_cost`, which
+  is a valid program on every acyclic graph.
+
+**What this file got right and what it got wrong.** The precision note — that the
+tempting "arithmetic makes it Turing-complete" summary overclaims, since `i64` and
+overflow-as-error keep the state space finite — held, and shaped §6's wording. The
+governance framing did not survive: it reads the hang as "a denial-of-service
+vector on exactly that surface", and the session found that argument had already
+been discounted by §17 2026-08-16 ("a slow program stays slow, `^C` is the
+operator's"), with the hosted surface parked. The DoS reading is what made
+rejection look obligatory; it is not.
+
+**What it did not anticipate.** The diagnostic had the same defect as the program:
+warnings were carried out on the run's result, which a non-terminating run never
+produces. Fixing the message required moving warning emission ahead of evaluation
+(`api::run_at_reporting`) — this file's own "no output at all" applied to the
+thing meant to explain it.

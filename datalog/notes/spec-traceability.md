@@ -20,7 +20,7 @@ Rows are the status lines the sections used to carry, verbatim in substance.
 | 7 Negation | anti-join evaluation + Ullman relaxation numbering (`src/lower.rs`, `src/engine/`) | 2026-07-20 |
 | 8 Arithmetic & comparison | the engine and the naive oracle (`src/engine/`), lowered with the assignment-safety exception (`src/lower.rs`) | 2026-07-21 |
 | 9 Aggregation | design session ratified §17; `count`/`sum`/`min`/`max`/`avg` shipped | 2026-07-24 |
-| 10 Recursion & safety | range restriction only — the Termination rule is designed, not built | — |
+| 10 Recursion & safety | range restriction, plus the Termination rule as a warning (`lower::value_creating_recursion`) | 2026-08-18 |
 | 11 Provenance | the data model, recorded in the fixpoint (`src/provenance.rs`); the query surface is designed, not built | 2026-07-19 |
 | 12 Error model | the diagnostic shape, `src/error.rs` | 2026-07-25 |
 | 13 External data / fact sources | design deep-dive ratified §17; DuckDB reader shipped as milestone 7 | 2026-07-23 |
