@@ -200,6 +200,25 @@ pub enum Warning {
         /// How many groups skipped at least one.
         groups: usize,
     },
+    /// A rule grows a predicate by **arithmetic inside a positive cycle** (§10,
+    /// *Termination*), so the least model may be infinite and evaluation may not
+    /// stop. The program is valid and still runs — the engine classifies and
+    /// reports, it does not reject (§17, 2026-08-18).
+    ///
+    /// `bounded_by` is what stands between the rule and certain divergence: the
+    /// relations it reads from *outside* the cycle, whose finiteness is the only
+    /// thing consuming a step. Empty means nothing does, and the program cannot
+    /// terminate on any input.
+    ValueCreatingRecursion {
+        /// The head predicate of the offending rule.
+        pred: String,
+        /// The concrete positive cycle, rendered `a -> b -> a`.
+        cycle: String,
+        /// The head variables bound to a computed value, in head-argument order.
+        vars: Vec<String>,
+        /// Relations read from outside the cycle, in body order.
+        bounded_by: Vec<String>,
+    },
 }
 
 impl fmt::Display for Warning {
@@ -230,6 +249,40 @@ impl fmt::Display for Warning {
                 "warning: `{op}` in `{rule}` skipped {skipped} absent input(s) across \
                  {groups} group(s); the result covers only the values that exist"
             ),
+            Warning::ValueCreatingRecursion {
+                pred,
+                cycle,
+                vars,
+                bounded_by,
+            } => {
+                let vars = vars
+                    .iter()
+                    .map(|var| format!("`{var}`"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(
+                    f,
+                    "warning: value-creating recursion: `{pred}` grows by arithmetic ({vars}) \
+                     inside the positive cycle `{cycle}`"
+                )?;
+                if bounded_by.is_empty() {
+                    write!(
+                        f,
+                        "; nothing outside the cycle bounds it, so this program does not terminate"
+                    )
+                } else {
+                    let relations = bounded_by
+                        .iter()
+                        .map(|name| format!("`{name}`"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    write!(
+                        f,
+                        "; it terminates only while {relations} has no cycle reachable through \
+                         this rule"
+                    )
+                }
+            }
         }
     }
 }

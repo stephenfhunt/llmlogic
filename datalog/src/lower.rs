@@ -1514,7 +1514,7 @@ pub fn check_program(program: &ir::Program) -> Vec<Warning> {
         collect_body_refs(&query.body, &mut referenced, &mut seen);
     }
 
-    referenced
+    let mut warnings: Vec<Warning> = referenced
         .into_iter()
         .filter(|pred| !defined.contains(&pred.0))
         .map(|pred| {
@@ -1525,7 +1525,149 @@ pub fn check_program(program: &ir::Program) -> Vec<Warning> {
                 suggestion: nearest_defined(&info.name, info.arity, &defined, program),
             }
         })
-        .collect()
+        .collect();
+    warnings.extend(value_creating_recursion(program));
+    warnings
+}
+
+/// Post-lowering lint: flags every rule that grows its head predicate by
+/// **arithmetic inside a positive cycle** (§10, *Termination*) — the one shape
+/// that can synthesise unboundedly many values, and so the one shape whose least
+/// model may be infinite.
+///
+/// This is a [`Warning`] and never an error, decided 2026-08-18 (§17). The
+/// programs it flags are not wrong: `path_cost` accumulating a cost around a
+/// transitive closure terminates on every acyclic graph, so rejecting it would be
+/// a false positive on a property of the **data** rather than of the program.
+/// What the engine owes is to say so before the run, not to refuse it — which is
+/// also why `api.rs` reports static warnings eagerly rather than through
+/// `RunResult`, since a warning delivered after a fixpoint that never finishes is
+/// no warning at all.
+///
+/// The complement is the guarantee: a program with **no** such rule has a finite
+/// Herbrand universe and terminates (`notes/termination.md` carries the proof).
+///
+/// Warnings come out in `RuleId` order, matching the crate's A7 stance.
+fn value_creating_recursion(program: &ir::Program) -> Vec<Warning> {
+    let mut edges = Vec::new();
+    for rule in &program.rules {
+        collect_stratum_edges(rule.head.pred, &rule.body, false, &mut edges);
+    }
+    // Positive edges only: a cycle through a negated or aggregated edge is
+    // already rejected by stratification (§7/§9), and only a positive cycle can
+    // feed a predicate back into its own body. `dependency_path` walks whatever
+    // adjacency it is handed, so the kind filter lives here and it needs no
+    // variant of its own.
+    let count = program.predicates.len();
+    let mut deps: Vec<Vec<(ir::PredId, Dep)>> = vec![Vec::new(); count];
+    let mut back: Vec<Vec<(ir::PredId, Dep)>> = vec![Vec::new(); count];
+    for &(head, body, dep) in &edges {
+        if !dep.strict() {
+            deps[head.0 as usize].push((body, dep));
+            back[body.0 as usize].push((head, dep));
+        }
+    }
+
+    let mut warnings = Vec::new();
+    for rule in &program.rules {
+        let computed = schedule::computed_vars(&rule.body);
+        if computed.is_empty() {
+            continue;
+        }
+        // Head variables bound to a computed value, in head-argument order.
+        let mut seen = std::collections::HashSet::new();
+        let vars: Vec<String> = rule
+            .head
+            .args
+            .iter()
+            .filter_map(|arg| match arg {
+                ir::Term::Var(var) if computed.contains(var) && seen.insert(var.0) => Some(
+                    rule.var_names[var.0 as usize]
+                        .clone()
+                        .unwrap_or_else(|| "_".to_string()),
+                ),
+                _ => None,
+            })
+            .collect();
+        if vars.is_empty() {
+            continue;
+        }
+        let head = rule.head.pred;
+        let Some(cycle) = positive_cycle(&deps, head, &program.predicates) else {
+            continue;
+        };
+        // What the recursion consumes: the positive atoms it reads from outside
+        // its own strongly-connected component. Those relations are finite, so
+        // each of their rows is a step the recursion cannot take twice — unless
+        // the relation has a cycle, which is what the message says. No such atom
+        // means nothing is consumed and no input can stop the growth.
+        let forward = positively_reachable(&deps, head);
+        let backward = positively_reachable(&back, head);
+        let mut seen = std::collections::HashSet::new();
+        let bounded_by: Vec<String> = rule
+            .body
+            .iter()
+            .filter_map(|literal| match &literal.kind {
+                ir::BodyLiteralKind::Atom(atom) => Some(atom.pred),
+                _ => None,
+            })
+            .filter(|pred| {
+                !(forward[pred.0 as usize] && backward[pred.0 as usize]) && seen.insert(pred.0)
+            })
+            .map(|pred| program.predicates[pred.0 as usize].name.clone())
+            .collect();
+        warnings.push(Warning::ValueCreatingRecursion {
+            pred: program.predicates[head.0 as usize].name.clone(),
+            cycle,
+            vars,
+            bounded_by,
+        });
+    }
+    warnings
+}
+
+/// A concrete cycle of positive dependency edges through `pred`, rendered
+/// `a -> b -> a`, or `None` when `pred` lies on none. The rendering mirrors
+/// [`negative_cycle_error`]'s, so both cycle diagnostics read alike; every edge
+/// here is positive, so no [`Dep::prefix`] ever shows.
+fn positive_cycle(
+    deps: &[Vec<(ir::PredId, Dep)>],
+    pred: ir::PredId,
+    predicates: &[ir::PredicateInfo],
+) -> Option<String> {
+    let name = |pred: ir::PredId| predicates[pred.0 as usize].name.as_str();
+    for &(next, _) in &deps[pred.0 as usize] {
+        // A self-loop closes with no intermediate steps; `dependency_path`
+        // cannot express that, since `Some(vec![])` is its `start == target` case.
+        let steps = if next == pred {
+            Some(Vec::new())
+        } else {
+            dependency_path(deps, next, pred)
+        };
+        let Some(steps) = steps else { continue };
+        let mut parts = vec![name(pred).to_string(), name(next).to_string()];
+        parts.extend(steps.into_iter().map(|(pred, _)| name(pred).to_string()));
+        return Some(parts.join(" -> "));
+    }
+    None
+}
+
+/// Which predicates are reachable from `start` along `deps` in **one or more**
+/// steps — so `seen[start]` is itself the "lies on a cycle" answer. Run over the
+/// reversed adjacency it gives the predicates that reach `start`; the two
+/// intersected are `start`'s strongly-connected component.
+fn positively_reachable(deps: &[Vec<(ir::PredId, Dep)>], start: ir::PredId) -> Vec<bool> {
+    let mut seen = vec![false; deps.len()];
+    let mut stack = vec![start];
+    while let Some(pred) = stack.pop() {
+        for &(next, _) in &deps[pred.0 as usize] {
+            if !seen[next.0 as usize] {
+                seen[next.0 as usize] = true;
+                stack.push(next);
+            }
+        }
+    }
+    seen
 }
 
 /// Appends the predicate of every positive/negated body atom to `referenced`,
@@ -3101,6 +3243,153 @@ mod tests {
         let ast = crate::parser::parse(src).expect("parses");
         let program = lower(&ast).expect("lowers");
         check_program(&program)
+    }
+
+    // --- check_program: value-creating recursion (§10, Termination) ---
+
+    /// The termination lint's verdict for `src`: the warnings it raised, with
+    /// every other lint filtered out.
+    fn termination(src: &str) -> Vec<Warning> {
+        warnings(src)
+            .into_iter()
+            .filter(|warning| matches!(warning, Warning::ValueCreatingRecursion { .. }))
+            .collect()
+    }
+
+    /// Asserts `src` is certified terminating — the lint says nothing about it.
+    fn assert_certified(src: &str) {
+        assert_eq!(
+            termination(src),
+            Vec::new(),
+            "expected no warning for:\n{src}"
+        );
+    }
+
+    /// Asserts `src` warns once, and returns the `(cycle, vars, bounded_by)` of
+    /// that warning.
+    fn assert_warns(src: &str) -> (String, Vec<String>, Vec<String>) {
+        let raised = termination(src);
+        match raised.as_slice() {
+            [
+                Warning::ValueCreatingRecursion {
+                    cycle,
+                    vars,
+                    bounded_by,
+                    ..
+                },
+            ] => (cycle.clone(), vars.clone(), bounded_by.clone()),
+            other => panic!("expected exactly one warning for:\n{src}\ngot {other:?}"),
+        }
+    }
+
+    #[test]
+    fn arithmetic_into_its_own_recursion_warns_with_nothing_bounding_it() {
+        // `bugs/004`'s repro: the two-line program that runs forever.
+        let (cycle, vars, bounded_by) = assert_warns("nat(0).\nnat(N) :- nat(M), N = M + 1.\n");
+        assert_eq!(cycle, "nat -> nat");
+        assert_eq!(vars, vec!["N".to_string()]);
+        assert_eq!(bounded_by, Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_hoisted_assignment_chain_is_the_same_recursion() {
+        // The head variable is bound by a *bare* variable, so a check reading
+        // only the binding literal would call this certified. It is not: taint
+        // travels the `=`-chain.
+        let (cycle, vars, bounded_by) =
+            assert_warns("nat(0).\nnat(N) :- nat(M), K = M + 1, N = K.\n");
+        assert_eq!(cycle, "nat -> nat");
+        assert_eq!(vars, vec!["N".to_string()]);
+        assert!(bounded_by.is_empty());
+    }
+
+    #[test]
+    fn a_cast_carries_the_computed_value_but_never_creates_one() {
+        // Casting a computed value keeps the growth...
+        assert_warns("nat(0).\nnat(N) :- nat(M), K = M + 1, N = K as int.\n");
+        // ...while casting a stored one creates nothing: a cast maps a finite
+        // value set to a finite value set (§8).
+        assert_certified("p(1).\np(N) :- p(M), N = M as int.\n");
+    }
+
+    #[test]
+    fn the_cycle_the_warning_names_may_run_through_another_predicate() {
+        let (cycle, vars, bounded_by) =
+            assert_warns("nat(0).\nsucc(M, N) :- nat(M), N = M + 1.\nnat(N) :- succ(_, N).\n");
+        assert_eq!(cycle, "succ -> nat -> succ");
+        assert_eq!(vars, vec!["N".to_string()]);
+        // `nat` is inside the cycle, so it bounds nothing.
+        assert!(bounded_by.is_empty());
+    }
+
+    #[test]
+    fn cost_accumulation_warns_naming_the_relation_that_bounds_it() {
+        // The design's motivating case: valid on every acyclic graph, which is
+        // why it warns rather than being rejected.
+        let (cycle, vars, bounded_by) = assert_warns(
+            "edge(\"a\", \"b\", 3).\n\
+             path_cost(X, Y, C) :- edge(X, Y, C).\n\
+             path_cost(X, Z, C) :- path_cost(X, Y, C1), edge(Y, Z, C2), C = C1 + C2.\n",
+        );
+        assert_eq!(cycle, "path_cost -> path_cost");
+        assert_eq!(vars, vec!["C".to_string()]);
+        assert_eq!(bounded_by, vec!["edge".to_string()]);
+    }
+
+    #[test]
+    fn value_creation_outside_every_positive_cycle_is_certified() {
+        // `gen` computes, but nothing feeds `gen` back from `nat`, so its extent
+        // is fixed before `nat` runs.
+        assert_certified(
+            "base(1).\n\
+             gen(M, N) :- base(M), N = M + 1.\n\
+             nat(1).\n\
+             nat(N) :- nat(M), gen(M, N).\n",
+        );
+    }
+
+    #[test]
+    fn arithmetic_with_no_recursion_at_all_is_certified() {
+        assert_certified("age(\"alice\", 30).\nnext_year(X, N) :- age(X, A), N = A + 1.\n");
+    }
+
+    #[test]
+    fn a_ground_expression_creates_one_value_however_often_it_runs() {
+        assert_certified("p(1).\np(N) :- p(_), N = 1 + 1.\n");
+    }
+
+    #[test]
+    fn an_aggregate_result_in_a_cycle_is_certified() {
+        // The aggregated relation is stratified strictly below (§9), so the
+        // result ranges over an already-finite set.
+        assert_certified("q(1, 5).\np(1).\np(N) :- p(M), N = count { C | q(M, C) }.\n");
+    }
+
+    #[test]
+    fn a_computed_value_the_head_never_carries_is_certified() {
+        // `K` grows inside the cycle but is only ever compared, so nothing about
+        // it reaches `p`'s extent.
+        assert_certified("p(1).\np(X) :- p(X), K = X + 1, K < 100.\n");
+    }
+
+    #[test]
+    fn every_rule_that_creates_a_value_in_a_cycle_is_named() {
+        // Two offending rules, so two warnings, in `RuleId` order (A7).
+        let raised = termination(
+            "nat(0).\n\
+             nat(N) :- nat(M), N = M + 1.\n\
+             big(0).\n\
+             big(N) :- big(M), N = M + 10.\n",
+        );
+        assert_eq!(raised.len(), 2);
+        let names: Vec<String> = raised
+            .iter()
+            .map(|warning| match warning {
+                Warning::ValueCreatingRecursion { pred, .. } => pred.clone(),
+                other => panic!("unexpected {other:?}"),
+            })
+            .collect();
+        assert_eq!(names, vec!["nat".to_string(), "big".to_string()]);
     }
 
     #[test]

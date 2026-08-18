@@ -379,6 +379,95 @@ fn diagnose(
     }
 }
 
+/// The variables this body binds to a value **computed by arithmetic**, taken
+/// transitively (§10, *Termination*).
+///
+/// The seed is an `=`-assignment whose source expression contains an arithmetic
+/// operator and mentions at least one variable: that is the only construct in the
+/// language that can synthesise a value absent from the program and its inputs.
+/// From there the set is closed under two propagations, and getting either wrong
+/// is what makes an unbounded program look bounded:
+///
+/// - **`=`-chains.** `K = M + 1, N = K` computes `N` just as `N = M + 1` does. The
+///   assignment that binds `N` is a bare variable, so a check that looked only at
+///   the binding literal would miss it.
+/// - **Casts.** `Y = X as int` *propagates* taint but never creates it — a cast
+///   maps a finite value set to a finite value set with no accumulation (§8), so a
+///   cast over an uncomputed value is not value creation, while a cast over a
+///   computed one still carries the growth.
+///
+/// Two things deliberately do **not** compute a value. A ground expression
+/// (`N = 1 + 1`) yields one value however often it runs. An **aggregate** result
+/// is a function of a relation stratified strictly below (§9), so its range is
+/// already finite.
+///
+/// Replays [`schedule_body_with`]'s order rather than walking source order,
+/// because whether an `=` *assigns* or *filters* is order-dependent and
+/// [`effect_of`] is where that classification lives. An unschedulable body
+/// computes nothing — its own error is reported elsewhere (the `safe_bound_vars`
+/// precedent in `lower.rs`).
+pub(crate) fn computed_vars(body: &[BodyLiteral]) -> HashSet<Var> {
+    let Ok((order, _)) = schedule_body_with(body, &HashSet::new()) else {
+        return HashSet::new();
+    };
+    let outside = outside_aggregate_vars(body);
+    let binders = binder_vars(body);
+    let mut bound: HashSet<Var> = HashSet::new();
+    let mut computed: HashSet<Var> = HashSet::new();
+
+    for &index in &order {
+        let literal = &body[index];
+        let Some(effect) = effect_of(literal, &bound, &outside, &binders) else {
+            // A positive atom, which `effect_of` does not model: it binds its own
+            // variables, and it binds them to stored values, so it computes none.
+            if let BodyLiteralKind::Atom(atom) = &literal.kind {
+                for arg in &atom.args {
+                    if let Term::Var(var) = arg {
+                        bound.insert(*var);
+                    }
+                }
+            }
+            continue;
+        };
+        if let BodyLiteralKind::Compare {
+            op: CmpOp::Eq,
+            lhs,
+            rhs,
+        } = &literal.kind
+            && let [target] = effect.binds[..]
+        {
+            // `effect_of` binds whichever side is the bare unbound variable; the
+            // other side is the source expression this assignment evaluates.
+            let source = if matches!(lhs, Expr::Term(Term::Var(var)) if *var == target) {
+                rhs
+            } else {
+                lhs
+            };
+            if creates_value(source) || expr_vars(source).iter().any(|var| computed.contains(var)) {
+                computed.insert(target);
+            }
+        }
+        bound.extend(effect.binds);
+    }
+    computed
+}
+
+/// Does evaluating `expr` synthesise a value that need not appear in the program
+/// or its inputs? Arithmetic over at least one variable does; a cast alone does
+/// not, and neither does a ground expression, which yields a single value.
+fn creates_value(expr: &Expr) -> bool {
+    has_arithmetic(expr) && !expr_vars(expr).is_empty()
+}
+
+/// Is there an arithmetic operator anywhere in `expr`, including under a cast?
+fn has_arithmetic(expr: &Expr) -> bool {
+    match expr {
+        Expr::Binary { .. } => true,
+        Expr::Cast { expr, .. } => has_arithmetic(expr),
+        Expr::Term(_) => false,
+    }
+}
+
 /// Every variable occurring in `body` *outside* any aggregate's own scope — the
 /// positions that share the enclosing clause's variables (§9).
 ///
