@@ -1,0 +1,7 @@
+% `bugs/004`'s repro: value creation inside a positive cycle, with nothing
+% outside it to consume a step. This program does not terminate on any input,
+% which is the point — the warning has to arrive before the fixpoint that never
+% does.
+nat(0).
+nat(N) :- nat(M), N = M + 1.
+?- nat(X).

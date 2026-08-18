@@ -1,0 +1,11 @@
+% Cost-accumulating transitive closure: value creation inside a positive cycle,
+% bounded by `edge`. It terminates on this acyclic graph — and on every acyclic
+% one — which is why §10 warns about it instead of rejecting it.
+edge("a", "b", 3).
+edge("b", "c", 4).
+edge("c", "d", 5).
+
+path_cost(X, Y, C) :- edge(X, Y, C).
+path_cost(X, Z, C) :- path_cost(X, Y, C1), edge(Y, Z, C2), C = C1 + C2.
+
+?- path_cost("a", "d", Total).

@@ -10,7 +10,10 @@
 //! - On success, each query's answers print to **stdout** as canonical Datalog
 //!   facts (so output is valid input); a program with no queries prints nothing.
 //!   Any non-fatal warnings (e.g. a referenced-but-undefined predicate) print to
-//!   **stderr**, keeping stdout a clean fact stream. Exit code **0**.
+//!   **stderr**, keeping stdout a clean fact stream. Exit code **0**. Warnings
+//!   known before evaluation print *before* it runs, so a program the
+//!   termination lint flags (§10) is announced even when its fixpoint never
+//!   arrives.
 //! - On any program error (lex / parse / lowering / type / evaluation), the
 //!   structured errors print to **stderr**, one per line. Exit code **1**.
 //! - On a usage problem (bad arguments, unreadable file), a usage message prints
@@ -68,12 +71,23 @@ fn main() -> ExitCode {
         .filter(|arg| *arg != "-")
         .map(std::path::Path::new);
 
-    match datalog::run_with_queries_at(&base, source_path, &cli.queries) {
+    // Static warnings print as they are found, before evaluation — a program the
+    // termination lint flags (§10) may never reach a fixpoint, and a warning
+    // withheld until then is a warning nobody ever reads. `reported` then keeps
+    // them from printing twice, since `RunResult::warnings` carries them too.
+    let mut reported = 0usize;
+    let result =
+        datalog::run_with_queries_at_reporting(&base, source_path, &cli.queries, &mut |warning| {
+            eprintln!("{warning}");
+            reported += 1;
+        });
+
+    match result {
         Ok(result) => {
             print!("{}", result.output());
             // Warnings go to stderr so the stdout fact stream stays valid Datalog
             // input; they do not affect the (success) exit code.
-            for warning in &result.warnings {
+            for warning in result.warnings.iter().skip(reported) {
                 eprintln!("{warning}");
             }
             ExitCode::SUCCESS

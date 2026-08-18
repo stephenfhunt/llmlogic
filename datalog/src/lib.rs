@@ -35,7 +35,8 @@ pub mod typecheck;
 pub(crate) mod testgen;
 
 pub use api::{
-    RunResult, program_with_queries, run, run_at, run_with_queries, run_with_queries_at,
+    RunResult, program_with_queries, run, run_at, run_at_reporting, run_with_queries,
+    run_with_queries_at, run_with_queries_at_reporting,
 };
 pub use error::{Error, Result, Warning};
 pub use parser::parse;

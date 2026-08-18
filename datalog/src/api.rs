@@ -97,12 +97,36 @@ pub fn run(src: &str) -> Result<RunResult, Vec<Error>> {
 /// imports resolve relative to that file's directory (`None` — stdin or
 /// `-q`-only programs — resolves against the working directory).
 pub fn run_at(src: &str, source_path: Option<&Path>) -> Result<RunResult, Vec<Error>> {
+    run_at_reporting(src, source_path, &mut |_| {})
+}
+
+/// [`run_at`], reporting each **static** warning to `report` as soon as it is
+/// known — before evaluation starts.
+///
+/// The timing is the point, and it is load-bearing rather than cosmetic. A
+/// program flagged by the termination lint (§10) may never reach a fixpoint, and
+/// [`RunResult`] is only returned once it has, so a caller that reads warnings
+/// off the result learns nothing about the very program the warning is for. That
+/// is `bugs/004`'s symptom exactly: no output at all.
+///
+/// `RunResult::warnings` still carries the full list, static and post-evaluation
+/// (§9's aggregate skips) alike, so a caller that does not care about timing —
+/// and every existing one — needs no change. The reported ones are its **prefix**,
+/// in order, which is what lets the CLI print the rest without repeating itself.
+pub fn run_at_reporting(
+    src: &str,
+    source_path: Option<&Path>,
+    report: &mut dyn FnMut(&Warning),
+) -> Result<RunResult, Vec<Error>> {
     let ast = parse(src)?;
     let resolved = resolve_modules(ast, source_path)?;
     let tables = load_imports(&resolved.program)?;
     let program = lower_with_sources(&resolved.program, &tables)?;
     typecheck(&program)?;
     let mut warnings = check_program(&program);
+    for warning in &warnings {
+        report(warning);
+    }
     let model = eval(&program).map_err(|e| vec![e])?;
     warnings.extend(absent_skip_warnings(&model, &program));
 
@@ -203,8 +227,20 @@ pub fn run_with_queries_at(
     source_path: Option<&Path>,
     queries: &[String],
 ) -> Result<RunResult, Vec<Error>> {
+    run_with_queries_at_reporting(base, source_path, queries, &mut |_| {})
+}
+
+/// [`run_with_queries_at`] with [`run_at_reporting`]'s eager warning channel —
+/// what the CLI uses, so a warning about a program that may not terminate
+/// reaches stderr before the fixpoint that may not finish.
+pub fn run_with_queries_at_reporting(
+    base: &str,
+    source_path: Option<&Path>,
+    queries: &[String],
+    report: &mut dyn FnMut(&Warning),
+) -> Result<RunResult, Vec<Error>> {
     let source = program_with_queries(base, queries)?;
-    run_at(&source, source_path)
+    run_at_reporting(&source, source_path, report)
 }
 
 /// Reports every aggregate that skipped an `absent` input (§9's skip-but-report

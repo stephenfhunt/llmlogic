@@ -557,3 +557,60 @@ fn a_malformed_dash_q_is_a_program_error() {
     assert!(out.stdout.is_empty());
     assert!(!out.stderr.is_empty());
 }
+
+// --- §10 Termination: the lint, and when it is allowed to speak ---
+
+#[test]
+fn a_bounded_value_creating_recursion_warns_and_still_answers() {
+    // `path_cost` is the case the design refuses to reject: valid on every
+    // acyclic graph, so it runs, answers, and exits 0 — with the warning naming
+    // the relation whose acyclicity termination now rests on.
+    let out = run_file("path_cost.dl");
+    assert_eq!(out.code, 0);
+    assert_eq!(out.stdout, "path_cost(\"a\", \"d\", 12).\n");
+    assert!(
+        out.stderr.contains("value-creating recursion"),
+        "{}",
+        out.stderr
+    );
+    assert!(
+        out.stderr.contains("`path_cost -> path_cost`"),
+        "{}",
+        out.stderr
+    );
+    assert!(out.stderr.contains("`edge`"), "{}", out.stderr);
+}
+
+#[test]
+fn a_nonterminating_program_warns_before_it_hangs() {
+    // The eager-emission contract, and nothing else pins it. Answers print after
+    // the fixpoint, so a warning carried out on `RunResult` would reach a program
+    // that never finishes exactly never — `bugs/004`'s "no output at all". This
+    // test therefore reads stderr from a *live* process and then kills it.
+    let mut child = Command::new(BIN)
+        .arg("tests/programs/nonterminating.dl")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("binary runs");
+    let stderr = child.stderr.take().expect("stderr is piped");
+
+    // Read the first line on another thread: if the warning were *not* eager
+    // there would be nothing to read, and a blocking read would hang the suite
+    // rather than fail it.
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut reader = std::io::BufReader::new(stderr);
+        let mut line = String::new();
+        let _ = std::io::BufRead::read_line(&mut reader, &mut line);
+        let _ = sender.send(line);
+    });
+    let first = receiver.recv_timeout(std::time::Duration::from_secs(30));
+    let _ = child.kill();
+    let _ = child.wait();
+
+    let first = first.expect("the warning must arrive while the program is still running");
+    assert!(first.contains("value-creating recursion"), "{first:?}");
+    assert!(first.contains("`nat -> nat`"), "{first:?}");
+    assert!(first.contains("does not terminate"), "{first:?}");
+}
