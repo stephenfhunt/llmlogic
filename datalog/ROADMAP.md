@@ -53,10 +53,10 @@ each; detail in §17 and `docs/worklog.md`.
 > v1 or post-v1** against §1's success criteria — the argument per item is in
 > [`notes/v1-scope.md`](notes/v1-scope.md), and the evidence that prompted the
 > exercise in [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
-> The stock-take's recommended order survives the ruling — **the caller's contract,
-> then temporal types, then the profile** — with one change: **S1's harness
-> (`EXPERIMENTS.md`) now sits alongside them** instead of near the bottom, since §1
-> names it as the instrument v1 is defined against.
+> The stock-take's recommended order survives the ruling — the caller's contract
+> (✅ 2026-08-18), **then temporal types, then the profile** — with one change:
+> **S1's harness (`EXPERIMENTS.md`) now sits alongside them** instead of near the
+> bottom, since §1 names it as the instrument v1 is defined against.
 >
 > Six are resolved in `bugs/resolved/`: `004` (§6 asserted a finiteness arithmetic
 > falsified), **fixed 2026-08-18** by the Termination session — §6's premise is now
@@ -105,12 +105,18 @@ for the ratio, keeping the widening visible in the source text. Two decisions
 came with the implementation (§17, 2026-08-16): the **conversion table** (§8),
 and **`absent` for an unrepresentable conversion, an error for a lossy one**.
 
-- **Make the malformed/missing reclassification visible.** `"abc" as int` is now
-  `absent`, so a dirty column reads as a sparse one and nothing says otherwise.
-  §9's skip-and-report (`AggOutcome.skipped`) is the shape, but it rides on the
-  aggregate literal and an `=`-assignment has no equivalent. Sequence with the
-  **truncation contract**, which is the same question — what does a run owe when
-  its answer is short? _queued — **v1** (S3; rides the caller's-contract session)._ — §8/§9/§11, §17 2026-08-16.
+- **Make the malformed/missing reclassification visible.** ✅ **2026-08-18.** A
+  conversion that loses a value reports *malformed, not missing* at the
+  `=`-assignment — which lowering hoists every cast into, so one site covers them
+  all — and a **guarded** conversion (§16.9's idiom) stays silent. The same session
+  fixed §9's other blind spot: an aggregate in a **query** now reports its skips.
+  — §4/§9/§12, [`notes/callers-contract.md`](notes/callers-contract.md).
+- **A conversion inside a comparison is still silent.** `X as int > 5` drops the
+  malformed rows: a failed conversion makes the operand `absent`, every comparison
+  with an absent operand is false (§8), and the row is filtered out before a
+  premise exists to carry the count — so a dirty column silently *narrows* a filter
+  where it visibly widens an assignment. Found 2026-08-18 while building the report
+  above. _queued — **v1** (S3: the same silence the report exists to end)._ — §8/§12.
 - **A type-clash diagnostic that names the conversion.** `V = A + B` over mixed
   numerics reports the clash and stops; now that `as` exists there is a concrete
   fix to suggest, which there was not when this was first noted. _queued — **v1** (S3)._ — §12.
@@ -168,29 +174,28 @@ warning today: §9's skipped aggregate rows, §13's unrepresentable import cells
 an external signal. The discriminating rule is how the program reads the short
 relation — projected, one row short and say so; folded or negated, withhold.
 
-The design question the decision leaves open is **the CLI shape**: a shell pipeline
-reads stdout and cannot see a stderr warning at all, so "withhold" has to mean an
-exit code and a stdout discipline, not a return field. Sequence it with §11's
-`?why`, whose `unknown` arm is the same distinction reached from the other side —
-**and with integrity constraints below**, which need the same exit code to signal a
-violation (2026-08-18: designing them apart yields two vocabularies for one code).
-_queued — decided, not built; **v1**, merged with integrity constraints._ — §15, `notes/tsdl-cross-project-review.md`,
-[`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
+**The CLI shape is settled and withholding has no trigger** (2026-08-18): the
+caller's-contract session measured all three of the decision's "live sources" and
+none is one — §13's cells are structured errors, the round cap is a test oracle,
+and §9's skips are absent *values* in present rows, not short relations. §15 says
+so, and §14's range invariant reserves the next code above `2` for the day
+something does truncate. What is left is a **trigger**, not a design.
+_parked (awaiting a trigger: a hosted surface's budget, an external signal) — **post-v1**: the vocabulary it needed shipped._ — §15, `notes/callers-contract.md`.
 
 ### The caller's contract, and what a run leaves behind (§12/§14/§15)
 
 Both found by the 2026-08-18 stock-take and neither previously listed;
 [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md) has the
-evidence.
+evidence, and [`notes/callers-contract.md`](notes/callers-contract.md) the design
+that settled the first.
 
-- **Integrity constraints, and an exit code that carries an answer.** There is no
-  `constraint`, no denial rule, no way to say *this must never happen* — while the
-  skill's own description advertises consistency checking. `src/main.rs` returns
-  `0` for every run that completes and silence means no (§14), so a caller must
-  **parse stdout** to learn whether its constraint held, and `datalog check.dl &&
-  deploy` cannot mean what it looks like. **Design it with the truncation
-  contract's open half above**, which needs the same exit code and stdout
-  discipline to express withholding. _queued (own session; merge) — **v1** (S1 + pillar 3)._ — §12/§14/§15.
+- **Integrity constraints, and an exit code that carries an answer.** ✅
+  **2026-08-18.** A constraint needs **no construct**: a negation-only body already
+  answers `holds(true).`, so only the code was missing. Exit codes are now grep's —
+  `0` rows · `1` no rows · `2` did not answer — **stated as a range** so a later
+  code refines `2` rather than reinterpreting it, and `datalog check.dl -q 'not
+  conflict(_, _)' && deploy` means what it looks like. Example §16.13. — §12/§14/§15,
+  [`notes/callers-contract.md`](notes/callers-contract.md).
 - **Nothing is reusable across runs.** Every invocation re-parses, re-imports (§13
   materializes eagerly) and re-runs the fixpoint from zero, and there is no REPL —
   so an agent's write-run-read-fix loop pays a full reload each iteration. Distinct

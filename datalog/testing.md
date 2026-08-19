@@ -199,6 +199,15 @@ it. A future audit starts here.
 | Absent value (§4/§8) | `arb_fact_constant` (absent in *data*, ~1 in 10) + `absent_ir` (join / self-join / anti-join / comparison / arithmetic / presence over a `{0, 1, absent}` pool) | B1 absent differential (`b1_absent_programs_agree`); value laws (annihilation, comparison-false, unify-vs-eq, sorts-first); `generator_emits_absent_in_facts_only` |
 | Declarative semantics (§6) | nothing of its own — §6 describes the semantics every generator above already exercises | the match relation: `try_match_binds_a_var_to_a_stored_absent_but_never_rematches_it`, `values_unify_matches_eq_off_absent`; its two derived consequences: `repeating_a_body_literal_drops_absent_rows` and `a_fact_never_satisfies_its_own_negation` (**C9**); the perfect model: **C1**–**C3**; the aggregate fold: the group-by oracle above; the fixpoint: **C10**; the error rule: B1's error path |
 
+| The caller's contract (§14) | nothing generated — the exit code is a property of the *process*, not of a program a generator can emit | `tests/system.rs`, listed under Phase D below: one test per code, §16.13's check in both halves, a warning shown not to move the code, and the any-query boundary |
+
+**§14's contract is pinned only at the system layer, and that is not a thin spot**
+(2026-08-18). Every inner layer returns a `RunResult`; the code is computed from it
+in `main.rs` and observable only by running the binary. A property would have to
+generate programs *and* predict their row counts, which is the evaluator's job
+restated — so the guard is the exhaustive system-test set instead, exhaustive being
+affordable because the vocabulary has three values.
+
 **§6 adds no property, and two of its claims cannot have one** (2026-08-18). The
 section is descriptive, so every rule it states was already guarded — the row above
 is an index, not new work. The exceptions are the two *metatheoretic* claims: that
@@ -751,8 +760,17 @@ integration-level behaviors: the process contract, output shaping, and error
   content, and exit codes (0/1/2). Includes the §14 **composition-over-a-pipe**
   test — run 16.1, feed its stdout back on stdin with an appended query —
   stdin (`-`) / usage-error paths, exact float/symbol stdout via `features.dl`,
-  and exit-1 stderr rendering for type, runtime, and lexical near-miss errors
+  and stderr rendering for type, runtime, and lexical near-miss errors
   (the `=<`→`<=` hint).
+- **The caller's contract (§14) is pinned here and only here**, because the exit
+  code is not visible from any inner layer: every code in the vocabulary has a
+  test (`rows_found_is_zero_and_no_rows_is_one`,
+  `a_program_with_no_queries_exits_zero`,
+  `usage_and_program_errors_share_the_did_not_answer_code`), a warning is shown
+  not to move it, and §16.13's consistency check is run in both its clean and
+  violated halves. One test pins a **boundary** rather than a guarantee —
+  `any_query_decides_so_a_files_own_answers_mask_a_dash_q` — so that a later
+  session changes that rule deliberately rather than by accident.
 - Corpus lives in `datalog/tests/programs/`: the §16 examples as real `.dl`
   files, `features.dl` / `disjunction.dl` for feature wiring, and
   `broken_{multi,unsafe,types,arith}.dl` for the error paths.

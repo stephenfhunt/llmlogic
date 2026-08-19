@@ -24,6 +24,58 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-18 — The caller's contract ships, and the thing it was merged for has no trigger
+
+The exit code now answers the question. Five axes taken one at a time
+([`notes/callers-contract.md`](../datalog/notes/callers-contract.md)); **two were
+settled by measurement, and both measurements contradicted a document**. 465 tests
+pass, clippy and rustfmt clean.
+
+**Done**
+- **grep's vocabulary**: `0` rows found · `1` no rows · `2` did not answer, stated
+  as a **range** (`≥ 2` did not answer) so a later code refines `2` rather than
+  reinterpreting it. Program errors moved `1 → 2`. **§16.13** is the first example
+  whose subject is the exit code; `tests/system.rs` pins every code, plus the
+  boundary that "any query decides".
+- **Two silences ended**: a conversion that loses a value reports *malformed, not
+  missing* (§4/§12), and an aggregate in a **query** now reports its skipped
+  absents — §9's documented blind spot, whose stated cause was wrong (`answer`
+  builds the premises and discarded them).
+- **Swept**: §9's exclusion, §12's severity and *Not covered*, §14's binary
+  contract, §15's truncation paragraph, §4's cast section, `ROADMAP.md` ×4,
+  `testing.md`, `skill/SKILL.md`, `docs/agent-skill.md`.
+
+**Decided**
+- **A constraint is not a construct.** The language already writes the check — a
+  negation-only body answers `holds(true).` — so only the code was missing.
+  *Rejected*: a `constraint` statement (buys no expressiveness) and the ASP denial
+  `:- body.` (its meaning is a model filter; we compute one model). Phrase checks
+  **affirmatively**: errors are `≥ 2`, so `&&` cannot fire on a broken program.
+- **Withholding is specified and unnumbered.** §17 2026-08-16 named three live
+  truncation sources; measured, **none is one** — §13's cells are structured
+  errors, the round cap is a test oracle, and §9's skips are absent *values* in
+  present rows. **Short by rows is not absent in a cell**, and the entry never drew
+  that line. So the merge that made this one session was right for a reason it
+  could not state: the two needs never contended for the code.
+- **stdout stays a pure fact stream.** A `%` marker was rejected as visibility
+  without capability — a downstream lexer skips comments, so it cannot make a pipe
+  safe, only look safe. The residual hazard is recorded in §14 rather than left to
+  lore: `a | b` still cannot see an exit code without `pipefail`.
+- **The new report needed a silencer.** §16.9's guarded idiom (`V = X as int, V is
+  absent`) is a *correct* program the warning fired on — the exact hazard the
+  sibling engine measured — so a guarded conversion is silent.
+
+**Removed**
+- §9's "not covered by the warning: an aggregate appearing only in a query", §14's
+  "what the exit code means beyond 'it ran'", §15's three-live-instances claim, and
+  the ROADMAP's integrity-constraint and reclassification items. The 2026-08-18 §6
+  entry rotated verbatim to `worklog-archive/2026-08.md`.
+
+**Next up**
+- **Temporal types**, then **the profile** — unchanged by this session.
+- Filed while building: **a conversion inside a comparison is still silent**
+  (`X as int > 5` narrows a filter with no premise to report on) — v1, §8/§12.
+
 ## 2026-08-18 — §1 is written, and three of §2's four principles ratify *scoped*
 
 The definition of done, taken first on the stock-take's recommendation. §1 now has
@@ -136,57 +188,3 @@ were untracked, four tracked and mis-ranked. No `src/` change, nothing ratified.
 - Open, in §17: whether a constraint is a language construct or a query convention,
   how many exit codes the vocabulary needs, and whether stdout stays a pure fact
   stream when a run has something to say and no rows to say it in.
-## 2026-08-18 — §6 is written, and the gap nobody listed is the one that moved the operator
-
-The last blocking design session: §6 goes from an account of positive programs to
-an account of the language, with `notes/declarative-semantics.md` carrying the
-formal half. **No `src/` change, by design** — 386 lib tests unchanged, clippy and
-rustfmt clean, which is the check that a descriptive session stayed descriptive.
-
-**Done**
-- **§6 rewritten** (37 → 86 lines): `T_P` over a **match relation** rather than
-  substitution; §8 literals as **interpreted predicates**; an aggregate as a
-  **fixed function from group keys to values**; the two finiteness claims
-  separated, PTIME restored with them; the error rule; a footer down to what is
-  genuinely out of scope.
-- **`notes/declarative-semantics.md`** (199 lines) — match table, witness set and
-  fold, the assembled operator, the PTIME argument; the §10/`termination.md`
-  pattern, second use. **`testing.md`** gains a §6 row indexing the properties its
-  claims already rest on, and the note that §6 adds none.
-- **Swept**: `spec-traceability.md`'s §6 row (its "no date" paragraph was stale for
-  §10 too); `termination.md`'s "two consequences worth stating in §6", discharged;
-  §15's "least model" widened to "least, or perfect"; three `ROADMAP.md` sites.
-
-**Decided**
-- **A run that raises an error has no model** — the one real decision, describing
-  `eval`'s `Result<Model>` rather than changing it. Not a smaller model and not a
-  hole: the error is neither a truth value nor a missing fact. It is the **limiting
-  case of the truncation contract**, and what stops the semantics erasing §8's line
-  between an *unrepresentable* conversion (`absent`) and a *lossy* one. *Whether* a
-  run errors is the program's; *which* error it names is the schedule's (B1).
-- **`T_P` needs a match relation**: `p(absent)` is in `I`, yet a *bound* occurrence
-  must never match it — **binding is total, matching is semantic**. One split, from
-  which `p(X), p(X)` selecting less than `p(X)` and `p(X), not p(X)` deriving
-  nothing both fall out rather than being rules of their own.
-- **Two finiteness claims had been one** — what `bugs/004` found without naming it:
-  `T_P(I)` is finite for *every* program; the **fixpoint** is reached only inside
-  §10's certified fragment.
-- **§6's footer ranked its own gaps backwards.** Aggregation, carried since
-  2026-07-25 as the last unknown, cost one sentence; `absent`, listed as a peer,
-  rewrote the **operator**, and nothing had flagged it. Annotated onto the
-  2026-07-29 deferral: a footer ranks by what was noticed.
-
-**Removed**
-- §6's three-gap *Not covered* footer, the **"§6 was never extended"** ROADMAP item,
-  `§6` from the hygiene section's title, and the backlog preamble's "the one
-  remaining design session" — none is blocking now.
-- The 2026-08-17 cross-engine benchmark entry rotated verbatim to the archive.
-
-**Next up**
-- **Profile the engine** — head of the queue, ranked leads in
-  `notes/cross-engine-benchmark.md` (the derivation recorder first). Gates the
-  aggregation rescan, the derivation-store swap, and parallelism.
-- Elective, none blocking: **limit predicates** (now with a written baseline),
-  **temporal types**, the §17 restructure.
-- Open, *not* filed: two §6 claims have no property and cannot — `T_P(I)` finite,
-  and PTIME. Metatheoretic; recorded in `testing.md` rather than softened away.

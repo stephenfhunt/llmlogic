@@ -48,9 +48,26 @@ zero or more one-shot `-q` queries:
 ./datalog [<file> | -] [-q <query>]…
 ```
 
-Write the program to a temp `.dl` file (or pipe via stdin). Exit codes: **0** ok
-· **1** program error (structured messages on stderr — read them, they include
-spans and did-you-mean hints and are meant to guide a fix) · **2** usage error.
+Write the program to a temp `.dl` file (or pipe via stdin).
+
+**Exit codes answer the question**, on `grep`'s vocabulary: **0** rows found (or
+no queries asked) · **1** no rows — every query ran and none answered · **2** the
+run did not answer, which covers a usage problem and a program error alike
+(structured messages on stderr — read them, they include spans and did-you-mean
+hints and are meant to guide a fix). `0` and `1` are answers; **`≥ 2` means it did
+not answer**, so branch on that boundary.
+
+That is also how you **check a constraint** — there is no `constraint` keyword,
+because a query already is one:
+
+```sh
+# nobody double-booked? then deploy
+./datalog roster.dl -q 'not double_booked(_, _)' && deploy
+```
+
+Phrase the check affirmatively, as here: errors are `≥ 2`, so `&&` cannot fire on
+a program that failed to compile. And impose it on a program whose queries *are*
+the checks — **any** query answering makes the run `0`.
 
 ### `-q` one-shot queries — the forms
 - **A query body** — a bare atom or a comma-separated conjunction, answered

@@ -72,8 +72,8 @@ sorted. Formatting is stable and round-trips as input:
   aggregate result being the usual case.
 - A question with no variables answers **`holds(true).`** if it holds, and prints
   nothing if it does not — `name(true).` when it is named. Silence therefore means
-  "no rows", never "something went wrong" — errors go to stderr and change the exit
-  code.
+  "no rows", never "something went wrong" — errors go to stderr and the exit code
+  tells the two apart (below).
 
 One trap worth knowing: an **unnamed** answer printed under a real relation's name
 is **the rows your query matched, not the whole relation**. Piping
@@ -127,6 +127,36 @@ import "lib/rules.dl".                    % no `as` = splice another .dl file
 Imports need the engine's default `duckdb` feature (present in the packaged
 skill binary). A build without it reports a structured error for any data
 import.
+
+## The exit code, and checking a constraint
+
+The code answers the question, on `grep`'s vocabulary:
+
+| code | meaning |
+|---|---|
+| `0` | **rows found** — a query printed an answer (or the program had no queries) |
+| `1` | **no rows** — every query ran, none answered |
+| `2` | **did not answer** — a usage problem or a program error, on stderr |
+
+`0` and `1` are answers; **`≥ 2` means the run did not answer**, so branch on that
+boundary rather than on `2` exactly.
+
+This is how you check a constraint — there is no `constraint` keyword, because a
+query already is one. Write the check as a negation and let the code carry it:
+
+```sh
+# nobody double-booked? then deploy
+datalog roster.dl -q 'not double_booked(_, _)' && deploy
+```
+
+**Phrase the check affirmatively, as here.** Errors are `≥ 2`, so `&&` cannot fire
+on a program that failed to compile — while the inverted form (`-q
+'double_booked(P, D)' || deploy`) deploys on a syntax error just as readily as on
+a clean roster.
+
+One thing to know: **any** query answering makes the run `0`. So impose your check
+on a program whose queries *are* the checks — a `-q` added to a file that asks its
+own questions is not a check, because the file's own answers set the code.
 
 ## Errors
 
