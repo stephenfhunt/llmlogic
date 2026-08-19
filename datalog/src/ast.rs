@@ -113,7 +113,7 @@ pub struct FieldDecl {
 }
 
 /// The five primitive type names (§4).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum TypeName {
     Symbol,
     String,

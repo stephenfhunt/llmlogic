@@ -49,7 +49,7 @@ use crate::ir::{
     Term, Tuple, Value, f64_as_exact_i64, i64_as_exact_f64,
 };
 use crate::lexer::{CellClass, classify_cell, classify_symbol};
-use crate::provenance::{Derivation, NoMatchPattern, Premise};
+use crate::provenance::{Derivation, LostConversion, NoMatchPattern, Premise};
 
 /// The result of evaluation: every predicate's full extent, plus provenance.
 ///
@@ -133,6 +133,24 @@ impl Model {
     /// A slot the match left unbound is malformed IR and surfaces as a
     /// structured error rather than a panic.
     pub fn answer(&self, query: &Query) -> Result<Vec<Vec<Value>>> {
+        self.answer_reporting(query, &mut |_| {})
+    }
+
+    /// [`answer`](Self::answer), reporting each matched row's premises to
+    /// `report` as they are produced.
+    ///
+    /// A query records no derivations — it is a projection over a finished
+    /// model, not a rule that adds to it — but the premises are built either
+    /// way, and §9's skip count rides on
+    /// [`Premise::Aggregate`](crate::provenance::Premise::Aggregate). Handing
+    /// them out here is what lets an aggregate written in a *query* report its
+    /// skipped `absent` inputs, which was the one shape §9's warning could not
+    /// see (§17, 2026-08-18).
+    pub fn answer_reporting(
+        &self,
+        query: &Query,
+        report: &mut dyn FnMut(&[Option<Premise>]),
+    ) -> Result<Vec<Vec<Value>>> {
         validate_body(&query.body, &query.var_names)?;
         let views = vec![AtomView::Full; query.body.len()];
         let cx = JoinCx {
@@ -143,7 +161,8 @@ impl Model {
         };
         let mut rows: BTreeSet<Vec<Value>> = BTreeSet::new();
         let mut unbound: Option<u32> = None;
-        enumerate_matches(&cx, query.var_names.len(), &mut |bindings, _premises| {
+        enumerate_matches(&cx, query.var_names.len(), &mut |bindings, premises| {
+            report(premises);
             let mut row = Vec::with_capacity(query.projection.len());
             for &slot in &query.projection {
                 match bindings.get(slot as usize).and_then(|v| v.clone()) {
@@ -702,16 +721,35 @@ fn enumerate_from(
             match eval_compare(*op, lhs, rhs, bindings)? {
                 CompareOutcome::Fail => {}
                 CompareOutcome::Pass { lhs, rhs } => {
-                    premises[idx] = Some(Premise::Builtin { op: *op, lhs, rhs });
+                    // A comparison filters; a conversion that failed inside one
+                    // makes its operand absent, which makes the comparison false
+                    // (§8), so the row never reaches here. That site is named in
+                    // §12's *Not covered* rather than reported from a premise
+                    // that does not exist.
+                    premises[idx] = Some(Premise::Builtin {
+                        op: *op,
+                        lhs,
+                        rhs,
+                        lost: None,
+                    });
                     let result = enumerate_from(cx, order, depth + 1, bindings, premises, on_match);
                     premises[idx] = None;
                     result?;
                 }
                 CompareOutcome::Bind { slot, value } => {
+                    // An `=`-assignment is where every hoisted cast lands
+                    // (`lower::ArgMode::Hoist` puts each compound argument here),
+                    // so this is the one site that sees a conversion lose a value.
+                    let lost = if value.is_absent() {
+                        lost_conversions(lhs, rhs, bindings)
+                    } else {
+                        None
+                    };
                     premises[idx] = Some(Premise::Builtin {
                         op: *op,
                         lhs: value.clone(),
                         rhs: value.clone(),
+                        lost,
                     });
                     bindings[slot] = Some(value);
                     let result = enumerate_from(cx, order, depth + 1, bindings, premises, on_match);
@@ -1053,6 +1091,56 @@ pub(crate) fn eval_expr(expr: &Expr, bindings: &[Option<Value>]) -> Result<Value
             apply_arith(*op, l, r)
         }
         Expr::Cast { expr, ty } => apply_cast(eval_expr(expr, bindings)?, *ty),
+    }
+}
+
+/// Counts the conversions (§8's `as`) that **failed on data** in an assignment
+/// whose result came out `absent` — a value existed, could not be represented in
+/// the target type, and became `absent` (§17, 2026-08-16).
+///
+/// Called only when the assignment produced `absent`, which is rare, so the
+/// re-evaluation it does costs nothing on the ordinary path. The discriminator
+/// is the one the value model does not keep: a cast whose *operand* is absent
+/// annihilates (data that was missing stays missing), while a cast whose operand
+/// is a real value and whose result is `absent` **lost** it.
+///
+/// Only the first losing target type is reported. Two different casts failing in
+/// one assignment is a shape no program has needed to distinguish, and a warning
+/// that lists types is harder to act on than one that names the count.
+fn lost_conversions(lhs: &Expr, rhs: &Expr, bindings: &[Option<Value>]) -> Option<LostConversion> {
+    let mut found: Option<LostConversion> = None;
+    for expr in [lhs, rhs] {
+        walk_lost(expr, bindings, &mut found);
+    }
+    found
+}
+
+/// Recurses through an expression, tallying casts that lost a value into `found`.
+fn walk_lost(expr: &Expr, bindings: &[Option<Value>], found: &mut Option<LostConversion>) {
+    match expr {
+        Expr::Cast { expr: inner, ty } => {
+            walk_lost(inner, bindings, found);
+            let Ok(operand) = eval_expr(inner, bindings) else {
+                return;
+            };
+            if operand.is_absent() {
+                return; // annihilation: missing in, missing out
+            }
+            if let Ok(result) = apply_cast(operand, *ty)
+                && result.is_absent()
+            {
+                match found {
+                    Some(lost) if lost.to == *ty => lost.count += 1,
+                    Some(_) => {}
+                    None => *found = Some(LostConversion { to: *ty, count: 1 }),
+                }
+            }
+        }
+        Expr::Binary { lhs, rhs, .. } => {
+            walk_lost(lhs, bindings, found);
+            walk_lost(rhs, bindings, found);
+        }
+        Expr::Term(_) => {}
     }
 }
 

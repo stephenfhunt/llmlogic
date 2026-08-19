@@ -45,7 +45,7 @@ use std::path::Path;
 
 use crate::ast::StatementKind;
 use crate::engine::{Model, eval};
-use crate::error::{Error, Warning};
+use crate::error::{AggregateSite, Error, Warning};
 use crate::ir;
 use crate::lower::{check_program, lower_with_sources};
 use crate::parser::parse;
@@ -131,8 +131,51 @@ pub fn run_at_reporting(
     warnings.extend(absent_skip_warnings(&model, &program));
 
     let mut answers = Vec::with_capacity(program.queries.len());
-    for query in &program.queries {
-        let rows = model.answer(query).map_err(|e| vec![e])?;
+    for (position, query) in program.queries.iter().enumerate() {
+        // (body index) → (op, total skipped, groups that skipped), for the
+        // aggregates written in *this* query. A query's premises are built and
+        // then dropped on the floor by `answer`; this is the only place they
+        // are read, and it is what makes §9's skip report reach a query (§14).
+        let mut sites: BTreeMap<usize, (&'static str, usize, usize)> = BTreeMap::new();
+        let mut lost_sites: BTreeMap<usize, (&'static str, usize)> = BTreeMap::new();
+        let rows = model
+            .answer_reporting(query, &mut |premises| {
+                for (idx, premise) in premises.iter().enumerate() {
+                    match premise {
+                        Some(crate::provenance::Premise::Aggregate { op, skipped, .. })
+                            if *skipped > 0 =>
+                        {
+                            let entry = sites.entry(idx).or_insert((op.keyword(), 0, 0));
+                            entry.1 += skipped;
+                            entry.2 += 1;
+                        }
+                        Some(crate::provenance::Premise::Builtin {
+                            lost: Some(lost), ..
+                        }) if !assignment_is_guarded(&query.body, idx) => {
+                            let entry = lost_sites.entry(idx).or_insert((lost.to.keyword(), 0));
+                            entry.1 += lost.count as usize;
+                        }
+                        _ => {}
+                    }
+                }
+            })
+            .map_err(|e| vec![e])?;
+        let site = || AggregateSite::Query(position + 1);
+        warnings.extend(sites.into_values().map(|(op, skipped, groups)| {
+            Warning::AbsentSkippedInAggregate {
+                op,
+                site: site(),
+                skipped,
+                groups,
+            }
+        }));
+        warnings.extend(lost_sites.into_values().map(|(to, failed)| {
+            Warning::ConversionFailedOnData {
+                to,
+                site: site(),
+                failed,
+            }
+        }));
         answers.push(answer_lines(query, &rows, &program));
     }
     Ok(RunResult {
@@ -243,9 +286,10 @@ pub fn run_with_queries_at_reporting(
     run_at_reporting(&source, source_path, report)
 }
 
-/// Reports every aggregate that skipped an `absent` input (§9's skip-but-report
-/// rule), read back out of the recorded provenance rather than tracked
-/// separately — [`crate::provenance::Premise::Aggregate`] already carries the
+/// Reports what a run's derivations know and its answers do not: every
+/// aggregate that skipped an `absent` input (§9's skip-but-report rule) and every
+/// conversion that lost a value (§12's malformed-not-missing report), read back
+/// out of the recorded provenance rather than tracked separately — [`crate::provenance::Premise::Aggregate`] already carries the
 /// count, and this is what makes it visible before the `?why` surface (§11)
 /// exists.
 ///
@@ -253,21 +297,26 @@ pub fn run_with_queries_at_reporting(
 /// every group that site produced. Sites are keyed in `BTreeMap` order so the
 /// warning stream is deterministic like everything else in §14.
 ///
-/// Limitation, deliberate for the interim: `Model::answer` records no
-/// derivations, so an aggregate that appears only in a *query* is not covered.
+/// Aggregates written in a **query** are covered by
+/// [`query_skip_warnings`], which reads the premises `Model::answer` builds and
+/// used to discard; a query records no derivations, so this scan cannot see it.
 fn absent_skip_warnings(model: &Model, program: &ir::Program) -> Vec<Warning> {
-    // Only programs with an aggregate can skip; skipping the derivation scan
-    // keeps this free for everything else.
+    // Only a program that aggregates or converts has anything to report here;
+    // skipping the derivation scan keeps this free for everything else.
     if !program.rules.iter().any(|rule| {
-        rule.body
-            .iter()
-            .any(|literal| matches!(literal.kind, ir::BodyLiteralKind::Aggregate { .. }))
+        rule.body.iter().any(|literal| match &literal.kind {
+            ir::BodyLiteralKind::Aggregate { .. } => true,
+            ir::BodyLiteralKind::Compare { lhs, rhs, .. } => expr_casts(lhs) || expr_casts(rhs),
+            _ => false,
+        })
     }) {
         return Vec::new();
     }
 
     // (rule, body index) → (op, total skipped, groups that skipped).
     let mut sites: BTreeMap<(u32, usize), (&'static str, usize, usize)> = BTreeMap::new();
+    // (rule, body index) → (target type, total values lost).
+    let mut lost_sites: BTreeMap<(u32, usize), (&'static str, usize)> = BTreeMap::new();
     for fact in model.facts() {
         for derivation in model.derivations_of(&fact) {
             for (idx, premise) in derivation.premises.iter().enumerate() {
@@ -281,23 +330,84 @@ fn absent_skip_warnings(model: &Model, program: &ir::Program) -> Vec<Warning> {
                     entry.1 += skipped;
                     entry.2 += 1;
                 }
+                if let crate::provenance::Premise::Builtin {
+                    lost: Some(lost), ..
+                } = premise
+                    && !assignment_is_guarded(&program.rules[derivation.rule.0 as usize].body, idx)
+                {
+                    let entry = lost_sites
+                        .entry((derivation.rule.0, idx))
+                        .or_insert((lost.to.keyword(), 0));
+                    entry.1 += lost.count as usize;
+                }
             }
         }
     }
 
-    sites
+    let rule_site = |rule_id: u32| {
+        let rule = &program.rules[rule_id as usize];
+        let info = program.pred_info(rule.head.pred);
+        AggregateSite::Rule(format!("{}/{}", info.name, info.arity))
+    };
+
+    let skips = sites
         .into_iter()
-        .map(|((rule_id, _), (op, skipped, groups))| {
-            let rule = &program.rules[rule_id as usize];
-            let info = program.pred_info(rule.head.pred);
-            Warning::AbsentSkippedInAggregate {
+        .map(
+            |((rule_id, _), (op, skipped, groups))| Warning::AbsentSkippedInAggregate {
                 op,
-                rule: format!("{}/{}", info.name, info.arity),
+                site: rule_site(rule_id),
                 skipped,
                 groups,
-            }
-        })
-        .collect()
+            },
+        );
+    let losses = lost_sites.into_iter().map(|((rule_id, _), (to, failed))| {
+        Warning::ConversionFailedOnData {
+            to,
+            site: rule_site(rule_id),
+            failed,
+        }
+    });
+    skips.chain(losses).collect()
+}
+
+/// Whether the assignment at `body[idx]` has its result **guarded** by a
+/// presence test in the same body — `V = X as int, V is [not] absent`.
+///
+/// A guarded assignment needs no malformed-value warning: the program already
+/// asks the question the warning would answer, and §16.9 recommends exactly this
+/// idiom for reading a mostly-numeric column. Warning there would be a
+/// diagnostic firing on a *correct* program, which a sibling engine measured
+/// leading a model to a destructive fix (`notes/tsdl-cross-project-review.md`) —
+/// the same hazard that keeps this report dynamic rather than static (§12).
+fn assignment_is_guarded(body: &[ir::BodyLiteral], idx: usize) -> bool {
+    let ir::BodyLiteralKind::Compare { lhs, rhs, .. } = &body[idx].kind else {
+        return false;
+    };
+    // The assigned variable is whichever side is a bare variable.
+    let bound = [lhs, rhs].into_iter().find_map(|expr| match expr {
+        ir::Expr::Term(ir::Term::Var(var)) => Some(*var),
+        _ => None,
+    });
+    let Some(bound) = bound else { return false };
+    body.iter().any(|literal| {
+        matches!(
+            &literal.kind,
+            ir::BodyLiteralKind::Presence {
+                expr: ir::Expr::Term(ir::Term::Var(var)),
+                ..
+            } if *var == bound
+        )
+    })
+}
+
+/// Whether an expression contains an `as` cast (§8) — the cheap static test that
+/// keeps the derivation scan off programs with nothing to report.
+fn expr_casts(expr: &ir::Expr) -> bool {
+    match expr {
+        ir::Expr::Cast { .. } => true,
+        ir::Expr::Binary { lhs, rhs, .. } => expr_casts(lhs) || expr_casts(rhs),
+        ir::Expr::Term(_) => false,
+    }
 }
 
 /// Renders one query's answer rows to canonical fact lines per the §14 output

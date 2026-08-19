@@ -364,3 +364,79 @@ fn output_is_valid_input_end_to_end() {
         vec!["ancestor(\"alice\", \"dave\")."]
     );
 }
+
+/// An aggregate written in a **query** reports its skipped absents (§9). This
+/// was the one shape the skip report could not see — a query records no
+/// derivations, and the report was read out of them — so the count existed and
+/// nothing read it. The site is the query's 1-based position, since an unnamed
+/// query has no name to use (a named one lowers to a rule and reports as one).
+#[test]
+fn a_query_level_aggregate_reports_its_skipped_absents() {
+    let result = datalog::run(
+        "m(\"a\", 5). m(\"a\", absent).\n\
+         ?- S = sum { A | m(\"a\", A) }.",
+    )
+    .expect("runs");
+    let warnings: Vec<String> = result.warnings.iter().map(|w| w.to_string()).collect();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings[0].contains("`sum` in query 1") && warnings[0].contains("skipped 1 absent"),
+        "{}",
+        warnings[0]
+    );
+}
+
+/// A conversion that fails on data reports **malformed, not missing** (§12).
+/// The value model cannot carry the distinction — both are `absent` (§4) — so
+/// without this a dirty column is indistinguishable from a sparse one.
+#[test]
+fn a_conversion_that_loses_a_value_reports_it_as_malformed() {
+    let result = datalog::run(
+        "raw(\"12\"). raw(\"abc\"). raw(\"30\").\n\
+         num(V) :- raw(X), V = X as int.\n?- num(V).",
+    )
+    .expect("runs");
+    let warnings: Vec<String> = result.warnings.iter().map(|w| w.to_string()).collect();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings[0].contains("`as int` in `num/1`")
+            && warnings[0].contains("1 value(s)")
+            && warnings[0].contains("malformed, not missing"),
+        "{}",
+        warnings[0]
+    );
+}
+
+/// An `absent` that arrived as **data** is missing, not malformed: nothing was
+/// lost, so the conversion report stays silent and only §9's skip speaks. This
+/// is the assertion that keeps the two reports from collapsing into one.
+#[test]
+fn an_absent_that_was_never_a_value_is_not_reported_as_malformed() {
+    let result = datalog::run(
+        "raw(\"12\"). raw(absent).\n\
+         num(V) :- raw(X), V = X as int.\n?- num(V).",
+    )
+    .expect("runs");
+    assert!(
+        result.warnings.is_empty(),
+        "absent in, absent out is annihilation, not loss: {:?}",
+        result.warnings
+    );
+}
+
+/// A **guarded** conversion is silent: `V = X as int, V is absent` is §16.9's
+/// recommended idiom for a mostly-numeric column, and the program asking the
+/// question is precisely the case a warning must not fire on. A diagnostic that
+/// fires on correct programs is the hazard `notes/tsdl-cross-project-review.md`
+/// measured, and this test is what stops this one becoming it.
+#[test]
+fn a_guarded_conversion_is_not_warned_about() {
+    let result = datalog::run(
+        "raw(\"12\"). raw(\"abc\").\n\
+         unparsed(X) :- raw(X), V = X as int, V is absent.\n\
+         amount(V)   :- raw(X), V = X as int, V is not absent.\n\
+         ?- unparsed(X).",
+    )
+    .expect("runs");
+    assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+}

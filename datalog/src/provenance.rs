@@ -15,7 +15,7 @@
 //! over a wide relation in named form — `employee(name: "alice", title:
 //! "manager")` rather than eight positional columns (§17, 2026-07-20).
 
-use crate::ast::{AggOp, CmpOp};
+use crate::ast::{AggOp, CmpOp, TypeName};
 use crate::engine::Model;
 use crate::ir::{Fact, PredId, RuleId, Tuple, Value};
 
@@ -70,7 +70,20 @@ pub enum Premise {
     /// and the evaluated operand values (for an assignment `N = expr`, both
     /// values are the assigned value). Self-justifying — like [`Premise::NoMatch`]
     /// it carries no fixpoint round and recurses into nothing.
-    Builtin { op: CmpOp, lhs: Value, rhs: Value },
+    Builtin {
+        op: CmpOp,
+        lhs: Value,
+        rhs: Value,
+        /// Conversions (§8's `as`) that **failed on data** while evaluating this
+        /// literal: a value existed, could not be represented, and became
+        /// `absent` (§17, 2026-08-16). `None` is the ordinary case.
+        ///
+        /// It rides here rather than in a counter beside the loop because a rule
+        /// instance may be rediscovered in a later round, and derivations
+        /// deduplicate by rule + premises — so the count is right by
+        /// construction, exactly as [`Premise::Aggregate`]'s `skipped` is.
+        lost: Option<LostConversion>,
+    },
     /// A satisfied presence test `expr is [not] absent` (§4/§8), carrying the
     /// evaluated operand and the operator's `negated` flag. Self-justifying like
     /// [`Premise::Builtin`]: it holds on its evaluated operand and recurses into
@@ -88,6 +101,18 @@ pub enum Premise {
         present: usize,
         skipped: usize,
     },
+}
+
+/// A conversion that failed on data, summarised for one premise: the target
+/// type it failed into, and how many values failed it there.
+///
+/// The distinction it preserves is the one the value model cannot: an `absent`
+/// that arrived as data is *missing*, and an `absent` a failed conversion
+/// manufactured is *malformed* (§12).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct LostConversion {
+    pub to: TypeName,
+    pub count: u32,
 }
 
 /// One way a fact was derived: a ground rule instance.
@@ -176,7 +201,7 @@ impl ProofTree {
             .map(|premise| match premise {
                 Premise::Fact(f) => ProofTree::explain(model, f),
                 Premise::NoMatch(pattern) => Some(ProofTree::NoMatch(pattern.clone())),
-                Premise::Builtin { op, lhs, rhs } => Some(ProofTree::Builtin {
+                Premise::Builtin { op, lhs, rhs, .. } => Some(ProofTree::Builtin {
                     op: *op,
                     lhs: lhs.clone(),
                     rhs: rhs.clone(),

@@ -193,12 +193,33 @@ pub enum Warning {
     AbsentSkippedInAggregate {
         /// The reducer, as written (`sum`, `avg`, `min`, `max`).
         op: &'static str,
-        /// The head predicate of the rule the aggregate appears in.
-        rule: String,
+        /// Where the aggregate is written.
+        site: AggregateSite,
         /// Total `absent` inputs skipped across every group.
         skipped: usize,
         /// How many groups skipped at least one.
         groups: usize,
+    },
+    /// A conversion (§8's `as` cast) failed on data: a value existed, could not
+    /// be represented in the target type, and became `absent` (§17, 2026-08-16).
+    ///
+    /// This is the **malformed** report, and it exists because the value model
+    /// cannot carry the distinction: an absent that arrived as data (an empty
+    /// CSV cell, a JSON `null`) and an absent the engine manufactured by failing
+    /// a conversion are the same value (§4), so a column of malformed text reads
+    /// downstream as a sparse one and nothing else would say otherwise.
+    ///
+    /// Counted per conversion *site*, and raised only on a run where a
+    /// conversion actually failed — never statically from the presence of a
+    /// cast, which is a warning that fires on correct programs
+    /// (`notes/tsdl-cross-project-review.md` measured that hazard).
+    ConversionFailedOnData {
+        /// The target type, as written (`int`, `float`, `bool`, `symbol`).
+        to: &'static str,
+        /// Where the conversion is written.
+        site: AggregateSite,
+        /// How many values failed the conversion at this site.
+        failed: usize,
     },
     /// A rule grows a predicate by **arithmetic inside a positive cycle** (§10,
     /// *Termination*), so the least model may be infinite and evaluation may not
@@ -221,6 +242,29 @@ pub enum Warning {
     },
 }
 
+/// Where a diagnostic's site is: inside a rule, or inside a query.
+///
+/// A *named* query lowers to a rule whose head is the projection (§14), so it
+/// reports as a rule and only an **unnamed** query reaches [`Self::Query`] —
+/// which is why the query arm has a position and not a name. The position is
+/// 1-based in program order, matching the order §14 prints answer blocks in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AggregateSite {
+    /// The head predicate of the rule the site appears in, as `name/arity`.
+    Rule(String),
+    /// The 1-based position of the query the site appears in.
+    Query(usize),
+}
+
+impl fmt::Display for AggregateSite {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AggregateSite::Rule(name) => write!(f, "`{name}`"),
+            AggregateSite::Query(position) => write!(f, "query {position}"),
+        }
+    }
+}
+
 impl fmt::Display for Warning {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -241,13 +285,18 @@ impl fmt::Display for Warning {
             }
             Warning::AbsentSkippedInAggregate {
                 op,
-                rule,
+                site,
                 skipped,
                 groups,
             } => write!(
                 f,
-                "warning: `{op}` in `{rule}` skipped {skipped} absent input(s) across \
+                "warning: `{op}` in {site} skipped {skipped} absent input(s) across \
                  {groups} group(s); the result covers only the values that exist"
+            ),
+            Warning::ConversionFailedOnData { to, site, failed } => write!(
+                f,
+                "warning: `as {to}` in {site} produced absent for {failed} value(s) that \
+                 could not be represented; they are malformed, not missing"
             ),
             Warning::ValueCreatingRecursion {
                 pred,
