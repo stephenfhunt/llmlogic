@@ -4,6 +4,13 @@ A short, honest set of tasks for watching whether an LLM agent (a) *reaches for*
 the `datalog` skill on the right problems and (b) gets the right answer, instead
 of hand-reasoning in prose. Not a benchmark — a checklist to eyeball in a session.
 
+**This file is `spec.md` §1's instrument for success criterion S1**, and a
+checklist is not yet enough to serve as one: v1 is defined as "S2–S6 hold and S1
+has been measured at least once", so rebuilding this as a harness — two model
+strengths, the first program recorded before any feedback, reference programs
+pinned in CI — is a **v1** item (`ROADMAP.md`, `notes/v1-scope.md`). What follows
+is the checklist as it stands.
+
 **Setup.** Activate the skill (see `README.md` → *Use as a Claude Code skill*),
 then pose each task below as a plain request in a Claude Code session — **without**
 naming datalog — and watch what the model does. The programs referenced live in

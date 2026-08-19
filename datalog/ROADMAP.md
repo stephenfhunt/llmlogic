@@ -16,6 +16,12 @@ design pass before it can be built) · **building** (implementation underway) ·
 **parked** (deliberately deferred, low priority / awaiting a trigger) ·
 **shipped**.
 
+Every open item also carries a **v1** / **post-v1** tag — an orthogonal axis to
+status, and a *classification*, not a restatement: **`spec.md` §1 defines what v1
+means** (S2–S6 hold and S1 has been measured at least once), and
+[`notes/v1-scope.md`](notes/v1-scope.md) holds the per-item argument. **post-v1
+means "does not block v1", never "unwanted".**
+
 ## Shipped milestones
 
 The evaluation-first roadmap (decided 2026-07-10; rationale in §17). One line
@@ -43,13 +49,14 @@ each; detail in §17 and `docs/worklog.md`.
 > 2026-08-18**, for the first time since the 2026-07-25 spec review. **No design
 > session blocks anything**: §6's extension, the last one, shipped 2026-08-18.
 >
-> **The order below is under review.** A feature-complete stock-take the same day
-> found three holes this file did not list and re-ranked four it did; the evidence
-> is in [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
-> Its recommendation: **§1 first, then the caller's contract, then temporal types,
-> then the profile** — which no longer leads. Recorded as a recommendation and
-> *not ratified*: ratifying §1 is itself step one, and what makes the rest
-> decidable.
+> **§1 is written and §2 ratified (2026-08-18), so every item below is now ruled
+> v1 or post-v1** against §1's success criteria — the argument per item is in
+> [`notes/v1-scope.md`](notes/v1-scope.md), and the evidence that prompted the
+> exercise in [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
+> The stock-take's recommended order survives the ruling — **the caller's contract,
+> then temporal types, then the profile** — with one change: **S1's harness
+> (`EXPERIMENTS.md`) now sits alongside them** instead of near the bottom, since §1
+> names it as the instrument v1 is defined against.
 >
 > Six are resolved in `bugs/resolved/`: `004` (§6 asserted a finiteness arithmetic
 > falsified), **fixed 2026-08-18** by the Termination session — §6's premise is now
@@ -72,17 +79,14 @@ each; detail in §17 and `docs/worklog.md`.
 > test left is `url_csv_import_reads_over_httpfs`, which needs the network and
 > passes. Any *failure* under `--ignored` now means something regressed.
 
-### Goals and principles (§1/§2) — the definition of done
+### Goals and principles (§1/§2) — shipped
 
-- **Ratify §1 and §2.** §1's goals, non-goals, target users and success criteria
-  have never been written; §2's principles are still candidates **except
-  "predictable evaluation"**, ratified 2026-08-18 in the scoped form the
-  implementation delivers. Both sections say so in their own *Not covered* footers.
-  **Moved out of "spec hygiene" 2026-08-18**, where filing it was a category error:
-  §1 is not tidiness but the definition of done, and "are we feature complete?" is
-  not answerable against an unwritten §1 — which is also why "is X in scope" keeps
-  getting decided ad hoc. Cheap, and it makes every other ranking here decidable.
-  _queued — recommended first ([`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md))._ — §1/§2.
+**✅ 2026-08-18.** §1 now states goals, non-goals, target users and six success
+criteria, and defines v1 as **S2–S6 hold and S1 has been measured at least once**;
+§2's remaining four principles are ratified, three of them **scoped to what the
+implementation delivers** rather than to what the sentence claimed. The ruling that
+tags every item below is in [`notes/v1-scope.md`](notes/v1-scope.md); §17
+2026-08-18 carries the argument. No `src/` change.
 
 ### Expressions (§5/§8)
 
@@ -106,10 +110,10 @@ and **`absent` for an unrepresentable conversion, an error for a lossy one**.
   §9's skip-and-report (`AggOutcome.skipped`) is the shape, but it rides on the
   aggregate literal and an `=`-assignment has no equivalent. Sequence with the
   **truncation contract**, which is the same question — what does a run owe when
-  its answer is short? _queued._ — §8/§9/§11, §17 2026-08-16.
+  its answer is short? _queued — **v1** (S3; rides the caller's-contract session)._ — §8/§9/§11, §17 2026-08-16.
 - **A type-clash diagnostic that names the conversion.** `V = A + B` over mixed
   numerics reports the clash and stops; now that `as` exists there is a concrete
-  fix to suggest, which there was not when this was first noted. _queued._ — §12.
+  fix to suggest, which there was not when this was first noted. _queued — **v1** (S3)._ — §12.
 
 *Superseding the former "scalar-function call form" item*: user-defined scalar
 functions were **declined** 2026-07-25 (a rule already is one; §17), and
@@ -133,7 +137,7 @@ atom-vs-call ambiguity that ruled out `float(A)`; scan-ahead is the candidate.
   **Ranked above the profile 2026-08-18**: date columns are ubiquitous in the files
   §13 exists to read, and a fast engine that cannot read one loses to a slow engine
   that can — and unlike the profile's leads, this item's design input is already in
-  hand. _queued (own session)._ — §4/§8/§13, [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
+  hand. _queued (own session) — **v1** (S4: "met except dates")._ — §4/§8/§13, [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
 
 ### Termination & value-creating recursion (§6/§10) — shipped
 
@@ -153,7 +157,7 @@ transitive closure finite rather than merely warned about — Kaminski et al.'s
 limit Datalog (references.md group 1). A milestone, not a rider: §6's `T_P`, §9's
 aggregation and §11's provenance all move — and §6 now states the premise it would
 give up (a fixpoint accumulating a set, not a per-group extremum), so the change
-has a written baseline to be measured against. _queued (own session)._ — §17 open
+has a written baseline to be measured against. _queued (own session) — **post-v1**: the 2026-08-18 warning is v1's answer._ — §17 open
 questions, `notes/termination.md`, `notes/declarative-semantics.md`.
 
 ### The truncation contract (§9/§13/§15) — decided, not built
@@ -170,7 +174,7 @@ exit code and a stdout discipline, not a return field. Sequence it with §11's
 `?why`, whose `unknown` arm is the same distinction reached from the other side —
 **and with integrity constraints below**, which need the same exit code to signal a
 violation (2026-08-18: designing them apart yields two vocabularies for one code).
-_queued — decided, not built._ — §15, `notes/tsdl-cross-project-review.md`,
+_queued — decided, not built; **v1**, merged with integrity constraints._ — §15, `notes/tsdl-cross-project-review.md`,
 [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
 
 ### The caller's contract, and what a run leaves behind (§12/§14/§15)
@@ -186,13 +190,13 @@ evidence.
   **parse stdout** to learn whether its constraint held, and `datalog check.dl &&
   deploy` cannot mean what it looks like. **Design it with the truncation
   contract's open half above**, which needs the same exit code and stdout
-  discipline to express withholding. _queued (own session; merge)._ — §12/§14/§15.
+  discipline to express withholding. _queued (own session; merge) — **v1** (S1 + pillar 3)._ — §12/§14/§15.
 - **Nothing is reusable across runs.** Every invocation re-parses, re-imports (§13
   materializes eagerly) and re-runs the fixpoint from zero, and there is no REPL —
   so an agent's write-run-read-fix loop pays a full reload each iteration. Distinct
   from pushdown and parallelism, which make *one* run faster. Invisible to
   `notes/cross-engine-benchmark.md`, which times whole processes by construction.
-  _queued._ — §13/§14/engine.
+  _queued — **post-v1**, with a trigger: S1's harness showing the reload change what an agent does._ — §13/§14/engine.
 
 ### Aggregation follow-ons (§9)
 
@@ -209,16 +213,16 @@ evidence.
   citing this measurement, then measured the **warning** beside it firing on
   correct programs and leading with a destructive fix — read
   `notes/tsdl-cross-project-review.md` before designing the diagnostic, not after.
-  _queued._ — §9/§13.
+  _queued — **v1** (S1: it returns wrong answers silently)._ — §9/§13.
 - **Statistical reducers** — `median`/`stddev`/`variance`/`percentile`. The
   aggregate node reserves a parameter slot for `percentile(p)`; each is a reducer
-  registration + a typecheck arm, no evaluator restructure. _queued._ — §9.
+  registration + a typecheck arm, no evaluator restructure. _queued — **post-v1** (additive)._ — §9.
 - **Collection-valued reducers** — `collect`/`string_agg`. Blocked on a
   first-class collection value (the value model is flat, §4); its own design
-  session. _queued (blocked)._ — §9/§4.
+  session. _queued (blocked) — **post-v1**._ — §9/§4.
 - **Recursive/monotonic aggregation** — v1 rejects recursion through an aggregate
   via stratification; how far to take a fixpoint semantics (Zaniolo et al.,
-  `references.md`) is open. _parked (research)._ — §9.
+  `references.md`) is open. _parked (research) — **post-v1**._ — §9.
 
 ### Surface uniformity & the agent edge (§5/§14)
 
@@ -246,7 +250,7 @@ them. Except where noted these are documented v1 limits rather than defects.
   **§16.11**, four mutations recorded. — §5/§14, `notes/query-answer-shape.md`.
   - Now unblocked, and *not* taken: **making an unnameable query an error** (axis 1).
     Recovery is "prepend a word" rather than "rewrite it as a rule", which is what
-    made strictness unaffordable before. Naming stays optional today. _queued._
+    made strictness unaffordable before. Naming stays optional today. _queued — **post-v1**._
   - A named query publishes **every** variable its body binds, so it does not
     replace a rule that projects fewer columns. Documented, not a defect.
 - **A synthesized answer does not say which query it answers.** Two boolean queries
@@ -256,7 +260,7 @@ them. Except where noted these are documented v1 limits rather than defects.
   than the only route. The fix is still a **`%` comment**, not an extra argument —
   the text is unusable by any program (string ops rejected) and an argument is the
   same move 2026-08-16 rejected for provenance-as-facts. **Sequence with §11's
-  comment rendering** so the format is designed once. _queued._ — §11/§14.
+  comment rendering** so the format is designed once. _queued — **post-v1** (naming resolves it today)._ — §11/§14.
   - *Rejected 2026-08-17, and recorded so it is not re-proposed:* a **warning when
     a program reads `answer` facts**. The hazard is a two-run merge, which inside a
     single run is indistinguishable from legitimate single-pipe composition — so it
@@ -271,7 +275,7 @@ them. Except where noted these are documented v1 limits rather than defects.
   "Queries stay conjunctive"). One datum on how much it matters: in a sibling
   engine's experiment **neither subject reached for `;` at all**, both writing two
   rules over one head, so the case for uniformity is consistency rather than demand
-  (`notes/tsdl-cross-project-review.md`). _queued._ — §5.
+  (`notes/tsdl-cross-project-review.md`). _queued — **post-v1**; §5's footer already states the asymmetry._ — §5.
 - **No string operations.** No prefix, split or concat, so reducing `lower::tests`
   to `lower` is unwritable and the fact producer must do it (2026-07-27). Closed:
   string construction fails §5's own termination test and would widen the hole the
@@ -284,7 +288,7 @@ them. Except where noted these are documented v1 limits rather than defects.
   string).` plus `not banned(X)` still warns "referenced but never defined"
   (verified). Declaring a schema is the user stating a relation exists and may be
   empty, and there is no way to suppress the warning. Either `declare` should
-  define, or there should be a way to say "intentionally empty". _queued._ — §10/§12.
+  define, or there should be a way to say "intentionally empty". _queued — **v1** (S3, inverted: it fires on correct programs)._ — §10/§12.
 
 ### Provenance surface (§11)
 
@@ -298,7 +302,7 @@ them. Except where noted these are documented v1 limits rather than defects.
   recorder runs unconditionally and is the top profiling target, while its only
   consumer is unbuilt — so pillar 1 pays full price on every run and returns
   nothing at the surface it exists for. Whichever is settled first constrains the
-  other. _queued — decided, not built._ — §11/§14, [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
+  other. _queued — decided, not built; **v1** (S5)._ — §11/§14, [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
 - **First appearance, not first round** — **closed 2026-08-16 without building it:
   the rationale was adopted from a sibling engine and does not hold here.** Ours
   *batches* application, so the derivation that first produces a fact always has
@@ -332,7 +336,7 @@ them. Except where noted these are documented v1 limits rather than defects.
   the same class of question `Premise::Builtin` raised when it was added: a
   self-justifying leaf records the *values*, not the expression, so replay has to
   re-evaluate rather than re-check. Catalogued as **E6** in `testing.md`.
-  _queued._ — §11/§15.
+  _queued — **v1**: S5 ships a proof surface, so its strongest property must have seen a builtin._ — §11/§15.
 - **Imported facts are anchored by *relation*, not by row.** `engine::validate`
   records that an import's facts "are ordinary base facts by the time the engine
   runs… `ImportSpec` survives only as provenance/definedness metadata", so `?why`
@@ -340,13 +344,13 @@ them. Except where noted these are documented v1 limits rather than defects.
   §13's workloads actually want, and §11's "anchored by the program text (or,
   later, the import)" reads as a granularity that does not exist. Retaining the row
   costs memory on exactly the shapes already at 1.2 GB, so it is a **trade to
-  decide with the two items above**, not a default to add. _queued._ — §11/§13,
+  decide with the two items above**, not a default to add. _queued — **v1** as a ruling, not necessarily as a feature._ — §11/§13,
   [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
 - **Semiring provenance under negation** — tropical cheapest-proof selection and
   the algebra behind it; sketch in `notes/semiring-provenance.md`. **`?whynot` with
   minimal repairs is no longer part of this item**: it was designed 2026-08-16
   without a semiring, a near-miss being a *rule* rather than a binding, which is
-  what bounds it. What stays parked is the algebra. _parked (research)._ — §11.
+  what bounds it. What stays parked is the algebra. _parked (research) — **post-v1**._ — §11.
 - **Does the derivation store earn its cost?** A sibling engine extracts a proof
   *backwards* from the retained model — no recorder in the fixpoint, no re-run — so
   a run nobody questions pays one integer per row. It is not a free swap: we record
@@ -356,20 +360,20 @@ them. Except where noted these are documented v1 limits rather than defects.
   concrete architecture to profile against.** Sequence after the profile, never
   before — and **settle it in the same session as the query surface above**
   (2026-08-18), since a profile is under pressure to make the recorder optional and
-  pillar 1 is the only argument that it should not be. _queued (after profiling)._
+  pillar 1 is the only argument that it should not be. _queued (after profiling) — **v1**, decided with the query surface._
   — §11/engine, [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
 
 ### Import follow-ons (§13)
 
 - **Database loading** — SQLite/DuckDB files via the reserved `table "…"`
   grammar; Postgres via DuckDB attach. Grammar ratified, loading deferred until
-  a real consumer. _queued._ — §13.
-- **TSV** — an easy format add, deferred with database loading. _queued._ — §13.
+  a real consumer. _queued — **post-v1** (awaiting a consumer)._ — §13.
+- **TSV** — an easy format add, deferred with database loading. _queued — **post-v1**._ — §13.
 - **Filter pushdown for large sources** — v1 eagerly materializes every import;
   push selections into SQL when a consumer hits the wall (the path/`table`
-  syntax leaves room). _queued._ — §13.
+  syntax leaves room). _queued — **post-v1** (awaiting a consumer)._ — §13.
 - **Module namespacing** — v1 module imports share one global namespace;
-  qualified names / visibility deferred until needed. _queued._ — §13.
+  qualified names / visibility deferred until needed. _queued — **post-v1**._ — §13.
 
 ### Performance (now unblocked)
 
@@ -383,17 +387,18 @@ the highest-signal next item.
   regenerating corpus and ranks the leads, first among them the derivation recorder
   (a second engine measures 13× for its own on a cyclic graph). Earlier one-off
   numbers: [`notes/performance-baseline.md`](notes/performance-baseline.md).
-  _queued — profile next, benchmark no longer blocking._ — engine.
+  _queued — **v1** by dependency: the input the recorder decision is sequenced behind, not on its own merits (S6 is met)._ — engine.
 - **Aggregation does not scale with the aggregated relation** — 2.5× the rows at a
   fixed group count costs 9.6×, and it is the one shape where `tsdl` wins outright;
   groups scale sublinearly, so the suspect is a rescan rather than a group-key
   reach. Measured in [`notes/cross-engine-benchmark.md`](notes/cross-engine-benchmark.md).
-  _queued (after profiling)._ — §9/engine.
+  _queued (after profiling) — **v1** (S6: the one shape a sibling engine wins outright)._ — §9/engine.
 - **Parallelism** — assess how much of semi-naive evaluation and joins can go
   parallel (independent rules within a stratum, partitioned/hash joins) while
   preserving the deterministic canonical output and full provenance recording,
   which are load-bearing guarantees. Scope follows from the profile. _queued
-  (after profiling)._ — engine.
+  (after profiling) — **post-v1**: S6 is about exponents, which parallelism does
+  not change._ — engine.
 
 ### Declarative semantics (§6) — shipped
 
@@ -429,11 +434,11 @@ but a different kind of work.
   comments and no named test, so a block nobody wired up cannot fail; retrofitting them to that shape is
   the item. The rule going forward is **no example means no feature**. Add a
   diagnostic example while doing it: none of them exercises an error, so nothing
-  checks what the engine prints when a program is wrong. _queued._ — §16,
+  checks what the engine prints when a program is wrong. _queued — **v1**: §16 is where S2–S6 are demonstrated._ — §16,
   `testing.md`.
 - **Normalize §17's chronology.** Reverse-chronological for 08-16 back to 07-25,
   then it jumps to 07-03 and runs *forward* through 07-21, so a reader cannot tell
-  which end is current. _queued._ — §17.
+  which end is current. _queued — **v1** (trivial; every ruling cites §17)._ — §17.
 - **Restructure the §17 decisions log** — **53% of `spec.md`** as of 2026-08-16
   (1 538 lines against §§1–16's 1 390; it was 48% on 2026-07-26), growing far faster
   than the body, driven by oversized entries rather than by decision count.
@@ -441,7 +446,7 @@ but a different kind of work.
   open questions are in
   [`notes/decisions-log-restructure.md`](notes/decisions-log-restructure.md).
   **Moving it to its own file** is the option a sibling engine took and this should
-  weigh — their spec holds no decisions at all. _queued (user call; own session)._ — §17.
+  weigh — their spec holds no decisions at all. _queued (user call; own session) — **post-v1**._ — §17.
 
 *Closed 2026-08-16, by the hygiene pass in §17's entry of that date:* the status
 vocabulary (deleted — §§1–16 carry no status markers, and each ends with a single
@@ -460,10 +465,10 @@ workaround and §16's preamble-vs-§16.4 contradiction fixed alongside.
   branch on `unsafe-aggregate` without matching prose, and **spans on semantic
   errors** — lowering reports many from points where the responsible span is not
   threaded, so choosing one per diagnostic is a design pass. _queued (partially
-  shipped)._ — §12.
+  shipped) — **v1** (S3, and the reason §2 ratified scoped)._ — §12.
 - **`--format json` scope** — a documented future *edge* feature (structured
-  errors, provenance); the data path stays Datalog-native. _parked (low value)._ — §14.
-- **`serde` for the API** — decide as §14 stabilizes. _queued._ — §14.
+  errors, provenance); the data path stays Datalog-native. _parked (low value) — **post-v1**._ — §14.
+- **`serde` for the API** — decide as §14 stabilizes. _queued — **post-v1**._ — §14.
 
 ### Agent skill
 
@@ -471,7 +476,7 @@ workaround and §16's preamble-vs-§16.4 contradiction fixed alongside.
   with a real parser, import, ask; the five traps. Bundled by `cargo
   package-skill`, so `recipes/` is now a shipped part of the skill. ✅ 2026-07-27.
 - **"Big external fact base" demo** — the motivating import demo; unblocked by
-  §13 (the USDA dogfood is a first pass). _queued._ — skill.
+  §13 (the USDA dogfood is a first pass). _queued — **post-v1**._ — skill.
 - **Make `EXPERIMENTS.md` a measuring instrument.** It is an honest checklist
   eyeballed in a session, run twice — which is not enough to gate the decision below
   that explicitly waits on it. The controls that transfer from a sibling engine's
@@ -488,7 +493,7 @@ workaround and §16's preamble-vs-§16.4 contradiction fixed alongside.
   an agent reasons better with a logic engine, and §1 calls the three pillars
   "settled authority" for every decision in §17 — authority resting on a premise
   measured twice by eyeball. It is also the item most able to reorder everything
-  else here, which argues for early rather than first. _queued._ — skill,
+  else here, which argues for early rather than first. _queued — **v1**: S1 names this as its instrument, so until it exists v1 is undefined rather than unfinished._ — skill,
   `EXPERIMENTS.md`, [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
 - **Other agent-exposure forms** — a Claude API agent-loop harness, and an MCP
   server. Both are deliberately waiting on a trigger: the skill (2026-07-23) is
@@ -498,4 +503,4 @@ workaround and §16's preamble-vs-§16.4 contradiction fixed alongside.
   no-budget termination call does not cover — and now the one place the
   warn-don't-reject call does not cover either, since a hosted caller cannot press
   `^C` (§17, 2026-08-18). _parked (awaiting the
-  skill experiment)._ — skill.
+  skill experiment) — **post-v1**, gated on S1._ — skill.
