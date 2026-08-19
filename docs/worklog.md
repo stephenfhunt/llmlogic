@@ -24,6 +24,61 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-18 — §6 is written, and the gap nobody listed is the one that moved the operator
+
+The last blocking design session: §6 goes from an account of positive programs to
+an account of the language, with `notes/declarative-semantics.md` carrying the
+formal half. **No `src/` change, by design** — 386 lib tests unchanged, clippy and
+rustfmt clean, which is the check that a descriptive session stayed descriptive.
+
+**Done**
+- **§6 rewritten** (37 → 86 lines): `T_P` over a **match relation** rather than
+  substitution; §8 literals as **interpreted predicates**; an aggregate as a
+  **fixed function from group keys to values**; the two finiteness claims
+  separated, PTIME restored with them; the error rule; a footer down to what is
+  genuinely out of scope.
+- **`notes/declarative-semantics.md`** (199 lines) — match table, witness set and
+  fold, the assembled operator, the PTIME argument; the §10/`termination.md`
+  pattern, second use. **`testing.md`** gains a §6 row indexing the properties its
+  claims already rest on, and the note that §6 adds none.
+- **Swept**: `spec-traceability.md`'s §6 row (its "no date" paragraph was stale for
+  §10 too); `termination.md`'s "two consequences worth stating in §6", discharged;
+  §15's "least model" widened to "least, or perfect"; three `ROADMAP.md` sites.
+
+**Decided**
+- **A run that raises an error has no model** — the one real decision, describing
+  `eval`'s `Result<Model>` rather than changing it. Not a smaller model and not a
+  hole: the error is neither a truth value nor a missing fact. It is the **limiting
+  case of the truncation contract**, and what stops the semantics erasing §8's line
+  between an *unrepresentable* conversion (`absent`) and a *lossy* one. *Whether* a
+  run errors is the program's; *which* error it names is the schedule's (B1).
+- **`T_P` needs a match relation**: `p(absent)` is in `I`, yet a *bound* occurrence
+  must never match it — **binding is total, matching is semantic**. One split, from
+  which `p(X), p(X)` selecting less than `p(X)` and `p(X), not p(X)` deriving
+  nothing both fall out rather than being rules of their own.
+- **Two finiteness claims had been one** — what `bugs/004` found without naming it:
+  `T_P(I)` is finite for *every* program; the **fixpoint** is reached only inside
+  §10's certified fragment.
+- **§6's footer ranked its own gaps backwards.** Aggregation, carried since
+  2026-07-25 as the last unknown, cost one sentence; `absent`, listed as a peer,
+  rewrote the **operator**, and nothing had flagged it. Annotated onto the
+  2026-07-29 deferral: a footer ranks by what was noticed.
+
+**Removed**
+- §6's three-gap *Not covered* footer, the **"§6 was never extended"** ROADMAP item,
+  `§6` from the hygiene section's title, and the backlog preamble's "the one
+  remaining design session" — none is blocking now.
+- The 2026-08-17 cross-engine benchmark entry rotated verbatim to the archive.
+
+**Next up**
+- **Profile the engine** — head of the queue, ranked leads in
+  `notes/cross-engine-benchmark.md` (the derivation recorder first). Gates the
+  aggregation rescan, the derivation-store swap, and parallelism.
+- Elective, none blocking: **limit predicates** (now with a written baseline),
+  **temporal types**, the §17 restructure.
+- Open, *not* filed: two §6 claims have no property and cannot — `T_P(I)` finite,
+  and PTIME. Metatheoretic; recorded in `testing.md` rather than softened away.
+
 ## 2026-08-18 — Termination ships as a *warning*, and the roadmap's own direction loses
 
 The last blocking design session, and it reversed the decision it was convened to
@@ -126,58 +181,3 @@ takes a name.
   queue. **Profile** is unblocked with a ranked list and gates two further items.
 - Newly unblocked, *not* taken: **an unnameable query as an error** (axis 1).
   Recovery is now "prepend a word", which is what made strictness unaffordable.
-
----
-
-## 2026-08-17 — Racing the sibling engine: the benchmark item closes, two of ours break
-
-A for-fun cross-engine comparison against `~/code/tsdl` that came back with three
-things reasoning would not have produced. No `src/` change (426 pass, 1 ignored);
-the deliverable is `notes/cross-engine-benchmark.md`, with the harness kept outside
-the repo at `~/datalog-cross-engine-bench-2026-08-17/`.
-
-**Done**
-- **A 26-program corpus both engines run byte-identically**, generated from a seeded
-  script inside the two dialects' common subset. All 23 that ran on both agreed, and
-  both agreed with a Python oracle that never calls either engine — **the first
-  differential test between two independent implementations of this language**.
-- **The measurement**: whole-process wall and RSS, best-of-3, 120 s cap, six shapes
-  at four to six sizes. Validated against a tsdl figure measured by an unrelated
-  route before the harness existed (15.79 s vs ~16 s).
-- **ROADMAP's *Profile the engine* loses its blocking half** — the repeatable
-  benchmark `performance-baseline.md` asked for exists, answered its "the fact base
-  needs a home" the cheapest of the three ways it listed (regenerate, don't commit).
-- **Two §17 ***Consequences*** annotations**: the 2026-08-16 naive-first decline
-  (measured, and it was an exponent) and 2026-07-19's provenance recording (the
-  third option now has a price tag, from the outside).
-
-**Decided**
-- **The chain gap is an exponent, not a constant**: ~n^2.4 here against ~n^3.8 there,
-  with closure output itself n². Semi-naive vs naive doing what the textbook says,
-  measured — and the front end is only ~4× apart (480k vs 110k facts/s), so the
-  whole separation lives in the fixpoint and none of it in reading the program.
-- **Two shapes where this engine is the bad one, neither visible without a second
-  engine.** `agg` is the one cell tsdl *wins*: 2.5× the rows at fixed group count
-  costs 9.6×, while groups scale sublinearly — a rescan of the aggregated relation,
-  now its own ROADMAP item. And `sparse_800` is a 22× cliff at 1.2 GB, cycles not
-  size: the chain at the same node count is 3.78 s against 65 s.
-- **The provenance recorder is the top profiling target, now on outside evidence.**
-  tsdl under `LINEAGE` costs **13×** on a cyclic graph, 1.3× on flat ones — and ours
-  is unconditional, so every table *understates* this engine, worst on exactly the
-  shapes that blew up. `performance-baseline.md` guessed it first and never measured
-  it; still needs a temporary build, since there is no flag.
-- Throughput is 5–14× that file's ~15k tuples/s on short values where its workload
-  had long Rust identifiers — evidence *for* its interning lead, not proof.
-
-**Removed**
-- The 2026-08-16 *Building the decided backlog* entry rotated verbatim to
-  `worklog-archive/2026-08.md`. Otherwise nothing — the one backlog item retired
-  here was retired by doing it.
-
-**Next up**
-- **Profile**, now unblocked and with a ranked list: recorder, aggregation's rescan,
-  value representation, cyclic graphs (`sparse_800`, not the chain everyone uses).
-- Unchanged and still ahead of it: **named queries**, then **Termination** (blocks
-  `bugs/004`), then **§6's extension**.
-- Open, not taken: whether the harness belongs in the repo — it needs a `tsdl`
-  checkout for the full sweep, though the generator and our half stand alone.

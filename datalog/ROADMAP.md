@@ -40,11 +40,10 @@ each; detail in §17 and `docs/worklog.md`.
 ## Open backlog
 
 > **Open defects live in [`bugs/`](bugs/)** — the set is **empty as of
-> 2026-08-18**, for the first time since the 2026-07-25 spec review. The one
-> remaining design session is **§6's extension**, now three unknowns lighter: the
-> anti-join settled `p(X), not p(X)` on 2026-07-29, the truncation contract settled
-> what an incomplete model is worth on 2026-08-16, and Termination settled the
-> finiteness premise §6 rests on (2026-08-18).
+> 2026-08-18**, for the first time since the 2026-07-25 spec review. **No design
+> session blocks anything**: §6's extension, the last one, shipped 2026-08-18. The
+> sessions still listed below — limit predicates, temporal types, the decisions-log
+> restructure — are elective, and **the profile is the next item**.
 >
 > Six are resolved in `bugs/resolved/`: `004` (§6 asserted a finiteness arithmetic
 > falsified), **fixed 2026-08-18** by the Termination session — §6's premise is now
@@ -131,8 +130,10 @@ closed `bugs/004` and ratified §2's *predictable evaluation* pillar. The
 min cost)` would keep only the extremum per key group, making cost-accumulating
 transitive closure finite rather than merely warned about — Kaminski et al.'s
 limit Datalog (references.md group 1). A milestone, not a rider: §6's `T_P`, §9's
-aggregation and §11's provenance all move. _queued (own session)._ — §17 open
-questions, `notes/termination.md`.
+aggregation and §11's provenance all move — and §6 now states the premise it would
+give up (a fixpoint accumulating a set, not a per-group extremum), so the change
+has a written baseline to be measured against. _queued (own session)._ — §17 open
+questions, `notes/termination.md`, `notes/declarative-semantics.md`.
 
 ### The truncation contract (§9/§13/§15) — decided, not built
 
@@ -332,24 +333,24 @@ the highest-signal next item.
   which are load-bearing guarantees. Scope follows from the profile. _queued
   (after profiling)._ — engine.
 
-### Spec hygiene & §6 (the document itself)
+### Declarative semantics (§6) — shipped
+
+**✅ 2026-08-18.** §6 accounts for the whole language: `T_P` is defined over a
+**match relation** rather than substitution (binding is total, matching is
+semantic), builtins are interpreted predicates, an aggregate is a fixed function
+from group keys to values because its goal reads a strictly lower stratum, and the
+two finiteness claims `bugs/004` had conflated are separated. One decision came
+with it — **a run that raises an error has no model**, the limiting case of the
+truncation contract. Proof and operator in
+[`notes/declarative-semantics.md`](notes/declarative-semantics.md); §17 2026-08-18
+carries the argument. No `src/` change: every rule was already guarded
+(`testing.md`'s coverage map).
+
+### Spec hygiene (the document itself)
 
 From the 2026-07-25 style review. The *false assertions* were `bugs/003`, closed
 2026-07-27; what follows is staleness, unwritten sections, and structure — real,
 but a different kind of work.
-
-- **§6 was never extended — the largest substantive gap.** Its own note still
-  reads "Still to fill in: extension to aggregation (§9); semantics of
-  comparison/arithmetic literals (§8)", both long shipped. So there is no
-  model-theoretic account of aggregation, and none of `absent`. For a spec whose
-  pitch is a logic engine an LLM can trust over its own reasoning, declarative
-  semantics stopping at positive programs is the hole that matters most. **Its own
-  session, and now the best-prepared one:** the anti-join decision settled what
-  `p(X), not p(X)` *means* on 2026-07-29 and §4 states the four match sites, so §6 has a
-  ratified semantics to describe rather than one to decide. Its remaining unknowns
-  are aggregation alone: the finiteness claim `bugs/004` owned was settled
-  2026-08-18, and §6 now states it conditionally on §10's certified fragment.
-  _queued._ — §6.
 - **Ratify §1 and §2.** §1's goals, non-goals, target users and success criteria
   have never been written; §2's principles are still candidates **except
   "predictable evaluation"**, ratified 2026-08-18 in the scoped form the
