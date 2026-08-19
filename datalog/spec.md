@@ -50,10 +50,87 @@ tables from external sources. Three pillars drive every design decision:
    (skill-based, CLI-first); Datalog is the interchange format in both directions,
    with JSON at the machine-readable edges (errors, provenance). See §14.
 
-*Not covered:* concrete goals, non-goals, target users and success criteria. The
-three pillars above have driven every decision in §17 and are cited as settled
-authority; the rest of this section has never been written, which is a ROADMAP item
-and not a deferral.
+### Goals
+
+Beyond the pillars, two goals are stated because a decision has already turned on
+each:
+
+- **Answer questions over real external data.** §13 exists so a question can be
+  asked of a CSV, JSONL or Parquet file as it actually is, without a preprocessing
+  step. This is the goal that distinguishes the engine from a semantic layer over a
+  host-supplied fact base, and it was the ground for declining `FactSource`-only
+  ingest (§17, 2026-08-16).
+- **Evaluator performance is a goal, not a non-goal.** Adopting it as a non-goal was
+  considered and **declined**; the decline was then measured — chain closure scales
+  ~n^2.4 here against ~n^3.8 in an engine that took the other branch, an exponent
+  rather than a constant (§17, 2026-08-16/17, `notes/cross-engine-benchmark.md`).
+  What carries no guarantee is *resource* behaviour on any one run (§2, §15).
+
+### Non-goals
+
+These are settled, each by a decision in §17 rather than by omission. Listing them
+here is what makes the boundary visible; the entry named holds the argument.
+
+- **String construction** — no `concat`, `substr`, `split` (2026-07-27). Filters
+  yes, constructors no: a constructor is unbounded in value *size* and would put a
+  generator inside a positive cycle (§8/§10).
+- **User-defined scalar functions** — declined as redundant, not as unsafe: in
+  Datalog a rule already *is* one (2026-07-25).
+- **Implicit numeric coercion** — `int` and `float` never meet implicitly; `as` is
+  the in-language escape hatch, so the widening stays visible in the source text
+  (2026-08-16). One `number` type was considered and declined.
+- **Proof trees as facts** — a proof tree is not a fact; it rides in `%` comments,
+  which keeps Datalog-out-is-Datalog-in intact byte-for-byte (2026-08-16). Lineage
+  annotations on answer rows are likewise not offered (§11).
+- **A resource budget** — rejected twice: no fuel, no cap, no timeout. A slow
+  program stays slow and a non-terminating one is *named before it runs* rather
+  than killed during it (§10, §2). This is the one non-goal a hosted surface would
+  reopen, which is why hosted surfaces are parked (§17, 2026-08-18).
+
+### Target users
+
+- **An agent driving the CLI** — the primary user, and pillar 3's premise. It
+  writes a program, runs it, reads the output, and repairs the program from the
+  diagnostics, without a human in the loop. Every surface decision is scored
+  against this loop: it is why output is canonical Datalog, why stdout stays a
+  pure fact stream, and why a diagnostic is data rather than prose.
+- **A Rust program embedding the engine** — a real second user with a different
+  reach: `pub mod engine` and `pub mod provenance` expose what the CLI does not,
+  which is currently the *only* way to get at a derivation (§2, §11).
+- **A human reading or writing the source** — third, and deliberately so. The
+  surface is conventional Datalog (§2), so a human can read it; but where the two
+  conflict, the agent's loop wins.
+
+### Success criteria
+
+Falsifiable, and each names how it is checked. Five are checkable today; the sixth
+is the project's own hypothesis, and naming its instrument is what makes it a
+criterion rather than an assumption.
+
+| | criterion | instrument | today |
+|---|---|---|---|
+| **S1** | An agent answering multi-hop, recursive or constraint questions is measurably more accurate **with** the engine than reasoning in prose — at two model strengths, first program recorded before any feedback. | `EXPERIMENTS.md`, rebuilt as a harness (ROADMAP) | **unmeasured** |
+| **S2** | The engine's stdout is valid input to the engine, byte-for-byte. | property **D2**, `print::tests::corpus_round_trips` | met |
+| **S3** | A rejected program can be repaired from the diagnostic alone, without reading the spec. | §12's fields; the near-miss corpus (§3) | met for lex/parse; **scoped** (§2) |
+| **S4** | A question over a real external table is answerable end-to-end with no preprocessing step. | §13 + the USDA dogfood | met **except dates** (§4) |
+| **S5** | Every fact in an answer can be explained **through the surface the caller used**. | §11's query surface | **not met** — designed, unbuilt |
+| **S6** | No *exponent* worse than a comparable engine on the shared corpus. | `notes/cross-engine-benchmark.md` | met |
+
+### What v1 means
+
+**v1 is reached when S2–S6 hold and S1 has been measured at least once.** S1's
+criterion is that the measurement was *made*, not that it came out favourably: this
+repo exists to test a hypothesis, so a negative result is a finding and not a
+failure to ship — whereas shipping v1 having never run the experiment would leave
+§1's own pillars resting on an unmeasured premise.
+
+Which open backlog items that ruling makes v1 work, and which it puts after v1, is
+recorded per item in [`ROADMAP.md`](ROADMAP.md) with the argument in
+[`notes/v1-scope.md`](notes/v1-scope.md).
+
+*Not covered:* what comes **after** v1 — there is no v2 theme, and post-v1 items are
+classified as *not blocking v1* rather than scheduled against anything. Nor does
+this section rank the v1 items among themselves; sequence is `ROADMAP.md`'s.
 
 ## 2. Design principles
 
