@@ -5,7 +5,7 @@ workflow, the doc-editing discipline) is in [`../AGENTS.md`](../AGENTS.md) and
 [`../docs/rules/editing-docs.md`](../docs/rules/editing-docs.md); this file
 covers only what is specific to this project.
 
-A Rust library (the engine) plus a thin binary (CLI/REPL). Everything for the
+A Rust library (the engine) plus a thin one-shot CLI binary. Everything for the
 project lives inside `datalog/` — no root Cargo workspace.
 
 **Design pillars** (they drive decisions): provenance/explainability,
@@ -25,7 +25,7 @@ source "$HOME/.cargo/env"
 ```sh
 cargo build          # compile
 cargo test           # unit + integration tests
-cargo run            # launch the CLI/REPL
+cargo run -- p.dl -q 'q(X)'  # run a program (no REPL: one shot, then exit)
 cargo clippy --all-targets   # lints — keep clean, no warnings
 cargo fmt            # apply formatting (run before committing)
 ```
