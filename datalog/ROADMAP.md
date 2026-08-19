@@ -41,9 +41,15 @@ each; detail in §17 and `docs/worklog.md`.
 
 > **Open defects live in [`bugs/`](bugs/)** — the set is **empty as of
 > 2026-08-18**, for the first time since the 2026-07-25 spec review. **No design
-> session blocks anything**: §6's extension, the last one, shipped 2026-08-18. The
-> sessions still listed below — limit predicates, temporal types, the decisions-log
-> restructure — are elective, and **the profile is the next item**.
+> session blocks anything**: §6's extension, the last one, shipped 2026-08-18.
+>
+> **The order below is under review.** A feature-complete stock-take the same day
+> found three holes this file did not list and re-ranked four it did; the evidence
+> is in [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
+> Its recommendation: **§1 first, then the caller's contract, then temporal types,
+> then the profile** — which no longer leads. Recorded as a recommendation and
+> *not ratified*: ratifying §1 is itself step one, and what makes the rest
+> decidable.
 >
 > Six are resolved in `bugs/resolved/`: `004` (§6 asserted a finiteness arithmetic
 > falsified), **fixed 2026-08-18** by the Termination session — §6's premise is now
@@ -65,6 +71,18 @@ each; detail in §17 and `docs/worklog.md`.
 > converted to pin the asymmetry it turned out to describe). The only `#[ignore]`d
 > test left is `url_csv_import_reads_over_httpfs`, which needs the network and
 > passes. Any *failure* under `--ignored` now means something regressed.
+
+### Goals and principles (§1/§2) — the definition of done
+
+- **Ratify §1 and §2.** §1's goals, non-goals, target users and success criteria
+  have never been written; §2's principles are still candidates **except
+  "predictable evaluation"**, ratified 2026-08-18 in the scoped form the
+  implementation delivers. Both sections say so in their own *Not covered* footers.
+  **Moved out of "spec hygiene" 2026-08-18**, where filing it was a category error:
+  §1 is not tidiness but the definition of done, and "are we feature complete?" is
+  not answerable against an unwritten §1 — which is also why "is X in scope" keeps
+  getting decided ad hoc. Cheap, and it makes every other ranking here decidable.
+  _queued — recommended first ([`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md))._ — §1/§2.
 
 ### Expressions (§5/§8)
 
@@ -111,8 +129,11 @@ atom-vs-call ambiguity that ruled out `float(A)`; scan-ahead is the candidate.
   `172800000` with no error, because the cast it wrote was not wrong — it yielded
   milliseconds — and they closed it by *deleting* the cast in favour of
   `duration / duration → number`, so the divisor is where a program names its unit.
-  A unit that has to be documented is the design being wrong. _queued (own
-  session)._ — §4/§8/§13.
+  A unit that has to be documented is the design being wrong.
+  **Ranked above the profile 2026-08-18**: date columns are ubiquitous in the files
+  §13 exists to read, and a fast engine that cannot read one loses to a slow engine
+  that can — and unlike the profile's leads, this item's design input is already in
+  hand. _queued (own session)._ — §4/§8/§13, [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
 
 ### Termination & value-creating recursion (§6/§10) — shipped
 
@@ -146,8 +167,32 @@ relation — projected, one row short and say so; folded or negated, withhold.
 The design question the decision leaves open is **the CLI shape**: a shell pipeline
 reads stdout and cannot see a stderr warning at all, so "withhold" has to mean an
 exit code and a stdout discipline, not a return field. Sequence it with §11's
-`?why`, whose `unknown` arm is the same distinction reached from the other side.
-_queued — decided, not built._ — §15, `notes/tsdl-cross-project-review.md`.
+`?why`, whose `unknown` arm is the same distinction reached from the other side —
+**and with integrity constraints below**, which need the same exit code to signal a
+violation (2026-08-18: designing them apart yields two vocabularies for one code).
+_queued — decided, not built._ — §15, `notes/tsdl-cross-project-review.md`,
+[`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
+
+### The caller's contract, and what a run leaves behind (§12/§14/§15)
+
+Both found by the 2026-08-18 stock-take and neither previously listed;
+[`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md) has the
+evidence.
+
+- **Integrity constraints, and an exit code that carries an answer.** There is no
+  `constraint`, no denial rule, no way to say *this must never happen* — while the
+  skill's own description advertises consistency checking. `src/main.rs` returns
+  `0` for every run that completes and silence means no (§14), so a caller must
+  **parse stdout** to learn whether its constraint held, and `datalog check.dl &&
+  deploy` cannot mean what it looks like. **Design it with the truncation
+  contract's open half above**, which needs the same exit code and stdout
+  discipline to express withholding. _queued (own session; merge)._ — §12/§14/§15.
+- **Nothing is reusable across runs.** Every invocation re-parses, re-imports (§13
+  materializes eagerly) and re-runs the fixpoint from zero, and there is no REPL —
+  so an agent's write-run-read-fix loop pays a full reload each iteration. Distinct
+  from pushdown and parallelism, which make *one* run faster. Invisible to
+  `notes/cross-engine-benchmark.md`, which times whole processes by construction.
+  _queued._ — §13/§14/engine.
 
 ### Aggregation follow-ons (§9)
 
@@ -248,7 +293,12 @@ them. Except where noted these are documented v1 limits rather than defects.
   *rule*, not a binding; a repair is a step, not a promise; the trace re-solves
   through the scheduler the fixpoint uses. §17 has the decision. What remains open
   is the rendering, the JSON encoding, and sequencing against the truncation
-  contract, whose distinction `unknown` is. _queued — decided, not built._ — §11/§14.
+  contract, whose distinction `unknown` is. **Decide it together with "does the
+  derivation store earn its cost" below, and with the profile** (2026-08-18): the
+  recorder runs unconditionally and is the top profiling target, while its only
+  consumer is unbuilt — so pillar 1 pays full price on every run and returns
+  nothing at the surface it exists for. Whichever is settled first constrains the
+  other. _queued — decided, not built._ — §11/§14, [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
 - **First appearance, not first round** — **closed 2026-08-16 without building it:
   the rationale was adopted from a sibling engine and does not hold here.** Ours
   *batches* application, so the derivation that first produces a fact always has
@@ -283,6 +333,15 @@ them. Except where noted these are documented v1 limits rather than defects.
   self-justifying leaf records the *values*, not the expression, so replay has to
   re-evaluate rather than re-check. Catalogued as **E6** in `testing.md`.
   _queued._ — §11/§15.
+- **Imported facts are anchored by *relation*, not by row.** `engine::validate`
+  records that an import's facts "are ordinary base facts by the time the engine
+  runs… `ImportSpec` survives only as provenance/definedness metadata", so `?why`
+  will answer "because `employees.csv`" and never "because row 4,182" — the answer
+  §13's workloads actually want, and §11's "anchored by the program text (or,
+  later, the import)" reads as a granularity that does not exist. Retaining the row
+  costs memory on exactly the shapes already at 1.2 GB, so it is a **trade to
+  decide with the two items above**, not a default to add. _queued._ — §11/§13,
+  [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
 - **Semiring provenance under negation** — tropical cheapest-proof selection and
   the algebra behind it; sketch in `notes/semiring-provenance.md`. **`?whynot` with
   minimal repairs is no longer part of this item**: it was designed 2026-08-16
@@ -295,7 +354,10 @@ them. Except where noted these are documented v1 limits rather than defects.
   `notes/performance-baseline.md` names this recorder as its top hypothesis for the
   35× cliff and has never measured it, so **the profiling item below now has a
   concrete architecture to profile against.** Sequence after the profile, never
-  before. _queued (after profiling)._ — §11/engine.
+  before — and **settle it in the same session as the query surface above**
+  (2026-08-18), since a profile is under pressure to make the recorder optional and
+  pillar 1 is the only argument that it should not be. _queued (after profiling)._
+  — §11/engine, [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
 
 ### Import follow-ons (§13)
 
@@ -351,11 +413,6 @@ carries the argument. No `src/` change: every rule was already guarded
 From the 2026-07-25 style review. The *false assertions* were `bugs/003`, closed
 2026-07-27; what follows is staleness, unwritten sections, and structure — real,
 but a different kind of work.
-- **Ratify §1 and §2.** §1's goals, non-goals, target users and success criteria
-  have never been written; §2's principles are still candidates **except
-  "predictable evaluation"**, ratified 2026-08-18 in the scoped form the
-  implementation delivers. Both sections say so in their own *Not covered* footers
-  instead of behind a status marker. _queued._ — §1/§2.
 - **The provenance "absence pattern" is now the `no-match pattern`** ✅ 2026-08-16,
   with the explanation of a missing answer named a **failure trace** (§17 — three
   names, adopted verbatim from a sibling engine). The decision's site count was
@@ -426,7 +483,13 @@ workaround and §16's preamble-vs-§16.4 contradiction fixed alongside.
   programs pinned byte-exact in CI. What must **not** be lost in the redesign is the
   finding their setup cannot produce — the questions our subject answered with
   `grep` because the engine could not express them. A skill that cannot say
-  something loses the question silently. _queued._ — skill, `EXPERIMENTS.md`.
+  something loses the question silently. **Reframed 2026-08-18: this is not skill
+  polish but the project's own validity question.** The repo exists to test whether
+  an agent reasons better with a logic engine, and §1 calls the three pillars
+  "settled authority" for every decision in §17 — authority resting on a premise
+  measured twice by eyeball. It is also the item most able to reorder everything
+  else here, which argues for early rather than first. _queued._ — skill,
+  `EXPERIMENTS.md`, [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
 - **Other agent-exposure forms** — a Claude API agent-loop harness, and an MCP
   server. Both are deliberately waiting on a trigger: the skill (2026-07-23) is
   the first experiment, and how well a model actually drives it is what should

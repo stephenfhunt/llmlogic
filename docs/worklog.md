@@ -24,6 +24,61 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-18 — Taking stock at feature-complete: three holes the backlog could not list
+
+Asked, after §6 shipped and `bugs/` went empty, whether the language has major
+design holes. The method was to **not** read `ROADMAP.md` first — a backlog lists
+only holes someone already noticed — and to read §§1–15, `src/main.rs` and the
+exported API instead. Seven findings in `notes/taking-stock-2026-08-18.md`; three
+were untracked, four tracked and mis-ranked. No `src/` change, nothing ratified.
+
+**Done**
+- **`ROADMAP.md`**: a new section, **the caller's contract (§12/§14/§15)**, holding
+  the two untracked items; **§1/§2 promoted out of "spec hygiene"** into a section
+  of its own; five annotations (the truncation merge, provenance's joint decision,
+  import row anchoring, temporal's ranking, the EXPERIMENTS reframe); the preamble
+  now says the order is under review rather than "the profile is the next item".
+- **`spec.md`**: §14's *Not covered* gains **what the exit code means** (every run
+  that completes exits `0`, so "no rows" and "answered no" are indistinguishable
+  without parsing stdout), §11's that an imported fact is anchored by its
+  **relation, not its row**, and §17 one open question covering both.
+- **`datalog/AGENTS.md`'s "CLI/REPL" corrected** — there is no REPL, and it was
+  claimed twice in the file every session loads.
+
+**Decided**
+- **Nothing, deliberately.** The findings are recorded as a recommendation because
+  ratifying **§1** is itself step one: "are we feature complete?" is not answerable
+  against goals, non-goals and success criteria that have never been written.
+  Filing §1 under *spec hygiene* was the category error that hid this — it is not
+  tidiness, it is the definition of done, and its absence is why "is X in scope"
+  keeps getting settled ad hoc at the moment it is asked.
+- **Integrity constraints and the truncation contract are one design.** There is no
+  way to say *this must never happen*, and the contract's one open piece already
+  says withholding "has to mean an exit code and a stdout discipline". Two needs,
+  one exit code; designing them apart gives it two vocabularies.
+- **Pillar 1 pays full price and returns nothing at the surface it exists for.**
+  The recorder is unconditional and the top profiling target (13× measured on a
+  sibling engine's cyclic graph); `?why` is unbuilt and absent from the exported
+  API. The backlog carried this as two items in two sections and never as one fact,
+  so whichever gets settled first would have silently constrained the other.
+- **The project's hypothesis has never been measured**, while §1 cites the three
+  pillars as "settled authority" for every §17 decision. `EXPERIMENTS.md` was filed
+  as skill polish; it is the validity question, and could reorder all of the above.
+
+**Removed**
+- The backlog preamble's "**the profile is the next item**", and the *Ratify §1 and
+  §2* bullet out of the Spec hygiene section — both moved rather than deleted.
+- `AGENTS.md`'s two "CLI/REPL" claims, which had stopped being true.
+- The 2026-08-17 named-query entry rotated verbatim to `worklog-archive/2026-08.md`.
+
+**Next up**
+- **§1 (and §2's remaining four)** — short, and it makes every other ranking here
+  decidable rather than arguable. Then **the caller's contract**, then **temporal
+  types**, then **the profile** with pillar 1's question attached rather than
+  trailing it. The sequence itself wants ratifying first.
+- Open, in §17: whether a constraint is a language construct or a query convention,
+  how many exit codes the vocabulary needs, and whether stdout stays a pure fact
+  stream when a run has something to say and no rows to say it in.
 ## 2026-08-18 — §6 is written, and the gap nobody listed is the one that moved the operator
 
 The last blocking design session: §6 goes from an account of positive programs to
@@ -130,54 +185,3 @@ since the 2026-07-25 spec review**. 386 lib tests (was 383), clippy/rustfmt clea
 - **§6's extension** — the last design session, three unknowns lighter and down to
   aggregation alone. Then the **profile**, still gating two items.
 - Open: **limit predicates** (new, queued); the benchmark harness's home.
-
-## 2026-08-17 — The named query ships, and one of its planned sites turns out not to be one
-
-The brief frozen earlier the same day, built. 439 pass (was 426), 1 ignored, clippy
-and rustfmt clean, `--no-default-features` still builds. The projection hazard —
-recorded 2026-08-16 as unsolved in both engines — is closed for any query that
-takes a name.
-
-**Done**
-- **`?- adult: person(N, A), A >= 18.`**, desugared in `lower_query` to the rule
-  `adult(N, A) :- …` plus the one-atom query `?- adult(N, A)`, reusing the same
-  `VarScope`. One `Option<Ident>` on `ast::Query`, one parser arm, one printer arm.
-- **`ir::Query` and `api.rs` were not touched**, which is the finding: a one-atom
-  query already prints under its atom's name, so the answer-shape rule settled
-  hours earlier needed **no third arm** — empty projection included, where the
-  ground head `name(true)` rides the same path.
-- **C8 gains `c8_a_named_query_matches_its_desugared_rule`**, oracle = the
-  desugaring as program text, over `arb_answer_shape_case` widened to carry the
-  projection *it* emitted. Eight lowering unit tests, three parser tests, **§16.11**
-  with its named system test and output pinned byte-for-byte.
-- **Swept**: §5's grammar, §14's shape rule + both hazard paragraphs + footer,
-  §16.10's closing line, `testing.md` C8, `ROADMAP.md`, the note, both agent docs.
-
-**Decided**
-- **The name is a *definition*, not a label**, and that is the whole feature.
-  Carrying an `Option<Ident>` to the printer emits the same bytes while the relation
-  does not exist — so `eligible(N) :- adult(N, _).` could not read it and provenance
-  would have nothing to explain. §16.11 pins that rule.
-- **The guard's line is *defined or declared*, not *mentioned*.** A name merely
-  referenced in a body stays takeable, defining it being exactly what the equivalent
-  hand-written rule does; rejecting it would make the sugar inexact. Needed a
-  `defined` set in pass 1, `by_name` conflating the two.
-- **Four mutations, two worth keeping**: a head one column short of the projection
-  is caught by the **existing** IR well-formedness check, not by anything added
-  here; and dropping the empty-projection `true` prints `ans().`, which §5 does not
-  accept — so the argument keeping output re-parseable is §5's own, now measured.
-- **A named query publishes *every* variable its body binds** (`adult/2` vs a
-  rule's `adult/1`). Verified, and documented for consumers rather than filed.
-
-**Removed**
-- The 2026-08-16 *`as` cast* entry rotated verbatim to `worklog-archive/2026-08.md`.
-- §14's *Not covered* claim that a query "cannot yet be given a name", and the
-  standing "this hazard is unsolved" sentence — both had stopped being true. The
-  synthesized-answer-collision item narrowed to the *unnamed* case instead of being
-  deleted: naming already tells two queries apart.
-
-**Next up**
-- **Termination** (blocks `bugs/004`), then **§6's extension** — now the head of the
-  queue. **Profile** is unblocked with a ranked list and gates two further items.
-- Newly unblocked, *not* taken: **an unnameable query as an error** (axis 1).
-  Recovery is now "prepend a word", which is what made strictness unaffordable.
