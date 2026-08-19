@@ -423,40 +423,90 @@ workaround for a yes/no question (§14).
 
 ## 6. Declarative semantics
 
-A program's meaning is its **least model** (references.md group 1):
+A program's meaning is its **least model**, and with negation and aggregation its
+**perfect model** (references.md groups 1 and 3). The formal operator, the match
+relation and the aggregate fold are in
+[`notes/declarative-semantics.md`](notes/declarative-semantics.md).
 
-- The **Herbrand universe** is the set of constants appearing in the program
-  (facts, rule constants, imported values) together with the values §8 arithmetic
-  computes from them; the **Herbrand base** is the set of all ground atoms
-  formable from the program's predicates over it.
-- The **immediate-consequence operator** `T_P` maps a fact set `I` to the
-  program's facts plus every ground rule head whose body atoms all hold in
-  `I`.
-- For positive programs `T_P` is monotone, so it has a least fixpoint — the
-  **least Herbrand model**. That model is what evaluation computes (§15) and what
-  queries are answered against, as projections.
-- **The universe is finite, and the fixpoint therefore reached in finitely many
-  steps, exactly when the program is *certified terminating* (§10).** Arithmetic
-  is what makes this conditional: `N = M + 1` synthesizes a value appearing
-  nowhere in the program, so the universe is not the program's constants and the
-  lattice it induces need not be finite. §10's rule is the condition under which
-  it is — no computed value reaches the head of a positively recursive predicate —
-  and under that condition the classical results return, including PTIME data
-  complexity. The proof is in `notes/termination.md`.
-- **Outside that fragment the least model may be infinite**, and then the fixpoint
-  is a limit that evaluation approaches without reaching. Such a program is
-  **not rejected**: it is valid, it is often correct on the data it will actually
-  see (`path_cost` over an acyclic graph), and §10 names it before the run
-  instead.
-- **Set semantics** throughout (§17): the model is a set of facts; a fact
-  derivable several ways is one fact with several derivations (§11).
+**The Herbrand universe** is the constants appearing in the program (facts, rule
+constants, imported values) together with the values §8 computes from them; the
+**Herbrand base** is the ground atoms formable from the program's predicates over
+it. `absent` (§4) is an ordinary element of both — a program produces it in a
+fact, a rule head, an arithmetic result or an import (§13) — but it is not
+reachable by *matching*, which is the next rule.
 
-Stratified negation extends this to the **perfect model** — a least fixpoint
-per stratum, lower strata frozen — in §7.
+**The immediate-consequence operator `T_P`** maps a fact set `I` to the program's
+facts plus `θ(head)` for every rule and every substitution `θ` satisfying its body
+in `I`; range restriction (§10) is what makes that head ground. Satisfaction is
+per literal:
 
-*Not covered:* the extension to aggregation (§9), the semantics of
-comparison/arithmetic literals (§8), and `absent` (§4) — so this section accounts
-for a fragment of the language rather than the language.
+- **A positive atom** matches a stored tuple argument-wise, and **binding is total
+  while matching is semantic**: an unbound variable takes whatever the tuple holds,
+  `absent` included, while a constant or an already-bound variable matches only an
+  equal value that is not `absent`. §4's table is the normative statement of which
+  notion applies where; two things it records follow from this split rather than
+  being separate rules — `p(X), p(X)` selects strictly *less* than `p(X)`, and
+  `p(X), not p(X)` derives nothing.
+- **A negated atom** is a **structural** membership test against a completed
+  relation, and binds nothing (§7).
+- **A comparison or arithmetic literal** is an **interpreted predicate**: its
+  extension is fixed by §8 rather than derived, and it is infinite. `absent`'s
+  two-valued treatment (§4) — annihilation in value space, false in truth space —
+  is a property of that fixed extension, not a third truth value; the operator
+  stays two-valued.
+- **An aggregate literal** binds its result to the fold of a multiset over the
+  **witness set** of its goal, evaluated against a strictly lower stratum (§9).
+
+**Stratification is what keeps the operator monotone.** Negated and aggregated
+dependencies point strictly down (§7, §9), so each stratum runs to its least
+fixpoint with the lower ones frozen, and the result is the perfect model; by the
+independence theorem every valid stratification yields the same one (§7). For an
+aggregate this is not bookkeeping but the whole reason it has a declarative
+reading: its goal's relations are complete before its stratum begins, so the
+aggregate is a **fixed function from group keys to values** for the duration of
+that fixpoint, rather than a non-monotone construct sitting inside the loop.
+
+**Two finiteness claims, and they are different** — conflating them is the error
+`bugs/004` found here:
+
+- **Every application is finite.** For finite `I` a rule has finitely many
+  satisfying substitutions, because §10's range restriction grounds every builtin
+  operand from a positive atom or an `=`-chain rooted in one. So `T_P(I)` is
+  finite, for *every* program — this says nothing about how many times it is
+  applied, and nothing about whether it succeeds (see the error rule below).
+- **The fixpoint is reached in finitely many rounds exactly when the program is
+  *certified terminating* (§10)**, because certification bounds the *universe*,
+  which no single application does. `N = M + 1` synthesises a value appearing
+  nowhere in the program; §10's rule is that no such value reaches the head of a
+  positively recursive predicate, and under it the classical results return —
+  **PTIME data complexity** included, with combined complexity higher as usual.
+  The proof is in [`notes/termination.md`](notes/termination.md).
+
+**Outside that fragment the least model may be infinite**, and the fixpoint is a
+limit that evaluation approaches without reaching. Such a program is **not
+rejected**: it is valid, it is often correct on the data it will actually see
+(`path_cost` over an acyclic graph), and §10 names it before the run instead.
+
+**A run that raises an error has no model** (§17, 2026-08-18). §8's builtins can
+fail — integer overflow, division by zero, a NaN-producing float operation, a
+lossy `as` conversion — so `T_P` is partial, and a failure yields no model at all
+rather than a smaller one: the error is neither a truth value nor a missing fact.
+This is the limiting case of the truncation contract (§15), where an incomplete
+model holds missing facts and never false ones; an erroring run holds nothing to
+project. *Whether* a run errors is a property of the program and its data, since a
+complete application enumerates every rule instance; *which* error it reports is a
+property of the schedule, and only the first is guaranteed (`testing.md` B1).
+
+**Set semantics** throughout (§17): the model is a set of facts; a fact derivable
+several ways is one fact with several derivations (§11). **Queries** are answered
+against the finished model, as projections (§14).
+
+*Not covered:* well-founded and stable-model semantics (references.md group 3) —
+§7 states why stratified is the choice for agent-generated programs. A
+**recursive or monotonic** aggregate has no account here and could not have one
+under this operator, since what it gives up is exactly the strictly-lower-stratum
+premise above (references.md group 4); so would **limit predicates**, whose
+fixpoint accumulates a per-group extremum rather than a set (§17 open questions).
 
 ## 7. Negation
 
@@ -1317,7 +1367,8 @@ results.
 
 ## 15. Evaluation strategy (non-normative)
 
-`eval` (`src/engine/`) computes the least model (§6) bottom-up:
+`eval` (`src/engine/`) computes the model (§6) — least, or perfect where the
+program has negation or aggregation — bottom-up:
 
 - **Load**: program facts enter per-predicate *set* storage (duplicates
   collapse, §17). Relations are sorted sets, so iteration — and hence §14's
@@ -1753,6 +1804,29 @@ marker that records a decision working out *well*, which the log would otherwise
 never say.
 
 ### Decisions
+
+- **2026-08-18** — **§6 accounts for the whole language, and a run that errors has
+  no model** (§4/§6/§8/§9; long form in
+  [`notes/declarative-semantics.md`](notes/declarative-semantics.md)). The
+  extension is otherwise *descriptive*: §4, §7, §8, §9 and §10 had already ratified
+  every rule it states, which is what the 2026-07-29 deferral was waiting for.
+  - **`T_P` needs a match relation, not substitution.** `p(absent)` is in `I`, yet
+    a *bound* occurrence of `X` must never match it: **binding is total, matching
+    is semantic**. Holding those two apart is what makes `p(X), p(X)` select
+    strictly less than `p(X)` and `p(X), not p(X)` derive nothing — one split, not
+    two rules.
+  - **The decision — an error yields no model at all**, not a smaller one and not a
+    hole. It is the limiting case of the truncation contract (2026-08-16), and it
+    stops the semantics erasing §8's line between an *unrepresentable* conversion
+    (`absent`) and a *lossy* one (an error). It describes `eval`'s `Result<Model>`
+    rather than changing it, so no `src/` change; **B1**'s error path is the guard,
+    which pins *whether* a run errors and deliberately not *which* error it names.
+    **2026-08-16 had already measured and relied on this** — that `eval_expr`'s
+    error path aborts the whole run rather than the row is what decided the cast's
+    failure mode — so what was missing was only its statement as a semantics.
+  - **Two finiteness claims had been one**, which is what `bugs/004` found without
+    naming: every application is finite for every program, while the *fixpoint* is
+    reached only inside §10's certified fragment. — §4/§6/§8/§9.
 
 - **2026-08-18** — **Termination is *classified*, not enforced: the rule ships as
   a warning** (§2/§6/§10/§15; `notes/termination.md` for the proof and the four
@@ -2374,6 +2448,16 @@ never say.
   §10's certified fragment. Had §6 been written into the negation session it would
   have committed to a finiteness premise that was false at the time and would have
   had to be rewritten twice. Its remaining unknown is aggregation alone.
+
+  ***Consequences 2026-08-18 (§6 shipped, same day).*** The three gaps §6's footer
+  listed were **not equal, and the ranking was inverted**. Aggregation — named here
+  as the last unknown — cost one sentence: its goal reads a strictly lower stratum,
+  so the aggregate is a fixed function from group keys to values and `T_P` stays
+  monotone without an argument. `absent`, listed as a peer, forced a change to the
+  **operator itself** — satisfaction is a match relation, not substitution — which
+  nothing had flagged as a gap at all. The lesson is not that the deferral was
+  wrong; it is that a *Not covered* footer ranks by what was noticed, and the item
+  that rewrites the definition is the one nobody listed.
 
 - **2026-07-25** — **Correctness review of milestones 8–9** (the absent value and
   aggregation, both shipped 2026-07-24). Re-derived their semantics against
