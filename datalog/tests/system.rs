@@ -155,14 +155,14 @@ fn module_import_program_runs() {
 
 /// A query inside an imported module is refused, naming the module file.
 #[test]
-fn a_query_in_a_module_exits_one_naming_the_file() {
+fn a_query_in_a_module_does_not_answer_naming_the_file() {
     let dir = std::env::temp_dir().join(format!("datalog-system-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("mkdir");
     std::fs::write(dir.join("asks.dl"), "p(1).\n?- p(X).\n").expect("write");
     let root = dir.join("main.dl");
     std::fs::write(&root, "import \"asks.dl\".\n").expect("write");
     let out = run_args(&[root.to_str().unwrap()]);
-    assert_eq!(out.code, 1);
+    assert_eq!(out.code, 2);
     assert!(out.stderr.contains("asks.dl"), "{}", out.stderr);
     assert!(
         out.stderr.contains("not allowed in imported modules"),
@@ -281,17 +281,17 @@ fn disjunction_program_runs() {
 }
 
 #[test]
-fn a_type_error_exits_one() {
+fn a_type_error_does_not_answer() {
     let out = run_file("broken_types.dl");
-    assert_eq!(out.code, 1);
+    assert_eq!(out.code, 2);
     assert!(out.stdout.is_empty());
     assert!(out.stderr.contains("type error"), "{}", out.stderr);
 }
 
 #[test]
-fn a_runtime_error_exits_one() {
+fn a_runtime_error_does_not_answer() {
     let out = run_file("broken_arith.dl");
-    assert_eq!(out.code, 1);
+    assert_eq!(out.code, 2);
     assert!(out.stdout.is_empty());
     assert!(out.stderr.contains("division by zero"), "{}", out.stderr);
 }
@@ -313,9 +313,9 @@ fn import_program_evaluates() {
 }
 
 #[test]
-fn a_malformed_file_reports_multiple_errors_and_exits_one() {
+fn a_malformed_file_reports_multiple_errors_and_does_not_answer() {
     let out = run_file("broken_multi.dl");
-    assert_eq!(out.code, 1);
+    assert_eq!(out.code, 2);
     assert!(out.stdout.is_empty());
     assert!(
         out.stderr.contains("relation names must be lowercase"),
@@ -336,7 +336,7 @@ fn a_malformed_file_reports_multiple_errors_and_exits_one() {
 #[test]
 fn an_unsafe_program_reports_a_lowering_error() {
     let out = run_file("broken_unsafe.dl");
-    assert_eq!(out.code, 1);
+    assert_eq!(out.code, 2);
     assert!(out.stderr.contains("unsafe rule"), "{}", out.stderr);
 }
 
@@ -514,7 +514,8 @@ fn dash_q_multiple_in_order() {
 #[test]
 fn dash_q_only_with_empty_base() {
     let out = run_args(&["-q", "p(X)"]);
-    assert_eq!(out.code, 0);
+    // The query ran and found nothing, which is an answer: `1`, not `0` (§14).
+    assert_eq!(out.code, 1);
     // No facts, so the query has no answers.
     assert!(out.stdout.is_empty(), "{}", out.stdout);
     // `p` is referenced by the query but nowhere defined — the warning explains
@@ -553,7 +554,7 @@ fn an_unknown_flag_is_a_usage_error() {
 #[test]
 fn a_malformed_dash_q_is_a_program_error() {
     let out = run_args(&["-q", "p("]);
-    assert_eq!(out.code, 1);
+    assert_eq!(out.code, 2);
     assert!(out.stdout.is_empty());
     assert!(!out.stderr.is_empty());
 }
@@ -623,4 +624,97 @@ fn a_nonterminating_program_warns_before_it_hangs() {
     assert!(first.contains("value-creating recursion"), "{first:?}");
     assert!(first.contains("`nat -> nat`"), "{first:?}");
     assert!(first.contains("does not terminate"), "{first:?}");
+}
+
+// ---------------------------------------------------------------------------
+// The caller's contract (§14): the exit code answers the question.
+//
+// Every code in the vocabulary is pinned here, because the vocabulary *is* the
+// feature — a caller branches on it and cannot see anything else without
+// parsing stdout. The range invariant (`0`/`1` answered, `≥ 2` did not answer)
+// is what a later code refines, so these tests are also what stops a refinement
+// silently reinterpreting one of them.
+// ---------------------------------------------------------------------------
+
+/// §16.13 through the real binary: a consistency check is an ordinary query,
+/// and the exit code carries its answer. The two halves differ only in the
+/// facts, which is the point — nothing about the *check* changes.
+#[test]
+fn a_consistency_check_answers_through_the_exit_code() {
+    let clean = run_file("16_13_consistency.dl");
+    assert_eq!(clean.code, 0, "a clean roster answers yes");
+    assert_eq!(clean.stdout, "holds(true).\n");
+    assert!(clean.stderr.is_empty(), "{}", clean.stderr);
+
+    let violated = run_file("16_13_consistency_violated.dl");
+    assert_eq!(violated.code, 1, "a violated roster answers no");
+    assert!(violated.stdout.is_empty(), "{}", violated.stdout);
+}
+
+/// A query that found rows exits `0`; the same query over facts that match
+/// nothing exits `1`. Both are answers — the difference from a `2` is that the
+/// run completed and the engine knows the answer is "none".
+#[test]
+fn rows_found_is_zero_and_no_rows_is_one() {
+    // `16_9_cast.dl` asks nothing of its own, so the `-q` is the only query in
+    // the run and the code is unambiguously about it.
+    let found = run_file_args("16_9_cast.dl", &["-q", "share(F, R)"]);
+    assert_eq!(found.code, 0);
+    assert!(!found.stdout.is_empty());
+
+    let none = run_file_args("16_9_cast.dl", &["-q", "share(nobody, R)"]);
+    assert_eq!(none.code, 1);
+    assert!(none.stdout.is_empty(), "{}", none.stdout);
+}
+
+/// **Any** query decides, so a file that answers on its own masks a `-q` that
+/// found nothing (§14). The consequence is the one a caller must know about:
+/// the consistency-check idiom is exact over a program whose queries *are* the
+/// checks, and a `-q` imposed on a file that asks its own questions is not a
+/// check at all. Nothing here is broken — this pins the boundary so a later
+/// session changes it deliberately rather than by accident.
+#[test]
+fn any_query_decides_so_a_files_own_answers_mask_a_dash_q() {
+    let out = run_file_args("16_1_ancestry.dl", &["-q", "ancestor(\"nobody\", X)"]);
+    assert_eq!(
+        out.code, 0,
+        "the file's own query answered, so the run found rows"
+    );
+    assert!(out.stdout.contains("ancestor(\"alice\""), "{}", out.stdout);
+}
+
+/// A program with no queries asked nothing, so "no rows" is not an answer to
+/// anything: it exits `0`, which keeps `datalog p.dl` usable as a plain check
+/// that a program loads, lowers, type-checks and runs.
+#[test]
+fn a_program_with_no_queries_exits_zero() {
+    let out = run_file("16_9_cast.dl");
+    assert_eq!(out.code, 0);
+    assert!(out.stdout.is_empty(), "{}", out.stdout);
+}
+
+/// A warning never moves the code (§12). This program warns on stderr *and*
+/// answers on stdout, so it exits `0` — the code reports rows, not happiness.
+#[test]
+fn a_warning_does_not_change_the_exit_code() {
+    let out = run_file("16_12_termination.dl");
+    assert_eq!(out.code, 0);
+    assert!(!out.stdout.is_empty());
+    assert!(
+        out.stderr.contains("value-creating recursion"),
+        "{}",
+        out.stderr
+    );
+}
+
+/// The two halves of `≥ 2`: a usage problem and a program error report on the
+/// same code, because a caller's next move — read stderr, do not trust the
+/// output — is the same for both. §12's `category` field carries the finer
+/// split, at a granularity an exit code could not reach.
+#[test]
+fn usage_and_program_errors_share_the_did_not_answer_code() {
+    let usage = run_args(&["--nope"]);
+    assert_eq!(usage.code, 2);
+    let program = run_file("broken_types.dl");
+    assert_eq!(program.code, 2);
 }

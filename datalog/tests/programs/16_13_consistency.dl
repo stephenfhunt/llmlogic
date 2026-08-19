@@ -1,0 +1,11 @@
+% §16.13 — a consistency check is a query, and the exit code is the answer.
+% The roster is clean: nobody is assigned two shifts on the same day.
+assigned("alice", "mon", "open").
+assigned("bob", "mon", "close").
+assigned("alice", "tue", "open").
+
+% the violation pattern, written as an ordinary rule
+double_booked(P, D) :- assigned(P, D, S1), assigned(P, D, S2), S1 != S2.
+
+% the check, phrased affirmatively so `&&` cannot fire on a broken program
+?- not double_booked(_, _).

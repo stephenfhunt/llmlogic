@@ -1,0 +1,7 @@
+% §16.13's other half: the same check over a roster that violates it.
+assigned("alice", "mon", "open").
+assigned("alice", "mon", "close").
+
+double_booked(P, D) :- assigned(P, D, S1), assigned(P, D, S2), S1 != S2.
+
+?- not double_booked(_, _).

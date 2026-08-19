@@ -7,17 +7,21 @@
 //!   one-shot query: a bare atom / comma-body becomes `?- <arg>.`, and a
 //!   define-and-select rule (`head :- body`) appends the rule plus a synthesized
 //!   `?- <head>.`. Multiple `-q` apply in CLI order.
-//! - On success, each query's answers print to **stdout** as canonical Datalog
-//!   facts (so output is valid input); a program with no queries prints nothing.
-//!   Any non-fatal warnings (e.g. a referenced-but-undefined predicate) print to
-//!   **stderr**, keeping stdout a clean fact stream. Exit code **0**. Warnings
-//!   known before evaluation print *before* it runs, so a program the
-//!   termination lint flags (§10) is announced even when its fixpoint never
-//!   arrives.
-//! - On any program error (lex / parse / lowering / type / evaluation), the
-//!   structured errors print to **stderr**, one per line. Exit code **1**.
-//! - On a usage problem (bad arguments, unreadable file), a usage message prints
-//!   to stderr. Exit code **2**.
+//! - Each query's answers print to **stdout** as canonical Datalog facts (so
+//!   output is valid input). Any non-fatal warnings (e.g. a
+//!   referenced-but-undefined predicate) print to **stderr**, keeping stdout a
+//!   clean fact stream, and never change the exit code. Warnings known before
+//!   evaluation print *before* it runs, so a program the termination lint flags
+//!   (§10) is announced even when its fixpoint never arrives.
+//! - **The exit code answers the question** (§14, grep's vocabulary): **0** when
+//!   at least one query printed a row — or when the program had no queries to
+//!   ask, since nothing was asked; **1** when every query ran and none produced
+//!   an answer; **2** when the run did not answer at all, which covers both a
+//!   usage problem (bad arguments, unreadable file) and a program error (lex /
+//!   parse / lowering / type / evaluation), each printed to stderr.
+//! - The vocabulary is a **range**: `0` and `1` are answers, `≥ 2` means the run
+//!   did not answer. A caller branches on that boundary, so a later code can
+//!   refine `2` or number §15's withholding without reinterpreting either.
 //!
 //! The binary stays deliberately thin: argument parsing lives here, everything
 //! else delegates to [`datalog::run_with_queries`].
@@ -47,7 +51,7 @@ fn main() -> ExitCode {
         Err(message) => {
             eprintln!("datalog: {message}");
             eprintln!("{USAGE}");
-            return ExitCode::from(2);
+            return ExitCode::from(DID_NOT_ANSWER);
         }
     };
 
@@ -56,7 +60,7 @@ fn main() -> ExitCode {
             Ok(source) => source,
             Err(message) => {
                 eprintln!("datalog: {message}");
-                return ExitCode::from(2);
+                return ExitCode::from(DID_NOT_ANSWER);
             }
         },
         None => String::new(),
@@ -86,20 +90,37 @@ fn main() -> ExitCode {
         Ok(result) => {
             print!("{}", result.output());
             // Warnings go to stderr so the stdout fact stream stays valid Datalog
-            // input; they do not affect the (success) exit code.
+            // input; they never change the exit code, which answers whether the
+            // run produced rows and not whether it was happy about them (§14).
             for warning in result.warnings.iter().skip(reported) {
                 eprintln!("{warning}");
             }
-            ExitCode::SUCCESS
+            // A program with no queries asked nothing, so "no rows" is not an
+            // answer to anything and the run reports success (§14) — which is
+            // what keeps `datalog p.dl` usable as a plain load-and-run check.
+            if result.answers.is_empty() || result.answers.iter().any(|rows| !rows.is_empty()) {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::from(NO_ROWS)
+            }
         }
         Err(errors) => {
             for error in errors {
                 eprintln!("{error}");
             }
-            ExitCode::FAILURE
+            ExitCode::from(DID_NOT_ANSWER)
         }
     }
 }
+
+/// Every query ran and none produced an answer (§14). Still an *answer* — the
+/// run completed and the question's answer was "none".
+const NO_ROWS: u8 = 1;
+
+/// The run did not answer: a usage problem or a program error (§14). The
+/// vocabulary is a range, so `≥ 2` is the boundary a caller branches on and a
+/// later code may refine this one without reinterpreting it.
+const DID_NOT_ANSWER: u8 = 2;
 
 /// Parses the argument vector into a [`Cli`]: repeated `-q <value>` pairs and at
 /// most one positional source. Rejects unknown flags, a second positional
