@@ -1928,6 +1928,29 @@ never say.
 
 ### Decisions
 
+- **2026-08-18** — **§1 is written, §2 is ratified, and v1 has a definition**
+  (§1/§2; the per-item ruling is in [`notes/v1-scope.md`](notes/v1-scope.md)).
+  Prompted by the stock-take of the same day, which found that "are we feature
+  complete?" was unanswerable against an unwritten §1.
+  - **v1 = S2–S6 hold and S1 has been *measured* at least once.** S1 is the
+    project's own hypothesis, and the criterion is deliberately that the experiment
+    was **run**, not that it came out favourably: a negative result is a finding,
+    whereas shipping v1 having never measured would leave the three pillars — cited
+    throughout this log as settled authority — resting on an unmeasured premise.
+  - **Three of §2's four principles ratified *scoped*, not as written.** A
+    principle is a claim about the implementation, so each was checked first. The
+    sharp one is *explainability and the agent API are first-class*: true of the
+    engine (all derivations, unconditionally, no flag) and **false at the surface**
+    (`?why` unbuilt, `RunResult` carries no derivations, the CLI's only flag is
+    `-q`). Ratifying it as written would have made §2 assert what §11 and
+    `src/lib.rs` contradict. **Rejected: leaving them candidates** — four years of
+    "candidate" is how a principle stops constraining anything.
+  - **The criteria were checked *against* the ruling, not only used for it.** The
+    test was: if an item's ruling cannot be derived from a stated criterion, the
+    criterion is missing rather than the ruling wrong. It fired once — S4 was
+    written "met" and corrected to "met **except dates**", which is what makes
+    temporal types v1 rather than a preference. — §1/§2.
+
 - **2026-08-18** — **§6 accounts for the whole language, and a run that errors has
   no model** (§4/§6/§8/§9; long form in
   [`notes/declarative-semantics.md`](notes/declarative-semantics.md)). The
@@ -2110,6 +2133,13 @@ never say.
   - **Performance as an explicit non-goal**; **one `number` type** (they rejected
     our int/float split because JS has one type, which is not an argument here);
     their **zero-dependency, ES-library-only build discipline**.
+  - ***Consequences 2026-08-18*** — **"performance is not a non-goal" was a
+    decline, and is now a stated goal.** §1 promotes it from something this entry
+    refused to adopt into one of two goals named beyond the pillars, on this
+    entry's own measured evidence. Worth recording because the decline was the
+    *weakest-looking* bullet here — declining someone else's non-goal asserts
+    nothing on its own — and it turned out to be the one §1 could not have been
+    written without.
   - ***Consequences 2026-08-17*** — **the naive-first decline is measured, and it
     was an exponent.** One corpus run on both engines
     (`notes/cross-engine-benchmark.md`): chain closure scales ~n^2.4 here against
