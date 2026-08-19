@@ -197,6 +197,17 @@ it. A future audit starts here.
 | Aggregation (§9) | `aggregate_ir` (grouped, one relation); `grouped_ir` (group keys from a *second* relation, empty groups, absent witnesses); `aggregate_goal_ir` (multi-atom + negated goal, all 6 goal orderings) | **independent group-by oracle** (`aggregation_matches_an_independent_group_by`); B1 differentials (`b1_aggregate_programs_agree`, `b1_aggregate_goal_shapes_agree`); body-order invariance (`b5_aggregate_body_order_does_not_change_the_model`); fold laws (absent-skip, empty→absent, count=witnesses, sum oracle, min/max bounds); §16.4 hand test; query-position and nested/assignment-bound goals in `tests/pipeline.rs` |
 | Termination (§10) | `arb_recursive_arithmetic_program` (ten placements of arithmetic relative to a positive cycle, over a freely cyclic graph); `arb_taint_spellings` (four spellings of one value-creating recursion) | **C10** `c10_a_certified_program_reaches_its_fixpoint` on a test-only round cap, with the B1 differential; `c10_generator_certifies_programs_that_do_arithmetic_in_a_cycle` — the non-vacuity half, without which C10 is a claim about arithmetic-free Datalog; **C8** `c8_the_taint_spellings_classify_alike`; §16.12 hand test (the diagnostic, on stderr) |
 | Absent value (§4/§8) | `arb_fact_constant` (absent in *data*, ~1 in 10) + `absent_ir` (join / self-join / anti-join / comparison / arithmetic / presence over a `{0, 1, absent}` pool) | B1 absent differential (`b1_absent_programs_agree`); value laws (annihilation, comparison-false, unify-vs-eq, sorts-first); `generator_emits_absent_in_facts_only` |
+| Declarative semantics (§6) | nothing of its own — §6 describes the semantics every generator above already exercises | the match relation: `try_match_binds_a_var_to_a_stored_absent_but_never_rematches_it`, `values_unify_matches_eq_off_absent`; its two derived consequences: `repeating_a_body_literal_drops_absent_rows` and `a_fact_never_satisfies_its_own_negation` (**C9**); the perfect model: **C1**–**C3**; the aggregate fold: the group-by oracle above; the fixpoint: **C10**; the error rule: B1's error path |
+
+**§6 adds no property, and two of its claims cannot have one** (2026-08-18). The
+section is descriptive, so every rule it states was already guarded — the row above
+is an index, not new work. The exceptions are the two *metatheoretic* claims: that
+`T_P` is total on finite inputs for every program, and PTIME data complexity for
+the certified fragment. Neither is a statement about a program a generator can
+emit, so both are carried by the proof in `notes/declarative-semantics.md` and
+`notes/termination.md` instead. C10's round cap is the closest a property gets to
+the first, and it witnesses the *fixpoint* rather than the application. Recorded
+rather than softened: a spec sentence with no guard should be visible.
 
 ## Property catalog
 

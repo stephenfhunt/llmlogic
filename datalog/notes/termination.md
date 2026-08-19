@@ -58,8 +58,8 @@ a finite extent over a finite active domain.
   Herbrand base is therefore finite, `T_P` is monotone over a finite lattice, and
   the least fixpoint is reached in finitely many steps. ∎
 
-**Two consequences worth stating in §6.** The classical finite-universe argument
-is available again, scoped to this fragment — which is what `bugs/004` found
+**Two consequences, stated in §6 since 2026-08-18.** The classical finite-universe
+argument is available again, scoped to this fragment — which is what `bugs/004` found
 missing. And with it the PTIME data-complexity result: for a fixed program the
 number of SCC levels is fixed, and each level's active domain is bounded by a
 polynomial in the input size whose degree depends only on the program's arities
