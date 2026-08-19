@@ -1033,7 +1033,11 @@ facts are not coming**: a proof tree is not a fact, so it rides in `%` comments,
 which keeps Datalog-out-is-Datalog-in intact. Also not covered: semiring provenance
 under negation and tropical cheapest-proof selection
 (`notes/semiring-provenance.md`), and lineage annotations on answer rows — Tier 1
-in tsdl's sense — which this engine does not have at all.
+in tsdl's sense — which this engine does not have at all. Also not covered: an
+imported fact is anchored by its **relation**, not by its source row — §13
+materializes imports into ordinary base facts before lowering — so the import
+anchor above is coarser than the sentence suggests, and a row-level one is a
+memory trade rather than an omission (`ROADMAP.md`).
 
 ## 12. Error model
 
@@ -1363,7 +1367,12 @@ unnameable projection is not an error (§17, 2026-08-17 — a bare `?-` stays to
 and making it strict is affordable only now that a name exists). Also not covered: a
 `--format json` data path (deferred as low-value; JSON stays at the
 machine-readable edges), `serde` on the API types, and streaming or cursored
-results.
+results. Also not covered: **what the exit code means beyond "it ran"**. Every
+completed run exits `0`, and an empty answer set prints nothing, so a caller
+cannot distinguish "no rows" from "the question was answered no" without parsing
+stdout — which is what an **integrity constraint** would need to report, and the
+same code the truncation contract needs for withholding (§15). One open question,
+§17 2026-08-18.
 
 ## 15. Evaluation strategy (non-normative)
 
@@ -3480,6 +3489,19 @@ never say.
   provenance (which derivation survives when a better value replaces it?) all move.
   The rejected cheaper alternative is a bounded-counter recognizer, and why it does
   not reach this case is in `notes/termination.md`. — §4/§6/§9/§10.
+- **What does a caller learn from a run that completed?** Opened 2026-08-18 by the
+  feature-complete stock-take (`notes/taking-stock-2026-08-18.md`). Today: exit `0`,
+  and silence on stdout, whether the program derived nothing or answered *no*. Two
+  needs converge on one answer and neither is built. **Integrity constraints** —
+  there is no `constraint`, no denial rule, and no way to say *this must never
+  happen*, while the skill advertises consistency checking; a violation is
+  discoverable only by parsing stdout. And the **truncation contract** (2026-08-16),
+  whose one open piece is the CLI shape, already states that withholding "has to
+  mean an exit code and a stdout discipline, not a return field". Designing them
+  apart would give one exit code two vocabularies. What is genuinely open: whether a
+  constraint is a language construct or a query convention, how many codes the
+  vocabulary needs, and whether stdout stays a pure fact stream when a run has
+  something to say and no rows to say it with. — §12/§14/§15.
 - **Builtin scalar functions with no relational spelling** — `abs`, `length`,
   `lower`, `substr`. *User-defined* scalar functions were declined 2026-07-25 (a
   rule already is one), and conversion is now the `as` cast, so what remains is the
