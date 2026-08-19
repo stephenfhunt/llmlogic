@@ -134,14 +134,46 @@ this section rank the v1 items among themselves; sequence is `ROADMAP.md`'s.
 
 ## 2. Design principles
 
-Candidate principles to ratify, except where a bullet says otherwise:
-- **Prefer familiar, conventional Datalog surface syntax.** LLMs generate standard
-  Prolog-/Datalog-style syntax reliably because it is well represented in training
-  data — a strong reason to stay conventional rather than invent novel syntax.
-- **Strict, unambiguous grammar.** No syntax whose meaning depends on subtle context.
-- **Every error is structured and actionable** (machine-readable, with spans and,
-  where possible, suggested fixes).
-- **Explainability and the agent API are first-class**, designed in from the start.
+Five principles, all ratified — two as stated, three **scoped** to what the
+implementation delivers. A principle is ratified against evidence, so where the
+surface falls short of the sentence, the sentence says so rather than the gap
+living in a footer (§17, 2026-08-18). §1 says what the engine is *for*; these say
+how it is built.
+
+- **Prefer familiar, conventional Datalog surface syntax** — *ratified, scoped to
+  the core.* LLMs generate standard Prolog-/Datalog-style syntax reliably because
+  it is well represented in training data, so facts, rules, `:-`, `?-`, `not` and
+  the comparison operators are conventional and stay that way. The principle is
+  not *never deviate*; it is that **every deviation carries a §17 entry saying
+  what it bought** — the `#` comment alias, named arguments, `op { Expr | Goal }`,
+  `is absent`, postfix `as`, `declare`, `import … as`, `?- name:`. Its operational
+  half is §3's near-miss recovery: a Prolog prior (`=<`, `\=`, `\+`) is recognized
+  and corrected rather than rejected obscurely.
+- **Strict, unambiguous grammar** — *ratified.* No syntax whose meaning depends on
+  subtle context. The one deliberate exception is §3's contextual keywords —
+  `table`, the five type names, the five aggregate names — each legal in exactly
+  one position, which keeps the grammar context-free while leaving all of them
+  usable as ordinary relation and field names. This principle has been paid for
+  rather than asserted: `float(A)` was declined because `ident (` cannot be told
+  from an atom without scan-ahead (§8, §17).
+- **Every error is structured and actionable** — *ratified, scoped to structure
+  and to lexical/syntactic location.* A diagnostic is data with a rendering
+  (§12): category, message, suggestion and position are separate fields, so a
+  consumer never parses English to recover them. **Location is the scoped half.**
+  Spans are attached in the lexer and the parser only — measured 2026-08-18, *all*
+  46 `Error::semantic` and 33 `Error::source` construction sites carry none, which
+  is broader than §12's "many" reads. Suggestions, by contrast, do reach every
+  stage. A stable per-diagnostic **code** is still missing, so a consumer branches
+  on one of four `ErrorKind` categories or on prose (§12, ROADMAP).
+- **Explainability and the agent API are first-class** — *ratified, scoped to the
+  engine.* Provenance is designed in from the start and is not an add-on: the
+  fixpoint records **all** derivations of every derived fact, deduplicated by rule
+  instance, unconditionally and with no flag to turn it off (§11). At the
+  **surface** it is not yet first-class, and this principle must not be read as
+  claiming otherwise — `?why`/`?whynot` are designed and unbuilt (§17, 2026-08-16),
+  the CLI's only flag is `-q`, and `RunResult` carries the model, the answers and
+  the warnings, not derivations. Pillar 1 therefore pays on every run and returns
+  nothing at pillar 3's surface; closing that is a v1 goal (§1).
 - **Predictable evaluation** — *ratified 2026-08-18, and scoped.* Termination is
   decided **statically and reported before the run**: a program the engine
   certifies terminates, and one it cannot is named, with the reason, on stderr
@@ -151,8 +183,12 @@ Candidate principles to ratify, except where a bullet says otherwise:
   *Resource* behaviour carries no guarantee at all and deliberately none: no
   budget, no cap, and a slow program stays slow (§15, §17 2026-08-16).
 
-*Not covered:* ratification of the other four, which stay candidates; that is a
-ROADMAP item covering §1 and §2 together.
+*Not covered:* **compatibility across versions.** Nothing here promises that a
+program valid under one release stays valid under the next, and at `v0.1` there is
+no deprecation path — a deliberate omission while the surface is still moving, not
+an oversight (§1's v1 criteria are what would make one affordable). Nor is
+performance a principle: §15 disclaims resource guarantees outright, and the
+predictability ratified above is about *knowing which class a program is in*.
 
 ## 3. Lexical structure
 
@@ -1153,9 +1189,10 @@ same data with no message re-parsing.
 
 *Not covered:* a stable machine-readable **code** per diagnostic (an agent should
 be able to branch on `unsafe-aggregate` without matching prose), and spans on
-semantic errors — lowering reports many from points where the responsible span is
-not threaded, and choosing the right span per diagnostic is a design pass rather
-than a mechanical change. Both tracked in `ROADMAP.md`. Nor does this section say
+semantic errors — spans are attached in the lexer and the parser only, and *every*
+one of the 46 `Error::semantic` and 33 `Error::source` construction sites carries
+none (measured 2026-08-18). Choosing the right span per diagnostic is a design pass
+rather than a mechanical change. Both tracked in `ROADMAP.md`. Nor does this section say
 anything about a `suggestion`'s *content*, which is the field with the sharpest
 known hazard: a model acts on a suggestion literally, so one that cannot be acted
 on costs a round and one that is wrong on correct code is worse than none
