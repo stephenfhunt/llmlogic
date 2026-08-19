@@ -355,7 +355,13 @@ share(F, R) :- count(food: F, n: N), total(t: T), R = (N as float) / (T as float
   visible in the source text instead.
 - **A conversion that cannot succeed splits two ways** (§8 has the table): one
   that would be *lossy* is a structured error, and one with no value to represent
-  (`"abc" as int`) is `absent`.
+  (`"abc" as int`) is `absent`. The second is **reported** — a value existed and
+  was lost, and the value model cannot say so, since the `absent` it produces is
+  the same value a missing cell produces. §12 carries that report
+  (*malformed, not missing*), counted per conversion site, on the run where the
+  conversion failed. A conversion whose result the program **guards** — `V = X as
+  int, V is [not] absent`, the idiom §16.9 shows — is silent: the program already
+  asks the question the report would answer.
 
 Conversion is also available at the **import boundary** — an explicit schema
 (`import "t.csv" as t(a: float)`) coerces cells as they load (§13) — and typed
@@ -956,12 +962,12 @@ Aggregates treat the absent value (§4) uniformly:
     ("`avg` in `mean/2` skipped 1 absent input(s) across 1 group(s)"), summed over
     every group. This is what makes the skip non-silent today — an `avg` over a
     half-empty column is otherwise indistinguishable from one over a full column
-    (added 2026-07-25; the warning channel is §12's severity axis);
+    (added 2026-07-25; the warning channel is §12's severity axis). An aggregate
+    written in a **query** reports the same way, under the query's 1-based
+    position rather than a rule name — a query records no derivations, so its
+    counts are read from the premises as its rows are produced;
   - eventually `?why` ("averaged 8 values, skipped 2 absent") once the §11 query
     surface exists. The record it reads is already there.
-
-  Not covered by the warning: an aggregate appearing only in a **query**, since
-  queries are answered as projections and record no derivations.
 
   A user who wants the skip count *as data* writes it directly:
   `S = count { A | Goal, A is absent }` (§17, 2026-07-24 — provenance-only chosen
@@ -1160,13 +1166,27 @@ English to recover where the problem is or what to do about it — the
 structured-errors pillar (§2), which matters most when the consumer is an agent
 about to rewrite the program.
 
-**Severity.** Two levels today. An **error** rejects the program (exit 1, stderr;
-every stage collects *all* of its own errors before returning, so one run reports
-everything at that stage rather than the first thing). A **warning** lets the
-program run (exit 0) but flags something that is valid yet usually a mistake —
-currently a referenced-but-undefined predicate (§10) and an aggregate that
-skipped `absent` inputs (§9). Warnings go to stderr, never stdout, which stays a
-clean fact stream (§14).
+**Severity.** Two levels today. An **error** rejects the program (stderr, and the
+run does not answer — §14's exit vocabulary; every stage collects *all* of its own
+errors before returning, so one run reports everything at that stage rather than
+the first thing). A **warning** lets the program run and answer, but flags
+something that is valid yet usually a mistake — currently a
+referenced-but-undefined predicate (§10), an aggregate that skipped `absent`
+inputs (§9), a value-creating recursion (§10), and a conversion that failed on
+data (§8, below). Warnings go to stderr, never stdout, which stays a clean fact
+stream (§14).
+
+A warning **never changes the exit code**, which answers a different question:
+whether the run produced rows, not whether it was happy about them (§14).
+
+**Missing and malformed are different reports.** An `absent` that arrived as data —
+an empty CSV cell, a JSON `null` (§13) — is *missing*, and §9's aggregate skip
+reports it as such. An `absent` the engine **manufactured** by failing a
+conversion (`"abc" as int`, §8) is *malformed*: a value existed and could not be
+represented. Both flow identically through the value model (§4) — that is the
+2026-08-16 decision and it stands — so the diagnostic is the only place the
+distinction survives, and it is reported at the conversion that lost it, counted
+per site, only on a run where one actually failed.
 
 **Category.** Which stage rejected the program, and so which vocabulary the
 message speaks: `lex`, `parse`, `semantic` (safety, stratification, types),
@@ -1196,7 +1216,15 @@ rather than a mechanical change. Both tracked in `ROADMAP.md`. Nor does this sec
 anything about a `suggestion`'s *content*, which is the field with the sharpest
 known hazard: a model acts on a suggestion literally, so one that cannot be acted
 on costs a round and one that is wrong on correct code is worse than none
-(`notes/tsdl-cross-project-review.md`, measured there).
+(`notes/tsdl-cross-project-review.md`, measured there). Nor is there a **third
+severity**: a run that completes, declines to answer, and says so with a non-zero
+code is what the truncation contract (§15) needs and what nothing today produces,
+so it is specified there rather than given a rung here (§17, 2026-08-18). Nor
+does the malformed report reach a conversion written **inside a comparison**
+(`X as int > 5`): a failed conversion makes its operand `absent`, every
+comparison with an absent operand is false (§8), and the row is filtered out
+before there is anything to report it on — so a dirty column silently narrows a
+filter where it visibly widens an assignment. Tracked in `ROADMAP.md`.
 
 ## 13. External data / fact sources
 
@@ -1420,12 +1448,44 @@ is what a reader wants, and it is a subset by construction (§17, 2026-08-16 and
 **Binary contract** (2026-07-22; `-q` completed 2026-07-23, roadmap step 6).
 Invocation is `datalog [<file> | -] [-q <query>]…`. The positional source is a
 program file, `-` for stdin, or **omitted** (empty base program); at most one is
-allowed. Each query's answers print to stdout as canonical facts and the process
-exits **0**; program errors (lex/parse/lower/type/eval) print to stderr, one per
-line, exit **1**; a usage error (bad arguments, unreadable file, or a bare
-`datalog` with no source and no `-q`) exits **2**. Argument parsing is a small
-hand-rolled loop in `src/main.rs`; the logic lives in the library
+allowed. Each query's answers print to stdout as canonical facts. Argument parsing
+is a small hand-rolled loop in `src/main.rs`; the logic lives in the library
 (`api::run_with_queries` / `program_with_queries`), so `main` stays thin.
+
+**The exit code answers the question**, on `grep`'s vocabulary (2026-08-18):
+
+| code | meaning |
+|---|---|
+| **0** | **rows found** — at least one query printed an answer, *or* the program had no queries to ask |
+| **1** | **no rows** — every query ran and none produced an answer |
+| **2** | **did not answer** — a usage error (bad arguments, unreadable file, a bare `datalog` with no source and no `-q`) or a program error (lex/parse/lower/type/eval), printed to stderr, one per line |
+
+**The vocabulary is a range, not a list: `0` and `1` are answers, `≥ 2` means the
+run did not answer.** A caller branches on that boundary, which is what lets a
+later code refine `2` (a §13 source failure is the standing candidate) or number
+the withholding §15 describes, without reinterpreting a code that already means
+something. `101` (a Rust panic) and `130` (`^C`) are the process's, not ours.
+
+A **warning does not change the code** (§12): the code says whether the run
+produced rows, not whether it was happy about them. A program with **no queries**
+exits `0` — nothing was asked, so "no rows" is not an answer to anything, and
+`datalog p.dl` stays usable as a plain check that a program loads and runs.
+
+**A consistency check is a query, not a construct** (2026-08-18). The language
+needs nothing for it: a negation-only body answers `holds(true).` when it holds,
+and §10 exempts wildcard-fresh variables under negation from range restriction, so
+the check writes as an ordinary query and the exit code carries the answer.
+
+```sh
+# `&&` means what it looks like: deploy only if nothing is double-booked
+datalog roster.dl -q 'not double_booked(_, _, _)' && deploy
+```
+
+**Phrase the check affirmatively**, as above. It is not a style preference: every
+error code is non-zero, so `&&` cannot fire on a program that failed to compile,
+while the inverted phrasing — `datalog roster.dl -q 'double_booked(P, S1, S2)' ||
+deploy` — deploys on a syntax error as readily as on a clean roster, because `||`
+fires on `2` exactly as it fires on `1`.
 
 **One-shot `-q` queries** — the jq analog (resolved 2026-07-23):
 
@@ -1481,12 +1541,15 @@ unnameable projection is not an error (§17, 2026-08-17 — a bare `?-` stays to
 and making it strict is affordable only now that a name exists). Also not covered: a
 `--format json` data path (deferred as low-value; JSON stays at the
 machine-readable edges), `serde` on the API types, and streaming or cursored
-results. Also not covered: **what the exit code means beyond "it ran"**. Every
-completed run exits `0`, and an empty answer set prints nothing, so a caller
-cannot distinguish "no rows" from "the question was answered no" without parsing
-stdout — which is what an **integrity constraint** would need to report, and the
-same code the truncation contract needs for withholding (§15). One open question,
-§17 2026-08-18.
+results. Also not covered: **an exit code survives a pipe only if the caller asks
+it to.** The code above is the one channel carrying the difference between "no
+rows" and "could not answer", and a downstream `datalog - -q '…'` sees **only**
+stdout — so `datalog a.dl | datalog - -q '…'` reads a run that failed exactly as it
+reads one that answered nothing, unless the shell is running under `set -o
+pipefail`. Nothing on stdout can close this: a marker a downstream lexer skips
+changes nothing, and one it does not skip is not valid input, which S2 forbids
+(§1). The closure property and the truncation contract (§15) are in genuine
+tension here, and this is where it lands (§17, 2026-08-18).
 
 ## 15. Evaluation strategy (non-normative)
 
@@ -1528,14 +1591,22 @@ slow. The engine's only obligation on the uncertified path is to say so first,
 which §10 discharges before this loop starts.
 
 *Also not covered, and decided rather than deferred:* **what an incomplete model is
-worth**. Decided 2026-08-16 and not implemented — an incomplete fixpoint holds
-missing facts and never false ones, so a whole-model dump survives it while
-*answers* do not, because a query solved against it can be wrong rather than
-missing (`not p(X)` over an incomplete `p` succeeds). Where a relation is short by
-rows the discriminator is how the program reads it: projected, answer one row short
-and say so; folded or negated, withhold. §9's skipped aggregate rows and §13's
-unrepresentable cells are the live instances, and both report through a stderr
-warning today.
+worth**. Decided 2026-08-16 — an incomplete fixpoint holds missing facts and never
+false ones, so a whole-model dump survives it while *answers* do not, because a
+query solved against it can be wrong rather than missing (`not p(X)` over an
+incomplete `p` succeeds). Where a relation is short by rows the discriminator is
+how the program reads it: projected, answer one row short and say so; folded or
+negated, **withhold** — which means no answer on stdout, the reason on stderr, and
+an exit code of its own (§14).
+
+**Nothing in this engine produces a short relation, so withholding has no trigger
+and no exit code yet** (2026-08-18). The rule above is about rows the fixpoint
+never derived; there is no budget, no fuel and no cap on the production path (the
+round cap in `src/engine/` is a test oracle), imports fail with a structured error
+rather than dropping a cell (§13), and an `absent` **value** is data the source did
+not have, not a row this engine did not reach (§4). When a trigger does exist — a
+hosted surface's budget, an external signal — it takes the next code above §14's
+`2`, which that section's range invariant reserves for exactly this.
 
 Also not covered: semi-naive's interaction with anything annotation-shaped, magic
 sets, indexes, parallelism, incremental maintenance.
@@ -1900,6 +1971,46 @@ it back. What the example cannot show is the timing, since a program that answer
 has necessarily terminated; `tests/programs/nonterminating.dl` carries that half,
 and only a live process can observe it.
 
+### 16.13 The caller's contract — a check whose answer is the exit code
+
+Run by `tests/system.rs::a_consistency_check_answers_through_the_exit_code` over
+`tests/programs/16_13_consistency.dl` and its violated twin. **The first example
+whose subject is not the output but the code**, so what it demonstrates is only
+visible to a caller that reads `$?`.
+
+```datalog
+assigned("alice", "mon", "open").
+assigned("bob",   "mon", "close").
+assigned("alice", "tue", "open").
+
+% the violation pattern, an ordinary rule
+double_booked(P, D) :- assigned(P, D, S1), assigned(P, D, S2), S1 != S2.
+
+% the check: a negation-only body, which answers `holds(true).` when it holds
+?- not double_booked(_, _).
+```
+stdout, and the code:
+```
+holds(true).
+$ echo $?
+0
+```
+The same program over a roster where `alice` works both `mon` shifts prints
+nothing and exits **1** — the answer is *no*, and no rows is how §14 says it.
+
+*Resolved (§12/§14/§15, 2026-08-18):* a constraint needs no construct. The
+language already writes the check, and what was missing was the exit code — so
+the shell idiom means what it looks like:
+
+```sh
+datalog roster.dl -q 'not double_booked(_, _)' && deploy
+```
+
+Phrase it **affirmatively**, as here. Every error code is `≥ 2`, so `&&` cannot
+fire on a program that failed to compile, while the inverted `-q
+'double_booked(P, D)' || deploy` deploys on a syntax error exactly as readily as
+on a clean roster.
+
 ## 17. Decisions log & open questions
 
 This section is an **append-only record**: history is what it is for. Amend
@@ -1927,6 +2038,24 @@ marker that records a decision working out *well*, which the log would otherwise
 never say.
 
 ### Decisions
+
+- **2026-08-18** — **The caller's contract: the exit code answers the question**
+  (§12/§14/§15). Five axes, their evidence and the alternatives that lost are in
+  [`notes/callers-contract.md`](notes/callers-contract.md).
+  - **A constraint is not a construct** — a negation-only body already answers
+    `holds(true).` (§14), so only the code was missing.
+  - **`0` rows · `1` no rows · `2` did not answer**, grep's vocabulary, **stated as
+    a range** so a later code refines `2` rather than reinterpreting it. Program
+    errors moved `1 → 2`; §12's `category` splits them finer than a code could.
+  - **stdout stays a pure fact stream**, and **withholding is specified and
+    unnumbered**: §17 2026-08-16 named three live truncation sources and,
+    measured, **none is one** — so a code with no trigger would be the worse error.
+  - **A failed conversion now reports** *malformed, not missing* (§4/§12); so does
+    a query-level aggregate skip (§9), silent before. A **guarded** conversion
+    (§16.9's idiom) stays silent — a diagnostic firing on a correct program is the
+    hazard `notes/tsdl-cross-project-review.md` measured.
+  - Named tests: `system::a_consistency_check_answers_through_the_exit_code`
+    (§16.13), `pipeline::a_guarded_conversion_is_not_warned_about`.
 
 - **2026-08-18** — **§1 is written, §2 is ratified, and v1 has a definition**
   (§1/§2; the per-item ruling is in [`notes/v1-scope.md`](notes/v1-scope.md)).
@@ -2173,6 +2302,15 @@ never say.
     exposure is a *hosted* surface (MCP, API harness — both parked). **Rejected:
     their five-way `verdict`**, a library's return field where ours must be an exit
     code and a stdout discipline.
+  - ***Consequences 2026-08-18*** — **the three "live sources" were not live**,
+    which the caller's-contract session found by measuring them: §13's cells are
+    structured errors, the round cap is a test oracle, and §9's skips are absent
+    *values* in present rows. The entry's rule turns on a distinction it never
+    draws — **short by rows** is not **absent in a cell** — and only the first is
+    truncation. So the contract is right and has nothing to fire on, which is why
+    §15 now says so and the exit code stays unnumbered. What the entry did get
+    exactly right is the *shape*: "an exit code and a stdout discipline, not a
+    return field" is what shipped, and rejecting tsdl's `verdict` field held.
   - ***Consequences 2026-08-18*** — the no-budget argument **held, and did more
     work than it was written for**. Termination (2026-08-18) reused it verbatim
     against *rejection*, not just against fuel: if "a slow program stays slow, `^C`
@@ -3613,6 +3751,13 @@ never say.
     visible**: this trades "malformed" for "missing", and the skip-and-report
     machinery it would need rides on the aggregate literal, not on an
     `=`-assignment. That is a ROADMAP item.
+    - ***Answered 2026-08-18*** — reported at the conversion (§4/§12), and the
+      `=`-assignment turned out to be the *right* carrier rather than the missing
+      one: lowering hoists every compound argument there, so one site covers every
+      cast that can fail on data. What the ROADMAP item did not anticipate is that
+      the report needs a **silencer** — §16.9's guarded idiom is a correct program
+      the warning would otherwise fire on — and that a cast inside a *comparison*
+      is not covered at all, the row being filtered out before a premise exists.
 - **Should an accumulating recursion be able to *terminate* rather than merely be
   warned about?** Opened 2026-08-18 by the decision above, which chose to classify
   and not reject, and so left `path_cost` running exactly as long as its data lets
@@ -3646,6 +3791,17 @@ never say.
   constraint is a language construct or a query convention, how many codes the
   vocabulary needs, and whether stdout stays a pure fact stream when a run has
   something to say and no rows to say it with. — §12/§14/§15.
+  - ***Answered 2026-08-18*** — by the decision of that date, and all three
+    sub-questions answered *smaller* than they were asked: a convention rather than
+    a construct, three codes rather than a taxonomy, and stdout unchanged. The
+    merge was worth making anyway, but not for the reason the question gives: the
+    two needs never contended for the code, because **withholding turned out to
+    have no trigger at all**. Measuring that was only prompted by designing them
+    together, which is the argument for the merge that this entry could not make.
+    - One question **survives and is new**: a conversion that fails inside a
+      *comparison* narrows a filter with nothing to report it on (§12's *Not
+      covered*), because the row is gone before a premise exists to carry the
+      count. `ROADMAP.md`.
 - **Builtin scalar functions with no relational spelling** — `abs`, `length`,
   `lower`, `substr`. *User-defined* scalar functions were declined 2026-07-25 (a
   rule already is one), and conversion is now the `as` cast, so what remains is the
