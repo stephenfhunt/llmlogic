@@ -4440,6 +4440,69 @@ mod tests {
                 }
             }
 
+            /// **The fold does not depend on the order its witnesses arrive
+            /// in** (§9) — permuting the multiset leaves every one of the five
+            /// unchanged.
+            ///
+            /// This is the law two *existing* properties already assume and
+            /// neither can see. `b5_aggregate_body_order_does_not_change_the_model`
+            /// permutes the body, which is exactly what changes which literal is
+            /// outer and so the order `enumerate_from` pushes values into the
+            /// witness `Vec`; `b1_aggregate_goal_shapes_agree` lets the two
+            /// evaluators enumerate a goal differently. Both were int-only, and
+            /// over ints the question cannot arise: integer addition is
+            /// associative and commutative, so any permutation folds alike.
+            ///
+            /// **Floats are where it can fail**, which is why the pool is
+            /// float-valued and deliberately ill-conditioned — a large magnitude
+            /// beside small ones is the classic case where `(a + b) + c` and
+            /// `a + (c + b)` differ in the last bits. Determinism of output is a
+            /// ratified design claim (`testing.md`, "Why PBT fits"), so if this
+            /// **It does redden — this is `bugs/007`.** Written `#[ignore]`d and
+            /// failing in the sitting the defect was found, the way
+            /// `dash_q_rule_equals_the_same_rule_in_a_file` was written for
+            /// `bugs/002` and `ordered_comparison_and_minmax_agree_on_every_type`
+            /// for `bugs/006`: deleting the `#[ignore]` is what closing the
+            /// defect looks like. The shrunk counterexample is committed in
+            /// `proptest-regressions/engine/mod.txt`.
+            ///
+            /// Two spellings of one goal, two answers — `r(0.0)` against
+            /// `r(0.1)` over floats, and answer-versus-`exit 2` over the int
+            /// overflow check. §17 (2026-07-25) rules that out in terms:
+            /// "Two orderings of one conjunction, two answers, which no
+            /// declarative reading permits."
+            #[test]
+            #[ignore = "bugs/007: sum/avg fold in enumeration order"]
+            fn fold_is_permutation_invariant(
+                floats in prop::collection::vec(
+                    prop_oneof![
+                        (-1e6f64..1e6),
+                        Just(1e16f64),
+                        Just(-1e16f64),
+                        Just(0.1f64),
+                        Just(1e-16f64),
+                    ],
+                    1..8,
+                ),
+                rotation in 0usize..8,
+            ) {
+                let vs: Vec<Value> = floats
+                    .iter()
+                    .map(|f| Value::Float(F64::new(*f).expect("pool floats are not NaN")))
+                    .collect();
+                let mut permuted = vs.clone();
+                permuted.rotate_left(rotation % vs.len());
+                permuted.reverse();
+                for op in [AggOp::Count, AggOp::Sum, AggOp::Avg, AggOp::Min, AggOp::Max] {
+                    let straight = fold_aggregate(op, &vs).unwrap();
+                    let shuffled = fold_aggregate(op, &permuted).unwrap();
+                    prop_assert_eq!(
+                        straight.value, shuffled.value,
+                        "{:?} depends on witness order over {:?}", op, &floats
+                    );
+                }
+            }
+
             /// sum matches an independent integer fold; empty → absent (§9).
             #[test]
             fn sum_matches_an_independent_fold(ints in prop::collection::vec(-1000i64..1000, 0..8)) {

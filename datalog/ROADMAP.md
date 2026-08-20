@@ -45,9 +45,15 @@ each; detail in §17 and `docs/worklog.md`.
 
 ## Open backlog
 
-> **Open defects live in [`bugs/`](bugs/)** — the set is **empty as of
-> 2026-08-18**, for the first time since the 2026-07-25 spec review. **No design
-> session blocks anything**: §6's extension, the last one, shipped 2026-08-18.
+> **Open defects live in [`bugs/`](bugs/)** — **one open as of 2026-08-20**:
+> `007`, `sum`/`avg` folding in witness-enumeration order, so two spellings of one
+> goal give two answers (and, on the int overflow path, an answer versus exit 2).
+> Found by the coverage audit that widened the aggregate generators past `int`.
+> The set had been empty since 2026-08-18, for the first time since the
+> 2026-07-25 spec review. **No design session blocks anything**: §6's extension,
+> the last one, shipped 2026-08-18 — but `007`'s *fix* is a §17 call between
+> sorting the witnesses and documenting the restriction, and the bug file argues
+> for sorting.
 >
 > **§1 is written and §2 ratified (2026-08-18), so every item below is now ruled
 > v1 or post-v1** against §1's success criteria — the argument per item is in
@@ -74,11 +80,15 @@ each; detail in §17 and `docs/worklog.md`.
 > rejected the types §8 orders), **fixed 2026-07-27** by widening the type
 > checker to match the spec, which needed no change.
 >
-> `cargo test -- --ignored` should report **no** known failures since 2026-07-29,
-> when the two absent × negation tests were closed out (one passes, one was
-> converted to pin the asymmetry it turned out to describe). The only `#[ignore]`d
-> test left is `url_csv_import_reads_over_httpfs`, which needs the network and
-> passes. Any *failure* under `--ignored` now means something regressed.
+> `cargo test -- --ignored` reports **exactly one** known failure as of
+> 2026-08-20: `fold_is_permutation_invariant`, `bugs/007`'s acceptance criterion,
+> written `#[ignore]`d and failing in the sitting the defect was found. Deleting
+> its `#[ignore]` is what closing that defect looks like. The other `#[ignore]`d
+> test is `url_csv_import_reads_over_httpfs`, which needs the network and passes.
+> Any *other* failure under `--ignored` means something regressed.
+>
+> (Between 2026-07-29 and 2026-08-20 this line read "no known failures", which
+> was true for that window.)
 
 ### Goals and principles (§1/§2) — shipped
 
