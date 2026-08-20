@@ -3546,6 +3546,98 @@ mod tests {
             assert_eq!(two, vec![vec![Value::Int(1)]]);
         }
 
+        /// Which parities of negation each predicate can reach `q` by, recomputed
+        /// from the lowered rules — C11's dependency walk, shared by the property
+        /// and its non-vacuity guard so the two cannot drift apart. `[even, odd]`
+        /// per predicate; `q` reaches itself by the empty (even) path.
+        ///
+        /// Deliberately independent of `crate::schedule` and of `program.strata`:
+        /// C1 recomputes its graph the same way, and for the same reason — a check
+        /// that asks the code under test for the answer agrees with it forever.
+        fn negation_parities(program: &Program, q: PredId) -> Vec<[bool; 2]> {
+            let n = program.predicates.len();
+            let mut parities: Vec<[bool; 2]> = vec![[false; 2]; n];
+            parities[q.0 as usize][0] = true;
+            let mut changed = true;
+            while changed {
+                changed = false;
+                for rule in &program.rules {
+                    for literal in &rule.body {
+                        let (body_pred, flip) = match &literal.kind {
+                            BodyLiteralKind::Atom(atom) => (atom.pred, 0),
+                            BodyLiteralKind::NegAtom(atom) => (atom.pred, 1),
+                            _ => continue,
+                        };
+                        for parity in 0..2 {
+                            if parities[body_pred.0 as usize][parity] {
+                                let target = (parity + flip) % 2;
+                                let slot = &mut parities[rule.head.pred.0 as usize][target];
+                                if !*slot {
+                                    *slot = true;
+                                    changed = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            parities
+        }
+
+        /// The predicates a fact added to `q` may be added to: EDB-only, so the
+        /// addition is a pure input change rather than a change to a derivation.
+        fn edb_only_preds(program: &Program) -> Vec<PredId> {
+            let derived: BTreeSet<PredId> = program.rules.iter().map(|r| r.head.pred).collect();
+            (0..program.predicates.len() as u32)
+                .map(PredId)
+                .filter(|p| !derived.contains(p))
+                .collect()
+        }
+
+        /// **C11's non-vacuity guard.** The parity property is satisfied by a
+        /// program where nothing depends on `q` oddly, and by one where every odd
+        /// dependent is empty — `∅ ⊆ ∅` proves nothing. This asserts the
+        /// discriminating case is reached across the generator: an odd-parity
+        /// dependent whose relation is **non-empty before the addition**, so the
+        /// subset claim has rows to constrain.
+        ///
+        /// Checked against C11's *sentence*, per `testing.md` rule 2 — C11 claims
+        /// odd dependents shrink, so what the guard must see is an odd dependent
+        /// with something to lose. A per-case assertion would be wrong here (one
+        /// small program need not contain the shape), which is why this is a
+        /// deterministic sampler in the `generator_emits_absent_in_facts_only`
+        /// style rather than a `proptest!` arm.
+        #[test]
+        fn c11_generator_reaches_a_non_empty_odd_dependent() {
+            use proptest::strategy::{Strategy, ValueTree};
+            use proptest::test_runner::TestRunner;
+
+            let mut runner = TestRunner::deterministic();
+            let strategy = arb_program_with_edb();
+            let mut reached = 0;
+            for _ in 0..400 {
+                let program = strategy
+                    .new_tree(&mut runner)
+                    .expect("strategy produces a value")
+                    .current();
+                let model = eval(&program).unwrap();
+                for q in edb_only_preds(&program) {
+                    let parities = negation_parities(&program, q);
+                    for pred in (0..program.predicates.len() as u32).map(PredId) {
+                        let [even, odd] = parities[pred.0 as usize];
+                        if odd && !even && !model.relation(pred).is_empty() {
+                            reached += 1;
+                        }
+                    }
+                }
+            }
+            assert!(
+                reached > 0,
+                "no generated program had a non-empty odd-parity dependent — C11 \
+             would be asserting `∅ ⊆ ∅` and the antitone half would be blind"
+            );
+        }
+
         proptest! {
             // Evaluator differentials are the expensive properties; keep the
             // case count modest (testing.md, Tooling).
@@ -4034,6 +4126,98 @@ mod tests {
                     .map(|p| Tuple(vec![Value::String(p)]))
                     .collect();
                 prop_assert_eq!(model.relation(root), &expected);
+            }
+
+            /// **C11 — negation is antitone, by parity.** Adding a fact to an
+            /// EDB relation grows every predicate that depends on it through an
+            /// **even** number of negations and shrinks every predicate that
+            /// depends on it through an **odd** number.
+            ///
+            /// This is the half of the fact-addition space B4 excludes rather
+            /// than covers. `with_extra_fact` (`testgen.rs:1563`) adds only to
+            /// `negation_independent_preds`, because over a negated predicate
+            /// the monotone claim is false — but excluding it left the *true*
+            /// law for that half unstated, so a stratified evaluator whose
+            /// anti-join read the wrong relation had nothing looking at it from
+            /// either side. B4 is this property's even case restricted to
+            /// parity-0-only predicates; C11 states both and derives which
+            /// applies from the dependency graph.
+            ///
+            /// **Why parity rather than "negation shrinks".** The simple form is
+            /// wrong two strata up: if `h` negates `q` then `h` shrinks, but
+            /// `s :- not h.` *grows* again. And it has to be stated over
+            /// generated programs rather than the §16.2 shape, because on that
+            /// shape **C2 already pins `root` exactly** for every person/parent
+            /// EDB — a monotonicity claim there would restate a theorem an
+            /// oracle already proves. The dependency walk below is recomputed
+            /// from the lowered rules, in the C1 style, and never asks
+            /// `crate::schedule` or the strata for an opinion.
+            ///
+            /// Predicates reachable by paths of *both* parities carry no claim:
+            /// the union of a growing and a shrinking relation moves either way.
+            ///
+            /// **Mutation, and what aiming it revealed.** Dropping the
+            /// strictness of a negated dependency in Ullman relaxation
+            /// (`lower.rs`, `stratum[body] + u32::from(dep.strict())` →
+            /// `stratum[body]`) reddens C11 **while C2 stays green** — C2's
+            /// program is `ir::fixtures::example_16_2`, whose strata are
+            /// hand-built, so the exact oracle covering this shape cannot see a
+            /// stratification bug at all. That contrast is C11's justification:
+            /// its contribution is not a stronger claim than C2's but a wider
+            /// one, over *generated* multi-stratum programs.
+            ///
+            /// Worth recording that two earlier aims failed. Mutating the
+            /// anti-join itself — reading `cx.delta` instead of the frozen
+            /// relation — reddens fourteen tests including B1, because a change
+            /// at one call site is *one-sided* and B1 catches one-sided changes
+            /// by construction. A mutation that would isolate C11 has to be made
+            /// **consistently in both evaluators**, which is the same reason C9
+            /// is asserted against the model rather than across them.
+            #[test]
+            fn c11_adding_a_fact_moves_dependents_by_negation_parity(
+                program in arb_program_with_edb(),
+                pred_sel in any::<u8>(),
+                values in proptest::collection::vec(arb_value(), 3),
+            ) {
+                let candidates = edb_only_preds(&program);
+                if candidates.is_empty() {
+                    return Ok(());
+                }
+                let q = candidates[pred_sel as usize % candidates.len()];
+                let parities = negation_parities(&program, q);
+                let n = program.predicates.len();
+
+                let arity = program.pred_info(q).arity as usize;
+                let mut extended = program.clone();
+                extended.facts.push(Fact {
+                    pred: q,
+                    tuple: Tuple(values.into_iter().take(arity).collect()),
+                });
+
+                let before = eval(&program).unwrap();
+                let after = eval(&extended).unwrap();
+
+                for pred in (0..n as u32).map(PredId) {
+                    let [even, odd] = parities[pred.0 as usize];
+                    let old = before.relation(pred);
+                    let new = after.relation(pred);
+                    match (even, odd) {
+                        (true, false) => prop_assert!(
+                            old.is_subset(new),
+                            "{} depends on {} evenly but shrank",
+                            program.pred_info(pred).name,
+                            program.pred_info(q).name
+                        ),
+                        (false, true) => prop_assert!(
+                            new.is_subset(old),
+                            "{} depends on {} oddly but grew",
+                            program.pred_info(pred).name,
+                            program.pred_info(q).name
+                        ),
+                        // Unreachable from `q`, or reachable both ways: no claim.
+                        _ => {}
+                    }
+                }
             }
 
             /// E1 — every derived fact has at least one derivation, and at
