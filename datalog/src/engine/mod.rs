@@ -893,15 +893,67 @@ pub(crate) fn fold_aggregate(op: AggOp, values: &[Value]) -> Result<AggregateOut
     })
 }
 
+/// Sums floats with **Neumaier compensation**, carrying the low-order bits the
+/// naive fold drops. Shared by `sum_values` and `avg_values` so the two cannot
+/// drift. B11's `avg_is_sum_over_count` cannot police that sharing — it states
+/// the law over `int`, where both paths are exact and neither can be wrong — so
+/// the float half of `a_float_sum_keeps_the_bits_a_naive_fold_drops` does:
+/// measured, giving `avg_values` its own naive accumulator reddens it.
+///
+/// `fold_aggregate` sorts before folding, which fixes *which* association is
+/// used (`bugs/007`); §14's order is by value, not by magnitude, so it is not
+/// the numerically good one. Compensation is what makes the one canonical
+/// answer also the accurate one: over `1e16, -1e16, 0.1` the sorted naive fold
+/// answers `0.0` and this answers `0.1`.
+fn compensated_sum(xs: impl Iterator<Item = f64>) -> f64 {
+    let mut sum = 0.0f64;
+    let mut compensation = 0.0f64;
+    for x in xs {
+        let t = sum + x;
+        // Neumaier's branch, which unlike Kahan's is also right when the
+        // incoming value is the larger of the two.
+        compensation += if sum.abs() >= x.abs() {
+            (sum - t) + x
+        } else {
+            (x - t) + sum
+        };
+        sum = t;
+    }
+    // `F64::new` rejects NaN but *permits* infinities, so a float sum that
+    // overflows is already an answer today, not an error. An infinite
+    // accumulator has an infinite correction term, and `inf + -inf` is NaN —
+    // which would turn that answer into an error the naive fold never produced.
+    // Compensating a non-finite total buys nothing anyway.
+    if sum.is_finite() {
+        sum + compensation
+    } else {
+        sum
+    }
+}
+
 /// Sums present values through the §8 arithmetic (`int+int`/`float+float`,
 /// checked overflow, type errors on a mix or a non-numeric). Empty → `absent`.
+///
+/// A run of floats takes the compensated path; **every other shape keeps the
+/// `apply_arith` fold**, which is what preserves the type errors exactly — a
+/// mixed `int`/`float` list and a list of strings still fail where and how they
+/// did. The single-element case falls through it untouched, so `sum` over one
+/// `date` still returns that date rather than erroring (§9 rejects it in the
+/// type checker, ahead of here).
 fn sum_values(present: &[&Value]) -> Result<Value> {
-    let mut iter = present.iter();
-    let Some(first) = iter.next() else {
+    let Some((first, rest)) = present.split_first() else {
         return Ok(Value::Absent);
     };
+    if present.iter().all(|v| matches!(v, Value::Float(_))) {
+        let total = compensated_sum(present.iter().map(|v| match v {
+            Value::Float(f) => f.get(),
+            // Unreachable: the `all` above is the guard.
+            _ => unreachable!("every value in this arm is a float"),
+        }));
+        return F64::new(total).map(Value::Float);
+    }
     let mut acc = (*first).clone();
-    for value in iter {
+    for value in rest {
         acc = apply_arith(ArithOp::Add, acc, (*value).clone())?;
     }
     Ok(acc)
@@ -922,9 +974,11 @@ fn avg_values(present: &[&Value]) -> Result<Value> {
         let total = sum_values(present)?;
         return apply_arith(ArithOp::Div, total, Value::Int(present.len() as i64));
     }
-    let mut sum = 0.0f64;
+    // Typed first, then folded, so the type error stays exactly where it was
+    // while the fold itself is the same compensated one `sum_values` uses.
+    let mut numbers: Vec<f64> = Vec::with_capacity(present.len());
     for value in present {
-        let x = match value {
+        numbers.push(match value {
             Value::Int(i) => *i as f64,
             Value::Float(f) => f.get(),
             other => {
@@ -934,9 +988,9 @@ fn avg_values(present: &[&Value]) -> Result<Value> {
                     value_type_name(other)
                 )));
             }
-        };
-        sum += x;
+        });
     }
+    let sum = compensated_sum(numbers.into_iter());
     F64::new(sum / present.len() as f64).map(Value::Float)
 }
 
@@ -3244,6 +3298,53 @@ mod tests {
         assert!(
             err.to_string().contains("type error"),
             "unexpected error: {err}"
+        );
+    }
+
+    /// The float sum carries its low-order bits (`compensated_sum`).
+    ///
+    /// `bugs/007`'s own repro, at the fold: sorting alone answers `0.0` here,
+    /// because §14's order puts `-1e16` first and `0.1` is lost against it.
+    /// That is a *canonical* answer, and this is the accurate one. Stated as an
+    /// exact equality because the compensated result is exactly `0.1`, not
+    /// nearly it.
+    ///
+    /// *Mutation*: dropping the correction term reddens this and nothing else;
+    /// so does giving `avg_values` back its own naive accumulator, which is
+    /// what makes the `avg` half worth asserting separately.
+    #[test]
+    fn a_float_sum_keeps_the_bits_a_naive_fold_drops() {
+        let values = vec![float(1e16), float(-1e16), float(0.1)];
+        assert_eq!(
+            fold_aggregate(AggOp::Sum, &values).unwrap().value,
+            float(0.1)
+        );
+        // And `avg` folds through the same helper, so it agrees.
+        assert_eq!(
+            fold_aggregate(AggOp::Avg, &values).unwrap().value,
+            float(0.1 / 3.0)
+        );
+    }
+
+    /// A float sum that overflows stays `inf` — it does **not** become an error.
+    ///
+    /// This pins `compensated_sum`'s finiteness guard, which is the whole reason
+    /// the guard exists: `F64::new` rejects NaN but permits infinities, so the
+    /// naive fold answers `inf` here. An infinite accumulator has an infinite
+    /// correction term, and adding them is NaN — so an unguarded compensation
+    /// would turn a (strange, but documented) answer into a new error.
+    ///
+    /// *Mutation*: compensating unconditionally reddens this and nothing else.
+    #[test]
+    fn a_float_sum_that_overflows_is_infinite_not_an_error() {
+        let values = vec![float(f64::MAX), float(f64::MAX)];
+        let Value::Float(total) = fold_aggregate(AggOp::Sum, &values).unwrap().value else {
+            panic!("summing floats yields a float");
+        };
+        assert!(
+            total.get().is_infinite(),
+            "expected inf, got {}",
+            total.get()
         );
     }
 
