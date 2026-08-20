@@ -4744,6 +4744,113 @@ mod tests {
                 }
             }
 
+            /// **`avg` is `sum` divided by `count`** over the present values
+            /// (§9). The three ops are each pinned in isolation above; nothing
+            /// tied them to each other, and `avg_values` is a separate code path
+            /// (`engine/mod.rs`) that could drift from `sum_values` without a
+            /// single existing property noticing.
+            ///
+            /// Stated over `int` because that is where all three are exact.
+            /// Over `float` the identity is only approximate — and over any type
+            /// the *ordering* caveat of `bugs/007` applies to both sides
+            /// equally, so it does not bear on this law.
+            ///
+            /// **Mutation-verified**: perturbing `avg_values`' own accumulator
+            /// (`sum` → `sum + 1.0`) so it drifts from `sum_values` reddens
+            /// **this and nothing else** — `avg_is_the_float_mean_of_present_values`
+            /// and `absent_inputs_are_skipped_not_folded` both stay green,
+            /// because each compares avg against avg. That is the measurement
+            /// showing the law is what ties the two code paths together.
+            #[test]
+            fn avg_is_sum_over_count(
+                ints in prop::collection::vec(-1000i64..1000, 1..8),
+                extra_absents in 0usize..3,
+            ) {
+                let mut vs: Vec<Value> = ints.iter().map(|n| Value::Int(*n)).collect();
+                for _ in 0..extra_absents {
+                    vs.push(Value::Absent);
+                }
+                let avg = fold_aggregate(AggOp::Avg, &vs).unwrap().value;
+                let sum = fold_aggregate(AggOp::Sum, &vs).unwrap().value;
+                let present = ints.len() as f64;
+                let Value::Int(total) = sum else {
+                    return Err(TestCaseError::fail("sum of ints is an int"));
+                };
+                prop_assert_eq!(
+                    avg,
+                    Value::Float(F64::new(total as f64 / present).unwrap()),
+                    "avg is not sum/count over the present values"
+                );
+            }
+
+            /// **The fold is a monoid homomorphism over group partition**:
+            /// splitting a group's witnesses into two halves and combining the
+            /// two folds equals folding the whole. `count` adds, `sum` adds,
+            /// `min`/`max` take the extreme of the two extremes.
+            ///
+            /// This is the law that pins **grouping** rather than folding.
+            /// `aggregation_matches_an_independent_group_by` (B7) checks which
+            /// witnesses land in which group, but only for one generated shape;
+            /// stated as a law, partition-invariance says the answer cannot
+            /// depend on how the witnesses were *divided up* at all — which is
+            /// the property a future change to group-key handling would break.
+            ///
+            /// `avg` is deliberately absent: the mean is not a monoid
+            /// homomorphism (you cannot average two averages without their
+            /// counts), and asserting it would be stating a false law.
+            ///
+            /// Ints only, and that exclusion is `bugs/007`: over floats the
+            /// combination is exactly the re-association the fold is not
+            /// invariant under, so a float arm here would be measuring that
+            /// defect rather than this law.
+            ///
+            /// **Mutation-verified**: making `extreme_value` keep the *first*
+            /// present value rather than the extreme reddens the min/max halves
+            /// here, alongside five sibling min/max tests — an aim that is
+            /// broad rather than wrong, since any min/max defect is visible to
+            /// several checks at once. `b7_ancestor_is_transitive_closure`
+            /// staying green is the useful contrast: it is the one aggregate-free
+            /// oracle in that group.
+            #[test]
+            fn folding_a_partitioned_group_combines(
+                left in prop::collection::vec(-1000i64..1000, 1..6),
+                right in prop::collection::vec(-1000i64..1000, 1..6),
+            ) {
+                let vals = |ns: &[i64]| -> Vec<Value> {
+                    ns.iter().map(|n| Value::Int(*n)).collect()
+                };
+                let whole: Vec<Value> =
+                    vals(&left).into_iter().chain(vals(&right)).collect();
+
+                let fold = |op: AggOp, vs: &[Value]| fold_aggregate(op, vs).unwrap().value;
+
+                prop_assert_eq!(
+                    fold(AggOp::Count, &whole),
+                    Value::Int((left.len() + right.len()) as i64),
+                    "count is not additive over a partition"
+                );
+                prop_assert_eq!(
+                    fold(AggOp::Sum, &whole),
+                    apply_arith(
+                        ArithOp::Add,
+                        fold(AggOp::Sum, &vals(&left)),
+                        fold(AggOp::Sum, &vals(&right)),
+                    )
+                    .unwrap(),
+                    "sum is not additive over a partition"
+                );
+                prop_assert_eq!(
+                    fold(AggOp::Min, &whole),
+                    fold(AggOp::Min, &vals(&left)).min(fold(AggOp::Min, &vals(&right))),
+                    "min is not the extreme of the two extremes"
+                );
+                prop_assert_eq!(
+                    fold(AggOp::Max, &whole),
+                    fold(AggOp::Max, &vals(&left)).max(fold(AggOp::Max, &vals(&right))),
+                    "max is not the extreme of the two extremes"
+                );
+            }
+
             /// sum matches an independent integer fold; empty → absent (§9).
             #[test]
             fn sum_matches_an_independent_fold(ints in prop::collection::vec(-1000i64..1000, 0..8)) {
