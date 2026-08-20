@@ -2377,6 +2377,16 @@ never say.
     is what makes reading and rendering inverse. A duration is now never
     inferred from any source, which is the simpler rule the design should have
     reached on its own.
+  - ***Consequences 2026-08-20 — what the generators did not follow.*** The value
+    layer shipped with T1–T6 and the *existing* suite stayed on five types:
+    `arb_constant` was never widened, so A4's cross-type order, D1/D2/D3 and the
+    whole B/C/E series certified five-eighths of the sentences they state. Not
+    caught by review — measured, by swapping `Date` and `Bool` in `ir::Value`'s
+    variant order, which A4 passes on the old generator and fails on the new. §8's
+    temporal cast rows and §9's duration folds had no property either; adding them
+    found **no defect**, so the design was right and only the coverage was thin.
+    The general rule this pays for is in `testing.md`: when the language widens,
+    the generator is the thing that silently does not.
 
 - **2026-08-19** — **A builtin is a relation from a gated `std` module**
   (§8/§12/§13). Long form in
@@ -2405,6 +2415,14 @@ never say.
     `truncate`, checked statically so a typo costs one message rather than one
     per row. The entry's claim that a relation dodges the `ident (` ambiguity
     held exactly.
+  - ***Consequences 2026-08-20 — the exemption now has a test.*** §10 exempts a
+    `std` relation from value-creating recursion as a finite-domain map. That is
+    a termination-soundness claim carried by prose for a day: C10's ten shapes
+    contained no builtin. `ArithShape::StdBuiltin` puts `truncate` in a positive
+    cycle, and removing the exemption reddens C10's **non-vacuity guard and only
+    it** — the property itself skips warned programs, so an exemption needs a
+    check watching the *classification*, not the fixpoint. The finite-domain
+    reasoning held; what it lacked was a witness.
 
 - **2026-08-18** — **The caller's contract: the exit code answers the question**
   (§12/§14/§15). Five axes, their evidence and the alternatives that lost are in
@@ -3184,6 +3202,21 @@ never say.
     (`schedules_bind_before_they_read`) alongside the end-to-end invariance
     (`b5_aggregate_body_order_does_not_change_the_model`,
     `b5_a_computed_group_key_is_order_independent`).
+
+    ***Falsified 2026-08-20 — `bugs/007`.*** "Two orderings of one conjunction,
+    two answers, which no declarative reading permits" is still the right
+    standard, and the scheduler still meets it. What was load-bearing and untrue
+    is the **generalisation**: fixing the schedule does not make body order
+    unobservable, because an *aggregate* fold consumes its witnesses in
+    enumeration order, and that order follows the goal's literal order. Over
+    `int` in a small range the question cannot arise — addition is associative
+    and cannot overflow — which is exactly why the properties named above
+    (`b5_aggregate_body_order_does_not_change_the_model`,
+    `b1_aggregate_goal_shapes_agree`) stated the claim and stayed green for a
+    month. Over `float` two spellings give `r(0.0)` and `r(0.1)`; on the int
+    overflow check, one answers and the other exits 2. The guarantee is
+    **conditional on the fold being associative over the value type**, and
+    `bugs/007` holds the four candidate fixes.
 
     Negated atoms stay in their own phase, before every builtin: §10 requires
     their named variables to be bound *positively*, and folding them into the
