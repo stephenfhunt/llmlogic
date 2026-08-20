@@ -54,7 +54,8 @@ each; detail in §17 and `docs/worklog.md`.
 > [`notes/v1-scope.md`](notes/v1-scope.md), and the evidence that prompted the
 > exercise in [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
 > The stock-take's recommended order survives the ruling — the caller's contract
-> (✅ 2026-08-18), **then temporal types, then the profile** — with one change:
+> (✅ 2026-08-18), **temporal types (✅ 2026-08-19), then the profile** — with one
+> change:
 > **S1's harness (`EXPERIMENTS.md`) now sits alongside them** instead of near the
 > bottom, since §1 names it as the instrument v1 is defined against.
 >
@@ -129,13 +130,14 @@ conversion is the cast. What remains is only *builtin* scalars (`abs`, `length`,
 module (§13), so the `ident (` ambiguity that ruled out `float(A)` never arises
 and the scan-ahead candidate is withdrawn.
 
-### The value model (§4)
+### The value model (§4) — shipped
 
-- **Temporal types — `date`, `timestamp`, `duration`.** Designed 2026-08-19:
-  `@`-sigilled literals, points-and-vectors arithmetic with `duration / duration
-  → float` as the only route to a number, CSV inference, and extraction/truncation
-  as gated `std/time` relations. _building — **v1** (S4: "met except dates")._
-  — §3/§4/§8/§9/§13, §16.14, [`notes/temporal-values.md`](notes/temporal-values.md).
+**✅ 2026-08-19. Temporal types — `date`, `timestamp`, `duration`.**
+`@`-sigilled literals, points-and-vectors arithmetic with `duration / duration
+→ float` as the only route to a number, CSV and Parquet inference, and
+extraction/truncation as gated `std/time` relations. **S4 now reads met.**
+— §3/§4/§8/§9/§13, §16.14, properties T1–T6,
+[`notes/temporal-values.md`](notes/temporal-values.md).
 
 ### Termination & value-creating recursion (§6/§10) — shipped
 
@@ -360,14 +362,14 @@ them. Except where noted these are documented v1 limits rather than defects.
   pillar 1 is the only argument that it should not be. _queued (after profiling) — **v1**, decided with the query surface._
   — §11/engine, [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
 
-### `std` modules (§8/§12/§13)
+### `std` modules (§8/§12/§13) — shipped
 
-- **The mechanism, and `std/time` as its first module.** A builtin is a *relation*
-  from a gated module; `std/` is a reserved virtual path prefix; a name collision
-  is an error naming both origins. Designed and normative 2026-08-19; ships with
-  temporal types above. `std/math` and `std/text` are designed, **not built**, and
-  stay deferred until a consumer needs them. _building — **v1** (rides S4)._ —
-  §13, [`notes/temporal-values.md`](notes/temporal-values.md).
+**✅ 2026-08-19.** A builtin is a *relation* from a gated module; `std/` is a
+reserved virtual path prefix; a name collision is an error naming both origins,
+and an unimported use is §12's warning carrying the import line. `std/math` and
+`std/text` are **designed, not built** — the shape is settled, so they stay
+deferred until a consumer needs them (§8's *Not covered*). — §13,
+[`notes/temporal-values.md`](notes/temporal-values.md).
 
 ### Import follow-ons (§13)
 

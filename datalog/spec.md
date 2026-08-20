@@ -112,7 +112,7 @@ criterion rather than an assumption.
 | **S1** | An agent answering multi-hop, recursive or constraint questions is measurably more accurate **with** the engine than reasoning in prose — at two model strengths, first program recorded before any feedback. | `EXPERIMENTS.md`, rebuilt as a harness (ROADMAP) | **unmeasured** |
 | **S2** | The engine's stdout is valid input to the engine, byte-for-byte. | property **D2**, `print::tests::corpus_round_trips` | met |
 | **S3** | A rejected program can be repaired from the diagnostic alone, without reading the spec. | §12's fields; the near-miss corpus (§3) | met for lex/parse; **scoped** (§2) |
-| **S4** | A question over a real external table is answerable end-to-end with no preprocessing step. | §13 + the USDA dogfood | met **except dates** (§4) |
+| **S4** | A question over a real external table is answerable end-to-end with no preprocessing step. | §13 + the USDA dogfood | met (dates included, 2026-08-19) |
 | **S5** | Every fact in an answer can be explained **through the surface the caller used**. | §11's query surface | **not met** — designed, unbuilt |
 | **S6** | No *exponent* worse than a comparable engine on the shared corpus. | `notes/cross-engine-benchmark.md` | met |
 
@@ -2361,6 +2361,22 @@ never say.
     The one tension resolved *for* an existing rule; §16.14 records what that
     costs. Named tests: `system::temporal_program_types_dates_and_groups_by_period`
     (§16.14), the **T3** unit property (`testing.md`).
+  - ***Consequences 2026-08-19 — built the same day.*** Four things the entry did
+    not know. **The cost landed in the type checker, not the value model**: an
+    operator whose result is not its operands' class cannot be a union-find edge,
+    so arithmetic and `sum`/`avg` became *deferred* constraints resolved to a
+    fixpoint — and the fallback for a constraint with no temporal type in
+    evidence is the old homogeneous rule, which is why 400 existing tests did not
+    move. **`avg` over durations is a duration**, which the entry would have got
+    wrong: it is not an exception to "`avg` is `int → float`" but the vector
+    rule's other half, since dividing a fold by a count is scaling. **A date
+    shifts only by whole days** — the sub-day case had no answer in the design
+    and takes the same refusal `timestamp as date` does. And **`INTERVAL` no
+    longer becomes a duration**: §13 said "when it is exact", but reading
+    DuckDB's `1 day 02:00:00` means a second duration grammar, and one grammar
+    is what makes reading and rendering inverse. A duration is now never
+    inferred from any source, which is the simpler rule the design should have
+    reached on its own.
 
 - **2026-08-19** — **A builtin is a relation from a gated `std` module**
   (§8/§12/§13). Long form in
@@ -2380,6 +2396,15 @@ never say.
     needed would have fixed that shape by accident.
   - **The cost is a failed first attempt**, so §12's did-you-mean carries the
     import line and ships with the module rather than after it.
+  - ***Consequences 2026-08-19 — built the same day.*** The mechanism turned out
+    **cheaper than its own design**: lowering a builtin to the `=`-assignment
+    `Y = year(D)` meant the scheduler, §10's safety rule, the
+    assignment-vs-filter decision and the termination classifier all applied
+    unchanged — `day(D, 15)` is a filter for the reason `X = 5` is, with no
+    separate form. The one place a new rule was needed is the *unit* argument of
+    `truncate`, checked statically so a typo costs one message rather than one
+    per row. The entry's claim that a relation dodges the `ident (` ambiguity
+    held exactly.
 
 - **2026-08-18** — **The caller's contract: the exit code answers the question**
   (§12/§14/§15). Five axes, their evidence and the alternatives that lost are in

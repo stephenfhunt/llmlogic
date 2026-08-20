@@ -24,6 +24,57 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-19 — Temporal values ship, and a builtin turns out to be a relation
+
+S4 read "met **except dates**"; it now reads met. Three primitive types with
+`@`-sigilled literals, one arithmetic rule, and `std/time` behind a gate. Design
+and rejected alternatives in
+[`notes/temporal-values.md`](../datalog/notes/temporal-values.md); two §17
+decisions, both annotated with what building them taught the same day.
+
+**Done**
+- **`src/temporal.rs`** — civil dates, civil timestamps, exact durations, and
+  Hinnant's calendar algorithms. **Zero new dependencies**, which is affordable
+  only because the design excludes zones and calendar durations.
+- **§8's algebra as one rule** — points and vectors — replacing a table to
+  memorize. `duration / duration → float` is the only route from a duration to a
+  number, so the sibling engine's `172800000` finding is excluded *by
+  construction* rather than by a paragraph in a guide.
+- **`std` modules**: `std/` is a reserved virtual path prefix; a builtin is a
+  **relation**, which is what dodges the `ident (` ambiguity that ruled out
+  `float(A)`. `std/time` ships; `std/math` and `std/text` are designed, not built.
+- **§13 types temporal columns** — CSV by the literal grammar, Parquet from its
+  declared type. §16.14 is the worked example, with a system test and a
+  pipe-it-back-in test.
+- **Properties T1–T6**, all six with mutations recorded.
+
+**Decided**
+- **The sigil is decided by §14's closure, not taste.** Output must re-parse, so
+  a computed date needs a spelling. Bare ISO was rejected because `2026-08-19`
+  already evaluates to `1999`.
+- **`timestamp as date` stays a lossy error**, with `truncate` named as the fix —
+  the one tension resolved *for* an existing rule. §16.14 records the cost.
+- **The gate buys the short names**, not safety: `year`/`month`/`day` are the
+  names a program wants *and* the names a column has.
+- **A duration is never inferred from any source** — reversing what §13 said this
+  morning about `INTERVAL`. Reading DuckDB's `1 day 02:00:00` would mean a second
+  duration grammar, and one grammar is what keeps reading and rendering inverse.
+
+**Removed**
+- §13's "date/time-like types become their ISO text as strings", §4's *Not
+  covered* temporal clause, `duckdb.rs`'s VARCHAR cast for `DATE`/`TIME*`, and
+  §8's scan-ahead candidate for the `ident (` ambiguity — **withdrawn**, not
+  parked: a relational spelling means the ambiguity never arises.
+- `print_type`'s duplicate type-name list, now `TypeName::keyword`'s.
+
+**Next up**
+- **The profile**, with pillar 1's question and the row-provenance trade attached
+  — the last of the stock-take's four, and `EXPERIMENTS.md` still sits alongside
+  it as the thing v1 is defined against.
+- Open, in §17: period arithmetic ("same day next month" is not expressible),
+  whether a truncated value should print as its period, and the `avg`-over-mixed
+  column question T5 does not reach.
+
 ## 2026-08-18 — The caller's contract ships, and the thing it was merged for has no trigger
 
 The exit code now answers the question. Five axes taken one at a time
@@ -132,59 +183,3 @@ design** — 386 lib tests unchanged, clippy and rustfmt clean.
   until it runs, v1 is undefined rather than unfinished.
 - Open, in §17: what a caller learns from a run that completed — unchanged, and the
   caller's-contract session is what answers it.
-
-## 2026-08-18 — Taking stock at feature-complete: three holes the backlog could not list
-
-Asked, after §6 shipped and `bugs/` went empty, whether the language has major
-design holes. The method was to **not** read `ROADMAP.md` first — a backlog lists
-only holes someone already noticed — and to read §§1–15, `src/main.rs` and the
-exported API instead. Seven findings in `notes/taking-stock-2026-08-18.md`; three
-were untracked, four tracked and mis-ranked. No `src/` change, nothing ratified.
-
-**Done**
-- **`ROADMAP.md`**: a new section, **the caller's contract (§12/§14/§15)**, holding
-  the two untracked items; **§1/§2 promoted out of "spec hygiene"** into a section
-  of its own; five annotations (the truncation merge, provenance's joint decision,
-  import row anchoring, temporal's ranking, the EXPERIMENTS reframe); the preamble
-  now says the order is under review rather than "the profile is the next item".
-- **`spec.md`**: §14's *Not covered* gains **what the exit code means** (every run
-  that completes exits `0`, so "no rows" and "answered no" are indistinguishable
-  without parsing stdout), §11's that an imported fact is anchored by its
-  **relation, not its row**, and §17 one open question covering both.
-- **`datalog/AGENTS.md`'s "CLI/REPL" corrected** — there is no REPL, and it was
-  claimed twice in the file every session loads.
-
-**Decided**
-- **Nothing, deliberately.** The findings are recorded as a recommendation because
-  ratifying **§1** is itself step one: "are we feature complete?" is not answerable
-  against goals, non-goals and success criteria that have never been written.
-  Filing §1 under *spec hygiene* was the category error that hid this — it is not
-  tidiness, it is the definition of done, and its absence is why "is X in scope"
-  keeps getting settled ad hoc at the moment it is asked.
-- **Integrity constraints and the truncation contract are one design.** There is no
-  way to say *this must never happen*, and the contract's one open piece already
-  says withholding "has to mean an exit code and a stdout discipline". Two needs,
-  one exit code; designing them apart gives it two vocabularies.
-- **Pillar 1 pays full price and returns nothing at the surface it exists for.**
-  The recorder is unconditional and the top profiling target (13× measured on a
-  sibling engine's cyclic graph); `?why` is unbuilt and absent from the exported
-  API. The backlog carried this as two items in two sections and never as one fact,
-  so whichever gets settled first would have silently constrained the other.
-- **The project's hypothesis has never been measured**, while §1 cites the three
-  pillars as "settled authority" for every §17 decision. `EXPERIMENTS.md` was filed
-  as skill polish; it is the validity question, and could reorder all of the above.
-
-**Removed**
-- The backlog preamble's "**the profile is the next item**", and the *Ratify §1 and
-  §2* bullet out of the Spec hygiene section — both moved rather than deleted.
-- `AGENTS.md`'s two "CLI/REPL" claims, which had stopped being true.
-- The 2026-08-17 named-query entry rotated verbatim to `worklog-archive/2026-08.md`.
-
-**Next up**
-- **§1 (and §2's remaining four)** — short, and it makes every other ranking here
-  decidable rather than arguable. Then **the caller's contract**, then **temporal
-  types**, then **the profile** with pillar 1's question attached rather than
-  trailing it. The sequence itself wants ratifying first.
-- Open, in §17: whether a constraint is a language construct or a query convention,
-  how many exit codes the vocabulary needs, and whether stdout stays a pure fact
-  stream when a run has something to say and no rows to say it in.

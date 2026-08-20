@@ -96,6 +96,9 @@ sorted — and they round-trip as input, so runs compose over pipes:
 - **symbols** print bare (`red`); **strings** are double-quoted (`"red"`) — these
   are distinct types, so quote string data and leave enum-like symbols unquoted;
 - **floats** always keep a decimal point (`3.0`, not `3`);
+- **dates, timestamps and durations** print with their `@` sigil
+  (`@2026-08-19`, `@2026-08-19T10:30:00`, `@1d12h`) — that is also how you write
+  them, so answers carrying them compose back as input;
 - **name the query and the answer wears that name**: `?- adult: person(N, A), A >=
   18.` prints `adult(...)` facts. Optional, but it is the right default when the
   output will be read by anything other than you — see the warning below;
@@ -128,6 +131,13 @@ the columns, write the rule (`-q 'adult(N) :- person(N, A), A >= 18'`).
   ```
 - **Negation**: `not covered(X)` (stratified — no recursion through negation).
 - **Comparisons/arithmetic**: `A >= 18`, `M = N + 1`; strict numeric types.
+- **Dates and times**: `@2026-08-19`, `@2026-08-19T10:30:00`, and durations
+  `@1d12h` / `@90m` / `@500ms`. A CSV or Parquet date column is typed for you —
+  no cast needed. The arithmetic is *points and vectors*: subtracting two dates
+  gives a duration, adding a duration to one moves it, and **dividing two
+  durations is the only way to get a number** — which is where you name the
+  unit: `N = (Closed - Opened) / @1d` is a number of days. There is deliberately
+  no `duration as int` (a number of *what*?), and no month or year duration.
 - **Arithmetic inside a recursion can run forever**, and the engine says so on
   stderr before it starts rather than refusing to run:
   ```
@@ -163,6 +173,15 @@ the columns, write the rule (`-q 'adult(N) :- person(N, A), A >= 18'`).
   import "data/parents.csv" as parent.   % CSV/JSONL/Parquet/http(s) → a relation
   import "lib/rules.dl".                  % splice another Datalog file (no `as`)
   ```
+  ```
+  import "std/time".                      % year/month/day/hour/minute/second
+  ```
+  `std/time` is how you reach a component or a period: `year(D, Y)` binds the
+  year (and `day(D, 15)` filters), `truncate(D, month, M)` gives the first of
+  the month — one sortable key to group by. They are only in scope where that
+  import is written, which is what lets them take names your own data might
+  also use.
+
   Field names and types come from the source; add an explicit schema
   (`as parent(parent: string, child: string)`) for headerless files. Paths are
   relative to the importing file. Bulk facts belong in a CSV/JSONL import rather
