@@ -194,7 +194,7 @@ it. A future audit starts here.
 | Set semantics | duplication mutators | A5, B3 |
 | Comparisons / arithmetic (§8) | `arb_comparison_program` (filter/assign/join on the int column **and the string key**) | B1 extended (incl. error path); `comparison_generator_is_well_typed` — the acceptance half, which is what B1 cannot be (`bugs/006`); §16.3 hand test |
 | Value order across constructs (§4/§8/§9) | `arb_order_agreement_spellings` (two distinct constants of one type, over all five primitives, both ends of the order) | **C8** `ordered_comparison_and_minmax_agree_on_every_type`; `order_agreement_spellings_reach_every_type_and_both_ends` |
-| Aggregation (§9) | `aggregate_ir` (grouped, one relation); `grouped_ir` (group keys from a *second* relation, empty groups, absent witnesses); `aggregate_goal_ir` (multi-atom + negated goal, all 6 goal orderings) | **independent group-by oracle** (`aggregation_matches_an_independent_group_by`); B1 differentials (`b1_aggregate_programs_agree`, `b1_aggregate_goal_shapes_agree`); body-order invariance (`b5_aggregate_body_order_does_not_change_the_model`); fold laws (absent-skip, empty→absent, count=witnesses, sum oracle, min/max bounds); §16.4 hand test; query-position and nested/assignment-bound goals in `tests/pipeline.rs` |
+| Aggregation (§9) | `aggregate_ir` (grouped, one relation); `grouped_ir` (group keys from a *second* relation, empty groups, absent witnesses); `aggregate_goal_ir` (multi-atom + negated goal, all 6 goal orderings) — it and B5's `aggregate_ir_permuted` draw values from an ill-conditioned float pool (`bugs/007`) | **independent group-by oracle** (`aggregation_matches_an_independent_group_by`); B1 differentials (`b1_aggregate_programs_agree`, `b1_aggregate_goal_shapes_agree`); body-order invariance (`b5_aggregate_body_order_does_not_change_the_model`); fold laws (absent-skip, empty→absent, count=witnesses, sum oracle, min/max bounds); §16.4 hand test; query-position and nested/assignment-bound goals in `tests/pipeline.rs` |
 | Termination (§10) | `arb_recursive_arithmetic_program` (ten placements of arithmetic relative to a positive cycle, over a freely cyclic graph); `arb_taint_spellings` (four spellings of one value-creating recursion) | **C10** `c10_a_certified_program_reaches_its_fixpoint` on a test-only round cap, with the B1 differential; `c10_generator_certifies_programs_that_do_arithmetic_in_a_cycle` — the non-vacuity half, without which C10 is a claim about arithmetic-free Datalog; **C8** `c8_the_taint_spellings_classify_alike`; §16.12 hand test (the diagnostic, on stderr) |
 | Absent value (§4/§8) | `arb_fact_constant` (absent in *data*, ~1 in 10) + `absent_ir` (join / self-join / anti-join / comparison / arithmetic / presence over a `{0, 1, absent}` pool) | B1 absent differential (`b1_absent_programs_agree`); value laws (annihilation, comparison-false, unify-vs-eq, sorts-first); `generator_emits_absent_in_facts_only` |
 | Declarative semantics (§6) | nothing of its own — §6 describes the semantics every generator above already exercises | the match relation: `try_match_binds_a_var_to_a_stored_absent_but_never_rematches_it`, `values_unify_matches_eq_off_absent`; its two derived consequences: `repeating_a_body_literal_drops_absent_rows` and `a_fact_never_satisfies_its_own_negation` (**C9**); the perfect model: **C1**–**C3**; the aggregate fold: the group-by oracle above; the fixpoint: **C10**; the error rule: B1's error path |
@@ -202,7 +202,7 @@ it. A future audit starts here.
 | Idempotence (join, union) | `arb_structural_law_spellings` | **C12**; its absent-valued *exception* is `repeating_a_body_literal_drops_absent_rows` |
 | Distribution (∧ over ∨) | **unspellable** — §5 is top-level DNF, no parentheses in v1 | nothing, and nothing is correct: the law has one spelling, so no two sides to compare |
 | Antitonicity (negation) | `arb_program_with_edb`, parity walk recomputed in-test | **C11**, with `c11_generator_reaches_a_non_empty_odd_dependent` |
-| Aggregate monoid laws (§9) | int pools + partition split | **B11** — `avg_is_sum_over_count`, `folding_a_partitioned_group_combines`; **`fold_is_permutation_invariant` is red (`bugs/007`)** |
+| Aggregate monoid laws (§9) | int pools + partition split; an ill-conditioned float pool (`ILL_CONDITIONED_FLOATS`) for the order laws | **B11** — `avg_is_sum_over_count`, `folding_a_partitioned_group_combines`, `fold_is_permutation_invariant` (`bugs/007`); the fold's three arithmetic rules, one test each: compensated float sum, its finiteness guard, wide int/duration accumulation |
 
 | Confluence (inference, interning, strata) | `arb_statement_permutation` | **C13** — the type half has nothing else; C4/C5 both fix statement order |
 | Order-invariance of *explanations* | B5/B6's mutators, compared at the derivation level | **C14**; E1–E4 check one evaluation each and are blind to it |
@@ -425,20 +425,22 @@ compared keyed by predicate *name*, not `PredId`.
     would be stating a false law. *Mutation*: `extreme_value` keeping the first
     present value reddens the min/max halves (broadly, alongside five sibling
     min/max tests — a broad aim rather than a wrong one).
-  - **Permutation invariance** (`fold_is_permutation_invariant`) — **red, and
-    that is `bugs/007`**: `sum`/`avg` fold in witness-*enumeration* order, so two
-    spellings of one goal give `r(0.0)` against `r(0.1)` over floats, and an
-    answer against `exit 2` over the int overflow check. Written `#[ignore]`d and
-    failing in the sitting the defect was found, per the `002`/`006` precedent;
-    deleting the `#[ignore]` is what closing it looks like.
+  - **Permutation invariance** (`fold_is_permutation_invariant`) — permuting the
+    witness multiset leaves all five ops unchanged. This was `bugs/007`, red when
+    written and green since 2026-08-20: the fold sorts into §14 order, so the
+    answer is a function of the multiset. *Mutation*: deleting the sort reddens
+    this and `b1_aggregate_goal_shapes_agree`, and nothing else.
 
-  **Why these were invisible until now.** Every aggregate generator was
+  **Why these were invisible until 2026-08-20.** Every aggregate generator was
   int-pooled with values in `-1000..1000`, where `sum` is associative and cannot
   overflow — so `b1_aggregate_goal_shapes_agree` (six goal orderings) and
   `b5_aggregate_body_order_does_not_change_the_model` both *state* the
-  order-invariance claim and neither can reach the case that breaks it. The
-  float-pooled versions of those two are the second half of `007`'s acceptance
-  criteria and land with the fix, since they are red until then.
+  order-invariance claim and neither could reach the case that breaks it. Both
+  draw floats now, which was `007`'s second acceptance half; **measured, only B1
+  can see witness order**, since B5's single-atom goal enumerates in the
+  relation's own order, which is the sorted one. That makes B5 an equivalent
+  mutant here rather than a hole, and its doc comment says so — a green test that
+  cannot fail is worth less than the sentence explaining why.
 
 - [x] **B8** Query/rule equivalence: `Model::answer(q)` equals the relation of
   a synthesized rule whose head projects `q`'s named variables over `q`'s

@@ -45,15 +45,9 @@ each; detail in §17 and `docs/worklog.md`.
 
 ## Open backlog
 
-> **Open defects live in [`bugs/`](bugs/)** — **one open as of 2026-08-20**:
-> `007`, `sum`/`avg` folding in witness-enumeration order, so two spellings of one
-> goal give two answers (and, on the int overflow path, an answer versus exit 2).
-> Found by the coverage audit that widened the aggregate generators past `int`.
-> The set had been empty since 2026-08-18, for the first time since the
-> 2026-07-25 spec review. **No design session blocks anything**: §6's extension,
-> the last one, shipped 2026-08-18 — but `007`'s *fix* is a §17 call between
-> sorting the witnesses and documenting the restriction, and the bug file argues
-> for sorting.
+> **Open defects live in [`bugs/`](bugs/)** — **none open as of 2026-08-20**.
+> **No design session blocks anything** either: §6's extension, the last one,
+> shipped 2026-08-18.
 >
 > **§1 is written and §2 ratified (2026-08-18), so every item below is now ruled
 > v1 or post-v1** against §1's success criteria — the argument per item is in
@@ -65,7 +59,12 @@ each; detail in §17 and `docs/worklog.md`.
 > **S1's harness (`EXPERIMENTS.md`) now sits alongside them** instead of near the
 > bottom, since §1 names it as the instrument v1 is defined against.
 >
-> Six are resolved in `bugs/resolved/`: `004` (§6 asserted a finiteness arithmetic
+> Seven are resolved in `bugs/resolved/`: `007` (`sum`/`avg` folded its witnesses
+> in enumeration order, so two spellings of one goal gave two answers), **fixed
+> 2026-08-20** — an aggregate is a fold over a **multiset** now, sorted into §14
+> order, compensated over floats and accumulated wide over ints and durations
+> (§9, §17), and the `i128` half is a semantic widening none of the bug file's
+> four candidates proposed; `004` (§6 asserted a finiteness arithmetic
 > falsified), **fixed 2026-08-18** by the Termination session — §6's premise is now
 > conditional on the fragment §10 certifies, and the non-terminating program takes
 > the criteria's *documented-as-in-scope* branch rather than being rejected; `001` (a compound argument in a negated
@@ -80,15 +79,9 @@ each; detail in §17 and `docs/worklog.md`.
 > rejected the types §8 orders), **fixed 2026-07-27** by widening the type
 > checker to match the spec, which needed no change.
 >
-> `cargo test -- --ignored` reports **exactly one** known failure as of
-> 2026-08-20: `fold_is_permutation_invariant`, `bugs/007`'s acceptance criterion,
-> written `#[ignore]`d and failing in the sitting the defect was found. Deleting
-> its `#[ignore]` is what closing that defect looks like. The other `#[ignore]`d
+> `cargo test -- --ignored` reports **no known failures**. The only `#[ignore]`d
 > test is `url_csv_import_reads_over_httpfs`, which needs the network and passes.
-> Any *other* failure under `--ignored` means something regressed.
->
-> (Between 2026-07-29 and 2026-08-20 this line read "no known failures", which
-> was true for that window.)
+> Any failure under `--ignored` means something regressed.
 
 ### Goals and principles (§1/§2) — shipped
 

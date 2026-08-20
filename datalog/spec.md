@@ -2353,7 +2353,7 @@ never say.
 
 - **2026-08-20** — **An aggregate is a fold over a multiset, so only its result
   is defined** (§9). `fold_aggregate` sorts its present values into §14 order
-  before folding, closing `bugs/resolved/007`: witnesses used to arrive in
+  before folding, closing `bugs/007`: witnesses used to arrive in
   whatever order the goal's literals were scheduled in, which reached the answer
   wherever the fold is not associative over the value type.
   - Sorting picks *an* association, and §14's order is by value, not magnitude —
@@ -3248,7 +3248,7 @@ never say.
     `bugs/007` holds the four candidate fixes.
 
     ***Amended 2026-08-20 — the generalisation is restored, by a second
-    mechanism.*** `bugs/resolved/007` is fixed, so body order is unobservable
+    mechanism.*** `bugs/007` is fixed, so body order is unobservable
     again — but because *two* things are order-independent now, not one. The
     scheduler settles which literal is outer; the fold no longer cares, having
     become a function of its witness multiset (2026-08-20, above). The fix taken

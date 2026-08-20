@@ -5,7 +5,7 @@ severity: wrong-answer
 area: engine
 spec: ["§9", "§14", "§17"]
 found: 2026-08-20
-resolution:
+resolution: fixed 2026-08-20 (88ce7e1, 7f62d59, 041889b)
 ---
 
 `fold_aggregate` folds its witnesses in the order `enumerate_from` pushed them
@@ -114,3 +114,54 @@ accumulator, is the open half.
   held". It held because the generator could not reach the case; the row wants
   the qualification.
 - No ROADMAP item's rationale moves.
+
+## Resolution
+
+**Fixed 2026-08-20.** `fold_aggregate` sorts its present values into §14 order
+before folding, so an aggregate is a function of its witness multiset and the
+enumeration order cannot reach the answer. `fold_is_permutation_invariant` lost
+its `#[ignore]` in the same commit (`88ce7e1`).
+
+**The diagnosis held exactly**, including the part that predicted which shapes
+could see it. The float-widened `b1_aggregate_goal_shapes_agree` reddens without
+the sort and `b5_aggregate_body_order_does_not_change_the_model` does not: B5's
+goal is the single atom `edge(K, V)`, so its witnesses arrive in the relation's
+own order, which *is* the sorted order. Widening it was still worth doing — it
+carries floats through typing, grouping and printing — but it is an equivalent
+mutant for this defect, and its doc comment now says so rather than looking like
+coverage.
+
+**The fix taken was none of the four candidates.** Candidate 1 (sort) is the
+mechanism, but sorting *alone* was rejected: §14's order is by value rather than
+by magnitude, so it would have canonised `0.0` for `{ 1e16, -1e16, 0.1 }` — the
+worse of the two answers this file reports, fixed forever. So the sort carries
+determinism and two further rules carry accuracy (§17, 2026-08-20):
+
+- **floats sum with Neumaier compensation** (candidate 2's second half, adopted
+  for a reason candidate 2 did not give — not accuracy for its own sake, but so
+  that the one canonical answer is the right one), with a finiteness guard,
+  because `F64::new` permits infinities and `inf + -inf` would have turned an
+  existing answer into a new error;
+- **ints and durations accumulate in `i128`**, which no candidate proposed. This
+  is the honest fix for the second repro: sorting makes the exit code
+  deterministic, but every fixed association still errors on a multiset whose
+  total is representable (`{ -MAX, -MAX, MAX, MAX }` sums to `0`). A multiset
+  fold has no observable partial sums, so only the total has to fit.
+
+Candidate 3 is candidate 1 with the sort moved; candidate 4 (document the
+restriction) was rejected for keeping a case where reordering a conjunction
+changes an exit code, which §17 2026-07-25 rules out in terms.
+
+**The sort's cost, which candidate 1 named, is not measurable here.** 30k facts
+over 200 groups with three aggregates each runs in 0.19–0.20 s at `--release`
+both before and after: enumeration and provenance dominate, and the sort sits
+inside the noise. That is one shape, not a profile — the real one is the next
+session's.
+
+**Cost elsewhere.** §9 gained the fold-order rule (a new normative home; §8's
+binary `+` keeps its operand-pair overflow). §17's 2026-07-25 body-order entry,
+already ***Falsified*** by this file, is now ***Amended***: the generalisation
+holds again, but because two things are order-independent rather than one. The
+`i128` change is a §9 semantic widening, not a bug fix — spec and code had agreed
+before it — so it took its own commit and its own decision entry. Four unit tests
+landed, each with a unique-kill mutation recorded in its doc comment.

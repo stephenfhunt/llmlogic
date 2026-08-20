@@ -24,6 +24,56 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-20 — `bugs/007` closes, and the aggregate becomes a fold over a multiset
+
+The defect the morning's audit filed, fixed the same day in four commits.
+**538 tests green**, clippy and rustfmt clean, `--ignored` back to no known
+failures, and the open defect set empty again.
+
+**Done**
+- **The sort** — `fold_aggregate` folds its present values in §14 order, so an
+  aggregate is a function of its witness multiset and the goal's literal order
+  cannot reach the answer. `fold_is_permutation_invariant` loses its `#[ignore]`.
+- **Compensated floats** — Neumaier summation, shared structurally by
+  `sum_values` and `avg_values`, with a finiteness guard: `F64::new` permits
+  infinities, so an overflowing sum is already an answer and `inf + -inf` in the
+  correction term would have made it an error.
+- **Wide ints** — `sum` over ints and durations accumulates in `i128`, so
+  overflow is a property of the total: `{ -MAX, -MAX, MAX, MAX }` sums to `0`
+  where every fixed association, the sorted one included, errored.
+- **Swept**: §9 (the fold-order rule, a new normative home), §17 ×2, `bugs/007`'s
+  resolution and `git mv`, `ROADMAP.md` ×3, `testing.md`'s B11 and two coverage
+  rows.
+
+**Decided**
+- **Sorting alone was rejected** — the bug file's own recommendation, and enough
+  to close the defect. §14's order is by value, not magnitude, so it would have
+  canonised `0.0` for `{ 1e16, -1e16, 0.1 }`, the worse of the two answers the
+  defect reported. The sort carries determinism, compensation accuracy.
+- **The `i128` half is not a bug fix**, and took its own commit: spec and code
+  agreed that the fold inherited §8's operand-pair overflow, so it is a §9
+  widening — and the one option none of the file's four candidates named.
+- **The float half was not split into a second defect.** One contradiction, one
+  root cause, one fix, one acceptance test; two files sharing a fix is the
+  stale-cross-reference failure mode `bugs/README.md` exists to prevent.
+- **B5 cannot see this defect, and its doc comment now says so.** Float-pooling
+  it was still right, but with the sort deleted it stays green: a single-atom
+  goal enumerates in the relation's own order, which *is* the sorted order. An
+  equivalent mutant, measured rather than assumed.
+
+**Removed**
+- ROADMAP's one-open-defect block and its known-`--ignored`-failure paragraph,
+  including the parenthetical recording which window the previous line was true
+  for — narration a current-state document should not carry.
+- `avg_values`' private float accumulator, which duplicated `sum_values`' fold.
+- The 2026-08-18 entry, rotated verbatim to `worklog-archive/2026-08.md`.
+
+**Next up**
+- **The profile** — unblocked, and now genuinely next: the defect that ran ahead
+  of it is closed.
+- Still open: **E5**/**E6**, and §17's period arithmetic, whether a truncated
+  value should print as its period, and the `avg`-over-mixed-column question.
+
 ## 2026-08-20 — A coverage audit finds `bugs/007`, and six laws that were never stated
 
 No feature work: an audit of the property suite, asked for before the profile,
@@ -126,55 +176,3 @@ decisions, both annotated with what building them taught the same day.
 - Open, in §17: period arithmetic ("same day next month" is not expressible),
   whether a truncated value should print as its period, and the `avg`-over-mixed
   column question T5 does not reach.
-
-## 2026-08-18 — The caller's contract ships, and the thing it was merged for has no trigger
-
-The exit code now answers the question. Five axes taken one at a time
-([`notes/callers-contract.md`](../datalog/notes/callers-contract.md)); **two were
-settled by measurement, and both measurements contradicted a document**. 465 tests
-pass, clippy and rustfmt clean.
-
-**Done**
-- **grep's vocabulary**: `0` rows found · `1` no rows · `2` did not answer, stated
-  as a **range** (`≥ 2` did not answer) so a later code refines `2` rather than
-  reinterpreting it. Program errors moved `1 → 2`. **§16.13** is the first example
-  whose subject is the exit code; `tests/system.rs` pins every code, plus the
-  boundary that "any query decides".
-- **Two silences ended**: a conversion that loses a value reports *malformed, not
-  missing* (§4/§12), and an aggregate in a **query** now reports its skipped
-  absents — §9's documented blind spot, whose stated cause was wrong (`answer`
-  builds the premises and discarded them).
-- **Swept**: §9's exclusion, §12's severity and *Not covered*, §14's binary
-  contract, §15's truncation paragraph, §4's cast section, `ROADMAP.md` ×4,
-  `testing.md`, `skill/SKILL.md`, `docs/agent-skill.md`.
-
-**Decided**
-- **A constraint is not a construct.** The language already writes the check — a
-  negation-only body answers `holds(true).` — so only the code was missing.
-  *Rejected*: a `constraint` statement (buys no expressiveness) and the ASP denial
-  `:- body.` (its meaning is a model filter; we compute one model). Phrase checks
-  **affirmatively**: errors are `≥ 2`, so `&&` cannot fire on a broken program.
-- **Withholding is specified and unnumbered.** §17 2026-08-16 named three live
-  truncation sources; measured, **none is one** — §13's cells are structured
-  errors, the round cap is a test oracle, and §9's skips are absent *values* in
-  present rows. **Short by rows is not absent in a cell**, and the entry never drew
-  that line. So the merge that made this one session was right for a reason it
-  could not state: the two needs never contended for the code.
-- **stdout stays a pure fact stream.** A `%` marker was rejected as visibility
-  without capability — a downstream lexer skips comments, so it cannot make a pipe
-  safe, only look safe. The residual hazard is recorded in §14 rather than left to
-  lore: `a | b` still cannot see an exit code without `pipefail`.
-- **The new report needed a silencer.** §16.9's guarded idiom (`V = X as int, V is
-  absent`) is a *correct* program the warning fired on — the exact hazard the
-  sibling engine measured — so a guarded conversion is silent.
-
-**Removed**
-- §9's "not covered by the warning: an aggregate appearing only in a query", §14's
-  "what the exit code means beyond 'it ran'", §15's three-live-instances claim, and
-  the ROADMAP's integrity-constraint and reclassification items. The 2026-08-18 §6
-  entry rotated verbatim to `worklog-archive/2026-08.md`.
-
-**Next up**
-- **Temporal types**, then **the profile** — unchanged by this session.
-- Filed while building: **a conversion inside a comparison is still silent**
-  (`X as int > 5` narrows a filter with no premise to report on) — v1, §8/§12.
