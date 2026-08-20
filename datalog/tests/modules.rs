@@ -106,3 +106,87 @@ proptest! {
         prop_assert_eq!(output_at(&root), output(&union));
     }
 }
+
+// --- `std` modules (§13, `notes/temporal-values.md`) ---
+
+/// The gate in both directions: without the import `year` is an ordinary
+/// relation the program may define and use; with it, `year` is the builtin.
+///
+/// This is the property the whole mechanism exists for — gating is what makes
+/// short names affordable, and it is only true if an unimporting program is
+/// completely unaffected.
+#[test]
+fn a_gated_name_is_an_ordinary_relation_until_the_module_is_imported() {
+    let own = datalog::run("year(1066, hastings). year(1215, runnymede).\n?- year(Y, E).")
+        .expect("a program may define its own `year`");
+    assert_eq!(
+        own.output(),
+        "year(1066, hastings).\nyear(1215, runnymede).\n"
+    );
+    assert!(own.warnings.is_empty(), "{:?}", own.warnings);
+
+    let gated =
+        datalog::run("import \"std/time\".\nd(@2026-08-19).\nr(Y) :- d(D), year(D, Y).\n?- r(Y).")
+            .expect("the import brings the builtin into scope");
+    assert_eq!(gated.output(), "r(2026).\n");
+}
+
+#[test]
+fn defining_a_gated_name_while_importing_it_names_both_origins() {
+    let errors = datalog::run("import \"std/time\".\nyear(1066, hastings).\n?- year(Y, E).")
+        .expect_err("a collision is an error, never a silent preference");
+    let text = errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(text.contains("defined by this program"), "{text}");
+    assert!(text.contains("std/time"), "{text}");
+    assert!(text.contains("rename"), "{text}");
+}
+
+#[test]
+fn using_a_gated_name_without_the_import_says_which_module_provides_it() {
+    // The honest cost of the gate, kept to one step by §12's suggestion.
+    let result = datalog::run("d(@2026-08-19).\nr(Y) :- d(D), year(D, Y).\n?- r(Y).")
+        .expect("an undefined relation is a warning, not an error");
+    let warnings: Vec<String> = result.warnings.iter().map(ToString::to_string).collect();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings[0].contains("provided by `std/time`"),
+        "{warnings:?}"
+    );
+    assert!(warnings[0].contains("import \"std/time\"."), "{warnings:?}");
+}
+
+#[test]
+fn an_unknown_std_module_lists_the_ones_that_exist() {
+    let errors = datalog::run("import \"std/nope\".\np(1).\n?- p(X).").expect_err("no such module");
+    let text = errors[0].to_string();
+    assert!(text.contains("there is no `std/nope` module"), "{text}");
+    assert!(text.contains("std/time"), "{text}");
+}
+
+#[test]
+fn a_real_std_directory_cannot_shadow_the_prefix() {
+    // `std/` always wins, and the collision is loud rather than resolved
+    // silently in either direction (§13).
+    let dir = scratch_dir();
+    std::fs::create_dir_all(dir.join("std")).expect("create std dir");
+    write(&dir, "std/time", "p(1).\n");
+    let root = write(&dir, "root.dl", "import \"std/time\".\nq(1).\n?- q(X).");
+    let source = std::fs::read_to_string(&root).expect("read root");
+    let errors = datalog::run_at(&source, Some(&root)).expect_err("the shadow is an error");
+    let text = errors[0].to_string();
+    assert!(text.contains("reserved `std/` module prefix"), "{text}");
+    assert!(text.contains("also exists on disk"), "{text}");
+}
+
+#[test]
+fn a_std_import_survives_printing_as_what_it_was_written_as() {
+    // §14's closure: resolution reclassifies the import, and the printed form
+    // must still be the source form.
+    let program = datalog::parse("import \"std/time\".\np(1).").expect("parses");
+    let printed = datalog::print::print_program(&program);
+    assert!(printed.contains("import \"std/time\"."), "{printed}");
+}

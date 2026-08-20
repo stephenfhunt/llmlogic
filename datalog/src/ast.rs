@@ -87,6 +87,14 @@ pub struct Import {
 pub enum ImportKind {
     /// `import "lib.dl".` — splice another program's statements in place.
     Module,
+    /// `import "std/time".` — bring a `std` module's builtin relations into
+    /// scope (§13). Classified by the **resolver**, which recognizes the
+    /// reserved `std/` prefix before touching the filesystem; the parser sees
+    /// only the ordinary no-`as` module shape, so this costs no grammar.
+    Std {
+        /// The module name after the prefix, e.g. `time`.
+        module: String,
+    },
     /// `import "<src>" [table "<t>"] as rel [ (field [: type], …) ].`
     Data {
         /// Database table selection; syntax ratified, loading deferred (§13).
@@ -110,6 +118,24 @@ pub struct FieldDecl {
     pub name: Ident,
     pub ty: Option<TypeName>,
     pub span: Span,
+}
+
+/// A `std` module relation, as an operation on values (§13, `crate::stdlib`).
+///
+/// These are relations at the surface and *functions* underneath: each reads
+/// bound inputs and produces one value, so lowering turns
+/// `year(D, Y)` into the `=`-assignment `Y = year(D)` and every existing rule
+/// about scheduling, safety and binding applies unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum BuiltinOp {
+    Year,
+    Month,
+    Day,
+    Hour,
+    Minute,
+    Second,
+    /// `truncate(V, unit, V')` — the start of the period containing `V`.
+    Truncate,
 }
 
 /// The eight primitive type names (§4).
@@ -823,7 +849,9 @@ mod tests {
                     assert_eq!(schema.len(), 8);
                     assert_eq!(schema[4].name.name, "title");
                 }
-                ImportKind::Module => panic!("expected a data import"),
+                ImportKind::Module | ImportKind::Std { .. } => {
+                    panic!("expected a data import")
+                }
             },
             other => panic!("expected an import, got {other:?}"),
         }

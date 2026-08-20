@@ -884,8 +884,21 @@ implementation.
 - [ ] **T4** Ordering agreement: for ISO-shaped inputs, `date` comparison
   agrees with the string comparison it replaces — the migration-safety oracle,
   and free, because filtering already worked that way.
-- [ ] **T5** `truncate` is idempotent and monotone; `year`/`month`/`day` agree
-  with the components of the printed form.
+- [x] **T5** `truncate` is idempotent and monotone — the two properties that
+  make a truncated value usable as a group key, since a key that moved under
+  re-truncation would double-count and one that reordered would sort wrong. The
+  extraction half checks `year`/`month`/`day` against the components of the
+  value's own canonical text, which is the only independent statement of what
+  those components are. `t5_truncation_is_idempotent_and_monotone`,
+  `t5_extraction_agrees_with_the_printed_form`.
+  *Mutation:* moved a month's period start back one day — T5 went red
+  immediately. **Worth recording: the first mutation tried did not.** Shifting
+  the week's origin from Monday to Sunday is *equally* idempotent and monotone,
+  so the property is blind to it — and the example written to cover that gap
+  (`a_week_starts_on_monday`) failed on the real implementation, which had the
+  epoch weekday off by one. A property that cannot fail on a wrong answer is
+  the case rule 3 exists to expose, and here it took the mutation to find that
+  the property needed an example beside it.
 - [ ] **T6** Import anchoring (the rule-4 acceptance property for the widened
   generators): a CSV of printed temporal values imports to exactly the facts the
   corresponding literals would give — **F3** extended to the sigil.

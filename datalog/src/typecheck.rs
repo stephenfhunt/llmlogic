@@ -506,6 +506,25 @@ impl<'a> TypeChecker<'a> {
                 self.set_type(node, *ty);
                 node
             }
+            // A `std` relation types by its operation (§13). Extraction is an
+            // `int` whatever it read, which is the cast's shape — inference
+            // terminates there. **`truncate` is the exception on purpose**: it
+            // returns the same point type it was given, so its result *is* its
+            // input's slot, and a group key can never change type with the
+            // unit. Which input types are accepted is a value-level question,
+            // settled at evaluation exactly as an undefined conversion is.
+            ir::Expr::Builtin { op, args } => {
+                let arg_slots: Vec<usize> =
+                    args.iter().map(|arg| self.expr_slot(arg, vars)).collect();
+                match (op, arg_slots.first()) {
+                    (crate::ast::BuiltinOp::Truncate, Some(input)) => *input,
+                    _ => {
+                        let node = self.fresh("the result of a `std/time` extraction".to_string());
+                        self.set_type(node, TypeName::Int);
+                        node
+                    }
+                }
+            }
         }
     }
 

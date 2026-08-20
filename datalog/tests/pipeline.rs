@@ -658,3 +658,161 @@ fn absent_annihilates_temporal_arithmetic_too() {
         ]
     );
 }
+
+// --- `std/time` (§13) ---
+
+proptest! {
+    /// **T5** — truncation is **idempotent** (truncating a period start leaves
+    /// it alone) and **monotone** (it never reorders two points), which is what
+    /// makes a truncated value usable as a group key at all: a key that moved
+    /// under re-truncation would double-count, and one that reordered would
+    /// sort wrong.
+    #[test]
+    fn t5_truncation_is_idempotent_and_monotone(
+        a in arb_date(),
+        b in arb_date(),
+        unit in proptest::sample::select(vec!["year", "quarter", "month", "week", "day"]),
+    ) {
+        let src = format!(
+            "import \"std/time\".\n\
+             a(@{a}). b(@{b}).\n\
+             once(K)  :- a(D), truncate(D, {unit}, K).\n\
+             twice(K) :- once(P), truncate(P, {unit}, K).\n\
+             ordered(true) :- a(X), b(Y), X <= Y,\n\
+                              truncate(X, {unit}, KX), truncate(Y, {unit}, KY), KX <= KY.\n\
+             ordered(true) :- a(X), b(Y), Y < X.\n\
+             ?- once(K).\n?- twice(K).\n?- ordered(true)."
+        );
+        let out = answers(&src);
+        prop_assert_eq!(&out[0].replace("once", "twice"), &out[1], "not idempotent");
+        prop_assert_eq!(out.len(), 3, "monotonicity found no witness: {:?}", out);
+    }
+
+    /// **T5**, the extraction half: `year`/`month`/`day` agree with the
+    /// components of the value's own canonical text (§14), which is the only
+    /// independent statement of what those components are.
+    #[test]
+    fn t5_extraction_agrees_with_the_printed_form(date in arb_date()) {
+        let text = date.to_string();
+        let src = format!(
+            "import \"std/time\".\n\
+             d(@{date}).\n\
+             parts(Y, M, N) :- d(D), year(D, Y), month(D, M), day(D, N).\n?- parts(Y, M, N)."
+        );
+        let (y, rest) = text.split_at(4);
+        prop_assert_eq!(
+            answers(&src),
+            vec![format!(
+                "parts({}, {}, {}).",
+                y.parse::<i64>().expect("year digits"),
+                rest[1..3].parse::<i64>().expect("month digits"),
+                rest[4..6].parse::<i64>().expect("day digits"),
+            )]
+        );
+    }
+}
+
+#[test]
+fn truncation_keeps_the_type_it_was_given() {
+    // The result type follows the input's, so a group key never changes type
+    // with the unit (§13) — a date truncates to a date, a timestamp to a
+    // timestamp at midnight.
+    assert_eq!(
+        answers(
+            "import \"std/time\".\n\
+             d(@2026-08-19). t(@2026-08-19T10:30:00).\n\
+             dk(K) :- d(D), truncate(D, month, K).\n\
+             tk(K) :- t(T), truncate(T, day, K).\n\
+             hk(K) :- t(T), truncate(T, hour, K).\n\
+             ?- dk(K).\n?- tk(K).\n?- hk(K)."
+        ),
+        vec![
+            "dk(@2026-08-01).".to_string(),
+            "tk(@2026-08-19T00:00:00).".to_string(),
+            "hk(@2026-08-19T10:00:00).".to_string(),
+        ]
+    );
+}
+
+/// The week is ISO's — Monday-based. T5 deliberately does not pin this: a
+/// Sunday-based week is just as idempotent and just as monotone, so the
+/// property cannot see the difference and an example has to.
+#[test]
+fn a_week_starts_on_monday() {
+    assert_eq!(
+        answers(
+            "import \"std/time\".\n\
+             d(@2026-08-19). d(@2026-08-17). d(@2026-08-16).\n\
+             w(D, K) :- d(D), truncate(D, week, K).\n?- w(D, K)."
+        ),
+        vec![
+            // Sunday the 16th belongs to the week that began on the 10th.
+            "w(@2026-08-16, @2026-08-10).".to_string(),
+            "w(@2026-08-17, @2026-08-17).".to_string(),
+            "w(@2026-08-19, @2026-08-17).".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn a_std_relation_is_a_filter_when_its_output_is_a_constant() {
+    // `day(D, 15)` needs no separate form: the `=` rule already decides
+    // assignment-vs-filter, which is why lowering can spell a builtin as one.
+    assert_eq!(
+        answers(
+            "import \"std/time\".\n\
+             d(@2026-08-15). d(@2026-08-19).\n\
+             mid(D) :- d(D), day(D, 15).\n?- mid(D)."
+        ),
+        vec!["mid(@2026-08-15).".to_string()]
+    );
+}
+
+#[test]
+fn a_truncation_unit_is_checked_once_with_the_list_attached() {
+    let text = error_text(
+        "import \"std/time\".\nd(@2026-08-19).\nr(K) :- d(D), truncate(D, fortnight, K).\n?- r(K).",
+    );
+    assert!(
+        text.contains("`fortnight` is not a truncation unit"),
+        "{text}"
+    );
+    assert!(text.contains("quarter"), "{text}");
+    // A computed unit is refused too: the check is static on purpose.
+    let text = error_text(
+        "import \"std/time\".\nd(@2026-08-19). u(month).\n\
+         r(K) :- d(D), u(U), truncate(D, U, K).\n?- r(K).",
+    );
+    assert!(text.contains("must be written as a symbol"), "{text}");
+}
+
+#[test]
+fn asking_a_date_for_a_time_of_day_is_a_type_error() {
+    // §4 gives a date no time of day, so a silent zero would read as midnight
+    // — a plausible wrong answer, which is the class this engine refuses.
+    let text =
+        error_text("import \"std/time\".\nd(@2026-08-19).\nr(H) :- d(D), hour(D, H).\n?- r(H).");
+    assert!(text.contains("a date has no time of day"), "{text}");
+    assert!(text.contains("as timestamp"), "{text}");
+}
+
+#[test]
+fn a_std_relation_annihilates_on_absent_like_every_other_computation() {
+    assert_eq!(
+        answers(
+            "import \"std/time\".\n\
+             d(@2026-08-19). d(absent).\n\
+             y(Y) :- d(D), year(D, Y).\n?- y(Y)."
+        ),
+        vec!["y(absent).".to_string(), "y(2026).".to_string()]
+    );
+}
+
+#[test]
+fn negating_a_std_relation_points_at_the_comparison_form() {
+    let text = error_text(
+        "import \"std/time\".\nd(@2026-08-19).\nr(D) :- d(D), not day(D, 15).\n?- r(D).",
+    );
+    assert!(text.contains("`not` applies to relations"), "{text}");
+    assert!(text.contains("X != "), "{text}");
+}

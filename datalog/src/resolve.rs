@@ -24,6 +24,10 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crate::ast::{ImportKind, Program, Statement, StatementKind};
+
+/// The reserved virtual path prefix for builtin modules (§13).
+const STD_PREFIX: &str = "std/";
+
 use crate::error::Error;
 use crate::parser::parse;
 
@@ -93,6 +97,20 @@ impl Resolver {
         for mut statement in program.statements {
             match &mut statement.kind {
                 StatementKind::Import(import) if import.kind == ImportKind::Module => {
+                    // `std/` is a reserved virtual prefix, resolved before the
+                    // filesystem is consulted (§13): a `std` module is not a
+                    // file, and a real `./std/` directory must not be able to
+                    // shadow one silently.
+                    if let Some(module) = import.path.strip_prefix(STD_PREFIX) {
+                        match self.classify_std(module, &import.path, dir, file) {
+                            Some(module) => {
+                                import.kind = ImportKind::Std { module };
+                                self.push(statement, file);
+                            }
+                            None => continue,
+                        }
+                        continue;
+                    }
                     self.splice_module(&import.path, dir, file);
                 }
                 StatementKind::Import(import) => {
@@ -112,6 +130,43 @@ impl Resolver {
                 _ => self.push(statement, file),
             }
         }
+    }
+
+    /// Validates a `std/…` import, or records why it is not one.
+    ///
+    /// Two refusals, both loud: an unknown module lists the ones that exist,
+    /// and a real `./std/…` file that the prefix would shadow is an error
+    /// rather than a silent preference for either reading.
+    fn classify_std(
+        &mut self,
+        module: &str,
+        path: &str,
+        dir: Option<&Path>,
+        file: usize,
+    ) -> Option<String> {
+        let context = format!("in `{}`", self.files[file]);
+        if crate::stdlib::module(module).is_none() {
+            self.errors.push(Error::source(format!(
+                "{context}: there is no `{path}` module; `std/` provides: {}",
+                crate::stdlib::module_names()
+                    .iter()
+                    .map(|name| format!("std/{name}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )));
+            return None;
+        }
+        let shadow = PathBuf::from(resolve_path(path, dir));
+        if shadow.exists() {
+            self.errors.push(Error::source(format!(
+                "{context}: `{path}` names the reserved `std/` module prefix, but \
+                 `{}` also exists on disk; `std/` always wins, so rename the file \
+                 to make the program mean one thing",
+                shadow.display()
+            )));
+            return None;
+        }
+        Some(module.to_string())
     }
 
     fn splice_module(&mut self, path: &str, dir: Option<&Path>, file: usize) {

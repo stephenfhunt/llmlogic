@@ -464,6 +464,10 @@ fn has_arithmetic(expr: &Expr) -> bool {
     match expr {
         Expr::Binary { .. } => true,
         Expr::Cast { expr, .. } => has_arithmetic(expr),
+        // A `std` module relation is a finite-domain map, like a cast: it
+        // reads a bound value and returns one no larger, so it propagates but
+        // never accumulates and §10 exempts it. Its *arguments* still count.
+        Expr::Builtin { args, .. } => args.iter().any(has_arithmetic),
         Expr::Term(_) => false,
     }
 }
@@ -530,6 +534,9 @@ pub fn expr_vars(expr: &Expr) -> Vec<Var> {
         // or `V = X as int` would look input-free and be placed before whatever
         // binds `X`.
         Expr::Cast { expr, .. } => expr_vars(expr),
+        // Same reason, and it is what makes a `std` relation's input position
+        // an *input*: `Y = year(D)` must be placed after whatever binds `D`.
+        Expr::Builtin { args, .. } => args.iter().flat_map(expr_vars).collect(),
     }
 }
 

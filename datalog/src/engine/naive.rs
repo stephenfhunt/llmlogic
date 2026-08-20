@@ -245,6 +245,16 @@ fn eval_expr(expr: &Expr, env: &HashMap<Var, Value>) -> Result<Value> {
             let b = eval_expr(rhs, env)?;
             arith(*op, a, b)
         }
+        // Shared with the engine for the same reason the cast is: a `std`
+        // relation is value semantics, identical under either fixpoint
+        // strategy, and this oracle varies the strategy alone.
+        Expr::Builtin { op, args } => {
+            let values = args
+                .iter()
+                .map(|arg| eval_expr(arg, env))
+                .collect::<Result<Vec<_>>>()?;
+            super::apply_builtin(*op, &values)
+        }
         // Deliberately *not* reimplemented, unlike `arith` below. What this
         // oracle varies is the fixpoint strategy — naive against semi-naive —
         // and §8's conversion table is value semantics, identical under both; a

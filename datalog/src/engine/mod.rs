@@ -42,7 +42,7 @@ pub(crate) mod naive;
 use std::collections::{BTreeSet, HashMap};
 
 use crate::Result;
-use crate::ast::{AggOp, ArithOp, CmpOp, TypeName};
+use crate::ast::{AggOp, ArithOp, BuiltinOp, CmpOp, TypeName};
 use crate::error::Error;
 use crate::ir::{
     Atom, BodyLiteral, BodyLiteralKind, Expr, F64, Fact, PredId, Program, Query, Rule, RuleId,
@@ -1102,6 +1102,13 @@ pub(crate) fn eval_expr(expr: &Expr, bindings: &[Option<Value>]) -> Result<Value
             apply_arith(*op, l, r)
         }
         Expr::Cast { expr, ty } => apply_cast(eval_expr(expr, bindings)?, *ty),
+        Expr::Builtin { op, args } => {
+            let values = args
+                .iter()
+                .map(|arg| eval_expr(arg, bindings))
+                .collect::<Result<Vec<_>>>()?;
+            apply_builtin(*op, &values)
+        }
     }
 }
 
@@ -1151,7 +1158,164 @@ fn walk_lost(expr: &Expr, bindings: &[Option<Value>], found: &mut Option<LostCon
             walk_lost(lhs, bindings, found);
             walk_lost(rhs, bindings, found);
         }
+        Expr::Builtin { args, .. } => {
+            for arg in args {
+                walk_lost(arg, bindings, found);
+            }
+        }
         Expr::Term(_) => {}
+    }
+}
+
+/// Applies a `std` module relation to its evaluated inputs (§13).
+///
+/// `absent` annihilates first, at the same choke point arithmetic and the cast
+/// use: a missing input yields a missing output rather than an error, so a
+/// sparse date column stays queryable.
+fn apply_builtin(op: BuiltinOp, args: &[Value]) -> Result<Value> {
+    if args.iter().any(Value::is_absent) {
+        return Ok(Value::Absent);
+    }
+    match op {
+        BuiltinOp::Truncate => truncate_value(args),
+        _ => extract_component(op, args),
+    }
+}
+
+/// `year`/`month`/`day`/`hour`/`minute`/`second` — one civil component of a
+/// point in time, as an `int`.
+fn extract_component(op: BuiltinOp, args: &[Value]) -> Result<Value> {
+    let [value] = args else {
+        return Err(Error::semantic(
+            "malformed IR: an extraction takes exactly one input".to_string(),
+        ));
+    };
+    let (year, month, day, hour, minute, second, _) = match value {
+        Value::Date(date) => {
+            let (y, m, d) = date.ymd();
+            (y, m, d, 0, 0, 0, 0)
+        }
+        Value::Timestamp(timestamp) => timestamp.parts(),
+        other => {
+            return Err(Error::semantic(format!(
+                "type error: `{}` reads a date or a timestamp, got {}",
+                builtin_name(op),
+                value_type_name(other),
+            )));
+        }
+    };
+    // A date has no time of day, and §4 gives it none — so asking for one is a
+    // type error rather than a silent zero, which would read as midnight.
+    if matches!(value, Value::Date(_))
+        && matches!(op, BuiltinOp::Hour | BuiltinOp::Minute | BuiltinOp::Second)
+    {
+        return Err(Error::semantic(format!(
+            "type error: `{}` reads a timestamp; a date has no time of day",
+            builtin_name(op),
+        ))
+        .suggest("widen with `as timestamp` if midnight is the reading you want"));
+    }
+    Ok(Value::Int(match op {
+        BuiltinOp::Year => year,
+        BuiltinOp::Month => month,
+        BuiltinOp::Day => day,
+        BuiltinOp::Hour => hour,
+        BuiltinOp::Minute => minute,
+        BuiltinOp::Second => second,
+        BuiltinOp::Truncate => unreachable!("handled by `truncate_value`"),
+    }))
+}
+
+/// `truncate(V, unit, V')` — the start of the period containing `V`, at the
+/// same point type. This is what `timestamp as date` refuses to be (§8), and
+/// the only spelling that reaches a week or a quarter.
+fn truncate_value(args: &[Value]) -> Result<Value> {
+    let [value, unit] = args else {
+        return Err(Error::semantic(
+            "malformed IR: `truncate` takes a value and a unit".to_string(),
+        ));
+    };
+    let Value::Symbol(unit) = unit else {
+        return Err(Error::semantic(format!(
+            "type error: `truncate`'s unit is a symbol, got {}",
+            value_type_name(unit),
+        )));
+    };
+    match value {
+        Value::Date(date) => truncate_date(*date, unit).map(Value::Date),
+        Value::Timestamp(timestamp) => {
+            let (_, _, _, hour, minute, _, _) = timestamp.parts();
+            match unit.as_str() {
+                // Below a day the period lives inside the timestamp itself.
+                "hour" | "minute" => {
+                    let date = truncate_date(timestamp.date(), "day")?;
+                    let kept = match unit.as_str() {
+                        "hour" => hour * 3_600_000_000,
+                        _ => hour * 3_600_000_000 + minute * 60_000_000,
+                    };
+                    date.at_midnight()
+                        .shifted(kept)
+                        .map(Value::Timestamp)
+                        .ok_or_else(|| {
+                            Error::semantic(
+                                "arithmetic error: truncation left the representable range"
+                                    .to_string(),
+                            )
+                        })
+                }
+                _ => truncate_date(timestamp.date(), unit).map(|date| {
+                    // A truncated timestamp stays a timestamp: the result type
+                    // follows the input's, so a group key never changes type
+                    // with the unit.
+                    Value::Timestamp(date.at_midnight())
+                }),
+            }
+        }
+        other => Err(Error::semantic(format!(
+            "type error: `truncate` reads a date or a timestamp, got {}",
+            value_type_name(other),
+        ))),
+    }
+}
+
+/// The civil day a date-level period starts on.
+fn truncate_date(date: temporal::Date, unit: &str) -> Result<temporal::Date> {
+    let (year, month, day) = date.ymd();
+    let start = match unit {
+        "year" => temporal::Date::from_ymd(year, 1, 1),
+        "quarter" => temporal::Date::from_ymd(year, month - (month - 1) % 3, 1),
+        "month" => temporal::Date::from_ymd(year, month, 1),
+        // ISO-8601's week: Monday-based. 1970-01-01 was a Thursday — index 3
+        // when Monday is 0 — so the day count is shifted by 3 before the
+        // modulus.
+        "week" => {
+            let weekday = (date.days() as i64 + 3).rem_euclid(7);
+            return temporal::Date::from_days(date.days() as i64 - weekday).map_err(|error| {
+                Error::semantic(format!("arithmetic error: {}", error.message()))
+            });
+        }
+        "day" => temporal::Date::from_ymd(year, month, day),
+        other => {
+            return Err(
+                Error::semantic(format!("type error: `{other}` is not a truncation unit")).suggest(
+                    format!("one of: {}", crate::stdlib::TRUNCATE_UNITS.join(", ")),
+                ),
+            );
+        }
+    };
+    start.map_err(|error| Error::semantic(format!("arithmetic error: {}", error.message())))
+}
+
+/// The source spelling of a `std` relation, for messages.
+fn builtin_name(op: BuiltinOp) -> &'static str {
+    match op {
+        BuiltinOp::Year => "year",
+        BuiltinOp::Month => "month",
+        BuiltinOp::Day => "day",
+        BuiltinOp::Hour => "hour",
+        BuiltinOp::Minute => "minute",
+        BuiltinOp::Second => "second",
+        BuiltinOp::Truncate => "truncate",
     }
 }
 

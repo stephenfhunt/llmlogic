@@ -1554,8 +1554,11 @@ so a builtin is a **relation**, and `std` modules are how a program asks for one
 | `hour(V, N)` `minute(V, N)` `second(V, N)` | a `timestamp` | an `int` component |
 | `truncate(V, U, V')` | a point `V`, a unit symbol `U` | the same point type, at the start of that period |
 
-`U` is one of `year`, `quarter`, `month`, `week`, `day`, `hour`, `minute`; a
-symbol outside that set is a structured error listing it. `truncate` is what
+`U` is one of `year`, `quarter`, `month`, `week`, `day`, `hour`, `minute`, and
+is written **literally** — the unit is static in every correct program, so a
+typo is caught once with the list attached rather than once per row. A `week`
+starts on **Monday**, as ISO-8601 numbers it. A symbol outside the set, or a
+computed one, is a structured error. `truncate` is what
 `timestamp as date` refuses to be (§8), and it is what a group-by-period joins
 on — one sortable key rather than a tuple of components, and the only spelling
 that reaches a week or a quarter at all.

@@ -44,6 +44,9 @@ fn print_statement(statement: &Statement) -> String {
 fn print_import(import: &Import) -> String {
     match &import.kind {
         ImportKind::Module => format!("import {}.", print_string_literal(&import.path)),
+        // A `std` import prints as the module import it was written as, so the
+        // closure property holds through resolution (§14).
+        ImportKind::Std { module } => format!("import \"std/{module}\"."),
         ImportKind::Data {
             table,
             relation,

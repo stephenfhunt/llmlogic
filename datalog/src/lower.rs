@@ -78,6 +78,9 @@ pub fn lower_with_sources(
                 // Module imports are spliced away by resolution before
                 // lowering; one reaching this point means the caller skipped
                 // that stage (§13).
+                // A `std` import contributes no statements: its relations were
+                // registered by `collect_predicates` before any clause lowered.
+                ast::ImportKind::Std { .. } => {}
                 ast::ImportKind::Module => lowerer.errors.push(Error::semantic(format!(
                     "module import \"{}\" must be resolved before lowering",
                     import.path
@@ -157,6 +160,10 @@ struct Lowerer {
     /// silently extend it, while naming one after a relation only referenced is
     /// exactly what the equivalent hand-written rule does, and stays legal (§14).
     defined: HashSet<String>,
+    /// The `std` modules this program imported (§13). Empty for a program with
+    /// no `import "std/…".`, which is what keeps `year` an ordinary relation
+    /// name everywhere else — the gate is the whole point of the mechanism.
+    std_modules: Vec<&'static crate::stdlib::StdModule>,
     errors: Vec<Error>,
 }
 
@@ -249,11 +256,39 @@ impl Lowerer {
     /// arity consistency across declares, imports, and use sites. `tables`
     /// (aligned with data-import statements) supplies a schema-less import's
     /// arity and header field names.
+    /// The `std` relation an atom denotes, if the program imported the module
+    /// providing it. `None` means "an ordinary relation", which is what an
+    /// unimporting program always gets.
+    fn builtin_for(&self, atom: &ast::Atom) -> Option<ast::BuiltinOp> {
+        let ast::Args::Positional(args) = &atom.args else {
+            return None;
+        };
+        let arity = args.len() as u32;
+        self.std_modules.iter().find_map(|module| {
+            crate::stdlib::relation(module, &atom.predicate.name, arity).map(|r| r.op)
+        })
+    }
+
     fn collect_predicates(
         &mut self,
         program: &ast::Program,
         tables: &[crate::sources::LoadedTable],
     ) {
+        // Pass 0: which `std` modules are in scope. Separate because an import
+        // may be written after the rules that use it, and because every later
+        // decision — intern or not, collision or not — depends on the answer.
+        for statement in &program.statements {
+            if let ast::StatementKind::Import(import) = &statement.kind
+                && let ast::ImportKind::Std { module } = &import.kind
+                && let Some(module) = crate::stdlib::module(module)
+                && !self
+                    .std_modules
+                    .iter()
+                    .any(|seen| std::ptr::eq(*seen, module))
+            {
+                self.std_modules.push(module);
+            }
+        }
         let mut data_import = 0usize;
         for statement in &program.statements {
             match &statement.kind {
@@ -311,6 +346,35 @@ impl Lowerer {
                 }
             }
         }
+        self.check_std_collisions();
+    }
+
+    /// A program that imports a `std` module and also **defines** one of its
+    /// relations is an error naming both origins (§13).
+    ///
+    /// Never resolved silently in either direction: user-wins shadowing would
+    /// change what a program means depending on an import line elsewhere in the
+    /// file, which is the class of silent meaning change the gate exists to
+    /// avoid (§17, 2026-08-19).
+    fn check_std_collisions(&mut self) {
+        for module in self.std_modules.clone() {
+            for relation in module.relations {
+                if !self.defined.contains(relation.name) {
+                    continue;
+                }
+                self.errors.push(
+                    Error::semantic(format!(
+                        "`{}` is defined by this program and provided by `std/{}`",
+                        relation.name, module.name
+                    ))
+                    .suggest(format!(
+                        "rename your relation, or drop `import \"std/{}\".` if you do not \
+                         need its relations",
+                        module.name
+                    )),
+                );
+            }
+        }
     }
 
     fn collect_literal(&mut self, literal: &ast::Literal) {
@@ -320,6 +384,12 @@ impl Lowerer {
     }
 
     fn collect_atom(&mut self, atom: &ast::Atom) {
+        // A gated builtin is not a relation: interning it would give the
+        // program an empty `year` relation and the undefined-predicate lint
+        // something to complain about.
+        if self.builtin_for(atom).is_some() {
+            return;
+        }
         match &atom.args {
             ast::Args::Positional(terms) => {
                 self.intern_checked(&atom.predicate.name, terms.len() as u32);
@@ -654,6 +724,85 @@ impl Lowerer {
 
     /// Lowers a body. `mode` is [`ArgMode::Hoist`] for a rule body and an
     /// aggregate goal, and [`ArgMode::FoldGround`] for a query body — see
+    /// Lowers `op(input…, out)` to `out = op(input…)`.
+    ///
+    /// The **last** argument is the output position, which may be a variable
+    /// (an assignment) or a constant (a filter) — the `=` rule already decides
+    /// which, so `day(D, 15)` needs no separate form (§13).
+    fn lower_builtin(
+        &mut self,
+        atom: &ast::Atom,
+        op: ast::BuiltinOp,
+        scope: &mut VarScope,
+        span: ast::Span,
+        out_literals: &mut Vec<ir::BodyLiteral>,
+    ) -> Option<ir::BodyLiteral> {
+        let ast::Args::Positional(args) = &atom.args else {
+            self.errors.push(
+                Error::semantic(format!(
+                    "`{}` is a `std` module builtin and takes positional arguments",
+                    atom.predicate.name
+                ))
+                .suggest("a builtin has no field names to select by"),
+            );
+            return None;
+        };
+        let mut hoisted = Vec::new();
+        let (out_expr, input_exprs) = args.split_last()?;
+        let inputs: Vec<ir::Expr> = input_exprs
+            .iter()
+            .map(|arg| self.lower_expr(arg, scope, &mut hoisted))
+            .collect();
+        let out = self.lower_expr(out_expr, scope, &mut hoisted);
+        out_literals.extend(hoisted);
+        if op == ast::BuiltinOp::Truncate && !self.check_truncate_unit(&inputs) {
+            return None;
+        }
+        Some(ir::BodyLiteral {
+            kind: ir::BodyLiteralKind::Compare {
+                op: ast::CmpOp::Eq,
+                lhs: out,
+                rhs: ir::Expr::Builtin { op, args: inputs },
+            },
+            span,
+        })
+    }
+
+    /// `truncate`'s unit is checked here, not at evaluation: it is written
+    /// literally in every correct program, so a typo can be caught once with
+    /// the list attached rather than once per row.
+    fn check_truncate_unit(&mut self, inputs: &[ir::Expr]) -> bool {
+        let unit = inputs.get(1);
+        match unit {
+            Some(ir::Expr::Term(ir::Term::Const(ir::Value::Symbol(name))))
+                if crate::stdlib::TRUNCATE_UNITS.contains(&name.as_str()) =>
+            {
+                true
+            }
+            Some(ir::Expr::Term(ir::Term::Const(ir::Value::Symbol(name)))) => {
+                self.errors.push(
+                    Error::semantic(format!("`{name}` is not a truncation unit")).suggest(format!(
+                        "one of: {}",
+                        crate::stdlib::TRUNCATE_UNITS.join(", ")
+                    )),
+                );
+                false
+            }
+            _ => {
+                self.errors.push(
+                    Error::semantic(
+                        "`truncate`'s unit must be written as a symbol, not computed".to_string(),
+                    )
+                    .suggest(format!(
+                        "one of: {}",
+                        crate::stdlib::TRUNCATE_UNITS.join(", ")
+                    )),
+                );
+                false
+            }
+        }
+    }
+
     /// [`ArgMode`] for why the query differs.
     fn lower_body(
         &mut self,
@@ -665,6 +814,32 @@ impl Lowerer {
         for literal in body {
             match &literal.kind {
                 ast::LiteralKind::Atom { negated, atom } => {
+                    // A gated `std` relation is not a join: it lowers to the
+                    // `=`-assignment `Y = year(D)`, which is why scheduling,
+                    // safety and the assignment-vs-filter rule need no new
+                    // cases for it (§13).
+                    if let Some(op) = self.builtin_for(atom) {
+                        if *negated {
+                            self.errors.push(
+                                Error::semantic(format!(
+                                    "`not` applies to relations, and `{}` is a `std` module \
+                                     builtin, which computes a value",
+                                    atom.predicate.name
+                                ))
+                                .suggest(format!(
+                                    "bind it and compare: `{}(D, X), X != …`",
+                                    atom.predicate.name
+                                )),
+                            );
+                            continue;
+                        }
+                        if let Some(literal) =
+                            self.lower_builtin(atom, op, scope, literal.span, &mut lowered)
+                        {
+                            lowered.push(literal);
+                        }
+                        continue;
+                    }
                     // Inline arithmetic in a body atom hoists to `=`-assignments
                     // placed immediately *before* the atom, so the computed
                     // value is bound when the atom is matched.
@@ -1481,6 +1656,7 @@ fn expr_vars(expr: &ir::Expr) -> Vec<ir::Var> {
             vars
         }
         ir::Expr::Cast { expr, .. } => expr_vars(expr),
+        ir::Expr::Builtin { args, .. } => args.iter().flat_map(expr_vars).collect(),
     }
 }
 
@@ -1524,10 +1700,19 @@ pub fn check_program(program: &ir::Program) -> Vec<Warning> {
         .filter(|pred| !defined.contains(&pred.0))
         .map(|pred| {
             let info = &program.predicates[pred.0 as usize];
-            Warning::UndefinedPredicate {
-                name: info.name.clone(),
-                arity: info.arity,
-                suggestion: nearest_defined(&info.name, info.arity, &defined, program),
+            // A name a `std` module provides is not a typo — it is a missing
+            // import, and saying so turns the gate's cost into one step (§12).
+            match crate::stdlib::provider(&info.name, info.arity) {
+                Some(module) => Warning::GatedPredicate {
+                    name: info.name.clone(),
+                    arity: info.arity,
+                    module,
+                },
+                None => Warning::UndefinedPredicate {
+                    name: info.name.clone(),
+                    arity: info.arity,
+                    suggestion: nearest_defined(&info.name, info.arity, &defined, program),
+                },
             }
         })
         .collect();

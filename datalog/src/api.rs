@@ -406,6 +406,7 @@ fn expr_casts(expr: &ir::Expr) -> bool {
     match expr {
         ir::Expr::Cast { .. } => true,
         ir::Expr::Binary { lhs, rhs, .. } => expr_casts(lhs) || expr_casts(rhs),
+        ir::Expr::Builtin { args, .. } => args.iter().any(expr_casts),
         ir::Expr::Term(_) => false,
     }
 }

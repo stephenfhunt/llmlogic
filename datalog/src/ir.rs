@@ -350,6 +350,15 @@ pub enum Expr {
         expr: Box<Expr>,
         ty: TypeName,
     },
+    /// A `std` module relation applied to its inputs (§13). The surface form is
+    /// an atom — `year(D, Y)` — which lowering turns into the `=`-assignment
+    /// `Y = year(D)`, so scheduling, safety and the assignment-vs-filter rule
+    /// all apply to it unchanged, and the output position may equally be a
+    /// constant (`day(D, 15)` is a filter).
+    Builtin {
+        op: crate::ast::BuiltinOp,
+        args: Vec<Expr>,
+    },
 }
 
 /// A lowered rule.

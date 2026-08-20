@@ -959,7 +959,7 @@ mod tests {
                 StatementKind::Import(import) => {
                     import.path_span = Span::DUMMY;
                     match &mut import.kind {
-                        ImportKind::Module => {}
+                        ImportKind::Module | ImportKind::Std { .. } => {}
                         ImportKind::Data {
                             table,
                             relation,

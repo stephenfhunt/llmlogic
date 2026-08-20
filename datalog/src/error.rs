@@ -182,6 +182,19 @@ pub enum Warning {
         arity: u32,
         suggestion: Option<String>,
     },
+    /// A predicate that is referenced but never defined is **provided by a
+    /// `std` module the program did not import** (§12/§13).
+    ///
+    /// This is the honest cost of gating: `year` is an ordinary undefined
+    /// relation until `import "std/time".` is written, so an agent's first
+    /// attempt can miss. The suggestion is what keeps that to one step, which
+    /// is why it ships with the module rather than after it.
+    GatedPredicate {
+        name: String,
+        arity: u32,
+        /// The module that provides it, without the `std/` prefix.
+        module: &'static str,
+    },
     /// An aggregate (§9) skipped one or more `absent` inputs. `sum`/`avg`/`min`/
     /// `max` aggregate the values that exist, which is the right default but is
     /// invisible in the answer — `avg` over a half-empty column looks exactly
@@ -283,6 +296,15 @@ impl fmt::Display for Warning {
                 }
                 Ok(())
             }
+            Warning::GatedPredicate {
+                name,
+                arity,
+                module,
+            } => write!(
+                f,
+                "warning: predicate `{name}/{arity}` is referenced but never defined; it is \
+                 provided by `std/{module}` (add `import \"std/{module}\".`)"
+            ),
             Warning::AbsentSkippedInAggregate {
                 op,
                 site,

@@ -29,6 +29,7 @@ pub mod provenance;
 pub mod resolve;
 pub mod schedule;
 pub mod sources;
+pub mod stdlib;
 pub mod temporal;
 pub mod typecheck;
 
