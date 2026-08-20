@@ -39,7 +39,53 @@ use crate::ir;
 /// Maximum predicate arity the generators produce.
 const MAX_ARITY: usize = 3;
 
+/// A temporal value from small, collision-rich pools (§4).
+///
+/// Deliberately **not** `temporal::tests`' generators, which range over the
+/// whole representable calendar because T1 is a round-trip property and wants
+/// breadth. These feed *programs*, so the same Csmith rule the other pools obey
+/// applies: values must collide often enough that generated joins actually
+/// join. Three days spanning a month boundary, timestamps at two clock readings
+/// on those same days, and durations of the magnitudes that arithmetic over
+/// those days produces.
+pub(crate) fn arb_temporal() -> impl Strategy<Value = crate::temporal::Temporal> {
+    use crate::temporal::{Date, Duration, Temporal, Timestamp};
+    let day = prop_oneof![
+        Just((2026i64, 1i64, 31i64)),
+        Just((2026, 2, 1)),
+        Just((2026, 2, 2))
+    ];
+    prop_oneof![
+        day.clone().prop_map(|(y, m, d)| Temporal::Date(
+            Date::from_ymd(y, m, d).expect("pool days are real dates")
+        )),
+        (day, prop_oneof![Just((0i64, 0i64)), Just((12, 30))]).prop_map(|((y, m, d), (h, mi))| {
+            Temporal::Timestamp(
+                Timestamp::from_parts(y, m, d, h, mi, 0, 0).expect("pool parts are in range"),
+            )
+        }),
+        // One day, half a day, an hour, and zero — the magnitudes a difference
+        // between two pool dates or timestamps actually produces, so a generated
+        // `D + K` lands back inside the date pool.
+        prop_oneof![
+            Just(0i64),
+            Just(3_600_000_000),
+            Just(43_200_000_000),
+            Just(86_400_000_000),
+            Just(-86_400_000_000),
+        ]
+        .prop_map(|us| Temporal::Duration(Duration::from_micros(us))),
+    ]
+}
+
 /// A constant from small, collision-rich pools (never NaN).
+///
+/// Covers **all eight** of §4's types. Temporal was absent here until
+/// 2026-08-20, which left A4, D1/D2/D3 and the whole B/C/E series certifying
+/// five-eighths of the sentences they state — `testing.md` rule 4 read in
+/// reverse, since the language widened and the generator did not follow. A
+/// generator downstream of this one that must stay narrower narrows
+/// *deliberately*, with a comment saying why.
 pub(crate) fn arb_constant() -> impl Strategy<Value = Constant> {
     prop_oneof![
         prop_oneof![Just("a"), Just("b"), Just("c")].prop_map(|s| Constant::Symbol(s.to_string())),
@@ -47,6 +93,7 @@ pub(crate) fn arb_constant() -> impl Strategy<Value = Constant> {
         (-3i64..=3).prop_map(Constant::Int),
         prop_oneof![Just(0.0f64), Just(1.5), Just(-2.0)].prop_map(Constant::Float),
         any::<bool>().prop_map(Constant::Bool),
+        arb_temporal().prop_map(Constant::Temporal),
     ]
 }
 
@@ -70,10 +117,12 @@ pub(crate) fn arb_value() -> impl Strategy<Value = ir::Value> {
         Constant::Int(i) => ir::Value::Int(i),
         Constant::Float(f) => ir::Value::Float(ir::F64::new(f).expect("pool floats are not NaN")),
         Constant::Bool(b) => ir::Value::Bool(b),
+        Constant::Temporal(crate::temporal::Temporal::Date(d)) => ir::Value::Date(d),
+        Constant::Temporal(crate::temporal::Temporal::Timestamp(t)) => ir::Value::Timestamp(t),
+        Constant::Temporal(crate::temporal::Temporal::Duration(d)) => ir::Value::Duration(d),
         // `arb_constant` never produces absent — generated programs stay in the
         // typed value space (absent has its own targeted tests).
         Constant::Absent => unreachable!("arb_constant generates no absent"),
-        Constant::Temporal(_) => unreachable!("arb_constant generates no temporal"),
     })
 }
 
@@ -3020,6 +3069,87 @@ mod tests {
         assert_eq!(
             absent_in_bodies, 0,
             "a literal `absent` reached a rule/query body, which cannot lower (§4/§8)"
+        );
+    }
+
+    /// Coverage guard for the **temporal widening** (2026-08-20): sampling
+    /// must reach all three of §4's temporal types, in generated programs and
+    /// in generated `ir::Value`s alike.
+    ///
+    /// Checked against the sentence it certifies, per `testing.md` rule 2. The
+    /// claims that went blind when temporal was added to the language and not
+    /// to `arb_constant` are about the **value space** the properties run over
+    /// — A4's cross-type order, D2/D3's round trips, the whole B/C/E series —
+    /// so what this guard has to see is each type actually *reaching* those
+    /// generators, not merely that `arb_temporal` can produce one. It asserts
+    /// against `arb_value` (A4, A5, D1) and `arb_safe_program` (A6–A15) rather
+    /// than against `arb_temporal` directly, which would certify the pool and
+    /// nothing downstream of it.
+    ///
+    /// Measured when the widening landed: with `Date` and `Bool` swapped in
+    /// `ir::Value`'s variant order, A4 passes on the pre-widening generator and
+    /// fails on this one. That is the evidence the widening reached a property
+    /// rather than merely enlarging a pool.
+    #[test]
+    fn generator_emits_every_temporal_type() {
+        let mut runner = TestRunner::deterministic();
+
+        let values = arb_value();
+        let (mut dates, mut timestamps, mut durations) = (0, 0, 0);
+        for _ in 0..400 {
+            match values
+                .new_tree(&mut runner)
+                .expect("strategy produces a value")
+                .current()
+            {
+                ir::Value::Date(_) => dates += 1,
+                ir::Value::Timestamp(_) => timestamps += 1,
+                ir::Value::Duration(_) => durations += 1,
+                _ => {}
+            }
+        }
+        assert!(
+            dates > 0 && timestamps > 0 && durations > 0,
+            "arb_value missed a temporal type (dates {dates}, timestamps \
+             {timestamps}, durations {durations}) — A4, A5 and D1 would be \
+             certifying five-eighths of the value space again"
+        );
+
+        // And they reach whole programs, which is what A6–A15 and the B/C/E
+        // series consume. Counted over statements, not values, so a single
+        // lucky draw cannot satisfy it.
+        let programs = arb_safe_program();
+        let mut temporal_statements = 0;
+        for _ in 0..200 {
+            let program = programs
+                .new_tree(&mut runner)
+                .expect("strategy produces a value")
+                .current();
+            for statement in &program.statements {
+                let StatementKind::Clause(clause) = &statement.kind else {
+                    continue;
+                };
+                let head_args = match &clause.head.args {
+                    Args::Positional(terms) => terms.clone(),
+                    Args::Named(pairs) => pairs.iter().map(|p| p.value.clone()).collect(),
+                };
+                if head_args.iter().any(|arg| {
+                    matches!(
+                        &arg.kind,
+                        ExprKind::Term(Term {
+                            kind: TermKind::Constant(Constant::Temporal(_)),
+                            ..
+                        })
+                    )
+                }) {
+                    temporal_statements += 1;
+                }
+            }
+        }
+        assert!(
+            temporal_statements > 0,
+            "no generated program carried a temporal constant — every property \
+             over arb_safe_program would be blind to §4's temporal types"
         );
     }
 
