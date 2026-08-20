@@ -1410,7 +1410,8 @@ import "data/parents.csv" as parent.
   that reasoning. Inference is **strict about the form**: the space-separated
   `2026-08-19 10:30:00` common in exports stays a string, and an explicit schema
   (`as t(d: timestamp)`) is what reads it, since a declared type *coerces* and is
-  deliberately more permissive than inference. Durations are never inferred. A
+  deliberately more permissive than inference. Durations are never
+  inferred here either (see the typed-source rule above). A
   column's type is the unification of its **non-absent** cells: all-int → int,
   int/float mix → float, all-bool → bool, all-date → date, a date/timestamp mix →
   timestamp (exact, at midnight),
@@ -1441,9 +1442,13 @@ import "data/parents.csv" as parent.
   rejects a lossy int→float widening below. **A zoned timestamp is converted to
   UTC and its offset dropped**, since §4's timestamp is civil: the instant is
   preserved and the displayed clock reading may change, which is why it is stated
-  here rather than left to the reader. An `INTERVAL` becomes a `duration` when it
-  is exact, and stays text when it carries a month or year component, which §4
-  has no value for. A **null / missing value from any source becomes the
+  here rather than left to the reader. An `INTERVAL` stays **text**, with `UUID`
+  and `JSON`: **a duration is never inferred, from any source**. The reason is
+  the one that keeps the rest of this cheap — a source renders a duration in its
+  own dialect (DuckDB's is `1 day 02:00:00`), so reading it would mean carrying
+  a second duration grammar beside §3's, and one grammar is what makes reading
+  and rendering inverse. Dates and timestamps raise no such question: ISO-8601
+  *is* §3's grammar. A **null / missing value from any source becomes the
   absent value** (§4), uniformly — an empty CSV cell, a missing JSON key or
   explicit `null`, a Parquet/DB `NULL`; nested/compound values remain structured
   errors naming row and column. This replaces the former three-backend split (CSV

@@ -16,9 +16,15 @@
 //!   anything. A missing key or an explicit `null` is the absent value (§4);
 //!   arrays and objects remain structured errors.
 //! - **Parquet** columns are natively typed (the file is the authority) and
-//!   are mapped onto [`RawValue`]; a NULL is the absent value (§4); date/
-//!   time-like columns are cast to their ISO text as strings; nested types are
-//!   structured errors.
+//!   are mapped onto [`RawValue`]; a NULL is the absent value (§4); nested
+//!   types are structured errors. `DATE` and `TIMESTAMP` columns become §4's
+//!   temporal values: transport stays ISO text — DuckDB renders exactly the
+//!   grammar [`crate::temporal`] reads — and the *typing* is ours, from the
+//!   column's declared type rather than from the text. A zoned timestamp is
+//!   converted to UTC and its offset dropped (§13), since §4's timestamp is
+//!   civil. An `INTERVAL` stays text, with `UUID` and `JSON`: a duration is
+//!   never inferred from any source, because reading DuckDB's `1 day 02:00:00`
+//!   would mean carrying a second duration grammar beside §3's.
 
 use duckdb::Connection;
 use duckdb::types::ValueRef;
@@ -362,12 +368,20 @@ fn read_parquet(conn: &Connection, path: &str) -> Result<RawTable, Error> {
     let describe = format!("DESCRIBE SELECT * FROM {from}");
     let described = describe_columns(conn, &describe, path)?;
 
-    // The file's types are the authority; map them onto the five value
-    // types, casting date/time-likes to their ISO text (§13).
+    // The file's types are the authority; map them onto the value types (§13).
+    // Date and timestamp columns travel as ISO text and are *typed* here, from
+    // the declared type — so a column of dates is a `date` column even where a
+    // row's text would also read as something else.
     let mut selects = Vec::with_capacity(described.len());
+    let mut temporal_columns = Vec::with_capacity(described.len());
     for (name, ty) in &described {
         let ident = sql_ident(name);
         let ty = ty.to_ascii_uppercase();
+        temporal_columns.push(match ty.as_str() {
+            "DATE" => Some(TemporalColumn::Date),
+            _ if ty.starts_with("TIMESTAMP") => Some(TemporalColumn::Timestamp),
+            _ => None,
+        });
         let select = match ty.as_str() {
             "BOOLEAN" | "TINYINT" | "SMALLINT" | "INTEGER" | "BIGINT" | "HUGEINT" | "UTINYINT"
             | "USMALLINT" | "UINTEGER" | "UBIGINT" | "UHUGEINT" | "FLOAT" | "DOUBLE"
@@ -395,7 +409,11 @@ fn read_parquet(conn: &Connection, path: &str) -> Result<RawTable, Error> {
         let mut cells = Vec::with_capacity(columns.len());
         for (col, name) in columns.iter().enumerate() {
             let value = row.get_ref(col).map_err(|e| source_error(path, e))?;
-            cells.push(map_typed_value(value, path, row_number, name)?);
+            let mapped = map_typed_value(value, path, row_number, name)?;
+            cells.push(match temporal_columns[col] {
+                Some(kind) => read_temporal_cell(mapped, kind, path, row_number, name)?,
+                None => mapped,
+            });
         }
         out.push(cells);
     }
@@ -442,6 +460,47 @@ fn map_typed_value(
             "value {other:?} does not map onto the value types"
         ))),
     }
+}
+
+/// Which temporal type a source column declared.
+#[derive(Debug, Clone, Copy)]
+enum TemporalColumn {
+    Date,
+    Timestamp,
+}
+
+/// Types a cell from a declared temporal column (§13).
+///
+/// The permissive reader is used deliberately: DuckDB renders a timestamp with
+/// a space separator and a zoned one with an offset, and both are forms §13
+/// coerces rather than infers. The offset is *applied* and dropped — the
+/// instant survives, the displayed clock reading may change, and §13 says so
+/// rather than leaving it to be discovered.
+fn read_temporal_cell(
+    value: RawValue,
+    kind: TemporalColumn,
+    path: &str,
+    row: usize,
+    column: &str,
+) -> Result<RawValue, Error> {
+    let RawValue::Str(text) = &value else {
+        // A NULL is already the absent value, and nothing else can arrive from
+        // a column DuckDB rendered as text.
+        return Ok(value);
+    };
+    let parsed = match kind {
+        TemporalColumn::Date => crate::temporal::parse_date(text.trim()).map(RawValue::Date),
+        TemporalColumn::Timestamp => {
+            crate::temporal::parse_timestamp_lenient(text).map(RawValue::Timestamp)
+        }
+    };
+    parsed.map_err(|error| {
+        Error::source(format!(
+            "`{path}`: row {row}, column `{column}`: `{text}` is not a temporal value \
+             this engine can hold ({})",
+            error.message()
+        ))
+    })
 }
 
 fn finite(f: f64, path: &str, row: usize, column: &str) -> Result<RawValue, Error> {

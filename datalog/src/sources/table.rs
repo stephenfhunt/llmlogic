@@ -52,6 +52,11 @@ pub(crate) enum RawValue {
     /// Always finite: backends reject NaN/±inf at read.
     Float(f64),
     Bool(bool),
+    /// A temporal value a **typed** source declared (§13): a Parquet or
+    /// database `DATE`/`TIMESTAMP` column. An untyped CSV cell arrives as
+    /// [`Text`](Self::Text) and is typed by the literal grammar instead.
+    Date(crate::temporal::Date),
+    Timestamp(crate::temporal::Timestamp),
     /// A missing value from any source (§4/§13): an empty (unquoted) CSV cell, a
     /// missing JSON key or explicit `null`, a Parquet/DB `NULL`. Type-neutral in
     /// inference and coerced to [`Value::Absent`] under any column type.
@@ -216,6 +221,11 @@ fn raw_text(value: &RawValue) -> String {
         RawValue::Int(n) => n.to_string(),
         RawValue::Float(f) => f.to_string(),
         RawValue::Bool(b) => b.to_string(),
+        // Unsigilled, as everywhere text and temporal meet (§8/§13). Only
+        // reachable for a typed source's header position, which is not a data
+        // cell — but the spelling still has to be the one grammar's.
+        RawValue::Date(d) => d.to_string(),
+        RawValue::Timestamp(t) => t.to_string(),
         // A header/name position that is missing has no text — the empty string,
         // which is not a legal field name (caught by `validate_field_names`).
         RawValue::Absent => String::new(),
@@ -299,12 +309,16 @@ fn infer_column(
                 CellClass::Int(_) => TypeName::Int,
                 CellClass::Float(_) => TypeName::Float,
                 CellClass::Bool(_) => TypeName::Bool,
+                CellClass::Date(_) => TypeName::Date,
+                CellClass::Timestamp(_) => TypeName::Timestamp,
                 CellClass::Str => TypeName::String,
             },
             RawValue::Str(_) => TypeName::String,
             RawValue::Int(_) => TypeName::Int,
             RawValue::Float(_) => TypeName::Float,
             RawValue::Bool(_) => TypeName::Bool,
+            RawValue::Date(_) => TypeName::Date,
+            RawValue::Timestamp(_) => TypeName::Timestamp,
         };
         inferred = Some(match (inferred, cell_ty) {
             (None, ty) => ty,
@@ -312,6 +326,11 @@ fn infer_column(
             (Some(TypeName::Int), TypeName::Float) | (Some(TypeName::Float), TypeName::Int) => {
                 TypeName::Float
             }
+            // A date widens to a timestamp exactly as an int widens to a float,
+            // and for the same reason: the widening is *exact* (midnight), so
+            // nothing is lost by unifying the column (§13).
+            (Some(TypeName::Date), TypeName::Timestamp)
+            | (Some(TypeName::Timestamp), TypeName::Date) => TypeName::Timestamp,
             (Some(a), b) => {
                 // A conflict. Untyped text always has the string reading;
                 // typed sources do not.
@@ -389,12 +408,17 @@ fn coerce(value: &RawValue, ty: TypeName) -> Result<Value, String> {
         // reads the space-separated and zone-suffixed forms real exports carry,
         // which inference leaves as strings on purpose.
         TypeName::Date => match value {
+            RawValue::Date(date) => Ok(Value::Date(*date)),
             RawValue::Text(t) | RawValue::Str(t) => temporal::parse_date(t.trim())
                 .map(Value::Date)
                 .or(fail(value)),
             _ => fail(value),
         },
         TypeName::Timestamp => match value {
+            RawValue::Timestamp(timestamp) => Ok(Value::Timestamp(*timestamp)),
+            // A date in a timestamp column is midnight — the exact widening
+            // `date as timestamp` performs, and what a mixed column infers to.
+            RawValue::Date(date) => Ok(Value::Timestamp(date.at_midnight())),
             RawValue::Text(t) | RawValue::Str(t) => temporal::parse_timestamp_lenient(t)
                 .map(Value::Timestamp)
                 .or(fail(value)),
@@ -447,6 +471,8 @@ fn render(value: &RawValue) -> String {
         RawValue::Int(n) => format!("`{n}`"),
         RawValue::Float(f) => format!("`{f}`"),
         RawValue::Bool(b) => format!("`{b}`"),
+        RawValue::Date(d) => format!("`@{d}`"),
+        RawValue::Timestamp(t) => format!("`@{t}`"),
         // Absent never reaches `render` (it coerces to a value, never fails),
         // but name it for completeness.
         RawValue::Absent => "absent".to_string(),

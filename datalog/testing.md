@@ -899,6 +899,13 @@ implementation.
   epoch weekday off by one. A property that cannot fail on a wrong answer is
   the case rule 3 exists to expose, and here it took the mutation to find that
   the property needed an example beside it.
-- [ ] **T6** Import anchoring (the rule-4 acceptance property for the widened
-  generators): a CSV of printed temporal values imports to exactly the facts the
-  corresponding literals would give — **F3** extended to the sigil.
+- [x] **T6** Import anchoring (the rule-4 acceptance property for the widened
+  generators): a CSV of temporal cells imports to exactly the values the
+  corresponding `@`-sigilled literals denote — **F3**'s claim extended to the
+  sigil, which it has to be, because inference now reads a form the lexer alone
+  does not. `t6_temporal_cells_import_as_their_literals`, with
+  `t6_generator_writes_unsigilled_cells_of_both_types` as the non-vacuity half
+  — it asserts the generated cells carry **no** `@`, since a generator that
+  emitted one would be testing the lexer rather than the reader.
+  *Mutation:* made CSV inference produce `string` for an ISO cell — T6 went red
+  on the first case.

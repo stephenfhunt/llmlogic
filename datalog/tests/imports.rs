@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use proptest::prelude::*;
+use proptest::strategy::ValueTree;
 
 use datalog::ast::{FieldDecl, Ident, Span, TypeName};
 use datalog::ir::{F64, Value};
@@ -123,9 +124,16 @@ fn type_name(ty: TypeName) -> &'static str {
 
 /// A value as an untyped CSV cell: the raw text for strings, the canonical
 /// literal for everything else (so it lexes back to the same value).
+///
+/// A temporal cell drops the `@`, which is the anchor property's own rule
+/// (§13): the sigil is a delimiter the *reader* supplies, exactly as a string's
+/// quotes are — a CSV cell holds `2026-08-19`, not `@2026-08-19`.
 fn cell_text(value: &Value) -> String {
     match value {
         Value::String(s) => s.clone(),
+        Value::Date(d) => d.to_string(),
+        Value::Timestamp(t) => t.to_string(),
+        Value::Duration(d) => d.to_string(),
         other => datalog::print::print_value(other),
     }
 }
@@ -573,8 +581,13 @@ fn csv_header_fields_arrive_in_order() {
             "start_date"
         ]
     );
-    // `2020-01-02` is not a literal of the language: it stays a string.
-    assert_eq!(loaded.rows[0][7], Value::String("2020-01-02".to_string()));
+    // An ISO-8601 extended cell types the column `date` with no schema line
+    // (§13, 2026-08-19): the `@` is a delimiter the reader supplies, exactly as
+    // a string's quotes are, and this default path is the case S4 is about.
+    assert_eq!(
+        loaded.rows[0][7],
+        Value::Date(datalog::temporal::Date::from_ymd(2020, 1, 2).expect("a real day"))
+    );
 }
 
 fn duckdb_test_connection() -> datalog::duckdb::Connection {
@@ -641,4 +654,131 @@ fn a_bad_cell_reports_file_row_and_column() {
     assert!(message.contains("ages.csv"), "got: {message}");
     assert!(message.contains("row 2"), "got: {message}");
     assert!(message.contains("`abc` is not an int"), "got: {message}");
+}
+
+// --- Temporal columns (§13, `notes/temporal-values.md`) ---
+
+fn arb_temporal_value() -> impl Strategy<Value = Value> {
+    prop_oneof![
+        (0i64..9999, 1i64..=12, 1i64..=28).prop_map(|(y, m, d)| Value::Date(
+            datalog::temporal::Date::from_ymd(y, m, d).expect("a real day")
+        )),
+        (
+            0i64..9999,
+            1i64..=12,
+            1i64..=28,
+            0i64..24,
+            0i64..60,
+            0i64..60,
+            0i64..1_000_000
+        )
+            .prop_map(|(y, mo, d, h, mi, s, us)| Value::Timestamp(
+                datalog::temporal::Timestamp::from_parts(y, mo, d, h, mi, s, us).expect("in range")
+            )),
+    ]
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(48))]
+
+    /// **T6** — the anchor property, extended to the sigil (§13).
+    ///
+    /// A CSV of temporal cells imports to exactly the values the corresponding
+    /// **`@`-sigilled literals** denote. This is the acceptance property the
+    /// widened generators owe (`testing.md` rule 4): inference now reads a form
+    /// the lexer alone does not, and the claim that an import still "means the
+    /// facts you would write" has to survive that.
+    #[test]
+    fn t6_temporal_cells_import_as_their_literals(
+        values in proptest::collection::vec(arb_temporal_value(), 1..6)
+    ) {
+        // One type per column, since a column is one type (§4): dates and
+        // timestamps in one column would widen, which is a different claim.
+        let kind_matches = |v: &Value| {
+            std::mem::discriminant(v) == std::mem::discriminant(&values[0])
+        };
+        prop_assume!(values.iter().all(kind_matches));
+
+        let rows: Vec<Vec<String>> = values.iter().map(|v| vec![cell_text(v)]).collect();
+        let mut csv = String::from("d\n");
+        for row in &rows {
+            csv.push_str(&row[0]);
+            csv.push('\n');
+        }
+        let path = scratch_dir().join("t.csv");
+        std::fs::write(&path, csv).expect("write csv");
+        let loaded = load_table(path.to_str().unwrap(), None, None).expect("loads");
+
+        // Import set semantics: compare as sets, as every other anchor check does.
+        let imported: std::collections::BTreeSet<Value> =
+            loaded.rows.iter().map(|row| row[0].clone()).collect();
+        let written: std::collections::BTreeSet<Value> = values.iter().cloned().collect();
+        prop_assert_eq!(imported, written);
+    }
+}
+
+/// The non-vacuity half of T6: the generator reaches both temporal types, and
+/// the cells it writes are genuinely unsigilled — a generator that emitted `@`
+/// would be testing the lexer rather than the reader.
+#[test]
+fn t6_generator_writes_unsigilled_cells_of_both_types() {
+    let mut runner = proptest::test_runner::TestRunner::default();
+    let (mut dates, mut timestamps) = (false, false);
+    for _ in 0..100 {
+        let value = arb_temporal_value()
+            .new_tree(&mut runner)
+            .expect("generates")
+            .current();
+        assert!(
+            !cell_text(&value).contains('@'),
+            "a CSV cell carries no sigil"
+        );
+        match value {
+            Value::Date(_) => dates = true,
+            Value::Timestamp(_) => timestamps = true,
+            other => panic!("unexpected {other:?}"),
+        }
+    }
+    assert!(dates && timestamps, "the generator missed a temporal type");
+}
+
+/// A declared temporal type **coerces** and is deliberately more permissive
+/// than inference (§13): the space-separated form real exports carry is a
+/// string to inference and a timestamp to a schema.
+#[test]
+fn a_declared_timestamp_reads_what_inference_leaves_alone() {
+    let path = scratch_dir().join("t.csv");
+    std::fs::write(&path, "at\n2026-08-19 10:30:00\n").expect("write csv");
+
+    let inferred = load_table(path.to_str().unwrap(), None, None).expect("loads");
+    assert_eq!(
+        inferred.rows[0][0],
+        Value::String("2026-08-19 10:30:00".to_string()),
+        "inference is strict about the form"
+    );
+
+    let schema = [field("at", Some(TypeName::Timestamp))];
+    let declared = load_table(path.to_str().unwrap(), None, Some(&schema)).expect("loads");
+    assert_eq!(
+        declared.rows[0][0],
+        Value::Timestamp(
+            datalog::temporal::Timestamp::from_parts(2026, 8, 19, 10, 30, 0, 0).expect("in range")
+        )
+    );
+}
+
+/// A column mixing dates and timestamps widens to `timestamp`, exactly as an
+/// int/float mix widens — and for the same reason: the widening is exact.
+#[test]
+fn a_mixed_temporal_column_widens_to_timestamp() {
+    let path = scratch_dir().join("t.csv");
+    std::fs::write(&path, "at\n2026-08-19\n2026-08-20T10:30:00\n").expect("write csv");
+    let loaded = load_table(path.to_str().unwrap(), None, None).expect("loads");
+    assert_eq!(
+        loaded.rows[0][0],
+        Value::Timestamp(
+            datalog::temporal::Timestamp::from_parts(2026, 8, 19, 0, 0, 0, 0).expect("in range")
+        ),
+        "a date widens at midnight"
+    );
 }

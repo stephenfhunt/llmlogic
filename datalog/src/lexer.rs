@@ -620,6 +620,11 @@ pub(crate) enum CellClass {
     Int(i64),
     Float(f64),
     Bool(bool),
+    /// An ISO-8601 extended date or timestamp (§13). **Not a duration**: a
+    /// duration is never inferred, from any source, so `1d` in a CSV stays the
+    /// string it looks like.
+    Date(crate::temporal::Date),
+    Timestamp(crate::temporal::Timestamp),
     Str,
 }
 
@@ -632,8 +637,21 @@ pub(crate) enum CellClass {
 /// means precisely the facts you would get by writing its cells as in-program
 /// literals; §8's `as` cast converts *from* `string` with it, so `"30" as int`
 /// is `30` exactly when writing `30` would be that literal. A second classifier
-/// would let the two answers drift.
+/// would let the two answers drift. The temporal forms reach the same grammar
+/// by a different door — [`crate::temporal`]'s reader, which the cast also
+/// calls — so there is still exactly one answer to "is this text a date?".
 pub(crate) fn classify_cell(text: &str) -> CellClass {
+    // A temporal cell is spelled without its `@` — the sigil is a delimiter the
+    // reader supplies, exactly as a string's quotes are (§13's anchor property)
+    // — so the literal grammar is reached through `crate::temporal` rather than
+    // through `lex`, which would read `2026-08-19` as three integers.
+    match crate::temporal::parse_temporal(text) {
+        Ok(crate::temporal::Temporal::Date(date)) => return CellClass::Date(date),
+        Ok(crate::temporal::Temporal::Timestamp(ts)) => return CellClass::Timestamp(ts),
+        // Durations are never inferred (§13): the one temporal form whose text
+        // a data source is likely to spell in its own dialect.
+        Ok(crate::temporal::Temporal::Duration(_)) | Err(_) => {}
+    }
     let lexed = lex(text);
     if !lexed.errors.is_empty() {
         return CellClass::Str;
