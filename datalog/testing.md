@@ -869,13 +869,18 @@ implementation.
   *Mutation:* dropped the `us` component from `Duration`'s decomposition —
   T1 and its non-vacuity guard both went red (the guard first, which is the
   point of having it).
-- [ ] **T2** Affine laws: `(D + Dur) - D == Dur` and `(D2 - D1) + D1 == D2`,
-  over dates and timestamps — §8's algebra as an equation rather than a table.
-- [ ] **T3** **The unit is the divisor**: `(D2 - D1) / @1d` equals an
-  independently computed civil day difference. This is the property that pins
-  the sibling engine's `172800000` finding; its mutation is making
-  `duration / duration` return a truncating `int`, which must fail it on
-  `@36h / @1d`.
+- [x] **T2** Affine laws through the whole pipeline (`tests/pipeline.rs`):
+  `(D + K) - D == K` and `D + (E - D) == E` — §8's algebra as an equation
+  rather than a table. `t2_affine_laws_hold`.
+- [x] **T3** **The unit is the divisor**: `(D2 - D1)` over both `@1d` and
+  `@36h` equals a difference computed from the day counts themselves, not by a
+  second pass over the engine's arithmetic. The `@36h` divisor is what makes
+  the expected value fractional, and so what makes the property sensitive to
+  the result type. This is the property that pins the sibling engine's
+  `172800000` finding. `t3_the_divisor_names_the_unit`, with
+  `t3_generator_reaches_both_signs` as the non-vacuity half.
+  *Mutation:* made `duration / duration` return a truncating `int` — T3 and
+  `a_duration_divided_by_a_duration_keeps_the_half_day` both went red.
 - [ ] **T4** Ordering agreement: for ISO-shaped inputs, `date` comparison
   agrees with the string comparison it replaces — the migration-safety oracle,
   and free, because filtering already worked that way.

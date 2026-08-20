@@ -22,7 +22,7 @@
 //! and declared-signature verification (§4) are additional sources that land
 //! once imports and IR-level declared types exist.
 
-use crate::ast::{AggOp, TypeName};
+use crate::ast::{AggOp, ArithOp, TypeName};
 use crate::error::Error;
 use crate::ir;
 
@@ -74,6 +74,120 @@ fn is_numeric(ty: TypeName) -> bool {
     matches!(ty, TypeName::Int | TypeName::Float)
 }
 
+/// The source spelling of an arithmetic operator, for messages.
+fn arith_symbol(op: ArithOp) -> &'static str {
+    match op {
+        ArithOp::Add => "+",
+        ArithOp::Sub => "-",
+        ArithOp::Mul => "*",
+        ArithOp::Div => "/",
+    }
+}
+
+/// One arithmetic node, held until unification has settled enough of its
+/// operands to type it.
+struct BinaryConstraint {
+    op: ArithOp,
+    lhs: usize,
+    rhs: usize,
+    result: usize,
+}
+
+/// The source spelling of an aggregate operator, for messages.
+fn agg_symbol(op: AggOp) -> &'static str {
+    match op {
+        AggOp::Count => "count",
+        AggOp::Sum => "sum",
+        AggOp::Min => "min",
+        AggOp::Max => "max",
+        AggOp::Avg => "avg",
+    }
+}
+
+/// The message and fix for an arithmetic pair §8's algebra has no rule for.
+///
+/// Each case names *why* rather than restating the types, because the whole
+/// point of the points-and-vectors rule is that it can be re-derived: a reader
+/// told "two points do not add" can work out what does.
+fn temporal_arith_error(op: ArithOp, lhs: TypeName, rhs: TypeName) -> (String, String) {
+    let operation = format!(
+        "`{} {} {}`",
+        type_label(lhs),
+        arith_symbol(op),
+        type_label(rhs)
+    );
+    if lhs.is_temporal_point() && rhs.is_temporal_point() {
+        if lhs != rhs {
+            return (
+                format!(
+                    "type error: {operation} mixes a date and a timestamp, which are \
+                     different types"
+                ),
+                "widen the date with `as timestamp`".to_string(),
+            );
+        }
+        return (
+            format!("type error: {operation} has no meaning — two points in time do not add"),
+            "subtract them for the duration between, or add a duration to move one".to_string(),
+        );
+    }
+    if (lhs == TypeName::Duration && is_numeric(rhs))
+        || (is_numeric(lhs) && rhs == TypeName::Duration)
+    {
+        return (
+            format!(
+                "type error: {operation} — a duration and a number do not add or subtract, \
+                 because the number has no unit"
+            ),
+            "scale with `*`, or divide by a duration to get a number: `(C - O) / @1d`".to_string(),
+        );
+    }
+    (
+        format!("type error: {operation} is not one of §8's temporal operations"),
+        "point - point is a duration; point ± duration is a point; duration / duration \
+         is a number"
+            .to_string(),
+    )
+}
+
+/// One `sum`/`avg` whose result type follows the type it folds over.
+struct ReducerConstraint {
+    op: AggOp,
+    result: usize,
+    value: usize,
+}
+
+/// What §8's algebra says an operator does to a pair of **known** operand
+/// types, when at least one of them is temporal.
+///
+/// The rule is points and vectors: a `date`/`timestamp` is a position, a
+/// `duration` a displacement. Point − point is a displacement, point ±
+/// displacement is a point, displacements add to each other and scale by
+/// numbers, and dividing one by another **cancels the unit** — which is the
+/// only route from a duration to a number, and so the reason there is no
+/// `duration as int` (§8).
+fn temporal_result(op: ArithOp, lhs: TypeName, rhs: TypeName) -> Option<TypeName> {
+    use ArithOp::{Add, Div, Mul, Sub};
+    use TypeName::Duration;
+    match (op, lhs, rhs) {
+        // Point − point: the displacement between two positions. Same point
+        // type on both sides — a date and a timestamp do not mix (§8).
+        (Sub, l, r) if l.is_temporal_point() && l == r => Some(Duration),
+        // Point ± displacement, in either order for `+`.
+        (Add | Sub, l, Duration) if l.is_temporal_point() => Some(l),
+        (Add, Duration, r) if r.is_temporal_point() => Some(r),
+        // Displacements add to each other.
+        (Add | Sub, Duration, Duration) => Some(Duration),
+        // Scaling by a number preserves the unit; a scalar is a scalar, so
+        // `int` and `float` both scale (§8).
+        (Mul | Div, Duration, n) if is_numeric(n) => Some(Duration),
+        (Mul, n, Duration) if is_numeric(n) => Some(Duration),
+        // The units cancel: this is where a program names its unit.
+        (Div, Duration, Duration) => Some(TypeName::Float),
+        _ => None,
+    }
+}
+
 /// Whether an expression is a bare `absent` literal (§4) — the operand form that
 /// makes a comparison unconditionally false and so exempt from type constraints.
 /// Arithmetic that merely *produces* absent at runtime (`X + absent`) is not this
@@ -102,6 +216,15 @@ struct TypeChecker<'a> {
     /// Slots that must resolve to a numeric type (arithmetic / ordered
     /// comparison operands), checked after all unification.
     numeric: Vec<usize>,
+    /// Arithmetic whose typing cannot be decided where it is met, because §8's
+    /// temporal rule makes an operator's result depend on its **operand types**
+    /// — `date - date` is a duration, `date - duration` a date. Resolved to a
+    /// fixpoint in [`Self::finish`], once unification has settled what is known.
+    binaries: Vec<BinaryConstraint>,
+    /// `sum`/`avg` over a value whose type is not yet known: both fold with
+    /// `+`, so both admit `duration` as well as the numeric types, and `avg`'s
+    /// result type differs between them (§9).
+    reducers: Vec<ReducerConstraint>,
     /// First slot index of each predicate's columns.
     col_base: Vec<usize>,
     errors: Vec<Error>,
@@ -123,6 +246,8 @@ impl<'a> TypeChecker<'a> {
             ty: vec![None; total],
             label: Vec::with_capacity(total),
             numeric: Vec::new(),
+            binaries: Vec::new(),
+            reducers: Vec::new(),
             col_base,
             errors: Vec::new(),
         };
@@ -309,16 +434,24 @@ impl<'a> TypeChecker<'a> {
                         // count : int, over any type (the collected value's type
                         // is unconstrained — a binding is a binding, §9).
                         AggOp::Count => self.set_type(result_slot, TypeName::Int),
-                        // sum : the same numeric type as the collected value.
+                        // sum : the same type as the collected value, which
+                        // must be one the fold makes sense over (§9).
                         AggOp::Sum => {
                             self.union(result_slot, value);
-                            self.numeric.push(value);
+                            self.reducers.push(ReducerConstraint {
+                                op: AggOp::Sum,
+                                result: result_slot,
+                                value,
+                            });
                         }
-                        // avg : always float; the collected value must be numeric.
-                        AggOp::Avg => {
-                            self.set_type(result_slot, TypeName::Float);
-                            self.numeric.push(value);
-                        }
+                        // avg : `float` over numbers, `duration` over durations
+                        // — the divisor rule, not an exception to it (§9). The
+                        // choice needs the value's type, so it is deferred.
+                        AggOp::Avg => self.reducers.push(ReducerConstraint {
+                            op: AggOp::Avg,
+                            result: result_slot,
+                            value,
+                        }),
                         // min / max : the same type as the collected value, which
                         // may be any single ordered type (every primitive is
                         // ordered, §8) — so no numeric constraint.
@@ -345,12 +478,17 @@ impl<'a> TypeChecker<'a> {
                 None => self.fresh("literal absent".to_string()),
             },
             ir::Expr::Term(ir::Term::Var(var)) => vars[var.0 as usize],
-            ir::Expr::Binary { lhs, rhs, .. } => {
+            ir::Expr::Binary { op, lhs, rhs } => {
                 let l = self.expr_slot(lhs, vars);
                 let r = self.expr_slot(rhs, vars);
-                self.union(l, r);
-                self.numeric.push(l);
-                l
+                let result = self.fresh(format!("the result of `{}`", arith_symbol(*op)));
+                self.binaries.push(BinaryConstraint {
+                    op: *op,
+                    lhs: l,
+                    rhs: r,
+                    result,
+                });
+                result
             }
             // `X as T` has type `T` **unconditionally** (§4/§8): a fresh node
             // fixed to `T`, deliberately *not* unioned with the operand, so
@@ -371,9 +509,194 @@ impl<'a> TypeChecker<'a> {
         }
     }
 
+    /// The concrete type a slot's class has settled on, if any.
+    fn slot_type(&mut self, slot: usize) -> Option<TypeName> {
+        let root = self.find(slot);
+        self.ty[root]
+    }
+
+    /// Resolves the deferred arithmetic and reducer constraints (§8/§9).
+    ///
+    /// Two phases, and the split is what keeps a temporal operand from being
+    /// mistyped by an eager guess: **first** settle every constraint whose
+    /// operands are both known, to a fixpoint — a binary's result types the
+    /// expression it feeds, so one pass is not enough — and only **then**, one
+    /// at a time, fall back on a constraint that is still undecided. A fallback
+    /// can unlock more known-operand work, so the outer loop repeats.
+    fn resolve_deferred(&mut self) {
+        let mut binaries: Vec<Option<BinaryConstraint>> = std::mem::take(&mut self.binaries)
+            .into_iter()
+            .map(Some)
+            .collect();
+        let mut reducers: Vec<Option<ReducerConstraint>> = std::mem::take(&mut self.reducers)
+            .into_iter()
+            .map(Some)
+            .collect();
+        loop {
+            loop {
+                let mut progress = false;
+                for pending in binaries.iter_mut() {
+                    let Some(constraint) = pending.take() else {
+                        continue;
+                    };
+                    let lhs = self.slot_type(constraint.lhs);
+                    let rhs = self.slot_type(constraint.rhs);
+                    match (lhs, rhs) {
+                        (Some(lhs), Some(rhs)) => {
+                            self.settle_binary(&constraint, lhs, rhs);
+                            progress = true;
+                        }
+                        _ => *pending = Some(constraint),
+                    }
+                }
+                for pending in reducers.iter_mut() {
+                    let Some(constraint) = pending.take() else {
+                        continue;
+                    };
+                    match self.slot_type(constraint.value) {
+                        Some(value) => {
+                            self.settle_reducer(&constraint, value);
+                            progress = true;
+                        }
+                        None => *pending = Some(constraint),
+                    }
+                }
+                if !progress {
+                    break;
+                }
+            }
+            // Nothing more is decidable from what is known; take one undecided
+            // constraint on its fallback and go round again.
+            if let Some(slot) = binaries.iter().position(Option::is_some) {
+                let constraint = binaries[slot].take().expect("just found");
+                self.fall_back_binary(&constraint);
+            } else if let Some(slot) = reducers.iter().position(Option::is_some) {
+                let constraint = reducers[slot].take().expect("just found");
+                self.fall_back_reducer(&constraint);
+            } else {
+                return;
+            }
+        }
+    }
+
+    /// Types one arithmetic node from both operand types (§8).
+    fn settle_binary(&mut self, constraint: &BinaryConstraint, lhs: TypeName, rhs: TypeName) {
+        if !lhs.is_temporal() && !rhs.is_temporal() {
+            // The homogeneous rule, unchanged: one numeric class for both
+            // operands and the result.
+            self.union(constraint.lhs, constraint.rhs);
+            self.union(constraint.lhs, constraint.result);
+            self.numeric.push(constraint.lhs);
+            return;
+        }
+        match temporal_result(constraint.op, lhs, rhs) {
+            Some(result) => self.set_type(constraint.result, result),
+            None => {
+                let (message, suggestion) = temporal_arith_error(constraint.op, lhs, rhs);
+                self.errors
+                    .push(Error::semantic(message).suggest(suggestion));
+            }
+        }
+    }
+
+    /// Types one `sum`/`avg` from the type it folds over (§9).
+    fn settle_reducer(&mut self, constraint: &ReducerConstraint, value: TypeName) {
+        if !is_numeric(value) && value != TypeName::Duration {
+            // A point does not fold: `sum` and `avg` both add, and §8 has no
+            // addition of two dates — so the message says that rather than
+            // "not numeric", which would misdescribe why.
+            let root = self.find(constraint.value);
+            let label = self.label[root].clone();
+            let reason = if value.is_temporal_point() {
+                format!(
+                    "type error: {label} has type {} but is folded by `{}`, and two points \
+                     in time do not add",
+                    type_label(value),
+                    agg_symbol(constraint.op),
+                )
+            } else {
+                format!(
+                    "type error: {label} has type {} but is folded by `{}`, which requires \
+                     int, float, or duration",
+                    type_label(value),
+                    agg_symbol(constraint.op),
+                )
+            };
+            let suggestion = if value.is_temporal_point() {
+                "for a span, subtract two points first; for the earliest or latest, use \
+                 `min`/`max`"
+            } else {
+                "project a numeric column, or convert with `as`"
+            };
+            self.errors
+                .push(Error::semantic(reason).suggest(suggestion));
+            return;
+        }
+        if constraint.op == AggOp::Avg {
+            // `avg` is `int → float` because a mean of numbers is not an
+            // integer; a mean of durations *is* a duration, since dividing one
+            // by a count is scaling (§8). Not an exception to the rule — the
+            // rule's other half.
+            let result = if value == TypeName::Duration {
+                TypeName::Duration
+            } else {
+                TypeName::Float
+            };
+            self.set_type(constraint.result, result);
+        }
+    }
+
+    /// An arithmetic node nothing else typed. With no temporal type in
+    /// evidence this is the homogeneous rule as before; with one, the operator
+    /// is genuinely ambiguous and says so.
+    fn fall_back_binary(&mut self, constraint: &BinaryConstraint) {
+        let known: Vec<TypeName> = [constraint.lhs, constraint.rhs, constraint.result]
+            .into_iter()
+            .filter_map(|slot| self.slot_type(slot))
+            .collect();
+        if known.iter().any(|ty| ty.is_temporal()) {
+            self.errors.push(
+                Error::semantic(format!(
+                    "type error: cannot tell what `{}` means here — {} is temporal, and \
+                     the other operand's type is never fixed, so the result could be a \
+                     point or a duration (§8)",
+                    arith_symbol(constraint.op),
+                    known
+                        .iter()
+                        .find(|ty| ty.is_temporal())
+                        .map(|ty| type_label(*ty))
+                        .expect("just found one"),
+                ))
+                .suggest(
+                    "give the other operand a type — a temporal literal, a column, or an `as` cast",
+                ),
+            );
+            return;
+        }
+        self.union(constraint.lhs, constraint.rhs);
+        self.union(constraint.lhs, constraint.result);
+        self.numeric.push(constraint.lhs);
+    }
+
+    /// A `sum`/`avg` whose collected value nothing typed: the pre-temporal
+    /// rule, which is still right when no duration is in evidence.
+    fn fall_back_reducer(&mut self, constraint: &ReducerConstraint) {
+        if self.slot_type(constraint.result) == Some(TypeName::Duration) {
+            // `avg` over an untyped value feeding a duration column: only a
+            // duration folds to one.
+            self.set_type(constraint.value, TypeName::Duration);
+            return;
+        }
+        if constraint.op == AggOp::Avg {
+            self.set_type(constraint.result, TypeName::Float);
+        }
+        self.numeric.push(constraint.value);
+    }
+
     /// Runs the deferred numeric checks and builds the [`TypeEnv`], or returns
     /// the deduplicated type errors.
     fn finish(mut self) -> std::result::Result<TypeEnv, Vec<Error>> {
+        self.resolve_deferred();
         for node in std::mem::take(&mut self.numeric) {
             let root = self.find(node);
             if let Some(ty) = self.ty[root]

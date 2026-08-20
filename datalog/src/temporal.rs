@@ -210,6 +210,28 @@ impl Date {
         Ok(Date(days as i32))
     }
 
+    /// This date moved by a **whole number of days**, or `None` if `delta` is
+    /// not one, or on overflow.
+    ///
+    /// A date has day precision, so a sub-day shift has no representable
+    /// answer — and rounding it would be the truncation `as` refuses
+    /// everywhere else (§8). The caller turns `None` into a structured error
+    /// naming the timestamp widening.
+    pub fn shifted(self, delta: i64) -> Option<Date> {
+        if delta % US_PER_DAY != 0 {
+            return None;
+        }
+        Date::from_days(self.0 as i64 + delta / US_PER_DAY).ok()
+    }
+
+    /// The whole-day distance to another date, in microseconds.
+    pub fn micros_since(self, other: Date) -> i64 {
+        (self.0 as i64 - other.0 as i64) * US_PER_DAY
+    }
+
+    /// One day, as a duration — the unit a `date` shift is counted in.
+    pub const DAY: i64 = US_PER_DAY;
+
     /// Midnight of this day — the exact widening `date as timestamp` performs
     /// (§8). Exact because a timestamp is civil: no zone can move midnight.
     pub fn at_midnight(self) -> Timestamp {
@@ -286,6 +308,11 @@ impl Timestamp {
             return Err(TemporalError::Range);
         }
         Ok(Timestamp(micros))
+    }
+
+    /// This timestamp moved by `delta`, or `None` on overflow.
+    pub fn shifted(self, delta: i64) -> Option<Timestamp> {
+        Timestamp::from_micros(self.0.checked_add(delta)?).ok()
     }
 
     /// The civil day this timestamp falls in — what `std/time`'s

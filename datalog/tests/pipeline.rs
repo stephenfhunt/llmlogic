@@ -440,3 +440,221 @@ fn a_guarded_conversion_is_not_warned_about() {
     .expect("runs");
     assert!(result.warnings.is_empty(), "{:?}", result.warnings);
 }
+
+// --- Temporal values (§4/§8, `notes/temporal-values.md`) ---
+
+use datalog::temporal::{Date, Duration};
+use proptest::prelude::*;
+use proptest::strategy::ValueTree;
+
+/// The one error a run reports, as text.
+fn error_text(src: &str) -> String {
+    let errors = datalog::run(src).expect_err("this program should not type-check");
+    errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn arb_date() -> impl Strategy<Value = Date> {
+    (1900i64..2200, 1i64..=12, 1i64..=28)
+        .prop_map(|(y, m, d)| Date::from_ymd(y, m, d).expect("day 1-28 exists in every month"))
+}
+
+proptest! {
+    /// **T2** — the affine laws, run through the whole pipeline: a point moved
+    /// by a displacement and back is where it started, and the displacement
+    /// between two points moves one onto the other (§8).
+    #[test]
+    fn t2_affine_laws_hold(start in arb_date(), days in -3000i64..3000, end in arb_date()) {
+        let shift = Duration::from_micros(days * Date::DAY);
+        let src = format!(
+            "d(@{start}). k(@{shift}). e(@{end}).\n\
+             there_and_back(X) :- d(D), k(K), X = (D + K) - D.\n\
+             onto(X)           :- d(D), e(E), X = D + (E - D).\n\
+             ?- there_and_back(X).\n?- onto(X)."
+        );
+        let out = answers(&src);
+        prop_assert_eq!(
+            out,
+            vec![
+                format!("there_and_back(@{shift})."),
+                format!("onto(@{end})."),
+            ]
+        );
+    }
+
+    /// **T3** — the unit is the divisor. `(D2 - D1) / @1d` is the civil day
+    /// difference, computed here from the day counts themselves rather than by
+    /// a second traversal of the same arithmetic.
+    ///
+    /// This is the property that pins the sibling engine's `172800000` finding:
+    /// there is no spelling of "as a number" that does not name a unit.
+    #[test]
+    fn t3_the_divisor_names_the_unit(a in arb_date(), b in arb_date()) {
+        let gap = (b.days() - a.days()) as f64;
+        // Two divisors, and the second is why the result type is `float`: a
+        // day gap over 36 hours is fractional, so a truncating `int` here
+        // would lose it silently — the very shape the divisor form exists to
+        // prevent. Both oracles come from the day counts, not from a second
+        // pass over the engine's own arithmetic.
+        let src = format!(
+            "a(@{a}). b(@{b}).\n\
+             days(N)   :- a(A), b(B), N = (B - A) / @1d.\n\
+             shifts(N) :- a(A), b(B), N = (B - A) / @36h.\n\
+             ?- days(N).\n?- shifts(N)."
+        );
+        prop_assert_eq!(
+            answers(&src),
+            vec![
+                format!("days({gap:?})."),
+                format!("shifts({:?}).", gap * 24.0 / 36.0),
+            ]
+        );
+    }
+}
+
+/// The non-vacuity half of T3: the generator must actually produce differences
+/// of both signs and a nonzero one, or the property is a claim about `0.0`.
+#[test]
+fn t3_generator_reaches_both_signs() {
+    let mut saw = (false, false, false);
+    let mut runner = proptest::test_runner::TestRunner::default();
+    for _ in 0..200 {
+        let (a, b) = (arb_date(), arb_date())
+            .new_tree(&mut runner)
+            .expect("generates")
+            .current();
+        let gap = b.days() - a.days();
+        saw.0 |= gap < 0;
+        saw.1 |= gap == 0;
+        saw.2 |= gap > 0;
+    }
+    assert!(
+        saw.0 && saw.2,
+        "the date generator never produced both signs"
+    );
+}
+
+#[test]
+fn a_duration_divided_by_a_duration_keeps_the_half_day() {
+    // Float, not int: `@36h / @1d` is 1.5, and truncating it would be the
+    // same silent loss the divisor form exists to prevent (§8).
+    assert_eq!(
+        answers("r(N) :- N = @36h / @1d.\n?- r(N)."),
+        vec!["r(1.5).".to_string()]
+    );
+}
+
+#[test]
+fn adding_two_points_says_why_it_has_no_meaning() {
+    let text = error_text("d(@2026-08-19).\nr(X) :- d(D), X = D + D.\n?- r(X).");
+    assert!(text.contains("two points in time do not add"), "{text}");
+    assert!(text.contains("subtract them"), "{text}");
+}
+
+#[test]
+fn a_duration_and_a_number_do_not_add() {
+    let text = error_text("r(X) :- X = @1d + 1.\n?- r(X).");
+    assert!(text.contains("no unit"), "{text}");
+    assert!(text.contains("/ @1d"), "{text}");
+}
+
+#[test]
+fn a_duration_never_converts_to_a_number() {
+    // The `172800000` bug, excluded by construction: the message names the
+    // divisor form rather than explaining a unit.
+    let text = error_text("r(N) :- N = @1d as int.\n?- r(N).");
+    assert!(
+        text.contains("no conversion between duration and int"),
+        "{text}"
+    );
+    assert!(text.contains("name the unit"), "{text}");
+}
+
+#[test]
+fn a_date_and_a_timestamp_do_not_mix() {
+    let text = error_text(
+        "d(@2026-08-19). t(@2026-08-19T10:30:00).\n\
+         r(X) :- d(D), t(T), X = T - D.\n?- r(X).",
+    );
+    assert!(text.contains("mixes a date and a timestamp"), "{text}");
+    assert!(text.contains("as timestamp"), "{text}");
+}
+
+#[test]
+fn truncating_a_timestamp_names_the_construct_that_does_it() {
+    // §8 resolves this tension in favour of the cast rule, so the error has to
+    // carry the alternative — otherwise the refusal is a dead end.
+    let text = error_text("t(@2026-08-19T10:30:00).\nr(D) :- t(T), D = T as date.\n?- r(D).");
+    assert!(text.contains("does not truncate"), "{text}");
+    assert!(text.contains("truncate(T, day, D)"), "{text}");
+}
+
+#[test]
+fn a_date_shifts_only_by_whole_days() {
+    // A date has day precision; rounding a sub-day shift would be the
+    // truncation `as` refuses everywhere else.
+    let text = error_text("d(@2026-08-19).\nr(X) :- d(D), X = D + @36h.\n?- r(X).");
+    assert!(text.contains("not a whole number of days"), "{text}");
+    assert!(text.contains("as timestamp"), "{text}");
+    // A timestamp has room for the remainder, so the widened form works.
+    assert_eq!(
+        answers("d(@2026-08-19).\nr(X) :- d(D), X = (D as timestamp) + @36h.\n?- r(X)."),
+        vec!["r(@2026-08-20T12:00:00).".to_string()]
+    );
+}
+
+#[test]
+fn durations_reduce_and_points_do_not() {
+    // `avg` over durations is a duration, because dividing one by a count is
+    // scaling — the vector rule's other half, not an exception to it (§9).
+    assert_eq!(
+        answers(
+            "took(a, @1h). took(b, @2h).\n\
+             stats(S, A) :- S = sum { D | took(_, D) }, A = avg { D | took(_, D) }.\n\
+             ?- stats(S, A)."
+        ),
+        vec!["stats(@3h, @1h30m).".to_string()]
+    );
+    let text = error_text(
+        "on(a, @2026-08-19). on(b, @2026-08-20).\n\
+         r(S) :- S = sum { D | on(_, D) }.\n?- r(S).",
+    );
+    assert!(text.contains("two points"), "{text}");
+    assert!(text.contains("min`/`max"), "{text}");
+}
+
+#[test]
+fn temporal_values_order_and_compare_within_their_type() {
+    assert_eq!(
+        answers(
+            "d(@2026-08-19). d(@2026-06-01). d(@2026-12-25).\n\
+             early(D) :- d(D), D < @2026-08-01.\n\
+             span(S)  :- S = max { D | d(D) } - min { D | d(D) }.\n\
+             ?- early(D).\n?- span(S)."
+        ),
+        vec![
+            "early(@2026-06-01).".to_string(),
+            "span(@207d).".to_string()
+        ]
+    );
+}
+
+/// Absent annihilates temporal arithmetic exactly as it does numeric (§4/§8) —
+/// the choke point is shared, and this is what pins that it stays shared.
+#[test]
+fn absent_annihilates_temporal_arithmetic_too() {
+    assert_eq!(
+        answers(
+            "d(@2026-08-19). d(absent).\n\
+             next(X) :- d(D), X = D + @1d.\n?- next(X)."
+        ),
+        // `absent` sorts first in the canonical output order (§4/§14).
+        vec![
+            "next(absent).".to_string(),
+            "next(@2026-08-20).".to_string()
+        ]
+    );
+}

@@ -896,11 +896,20 @@ fn sum_values(present: &[&Value]) -> Result<Value> {
     Ok(acc)
 }
 
-/// The float mean of the present values (§9: `avg` is always `float`). Requires
-/// every present value numeric; empty → `absent`.
+/// The mean of the present values: `float` over numbers, `duration` over
+/// durations (§9). Empty → `absent`.
+///
+/// The two cases are one rule, not an exception: `avg` divides the fold by the
+/// count, and §8 says dividing a duration by a number is scaling — so a mean of
+/// durations is a duration, and only a mean of *numbers* has to leave its
+/// operand type behind.
 fn avg_values(present: &[&Value]) -> Result<Value> {
     if present.is_empty() {
         return Ok(Value::Absent);
+    }
+    if present.iter().all(|v| matches!(v, Value::Duration(_))) {
+        let total = sum_values(present)?;
+        return apply_arith(ArithOp::Div, total, Value::Int(present.len() as i64));
     }
     let mut sum = 0.0f64;
     for value in present {
@@ -909,7 +918,8 @@ fn avg_values(present: &[&Value]) -> Result<Value> {
             Value::Float(f) => f.get(),
             other => {
                 return Err(Error::semantic(format!(
-                    "type error: avg requires numeric values, got {}",
+                    "type error: avg requires values it can fold and divide — int, \
+                     float, or duration — got {}",
                     value_type_name(other)
                 )));
             }
@@ -1338,13 +1348,135 @@ fn apply_arith(op: ArithOp, lhs: Value, rhs: Value) -> Result<Value> {
     match (&lhs, &rhs) {
         (Value::Int(a), Value::Int(b)) => arith_int(op, *a, *b),
         (Value::Float(a), Value::Float(b)) => arith_float(op, *a, *b),
-        _ => Err(Error::semantic(format!(
-            "type error: arithmetic `{}` requires two ints or two floats, got {} and {}",
-            arith_symbol(op),
-            value_type_name(&lhs),
-            value_type_name(&rhs),
-        ))),
+        // §8's temporal algebra, the one heterogeneous case. Checked first as
+        // a pair, so a `None` here means "not a temporal operation" and falls
+        // through to the same type error every other mismatch gets.
+        _ => match arith_temporal(op, &lhs, &rhs) {
+            Some(result) => result,
+            None => Err(Error::semantic(format!(
+                "type error: arithmetic `{}` requires two ints, two floats, or one of \
+                 §8's temporal operations, got {} and {}",
+                arith_symbol(op),
+                value_type_name(&lhs),
+                value_type_name(&rhs),
+            ))),
+        },
     }
+}
+
+/// §8's temporal arithmetic: points and vectors.
+///
+/// `None` is "no rule for this pair", which the caller reports as the ordinary
+/// type error. Every arm is checked — an overflow is a structured error, never
+/// a wrap, exactly as integer arithmetic already is.
+fn arith_temporal(op: ArithOp, lhs: &Value, rhs: &Value) -> Option<Result<Value>> {
+    use ArithOp::{Add, Div, Mul, Sub};
+    use Value::{Date, Duration, Float, Int, Timestamp};
+    let overflow = || {
+        Err(Error::semantic(format!(
+            "arithmetic error: `{} {} {}` is outside the representable range",
+            crate::print::print_value(lhs),
+            arith_symbol(op),
+            crate::print::print_value(rhs),
+        )))
+    };
+    Some(match (op, lhs, rhs) {
+        // Point − point is the displacement between them.
+        (Sub, Date(a), Date(b)) => Ok(Duration(temporal::Duration::from_micros(
+            a.micros_since(*b),
+        ))),
+        (Sub, Timestamp(a), Timestamp(b)) => match a.micros().checked_sub(b.micros()) {
+            Some(micros) => Ok(Duration(temporal::Duration::from_micros(micros))),
+            None => overflow(),
+        },
+        // Point ± displacement, in either order for `+`. A date shifts only by
+        // a whole number of days: it has day precision, and rounding would be
+        // the truncation `as` refuses (§8), so the error names the widening.
+        (Add | Sub, Date(a), Duration(d)) | (Add, Duration(d), Date(a)) => {
+            let delta = if op == Sub { -d.micros() } else { d.micros() };
+            match a.shifted(delta) {
+                Some(date) => Ok(Date(date)),
+                None if delta % temporal::Date::DAY != 0 => Err(Error::semantic(format!(
+                    "arithmetic error: `{}` is not a whole number of days, and a date has \
+                     no time of day to carry the remainder",
+                    crate::print::print_value(rhs),
+                ))
+                .suggest("widen the date first: `(D as timestamp) + @36h`")),
+                None => overflow(),
+            }
+        }
+        (Add | Sub, Timestamp(a), Duration(d)) | (Add, Duration(d), Timestamp(a)) => {
+            let delta = if op == Sub { -d.micros() } else { d.micros() };
+            match a.shifted(delta) {
+                Some(timestamp) => Ok(Timestamp(timestamp)),
+                None => overflow(),
+            }
+        }
+        // Displacements add to each other.
+        (Add | Sub, Duration(a), Duration(b)) => {
+            let combined = if op == Sub {
+                a.micros().checked_sub(b.micros())
+            } else {
+                a.micros().checked_add(b.micros())
+            };
+            match combined {
+                Some(micros) => Ok(Duration(temporal::Duration::from_micros(micros))),
+                None => overflow(),
+            }
+        }
+        // The units cancel — the only route from a duration to a number, and
+        // the reason there is no `duration as float` (§8).
+        (Div, Duration(a), Duration(b)) => {
+            if b.micros() == 0 {
+                return Some(Err(Error::semantic(
+                    "arithmetic error: division by a zero duration".to_string(),
+                )));
+            }
+            Some(F64::new(a.micros() as f64 / b.micros() as f64).map(Value::Float))?
+        }
+        // Scaling preserves the unit. Truncating toward zero at the
+        // microsecond, which is §8's integer division applied to the count.
+        (Mul, Duration(a), Int(n)) | (Mul, Int(n), Duration(a)) => {
+            match a.micros().checked_mul(*n) {
+                Some(micros) => Ok(Duration(temporal::Duration::from_micros(micros))),
+                None => overflow(),
+            }
+        }
+        (Div, Duration(a), Int(n)) => {
+            if *n == 0 {
+                return Some(Err(Error::semantic(
+                    "arithmetic error: division by zero".to_string(),
+                )));
+            }
+            Ok(Duration(temporal::Duration::from_micros(a.micros() / n)))
+        }
+        (Mul, Duration(a), Float(f)) | (Mul, Float(f), Duration(a)) => scale(*a, f.get(), overflow),
+        (Div, Duration(a), Float(f)) => {
+            if f.get() == 0.0 {
+                return Some(Err(Error::semantic(
+                    "arithmetic error: division by zero".to_string(),
+                )));
+            }
+            scale(*a, 1.0 / f.get(), overflow)
+        }
+        _ => return None,
+    })
+}
+
+/// A duration scaled by a float, truncating toward zero and refusing a result
+/// no `i64` of microseconds holds.
+fn scale(
+    duration: temporal::Duration,
+    factor: f64,
+    overflow: impl Fn() -> Result<Value>,
+) -> Result<Value> {
+    let scaled = duration.micros() as f64 * factor;
+    if !scaled.is_finite() || scaled.abs() >= i64::MAX as f64 {
+        return overflow();
+    }
+    Ok(Value::Duration(temporal::Duration::from_micros(
+        scaled.trunc() as i64,
+    )))
 }
 
 /// Integer arithmetic: truncating division, checked overflow and division by
