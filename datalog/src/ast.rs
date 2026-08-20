@@ -442,6 +442,8 @@ pub enum Constant {
     /// arithmetic operand; matching it in a body atom argument is a structured
     /// error (lowering) steering to `is absent`.
     Absent,
+    /// A temporal literal (§3/§4), carrying its already-validated value.
+    Temporal(crate::temporal::Temporal),
 }
 
 #[cfg(test)]

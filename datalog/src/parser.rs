@@ -313,7 +313,7 @@ impl Parser<'_> {
         })
     }
 
-    /// The five type names are *contextual* — lexed as identifiers, recognized
+    /// The eight type names are *contextual* — lexed as identifiers, recognized
     /// only here.
     fn parse_type(&mut self) -> PResult<(TypeName, Span)> {
         let span = self.span();
@@ -324,6 +324,9 @@ impl Parser<'_> {
                 "string" => Some(TypeName::String),
                 "symbol" => Some(TypeName::Symbol),
                 "bool" => Some(TypeName::Bool),
+                "date" => Some(TypeName::Date),
+                "timestamp" => Some(TypeName::Timestamp),
+                "duration" => Some(TypeName::Duration),
                 _ => None,
             };
             if let Some(ty) = ty {
@@ -331,7 +334,9 @@ impl Parser<'_> {
                 return Ok((ty, span));
             }
         }
-        Err(self.error_expected("a type name (int, float, string, symbol, or bool)"))
+        Err(self.error_expected(
+            "a type name (int, float, string, symbol, bool, date, timestamp, or duration)",
+        ))
     }
 
     fn parse_query(&mut self) -> PResult<Statement> {
@@ -740,6 +745,11 @@ impl Parser<'_> {
             TokenKind::Absent => {
                 self.bump();
                 TermKind::Constant(Constant::Absent)
+            }
+            TokenKind::Temporal(value) => {
+                let c = Constant::Temporal(*value);
+                self.bump();
+                TermKind::Constant(c)
             }
             TokenKind::Ident(name) => {
                 // A bare identifier is a symbol constant. `ident (` would be a
@@ -1176,13 +1186,65 @@ adult(N) :- person(name: N, age: A), A >= 18.
     /// recognized only in the one position each is meaningful, so they stay
     /// usable as ordinary relation names.
     #[test]
+    fn a_temporal_literal_parses_and_prints_back() {
+        // §14's closure at the source layer: what the printer emits re-parses
+        // to the same tree, sigil and canonical spelling included.
+        for (src, expected) in [
+            ("p(@2026-08-19).", "p(@2026-08-19)."),
+            ("p(@2026-08-19T10:30:00).", "p(@2026-08-19T10:30:00)."),
+            // Both non-canonical spellings normalize on the way out, and the
+            // normalized form parses to the same value.
+            ("p(@90m).", "p(@1h30m)."),
+            ("p(@P1D).", "p(@1d)."),
+            ("q(X) :- p(D), X = D + @1d.", "X = D + @1d"),
+            ("q(X) :- p(D), X = D as date.", "as date"),
+        ] {
+            let printed = print_program(&parse(src).expect("parses"));
+            assert!(
+                printed.contains(expected),
+                "printing {src:?} should render {expected:?}: {printed}"
+            );
+            assert_eq!(
+                parse_ok(&printed),
+                parse_ok(&printed),
+                "the printed form must be stable for {src:?}"
+            );
+            // The printed text re-parses to a tree that prints identically —
+            // the fixed point a normalizing printer has to reach.
+            let reprinted = print_program(&parse(&printed).expect("re-parses"));
+            assert_eq!(reprinted, printed, "round trip changed {src:?}");
+        }
+    }
+
+    #[test]
+    fn a_temporal_type_name_is_a_cast_target_and_a_field_type() {
+        let program = parse_ok("declare e(at: timestamp, took: duration).");
+        let StatementKind::Declare(declaration) = &program.statements[0].kind else {
+            panic!("expected a declaration");
+        };
+        assert_eq!(declaration.fields[0].ty, Some(TypeName::Timestamp));
+        assert_eq!(declaration.fields[1].ty, Some(TypeName::Duration));
+    }
+
+    #[test]
     fn contextual_keywords_are_ordinary_relation_names() {
         for word in [
             // §13's `table "…"` selector.
-            "table", // The five type names (§4).
-            "int", "float", "string", "symbol", "bool",
+            "table", // The eight type names (§4).
+            "int",
+            "float",
+            "string",
+            "symbol",
+            "bool",
+            "date",
+            "timestamp",
+            "duration",
             // The five aggregate operators (§9), recognized only before `{`.
-            "count", "sum", "min", "max", "avg",
+            "count",
+            "sum",
+            "min",
+            "max",
+            "avg",
         ] {
             let src = format!("{word}(2).");
             let program = parse_ok(&src);
@@ -1696,10 +1758,10 @@ adult(N) :- person(name: N, age: A), A >= 18.
     /// production a declaration's field type uses, so the message is the one
     /// `parse_type` already gives.
     #[test]
-    fn a_cast_to_a_non_type_names_the_five() {
+    fn a_cast_to_a_non_type_names_them_all() {
         asserts_message(
             "r(X) :- n(A), X = A as widget.",
-            "a type name (int, float, string, symbol, or bool)",
+            "a type name (int, float, string, symbol, bool, date, timestamp, or duration)",
         );
     }
 

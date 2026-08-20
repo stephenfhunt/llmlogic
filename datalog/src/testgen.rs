@@ -73,6 +73,7 @@ pub(crate) fn arb_value() -> impl Strategy<Value = ir::Value> {
         // `arb_constant` never produces absent — generated programs stay in the
         // typed value space (absent has its own targeted tests).
         Constant::Absent => unreachable!("arb_constant generates no absent"),
+        Constant::Temporal(_) => unreachable!("arb_constant generates no temporal"),
     })
 }
 
@@ -349,8 +350,8 @@ fn monotype_term(term: &mut Term) {
     }
 }
 
-/// The injective constant → symbol relabeling: type-prefixed so the five
-/// primitive types map to disjoint symbol ranges (an int and the string of the
+/// The injective constant → symbol relabeling: type-prefixed so the primitive
+/// types map to disjoint symbol ranges (an int and the string of the
 /// same text never collide), preserving the original equality relation exactly.
 fn monotype_constant(constant: &Constant) -> Constant {
     let symbol = match constant {
@@ -359,6 +360,9 @@ fn monotype_constant(constant: &Constant) -> Constant {
         Constant::Int(i) => format!("int_{i}"),
         Constant::Float(f) => format!("flt_{}", f.to_bits()),
         Constant::Bool(b) => format!("bool_{b}"),
+        // One range for all three temporal types: their canonical texts are
+        // already mutually distinct, so the prefix keeps the map injective.
+        Constant::Temporal(value) => format!("tmp_{value}"),
         // Never generated; absent has no monotype relabeling (it is
         // type-neutral) and maps to itself.
         Constant::Absent => return Constant::Absent,
@@ -2032,6 +2036,11 @@ pub(crate) fn fold_ground_atom_args(program: &Program) -> Program {
             Constant::Bool(b) => ir::Value::Bool(*b),
             Constant::Absent => ir::Value::Absent,
             Constant::Float(f) => ir::Value::Float(ir::F64::new(*f).ok()?),
+            Constant::Temporal(value) => match value {
+                crate::temporal::Temporal::Date(d) => ir::Value::Date(*d),
+                crate::temporal::Temporal::Timestamp(t) => ir::Value::Timestamp(*t),
+                crate::temporal::Temporal::Duration(d) => ir::Value::Duration(*d),
+            },
         })
     }
 
@@ -2046,9 +2055,9 @@ pub(crate) fn fold_ground_atom_args(program: &Program) -> Program {
             // See the doc comment: a literal `absent` is banned in a body atom
             // argument, so folding to one would test the ban, not the claim.
             ir::Value::Absent => return None,
-            // Temporal constants are not generated yet — the generators widen
-            // with the lexer that can spell them (`testing.md`).
-            ir::Value::Date(_) | ir::Value::Timestamp(_) | ir::Value::Duration(_) => return None,
+            ir::Value::Date(d) => Constant::Temporal(crate::temporal::Temporal::Date(*d)),
+            ir::Value::Timestamp(t) => Constant::Temporal(crate::temporal::Temporal::Timestamp(*t)),
+            ir::Value::Duration(d) => Constant::Temporal(crate::temporal::Temporal::Duration(*d)),
         })
     }
 

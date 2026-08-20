@@ -933,6 +933,11 @@ impl Lowerer {
             ast::Constant::Int(i) => ir::Value::Int(*i),
             ast::Constant::Bool(b) => ir::Value::Bool(*b),
             ast::Constant::Absent => ir::Value::Absent,
+            ast::Constant::Temporal(value) => match value {
+                crate::temporal::Temporal::Date(d) => ir::Value::Date(*d),
+                crate::temporal::Temporal::Timestamp(t) => ir::Value::Timestamp(*t),
+                crate::temporal::Temporal::Duration(d) => ir::Value::Duration(*d),
+            },
             ast::Constant::Float(f) => match ir::F64::new(*f) {
                 Ok(v) => ir::Value::Float(v),
                 Err(e) => {

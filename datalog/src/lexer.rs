@@ -53,6 +53,10 @@ pub enum TokenKind {
     Float(f64),
     /// A string literal, with escapes already resolved.
     Str(String),
+    /// An `@`-sigilled temporal literal (§3), already read into its value —
+    /// the components are validated here so `@2026-02-30` names the day rather
+    /// than reaching the parser as three integers.
+    Temporal(crate::temporal::Temporal),
 
     // Keywords (§3 reserved words).
     Import,
@@ -124,6 +128,7 @@ impl TokenKind {
             TokenKind::Int(n) => format!("integer `{n}`"),
             TokenKind::Float(f) => format!("float `{f}`"),
             TokenKind::Str(s) => format!("string {s:?}"),
+            TokenKind::Temporal(value) => format!("temporal literal `@{value}`"),
             TokenKind::Import => "`import`".to_string(),
             TokenKind::As => "`as`".to_string(),
             TokenKind::Declare => "`declare`".to_string(),
@@ -263,6 +268,9 @@ impl<'a> Lexer<'a> {
             // future floor-division operator, so it gets a targeted hint.
             b'%' | b'#' => self.skip_line(),
             b'"' | b'\'' => self.scan_string(c),
+            // `@` begins nothing else in the grammar, so the lexer commits on
+            // the sigil and reads the whole literal as one token (§5).
+            b'@' => self.scan_temporal(),
             b'0'..=b'9' => self.scan_number(),
             b'a'..=b'z' => self.scan_ident_or_keyword(),
             b'A'..=b'Z' | b'_' => self.scan_variable(),
@@ -450,6 +458,56 @@ impl<'a> Lexer<'a> {
         }
     }
 
+    /// Reads an `@`-sigilled temporal literal (§3).
+    ///
+    /// The run is delimited *structurally*, not greedily: a `-` is taken only
+    /// where a date has one (offsets 4 and 7) or as a duration's leading sign,
+    /// so `@2026-08-20-@2026-08-19` is two literals and a subtraction rather
+    /// than one unreadable token. A `.` is taken only when a digit follows,
+    /// the rule `p(1).` already needs.
+    fn scan_temporal(&mut self) {
+        let start = self.pos;
+        self.pos += 1; // `@`
+        let body_start = self.pos;
+        if self.peek_at(0) == Some(b'-') {
+            self.pos += 1;
+        }
+        let digits_start = self.pos;
+        while let Some(byte) = self.peek_at(0) {
+            let offset = self.pos - digits_start;
+            let take = match byte {
+                b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z' | b':' | b'+' => true,
+                b'-' => offset == 4 || offset == 7,
+                b'.' => self.peek_at(1).is_some_and(|b| b.is_ascii_digit()),
+                _ => false,
+            };
+            if !take {
+                break;
+            }
+            self.pos += 1;
+        }
+        let text = &self.src[body_start..self.pos];
+        if text.is_empty() {
+            self.error_suggesting(
+                start,
+                "`@` begins a temporal literal but none follows",
+                "a date `@2026-08-19`, a timestamp `@2026-08-19T10:30:00`, or a \
+                 duration `@1d12h`",
+            );
+            return;
+        }
+        match crate::temporal::parse_temporal(text) {
+            Ok(value) => self.push(TokenKind::Temporal(value), start),
+            Err(error) => {
+                let message = format!("`@{text}` is not a temporal literal: {}", error.message());
+                match error.suggestion() {
+                    Some(suggestion) => self.error_suggesting(start, message, suggestion),
+                    None => self.error(start, message),
+                }
+            }
+        }
+    }
+
     fn scan_number(&mut self) {
         let start = self.pos;
         while self.pos < self.bytes.len() && self.peek().is_ascii_digit() {
@@ -620,6 +678,92 @@ mod tests {
             .map(|t| t.kind)
             .filter(|k| *k != TokenKind::Eof)
             .collect()
+    }
+
+    fn temporal(text: &str) -> TokenKind {
+        TokenKind::Temporal(crate::temporal::parse_temporal(text).expect("a temporal literal"))
+    }
+
+    #[test]
+    fn lexes_the_three_temporal_literals() {
+        assert_eq!(
+            kinds("p(@2026-08-19, @2026-08-19T10:30:00.5, @1d12h)."),
+            vec![
+                TokenKind::Ident("p".into()),
+                TokenKind::LParen,
+                temporal("2026-08-19"),
+                TokenKind::Comma,
+                temporal("2026-08-19T10:30:00.5"),
+                TokenKind::Comma,
+                temporal("1d12h"),
+                TokenKind::RParen,
+                TokenKind::Dot,
+            ]
+        );
+    }
+
+    #[test]
+    fn a_temporal_literal_does_not_swallow_the_terminator_or_a_minus() {
+        // The `.` after a date is the statement terminator, not a fraction —
+        // the same digit-must-follow rule `p(1).` needs.
+        assert_eq!(
+            kinds("p(@1d)."),
+            vec![
+                TokenKind::Ident("p".into()),
+                TokenKind::LParen,
+                temporal("1d"),
+                TokenKind::RParen,
+                TokenKind::Dot,
+            ]
+        );
+        // A `-` is taken only where a date has one, so a difference written
+        // without spaces is two literals and a subtraction.
+        assert_eq!(
+            kinds("@2026-08-20-@2026-08-19"),
+            vec![
+                temporal("2026-08-20"),
+                TokenKind::Minus,
+                temporal("2026-08-19"),
+            ]
+        );
+        // And a negative duration keeps its sign, because it is at offset 0.
+        assert_eq!(kinds("@-1d12h"), vec![temporal("-1d12h")]);
+    }
+
+    #[test]
+    fn a_malformed_temporal_literal_names_the_component() {
+        let errors = lex("p(@2026-02-30).").errors;
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        let message = errors[0].to_string();
+        assert!(message.contains("30 is not a valid day"), "{message}");
+        // A calendar unit is refused with the reason, and the fix.
+        let errors = lex("p(@P1M).").errors;
+        let message = errors[0].to_string();
+        assert!(message.contains("no fixed length"), "{message}");
+        assert!(message.contains("truncate"), "{message}");
+        // A zone offset says the value model is civil rather than "bad shape".
+        let errors = lex("p(@2026-08-19T10:30:00Z).").errors;
+        let message = errors[0].to_string();
+        assert!(message.contains("civil"), "{message}");
+        // A bare sigil is its own message.
+        let errors = lex("p(@).").errors;
+        assert!(errors[0].to_string().contains("none follows"), "{errors:?}");
+    }
+
+    #[test]
+    fn an_unsigilled_date_is_still_arithmetic() {
+        // The sigil is load-bearing: accepting the bare form would silently
+        // change what every existing `2026-08-19` means (§17).
+        assert_eq!(
+            kinds("2026-08-19"),
+            vec![
+                TokenKind::Int(2026),
+                TokenKind::Minus,
+                TokenKind::Int(8),
+                TokenKind::Minus,
+                TokenKind::Int(19),
+            ]
+        );
     }
 
     #[test]

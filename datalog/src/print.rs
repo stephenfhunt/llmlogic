@@ -261,6 +261,9 @@ fn print_constant(constant: &Constant) -> String {
         Constant::Float(f) => print_f64(*f),
         Constant::Bool(b) => b.to_string(),
         Constant::Absent => "absent".to_string(),
+        // The sigil is part of the literal: what the printer emits must re-lex
+        // to the same constant (§14's closure, `testing.md` D2/D3).
+        Constant::Temporal(value) => format!("@{value}"),
     }
 }
 

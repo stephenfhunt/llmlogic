@@ -72,6 +72,8 @@ pub enum TemporalError {
     Unit(String),
     /// Duration components out of order, or one unit used twice.
     Order,
+    /// A zone offset where §4's civil timestamp has nothing for one to mean.
+    Zone(String),
 }
 
 impl TemporalError {
@@ -96,6 +98,10 @@ impl TemporalError {
             TemporalError::Order => {
                 "duration components must be largest-first and each used once".to_string()
             }
+            TemporalError::Zone(offset) => format!(
+                "`{offset}` is a zone offset, and a timestamp is civil — it denotes a \
+                 date and a clock reading, not an instant"
+            ),
         }
     }
 
@@ -105,6 +111,10 @@ impl TemporalError {
             TemporalError::Unit(unit) if unit == "M" || unit == "Y" => Some(
                 "for a month or a year, group with `truncate(D, month, M)` from \
                  `import \"std/time\".`"
+                    .to_string(),
+            ),
+            TemporalError::Zone(_) => Some(
+                "drop the offset; a zoned source column is converted to UTC at import (§13)"
                     .to_string(),
             ),
             _ => None,
@@ -365,6 +375,18 @@ pub enum Temporal {
     Duration(Duration),
 }
 
+impl fmt::Display for Temporal {
+    /// The unsigilled text of whichever form this is — so one `{}` covers all
+    /// three wherever the sigil is supplied by the caller (§3/§14).
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Temporal::Date(value) => write!(f, "{value}"),
+            Temporal::Timestamp(value) => write!(f, "{value}"),
+            Temporal::Duration(value) => write!(f, "{value}"),
+        }
+    }
+}
+
 /// Reads any temporal form from **unsigilled** text.
 ///
 /// The three forms are distinguishable by shape with no backtracking: a
@@ -425,6 +447,13 @@ fn parse_digits(text: &str) -> Result<i64, TemporalError> {
 /// nothing for one to mean. §13 converts a zoned source column to UTC at the
 /// import boundary instead, which is the one place the conversion is stated.
 pub fn parse_timestamp(text: &str) -> Result<Timestamp, TemporalError> {
+    // Detected rather than ignored: a literal carrying an offset is a real
+    // intention the value model cannot hold, and "wrong shape" would send the
+    // writer looking in the wrong place.
+    let (body, _) = split_offset(text)?;
+    if body.len() < text.len() {
+        return Err(TemporalError::Zone(text[body.len()..].to_string()));
+    }
     let (date_text, time_text) = text.split_once('T').ok_or(TemporalError::Shape)?;
     let (year, month, day) = split_date(date_text)?;
     let (clock, frac) = match time_text.split_once('.') {
@@ -879,10 +908,18 @@ mod tests {
                 ..
             })
         ));
-        // A zone offset is not a civil timestamp (§4) — the literal refuses it.
+        // A zone offset is not a civil timestamp (§4) — the literal refuses it,
+        // and says which part it is refusing.
         assert_eq!(
             parse_timestamp("2026-08-19T10:30:00Z"),
-            Err(TemporalError::Shape)
+            Err(TemporalError::Zone("Z".to_string()))
+        );
+        let zoned = parse_timestamp("2026-08-19T10:30:00+01:00").expect_err("civil only");
+        assert!(zoned.message().contains("civil"), "{}", zoned.message());
+        assert!(
+            zoned
+                .suggestion()
+                .is_some_and(|s| s.contains("UTC at import"))
         );
     }
 
