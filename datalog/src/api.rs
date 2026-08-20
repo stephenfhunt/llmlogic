@@ -865,6 +865,119 @@ banned(\"carol\").
         }
     }
 
+    /// Non-vacuity for `a_runs_output_appended_to_it_changes_nothing`
+    /// (`testing.md` rule 2). A program that answers **nothing** appends an
+    /// empty string and re-runs trivially, so the property is satisfied by a
+    /// generator that never answers — and checked against the property's
+    /// sentence, what has to be reached is a run whose *output* is non-empty,
+    /// not merely one that succeeds.
+    ///
+    /// It asserts the stronger thing too: that some generated program answers
+    /// under a **real relation's name** rather than the `answer/N` fallback, so
+    /// the appended facts land in a relation a rule already derives. That is the
+    /// case where the second run could differ, and without it the property would
+    /// only ever append inert `answer(…)` rows.
+    #[test]
+    fn closure_generator_produces_runs_that_answer() {
+        use proptest::strategy::{Strategy, ValueTree};
+        use proptest::test_runner::TestRunner;
+
+        let mut runner = TestRunner::deterministic();
+        let strategy = crate::testgen::arb_closure_program();
+        let (mut answered, mut named_relation) = (0, 0);
+        for _ in 0..300 {
+            let program = strategy
+                .new_tree(&mut runner)
+                .expect("strategy produces a value")
+                .current();
+            let Ok(result) = run(&program) else { continue };
+            let lines: Vec<&String> = result.answers.iter().flatten().collect();
+            if lines.is_empty() {
+                continue;
+            }
+            answered += 1;
+            if lines.iter().any(|l| !l.starts_with("answer(")) {
+                named_relation += 1;
+            }
+        }
+        assert!(
+            answered > 0,
+            "no generated program answered anything — the closure property \
+             appends an empty string and proves nothing"
+        );
+        assert!(
+            named_relation > 0,
+            "every answer used the `answer/N` fallback — the appended facts are \
+             inert, so the property never reaches a relation a rule derives"
+        );
+    }
+
+    proptest! {
+        /// **§14's closure property at the program level** — a run's own output,
+        /// appended to the program that produced it, re-runs to the same
+        /// answers. "Datalog out is Datalog in", stated about a *program* rather
+        /// than a fact set.
+        ///
+        /// D1 closes fact sets through print → parse → lower, which is the value
+        /// layer; this is the claim pillar 3 actually makes, and it existed only
+        /// as one hand-written example in `tests/pipeline.rs`. It is B2's
+        /// fixpoint idempotence carried through the text layer, and it is not
+        /// implied by B2: B2 saturates the *IR*, where this appends what the
+        /// **printer** emitted and the **parser** read back, so a rendering that
+        /// loses or renames a value fails here and not there.
+        ///
+        /// The appended output is deliberately not inert. Under §14 a query over
+        /// a single relation answers under **that relation's name**, so the
+        /// appended facts land in a relation the program already derives — and
+        /// in one shape, in a relation another rule *negates*, which is where a
+        /// second run could plausibly differ.
+        ///
+        /// **Mutation — the honest result, after four aims.** This property has
+        /// no kill of its own, and the reason is structural rather than a defect
+        /// in the property: it is a *composition* claim over stages that each
+        /// already carry a dedicated guard. Rendering a value wrongly reddens
+        /// **D1** (and this) — `Value::Int` printing as `1.0` fails both.
+        /// Getting §14's answer *shape* wrong reddens **C8**'s
+        /// `c8_an_answer_shape_neither_drops_nor_collapses_a_row` and not this.
+        /// Emitting the ground yes as the arity-0 `holds.` — unparseable under
+        /// §5 — reddens **`tests/system.rs`** and not this.
+        ///
+        /// Recorded rather than smoothed over, because "no unique kill" is the
+        /// expected result for an end-to-end claim over well-guarded stages, and
+        /// the alternative reading — that it asserts nothing — is wrong: it is
+        /// the only check that the stages compose, and it is what a *future*
+        /// change to any of them has to keep true.
+        ///
+        /// A fifth aim did find something, and it is why the `holds(true).`
+        /// shape is in the generator: the `holds.` mutation is invisible to
+        /// `cargo test --lib`, so a mutation check run with that filter — as
+        /// several in this session's first pass were — would have recorded a
+        /// kill that did not happen. **Mutation-verify against the full suite.**
+        #[test]
+        fn a_runs_output_appended_to_it_changes_nothing(
+            program in crate::testgen::arb_closure_program()
+        ) {
+            let Ok(first) = run(&program) else { return Ok(()) };
+            let appended: String = first
+                .answers
+                .iter()
+                .flat_map(|lines| lines.iter())
+                .map(|line| format!("{line}\n"))
+                .collect();
+            let second = run(&format!("{program}{appended}"))
+                .map_err(|e| TestCaseError::fail(format!(
+                    "a program's own output did not re-parse as a program:\n\
+                     --- program ---\n{program}--- appended ---\n{appended}--- {e:?}"
+                )))?;
+            prop_assert_eq!(
+                &second.answers, &first.answers,
+                "re-running with its own output changed the answers\n\
+                 --- program ---\n{}--- appended ---\n{}",
+                &program, &appended
+            );
+        }
+    }
+
     proptest! {
         /// **The structural laws of the relational algebra the language
         /// embodies** — join idempotence and union idempotence (§5/§6).

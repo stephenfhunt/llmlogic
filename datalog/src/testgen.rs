@@ -681,6 +681,35 @@ pub(crate) fn arb_disjunction_spellings() -> impl Strategy<Value = (String, Stri
         })
 }
 
+/// A small, complete program **as text**, with an EDB, derived relations
+/// (including a negated one and an aggregate) and one or more queries — for the
+/// §14 closure property at the *program* level.
+///
+/// Text rather than `ir::Program` because the claim is about what a run
+/// **prints** and whether that text is a program: `arb_program_with_edb` would
+/// need an IR printer that does not exist, and going through the front end is
+/// the point rather than a shortcut (the `arb_taint_spellings` precedent).
+///
+/// The shapes are chosen so the appended output is not inert. A query answering
+/// under a **real relation's name** (§14) appends facts to a relation some rule
+/// already derives — and, in the negation shape, to one another rule *negates*,
+/// which is the case where re-running could plausibly differ.
+pub(crate) fn arb_closure_program() -> impl Strategy<Value = String> {
+    let bodies = prop_oneof![
+        Just("d(K) :- n(K, V), V >= 0.\n?- d(K).\n"),
+        Just("d(K) :- n(K, _).\ne(K) :- d(K), not n(K, 0).\n?- e(K).\n"),
+        Just("d(K) :- n(K, _).\n?- d(K).\n?- n(K, V), V < 0.\n"),
+        Just("t(K, S) :- n(K, _), S = sum { V | n(K, V) }.\n?- t(K, S).\n"),
+        // A body with no positive atom, so §14's substituted form does not
+        // apply and the answer is the ground yes `holds(true).` — a third
+        // rendering path beside the substituted atom and the `answer/N`
+        // fallback, and the one whose output is a relation the program does not
+        // otherwise mention.
+        Just("?- not n(\"zz\", 0).\n"),
+    ];
+    (arb_edb_text(), bodies).prop_map(|(edb, rules)| format!("{edb}{rules}"))
+}
+
 /// **The structural laws of a conjunction and a disjunction**, as spellings.
 ///
 /// Returns `(base, variant)` — two programs that must answer identically —
