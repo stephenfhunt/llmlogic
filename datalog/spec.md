@@ -212,13 +212,24 @@ predictability ratified above is about *knowing which class a program is in*.
   - *Booleans* — `true`, `false`.
   - *Symbols* — a bare identifier in term position (`red`, `pending`) denotes a
     symbol constant, a distinct type from the string `"red"`.
+  - *Temporal* — an `@` sigil then the value, self-delimiting and whitespace-free:
+    a **date** `@2026-08-19`, a **timestamp** `@2026-08-19T10:30:00` (an optional
+    fractional part, `@2026-08-19T10:30:00.500`), or a **duration** written as
+    unit-suffixed components, largest first — `@1d`, `@36h`, `@1d12h`, `@90m`,
+    `@500ms`, `@-1d12h`, `@0s`. Duration units are `d h m s ms us`; there is no
+    month or year unit, which is what leaves `m` unambiguously *minutes* (§4).
+    ISO-8601 durations (`@P1D`, `@PT36H`) are accepted as an input alias and
+    print in the form above. The sigil is required: an unsigilled `2026-08-19` is
+    arithmetic over three integers, and stays so.
 - **Punctuation / operators** — `:-` (rule), `?-` (query), `.` (statement end),
-  `,` (conjunction), `(` `)`, `:` (named argument), comparisons `=` `!=` `<` `<=`
+  `,` (conjunction), `(` `)`, `:` (named argument), `@` (temporal literal, above),
+  comparisons `=` `!=` `<` `<=`
   `>` `>=`, arithmetic `+` `-` `*` `/` (§8).
 - **Reserved words** — `import`, `as`, `declare`, `not`, `is`, `true`, `false`,
   `absent`. These cannot be used as relation or field names.
-- **Contextual keywords are not reserved.** `table` (§13), the five type names
-  (`int`, `float`, `string`, `symbol`, `bool`), and the five aggregate operator
+- **Contextual keywords are not reserved.** `table` (§13), the eight type names
+  (`int`, `float`, `string`, `symbol`, `bool`, `date`, `timestamp`, `duration`),
+  and the five aggregate operator
   names (`count`, `sum`, `min`, `max`, `avg`) are lexed as ordinary identifiers
   and recognized only in the one position each is meaningful. So `int(2).` and
   `table(2).` are legal relations.
@@ -239,17 +250,46 @@ the identifier grammar are ASCII.
 
 ### Values and terms
 
-Primitive value types: **symbol**, **string**, **int**, **float**, **bool**.
-Symbols and strings are distinct types and never compare equal. Terms are **flat**:
-a term is a constant or a variable — no compound/function terms in v1 (deferred;
-see §17).
+Primitive value types: **symbol**, **string**, **int**, **float**, **bool**,
+**date**, **timestamp**, **duration**. Symbols and strings are distinct types and
+never compare equal. Terms are **flat**: a term is a constant or a variable — no
+compound/function terms in v1 (deferred; see §17).
 
 A relation has a fixed arity, and every column has exactly one type.
+
+### Temporal values — points and vectors
+
+The three temporal types are ordinary primitives: they have literals (§3), a
+natural order, and no special status in matching, negation or aggregation. What
+distinguishes them is that their **arithmetic is heterogeneous**, which §8 states
+as one rule and this section's domains make precise:
+
+| type | domain | literal | precision |
+|---|---|---|---|
+| `date` | a civil day, proleptic Gregorian | `@2026-08-19` | one day |
+| `timestamp` | a civil date **and** time | `@2026-08-19T10:30:00.500` | one microsecond |
+| `duration` | a signed elapsed quantity | `@1d12h`, `@-90m`, `@0s` | one microsecond |
+
+- **A timestamp is civil — there are no time zones in the value model.** It
+  denotes a date and a clock reading, not an instant on a global timeline, so no
+  zone database is needed and `timestamp - timestamp` is exact subtraction. A
+  zoned source column is normalized to UTC at import and its offset dropped
+  (§13), which is where that conversion is visible and stated.
+- **A duration is exact.** It counts microseconds, so every duration has a fixed
+  length. There is deliberately **no month or year unit** (§17): a calendar
+  duration has no fixed length, so `@1mo / @1d` has no value and `D + @1mo` needs
+  a clamping rule for the 31st. Period arithmetic is `std/time`'s job instead —
+  `truncate` groups by month without a month-long duration existing.
+- **Range and overflow.** A microsecond count in an `i64` spans roughly ±292,000
+  years; a temporal operation that leaves the range is a structured error, never a
+  wrap, exactly as integer overflow is (§8).
+- Temporal values order naturally (earlier before later, shorter before longer)
+  and sit **after `bool`** in the cross-type order §14 prints by.
 
 ### Absent — the missing-data value
 
 A distinguished value, **`absent`**, marks missing data (an empty CSV cell, a
-JSON/Parquet null; §13). It is a *value, not a sixth type*: the five static types
+JSON/Parquet null; §13). It is a *value, not a ninth type*: the eight static types
 above are unchanged, and `absent` may inhabit **any** column regardless of that
 column's type (an `int` column may hold `absent`, exactly as a SQL `INT` column
 may be `NULL`). Inference treats `absent` as **type-neutral** — it does not
@@ -316,7 +356,8 @@ The language is statically typed **with full type inference** — annotations ar
 never required. Before evaluation, the engine infers every column's type from:
 
 1. literals in program facts (`30` int, `3.14` float, `"a"` string, `true` bool,
-   bare `red` symbol),
+   bare `red` symbol, `@2026-08-19` date, `@2026-08-19T10:30:00` timestamp,
+   `@1d12h` duration),
 2. column types of imported sources (§13), and
 3. variable flow through rule bodies (a variable unifies the types of every
    position it occupies; builtins constrain their operands, §8).
@@ -404,9 +445,9 @@ adult(N) :- person(name: N, age: A), A >= 18.
   cannot leave columns unbound).
 
 *Not covered:* compound and function terms, and collection-valued columns — the
-value model is flat, which is what blocks `collect`/`string_agg` in §9. Also
-temporal types: a date column from §13 arrives as a string or an int, and there is
-no date arithmetic. Both are ROADMAP items.
+value model is flat, which is what blocks `collect`/`string_agg` in §9. A ROADMAP
+item. Nor **calendar durations** (`@1mo`, `@1y`) or time zones, both excluded by
+the temporal design rather than deferred by it (§17).
 
 ## 5. Syntax
 
@@ -432,7 +473,8 @@ data_import   = "import" string [ "table" string ] "as" ident
                 [ "(" field { "," field } ")" ] "." ;
 declaration = "declare" ident "(" field { "," field } ")" "." ;
 field       = ident [ ":" type ] ;
-type        = "int" | "float" | "string" | "symbol" | "bool" ;
+type        = "int" | "float" | "string" | "symbol" | "bool"
+            | "date" | "timestamp" | "duration" ;
 
 clause      = atom [ ":-" body ] "." ;          (* fact when no body, else rule *)
 query       = "?-" [ ident ":" ] conjunction "." ;  (* conjunctive; the ident names the answer, §14 *)
@@ -446,7 +488,8 @@ positional  = expr { "," expr } ;               (* args are expressions, §17 *)
 named       = ident ":" expr { "," ident ":" expr } ;
 
 term        = constant | variable ;
-constant    = integer | float | string | bool | "absent" | ident ;  (* bare ident = symbol; `absent` = the missing-data value, §4 *)
+constant    = integer | float | string | bool | temporal | "absent" | ident ;  (* bare ident = symbol; `absent` = the missing-data value, §4 *)
+temporal    = TEMPORAL ;                        (* "@"-sigilled date/timestamp/duration, §3 *)
 variable    = VARIABLE ;                        (* uppercase- or "_"-initial, §3 *)
 
 comparison  = expr cmp expr
@@ -511,6 +554,12 @@ Notes:
   begin a statement or a body literal. The right-hand side is the existing `type`
   production, so no new vocabulary is introduced. Chosen over `float(A)` calls and
   over juxtaposition (§17, 2026-07-25).
+- **A temporal literal needs no lookahead**: `@` begins nothing else in the
+  grammar, so the lexer commits on the sigil and the whole literal is one token
+  (§3). A malformed component is a *lexical* error naming it — `@2026-02-30` says
+  the day, not "unexpected character" — which is why the value is lexed rather
+  than parsed from parts. The three type names are the existing `type` production
+  (§4/§8), so the cast form introduces no new vocabulary.
 - **`absent` is a reserved value literal** (§4), joining `true`/`false` as a
   keyword that is not an identifier — a relation, field, or symbol may not be
   named `absent`. It may appear wherever a constant may (facts, heads, arithmetic
@@ -719,15 +768,56 @@ evaluates, `=` **binds** it (`next_year(X, N) :- age(X, A), N = A + 1.` binds
 `N`). Otherwise both sides evaluate and `=` is an equality **filter**
 (`A = 18`). `!= < <= > >=` are always filters.
 
-**Strict types, no coercion.** `int` and `float` are distinct; **symbol**,
-**string**, and **bool** are the other three. Arithmetic requires both operands
-the *same numeric* type — `int op int → int`, `float op float → float`; any
-mixed or non-numeric operand is a **type error**. A comparison requires both
-operands the *same* type (any type); a cross-type comparison is a type error,
-never a silent `false`. Ordered comparisons use the operand type's natural
-order (ints/floats numerically, strings/symbols lexicographically, `false <
-true`). Post-§4, these conflicts are caught before evaluation; pre-typecheck
-they are structured runtime errors — same error channel either way.
+**Strict types, no coercion.** `int` and `float` are distinct. Numeric
+arithmetic requires both operands the *same numeric* type — `int op int → int`,
+`float op float → float`; any mixed operand is a **type error**. **Temporal
+arithmetic is the one heterogeneous case**, stated below; every other operand
+type — symbol, string, bool — is a type error in arithmetic. A comparison
+requires both operands the *same* type (any type); a cross-type comparison is a
+type error, never a silent `false`, and its suggested fix names the cast that
+would make the two agree (`D as timestamp`). Ordered comparisons use the operand
+type's natural order (ints/floats numerically, strings/symbols lexicographically,
+`false < true`, temporal values earliest/shortest first). Post-§4, these
+conflicts are caught before evaluation; pre-typecheck they are structured runtime
+errors — same error channel either way.
+
+**Temporal arithmetic — one rule** (§4 for the domains). This is the only place
+in the language where an operator's two operands have different types, so it is
+stated as a rule and not only as a table:
+
+> A `date` and a `timestamp` are **points**; a `duration` is a **vector**. Point
+> minus point is a vector, point plus-or-minus a vector is a point, and adding
+> two points is meaningless. Vectors add to each other, scale by numbers, and
+> **cancel against each other** — which is the only way a duration becomes a
+> number.
+
+| expression | result |
+|---|---|
+| `date - date`, `timestamp - timestamp` | `duration` |
+| `date ± duration`, `timestamp ± duration` | the same point type |
+| `date + date`, `timestamp + timestamp`, `duration - date` | **type error** |
+| `duration ± duration` | `duration` |
+| `duration * N`, `N * duration`, `duration / N` (`N` an `int` or a `float`) | `duration` |
+| `duration / duration` | `float` |
+| `duration` with a number under `+` `-`, or `date`/`timestamp` with anything under `*` `/` | **type error** |
+
+Mixed point types (`date - timestamp`) are a type error like any other cross-type
+comparison; `D as timestamp` is the fix, and the error says so.
+
+**`duration / duration` is where a program names its unit**, and it is `float`
+rather than `int` deliberately: `@36h / @1d` is `1.5`, and an integer result
+would truncate exactly the way the unitless conversion this rule replaces did
+(§17). Scaling takes an `int` *or* a `float` — a scalar is a scalar, and
+excluding one would be an exception to the rule rather than part of it — and
+truncates toward zero at the microsecond, which is §8's existing
+integer-division behaviour applied to the count. There is **no
+conversion between `duration` and a number** in either direction (the `as` table
+below) — a bare number of *what* is the whole hazard, and division by a duration
+literal is the construct that answers it:
+
+```datalog
+days_open(T, N) :- ticket(id: T, opened: O, closed: C), N = (C - O) / @1d.
+```
 
 **Arithmetic edge cases** are structured errors, never a wrap or panic: integer
 division truncates toward zero, division by zero and integer overflow error, and
@@ -764,7 +854,7 @@ The runtime rule is unchanged: comparing a *variable* that happens to hold
 `absent` against a value is still silently false.
 
 **The `as` cast — explicit conversion** (ratified 2026-07-25; §4 for the type
-rules, §5 for the grammar). `Expr as type` converts a value between the five
+rules, §5 for the grammar). `Expr as type` converts a value between the
 primitive types. It is the *only* way `int` and `float` meet, since the strict
 no-coercion rule above stands:
 
@@ -798,6 +888,27 @@ A `—` is a pair with **no conversion at all**, and writing one is a structured
 error naming both types — a program mistake, like arithmetic over two
 non-numbers. `bool as int` is the shape this excludes; nothing in the value model
 (§4) says which integer a boolean is.
+
+**Temporal conversions** are text, and one widening. Every pair not listed here —
+in particular **`duration` against `int` or `float`, in both directions** — is a
+`—`, and its error names the divisor form instead (`(C - O) / @1d`), because a
+duration rendered as a bare number is a number of nothing:
+
+| conversion | result |
+|---|---|
+| `date`/`timestamp`/`duration` `as string` | render — §14's canonical spelling |
+| `string as date`/`timestamp`/`duration` | read (§3's literal grammar, **without** the `@`) or `absent` |
+| `date as timestamp` | exact — midnight of that day |
+| `timestamp as date` | **lossy: a structured error** |
+| any temporal against `int`, `float`, `bool`, `symbol` | `—` |
+
+`timestamp as date` is the one conversion whose exclusion costs something real:
+truncating a timestamp to its day is what a group-by-day needs. It stays an error
+because `as` neither rounds nor truncates in any other case either, and the
+suggested fix names the construct that does — `truncate(T, day, D)`, from
+`import "std/time".` (§13). Reading a temporal from text takes the *unsigilled*
+form, so `"2026-08-19" as date` works and matches what a CSV cell holds (§13);
+rendering is its inverse and drops the `@` for the same reason.
 
 "Render" is §14's canonical spelling and "read" is §3's literal grammar — the
 same one §13 types an untyped CSV cell with. The two directions are therefore
@@ -853,9 +964,14 @@ guarantees make this a widening rather than a change of meaning:
 *Not covered:* **String operations** — no
 prefix, split or concat, *rejected* rather than deferred (§17, 2026-07-27): string
 construction fails §10's termination test. **Builtin scalar functions** (`abs`,
-`length`, `lower`, `substr`) are deferred until a consumer needs them, and
-user-defined ones are declined — a rule already is one. **Implicit int/float
-widening** does not happen; the import boundary is the only coercion site.
+`length`, `lower`, `substr`) are still deferred until a consumer needs them, but
+they are no longer *shapeless*: a builtin is a **relation from a `std` module**
+(§13), which is how `std/time` spells extraction, so the `ident (` ambiguity that
+ruled out `float(A)` never arises. User-defined ones stay declined — a rule
+already is one. **Implicit int/float widening** does not happen; the import
+boundary is the only coercion site. **Calendar arithmetic** — `D + @1mo`, "age in
+years" as a subtraction — is excluded with the calendar duration (§4); `std/time`
+is where a program reaches a month or a year.
 
 ## 9. Aggregation
 
@@ -938,14 +1054,23 @@ in v1; project into a helper relation first if you need one.
 | op | over | result type | absent |
 |----|------|-------------|--------|
 | `count` | any type | `int` | counts absent bindings too |
-| `sum` | `int` or `float` | same numeric type | skips |
-| `avg` | `int` or `float` | `float` | skips |
+| `sum` | `int`, `float`, or `duration` | same type as `Expr` | skips |
+| `avg` | `int`, `float`, or `duration` | `float` for a numeric `Expr`, `duration` for a `duration` | skips |
 | `min` / `max` | any single ordered type | same type as `Expr` | skips |
 
-`sum`/`avg` require a numeric `Expr`; `min`/`max` accept any single type under
-its natural order (numeric, string/symbol lexicographic, `false < true`); `count`
-accepts anything. A cross-type or non-numeric misuse is a §4 type error before
-evaluation, never a silent result.
+`sum`/`avg` require a numeric or `duration` `Expr`; `min`/`max` accept any single
+type under its natural order (numeric, string/symbol lexicographic, `false <
+true`, temporal earliest/shortest first); `count` accepts anything. A cross-type
+or non-numeric misuse is a §4 type error before evaluation, never a silent result.
+
+**Durations reduce, points do not.** `sum` and `avg` fold with `+` and then
+divide, and §8's algebra says a vector may do both while a point may do neither —
+so `sum { D | order(date: D) }` over a `date` column is a type error, and the
+message says adding two dates has no meaning rather than "not numeric". `avg`
+over durations is a `duration` and not a `float`, because `duration / int` is a
+duration: the general "`avg` is `int → float`" rule is about *numbers* losing
+their exactness, and the vector rule already answers the question for a duration.
+It truncates toward zero at the microsecond, as that division does.
 
 ### Absent inputs — skip but report
 
@@ -1067,12 +1192,21 @@ nat(N) :- nat(M), K = M + 1, N = K.          % through a bare variable
 nat(N) :- nat(M), N = (M + 1) as int.        % under a cast
 ```
 
-Two constructs deliberately do **not** compute a value. An `as` **cast**
+Three constructs deliberately do **not** compute a value. An `as` **cast**
 propagates but never creates — it maps a finite value set to a finite value set
 with no accumulation (§8) — so `N = M as int` over an uncomputed `M` is certified.
 An **aggregate** result is a function of a relation stratified strictly below
-(§9), so its range is already finite. A ground expression (`N = 1 + 1`) yields one
+(§9), so its range is already finite. A **`std` module relation** (§13) is a
+finite-domain map for the same reason the cast is: `year(D, Y)` and
+`truncate(D, month, M)` read a bound input and produce one value that is no
+larger, so neither accumulates. A ground expression (`N = 1 + 1`) yields one
 value however often it runs.
+
+**Temporal arithmetic computes**, and is not an exception to any of this:
+`D = D0 + @1d` in a head on a positive cycle is value-creating exactly as
+`N = M + 1` is, and gets the same warning. The classification keys on the
+operator, so this needs no separate rule — but it is the shape a date-walking
+recursion takes, so it is worth saying it is covered.
 
 **Why a warning and not an error.** The uncertified shape is written on purpose
 and is usually right:
@@ -1203,6 +1337,14 @@ name and, for imports, the row and column, but not yet a span (below).
 hints models reach for out of a Prolog prior (`=<` → `<=`, `\=` → `!=`), an
 uppercase relation name, the nearest defined predicate for a typo.
 
+**A gated name is the fix's clearest case** (§13). A `std` module's relations are
+only in scope where the module is imported, so using one without the import is
+the ordinary referenced-but-undefined warning — and the suggestion turns it into
+one step: `` `year` is provided by `std/time`; add `import "std/time".` ``. This
+is deliberate design cost, not an accident: gating is what lets those relations
+take short names that would otherwise be unusable as reserved words, and the
+suggestion is what keeps the gate from costing a round of guessing.
+
 **Rendering** is `"{category} error: {message} (at {line}:{column}) ({suggestion})"`,
 composed from the fields — so a future `--format json` edge (§14) serializes the
 same data with no message re-parsing.
@@ -1252,8 +1394,18 @@ import "data/parents.csv" as parent.
   delegating to a reader's type sniffer, §17): a cell is typed int, float, or
   bool **iff the lexer reads it as exactly that literal** (as accepted in fact
   positions, including a leading sign); anything else is a string, and an **empty
-  cell is the absent value** (§4). A column's type is the unification of its
-  **non-absent** cells: all-int → int, int/float mix → float, all-bool → bool,
+  cell is the absent value** (§4). **A cell in ISO-8601 extended form is typed
+  temporal** — `2026-08-19` a date, `2026-08-19T10:30:00` a timestamp — which is
+  the one place the rulebook reads a cell as a literal it is not spelled as: the
+  `@` sigil is a delimiter the way a string's quotes are, and a CSV `alice`
+  already becomes the string `"alice"` rather than the symbol `alice` on exactly
+  that reasoning. Inference is **strict about the form**: the space-separated
+  `2026-08-19 10:30:00` common in exports stays a string, and an explicit schema
+  (`as t(d: timestamp)`) is what reads it, since a declared type *coerces* and is
+  deliberately more permissive than inference. Durations are never inferred. A
+  column's type is the unification of its **non-absent** cells: all-int → int,
+  int/float mix → float, all-bool → bool, all-date → date, a date/timestamp mix →
+  timestamp (exact, at midnight),
   anything else → string; missing cells become `absent` and do **not** force the
   column's type (an int column with gaps stays `int` — this unbroke the USDA
   `amount`/`food_category_id` columns, §17 2026-07-24). An int/float mix widens
@@ -1269,12 +1421,21 @@ import "data/parents.csv" as parent.
   (§4), else left unconstrained. Inferred types are never symbol. This makes the
   anchor property exact:
   **an import means precisely the facts you would get by writing its cells as
-  in-program literals**, and inference is deterministic across engine and
+  in-program literals, each cell delimited as its type requires** — a string's
+  quotes and a temporal's `@` are supplied by the reader, exactly as they would
+  be by a hand writing the fact. Inference stays deterministic across engine and
   dependency versions.
 - **Typed sources are their own authority**: JSON, Parquet, and database columns
-  carry types, coerced onto the five value types (a JSON `"42"` stays a string,
-  never re-inferred; ints are range-checked into int; date/time-like types become
-  their ISO text as strings). A **null / missing value from any source becomes the
+  carry types, coerced onto the value types (a JSON `"42"` stays a string, never
+  re-inferred; ints are range-checked into int). A `DATE` column becomes `date`
+  and a timestamp column `timestamp`, at microsecond precision — a finer-grained
+  source column is a precision error naming the column, on the same rule that
+  rejects a lossy int→float widening below. **A zoned timestamp is converted to
+  UTC and its offset dropped**, since §4's timestamp is civil: the instant is
+  preserved and the displayed clock reading may change, which is why it is stated
+  here rather than left to the reader. An `INTERVAL` becomes a `duration` when it
+  is exact, and stays text when it carries a month or year component, which §4
+  has no value for. A **null / missing value from any source becomes the
   absent value** (§4), uniformly — an empty CSV cell, a missing JSON key or
   explicit `null`, a Parquet/DB `NULL`; nested/compound values remain structured
   errors naming row and column. This replaces the former three-backend split (CSV
@@ -1344,14 +1505,65 @@ import "lib/family.dl".
   global namespace exactly as if written in the importing file.
 - A query (`?- …`) in an imported file is a structured error naming the file —
   libraries define, they don't ask. Root-file queries are unaffected.
-- Module imports are local files only in v1 (no URL modules).
+- Module imports are local files only in v1 (no URL modules) — with one
+  exception, below, which is not a file at all.
+
+### `std` modules — the builtins the language cannot spell
+
+```datalog
+import "std/time".
+```
+
+Some operations a rule cannot express are also unspellable as *functions*: an
+`ident (` in expression position is ambiguous between an atom and a call, which
+is what ruled out `float(A)` (§17). As a **body literal** there is no ambiguity,
+so a builtin is a **relation**, and `std` modules are how a program asks for one.
+
+- **`std/` is a reserved virtual path prefix**, resolved before the filesystem is
+  consulted. It needs no grammar: `import "std/time".` has no `as` clause, so it
+  is already a module import by the shape rule above. A real `./std/` directory
+  that would otherwise shadow it is a **structured error**, never a silent
+  preference for one or the other.
+- **The relations are in scope only where the module is imported.** That is the
+  point of the gate rather than an access-control feature: it is what lets them
+  take short, obvious names — `year`, `month`, `day` — which as *reserved* words
+  would break every program with a column called `year`. An unimporting program
+  is unaffected, and using a gated name without the import is §12's
+  referenced-but-undefined warning carrying the import line as its fix.
+- **A collision is an error naming both origins**, exactly as two disagreeing
+  `declare` schemas are (§4): a program that imports `std/time` and also defines
+  its own `year` is rejected, and never silently resolved in either direction.
+- **They bind like any body literal.** Every argument a module relation reads
+  must be bound by the body in §10's sense, so `day(D, 15)` is a filter and
+  `day(D, N)` binds `N`; the scheduler places them like it places a comparison.
+  They are finite-domain maps, so §10 exempts them from value-creating recursion.
+
+**`std/time`** is the first and, in v1, the only one:
+
+| relation | reads | binds |
+|---|---|---|
+| `year(V, N)` `month(V, N)` `day(V, N)` | a `date` or `timestamp` | an `int` component |
+| `hour(V, N)` `minute(V, N)` `second(V, N)` | a `timestamp` | an `int` component |
+| `truncate(V, U, V')` | a point `V`, a unit symbol `U` | the same point type, at the start of that period |
+
+`U` is one of `year`, `quarter`, `month`, `week`, `day`, `hour`, `minute`; a
+symbol outside that set is a structured error listing it. `truncate` is what
+`timestamp as date` refuses to be (§8), and it is what a group-by-period joins
+on — one sortable key rather than a tuple of components, and the only spelling
+that reaches a week or a quarter at all.
+
+*Not covered:* **`std/math`** (`abs`, `ceil`, `floor`) and **`std/text`**
+(`length`, `lower`, `substr`) — the deferred builtin scalars (§8) now have a home
+and a spelling, and stay deferred until a consumer needs them. The mechanism was
+designed for them and not only for `std/time`, deliberately (§17).
 
 *Not covered:* **database loading** — the `table "…"` grammar is reserved and
 SQLite/DuckDB/Postgres loading is deferred until a consumer needs it — and **TSV**,
 deferred with it. **Filter pushdown**: every import is eagerly materialized, so a
 large source is read whole; pushing selections into SQL waits on someone hitting
 that wall. **Module namespacing**: v1 shares one global namespace, and qualified
-names and visibility are deferred. A cell the reader cannot represent is a
+names and visibility are deferred — `std/` is a reserved *prefix*, not a
+namespace system, and gates a module's names rather than qualifying them. A cell the reader cannot represent is a
 structured error, and what that costs the *run* is §15's.
 
 ## 14. Programmatic / agent API
@@ -1372,9 +1584,19 @@ itself**:
   the `run` pipeline (`src/api.rs`), 2026-07-22.
 
 **Canonical output form** (resolved 2026-07-22). Values print in the §4
-cross-type order (symbol < string < int < float < bool); strings are
-double-quoted with the §3 escapes; a float always carries a decimal point
-(`1.0`, not `1`) so it re-lexes as a float.
+cross-type order (symbol < string < int < float < bool < date < timestamp <
+duration); strings are double-quoted with the §3 escapes; a float always carries
+a decimal point (`1.0`, not `1`) so it re-lexes as a float.
+
+**A temporal value prints as its §3 literal, sigil included** — `@2026-08-19`,
+`@2026-08-19T10:30:00`, `@1d12h` — which is what keeps the closure property true
+of a program that computes one. Three spellings are canonical where the grammar
+accepts more: a timestamp's fractional part appears **only when nonzero**, a
+duration is the **largest-unit decomposition** with zero components omitted
+(`@1d12h`, never `@1d12h0m`), and zero is `@0s`. An ISO-8601 duration read on
+input (§3) therefore prints in the friendly form — the two spellings are one
+value, and the canonical one is chosen so that printing is a function of the
+value and not of how it was written.
 
 A query that **names itself** answers under that name: `?- adult: person(N, A),
 A >= 18.` prints `adult` facts, one per answer row, over exactly the columns the
@@ -1618,7 +1840,7 @@ sets, indexes, parallelism, incremental maintenance.
 > Each example ends with the design questions it settled or still raises.
 >
 > **An example is a claim about the engine, so it should name the test that runs
-> it.** Only §16.9 does — a ROADMAP item for the other eight, and the reason a
+> it.** §16.9 onward do — a ROADMAP item for the other eight, and the reason a
 > block nobody wired up could quietly stop being true (§17, 2026-08-16).
 > Everything below is ratified in §3–§5, §8, §9 and §13 except §16.6's `?why`
 > form, whose surface was designed 2026-08-16 and is not built.
@@ -2011,6 +2233,67 @@ fire on a program that failed to compile, while the inverted `-q
 'double_booked(P, D)' || deploy` deploys on a syntax error exactly as readily as
 on a clean roster.
 
+### 16.14 Temporal values — a typed date column, its arithmetic, and a period key
+
+Run by `tests/system.rs::temporal_program_types_dates_and_groups_by_period` over
+`tests/programs/16_14_temporal.dl` and `tests/programs/data/tickets.csv`:
+
+```
+id,opened,closed
+1,2026-06-28,2026-06-30
+2,2026-07-02,2026-07-05
+3,2026-07-20,2026-07-21
+```
+
+```datalog
+% §13 types both date columns with no explicit schema — the cells are ISO-8601
+import "data/tickets.csv" as ticket.
+% the extraction and truncation relations are gated; without this line `month`
+% and `truncate` are ordinary undefined predicates (§12 says so, with the fix)
+import "std/time".
+
+% §8's algebra: point - point is a vector, and the divisor is where the unit is
+% named. There is no `as number` to get this wrong with.
+days_open(T, N) :- ticket(id: T, opened: O, closed: C), N = (C - O) / @1d.
+slow(T)         :- days_open(T, N), N > 2.0.
+
+% a date range filter, with no cast and no string comparison standing in for one
+recent(T) :- ticket(id: T, opened: O), O >= @2026-07-01.
+
+% extraction reads a component; the same relation is a filter when its output
+% position is a constant
+june(T) :- ticket(id: T, opened: O), month(O, 6).
+
+% a period key is one sortable value, so grouping is an ordinary join
+month_opened(T, M) :- ticket(id: T, opened: O), truncate(O, month, M).
+per_month(M, N)    :- month_opened(_, M), N = count { T | month_opened(T, M) }.
+```
+```
+days_open(1, 2.0).
+days_open(2, 3.0).
+days_open(3, 1.0).
+slow(2).
+recent(2).
+recent(3).
+june(1).
+month_opened(1, @2026-06-01).
+month_opened(2, @2026-07-01).
+month_opened(3, @2026-07-01).
+per_month(@2026-06-01, 1).
+per_month(@2026-07-01, 2).
+```
+(One query per relation, in the order above; answers are sorted within a query.)
+*Resolved (§3/§4/§8/§13, 2026-08-19):* three primitive types with `@`-sigilled
+literals; one heterogeneous arithmetic rule (points and vectors) in place of a
+table to memorize; `duration / duration → float` as the only path from a duration
+to a number, so a unit is always written down; ISO-8601 cells inferred temporal by
+§13; and extraction/truncation as **relations from a gated `std` module**, which
+is what makes `month` and `truncate` usable as names at all. *Still raises:* the
+output above is a projection of every derived relation — a `truncate` result
+printed as `@2026-06-01` is a *date*, and a reader who wants "June 2026" is
+reading a start-of-period convention rather than a month value, the price of not
+adding a granularity type (§17).
+
 ## 17. Decisions log & open questions
 
 This section is an **append-only record**: history is what it is for. Amend
@@ -2038,6 +2321,49 @@ marker that records a decision working out *well*, which the log would otherwise
 never say.
 
 ### Decisions
+
+- **2026-08-19** — **Temporal values: three types, one algebra, and the unit at the
+  divisor** (§3/§4/§8/§9/§13). The design space, the measurements and the four
+  rejected alternatives are in
+  [`notes/temporal-values.md`](notes/temporal-values.md).
+  - **`date`, `timestamp`, `duration`**, `@`-sigilled literals. The sigil is
+    **decided by §14's closure**, not by taste: output must re-parse, so a
+    computed date needs a spelling. **Rejected: bare ISO**, which today lexes as
+    `2026 - 08 - 19` and evaluates to `1999` — accepting it changes the meaning of
+    existing arithmetic silently.
+  - **Points and vectors, stated as a rule** rather than a table, and it is the
+    language's first heterogeneous operator typing. `duration / duration → float`
+    is the only path from a duration to a number, so a unit is always written
+    down — the sibling engine's `172800000` finding excluded *by construction*
+    rather than by a paragraph in a guide.
+  - **`timestamp` is civil, durations are exact.** No zones, no `@1mo`/`@1y` — and
+    the absence of a month unit is what leaves `m` unambiguously minutes.
+  - **CSV infers temporal**, and the §13 anchor property is restated ("each cell
+    delimited as its type requires") rather than broken: `alice` → `"alice"` was
+    already the same rule.
+  - **`timestamp as date` stays a lossy error**, with `truncate` named as the fix.
+    The one tension resolved *for* an existing rule; §16.14 records what that
+    costs. Named tests: `system::temporal_program_types_dates_and_groups_by_period`
+    (§16.14), the **T3** unit property (`testing.md`).
+
+- **2026-08-19** — **A builtin is a relation from a gated `std` module**
+  (§8/§12/§13). Long form in
+  [`notes/temporal-values.md`](notes/temporal-values.md).
+  - **The gate buys the short names, not safety.** `year`, `month`, `day` are the
+    names a program wants *and* the names a data column has; reserving them would
+    break every program with a `year` column. Unimported they stay ordinary
+    relations, so nothing existing changes meaning; imported, a collision is an
+    error naming both origins. **Rejected: silent user-wins shadowing** — the
+    silent-meaning-change class this repo has already paid for twice.
+  - **`std/` is a reserved virtual path prefix**, needing no grammar: a module
+    import is already the no-`as` shape (§13). A real `./std/` is a loud error.
+  - **The mechanism was designed past `std/time`, deliberately.** It answers the
+    blocking half of the deferred builtin-scalars question — a body literal
+    opening with an identifier can only be an atom, so the `ident (` ambiguity
+    that ruled out `float(A)` never arises — and settling only what temporal
+    needed would have fixed that shape by accident.
+  - **The cost is a failed first attempt**, so §12's did-you-mean carries the
+    import line and ships with the module rather than after it.
 
 - **2026-08-18** — **The caller's contract: the exit code answers the question**
   (§12/§14/§15). Five axes, their evidence and the alternatives that lost are in
@@ -3810,6 +4136,15 @@ never say.
   If they land, the `ident (` ambiguity above must be solved (scan-ahead is the
   candidate), and note `min`/`max` would coexist harmlessly with the aggregates,
   since `min { X | goal }` and `min(A, B)` differ by delimiter. — §5/§8.
+  - ***Answered 2026-08-19 — in the shape, not the deferral.*** The temporal
+    session's `std`-module decision settles what a builtin *is*: a **relation**
+    from a gated module, so `std/math` and `std/text` have a home and the
+    `ident (` ambiguity never arises — it only ever existed for a *call* in
+    expression position. The scan-ahead candidate is therefore **not needed** and
+    is withdrawn rather than parked. What survives is exactly the original
+    deferral: these land when a consumer needs them. Note what this entry got
+    right and for the wrong reason — it called the ambiguity the blocker, which
+    was true, and assumed the fix had to be lexical, which was not.
 - **Is the three-way body-grammar split deliberate?** Rule bodies are DNF; queries
   and aggregate goals are conjunction-only. §5 states the query half as an aside
   ("Queries stay conjunctive") and §9 the goal half in passing, but nothing says
@@ -3966,6 +4301,12 @@ never say.
   a consumer hits the wall. — §13.
 - **Module namespacing:** v1 module imports share one global namespace;
   qualified names/visibility deferred until a real consumer needs them. — §13.
+  - ***Amended 2026-08-19.*** It has a consumer now — `std/time`'s relations are
+    scoped to the programs that import them — and the answer taken was **not**
+    namespacing: `std/` **gates** a set of names rather than qualifying them, so a
+    collision is an error instead of being resolved by a prefix. The question
+    stands unchanged for user modules; what the consumer showed is that gating
+    and qualifying are separable, and that the cheaper one covered this case.
 - **Recursive/monotonic aggregation:** v1 rejects recursion through an aggregate
   via stratification (§9, resolved 2026-07-24); how far to take a fixpoint
   semantics for recursive aggregates (Zaniolo et al., `references.md`) is the

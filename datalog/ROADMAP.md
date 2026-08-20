@@ -123,27 +123,19 @@ and **`absent` for an unrepresentable conversion, an error for a lossy one**.
 
 *Superseding the former "scalar-function call form" item*: user-defined scalar
 functions were **declined** 2026-07-25 (a rule already is one; §17), and
-conversion is the cast. What remains is only *builtin* scalars with no relational
-spelling (`abs`, `length`, `lower`, `substr`), deferred until a consumer needs
-them — §17's open questions. If those land they must solve the `ident (`
-atom-vs-call ambiguity that ruled out `float(A)`; scan-ahead is the candidate.
+conversion is the cast. What remains is only *builtin* scalars (`abs`, `length`,
+`lower`, `substr`), still deferred until a consumer needs them — but their
+**shape is settled 2026-08-19**: a builtin is a relation from a gated `std`
+module (§13), so the `ident (` ambiguity that ruled out `float(A)` never arises
+and the scan-ahead candidate is withdrawn.
 
 ### The value model (§4)
 
-- **Temporal types — `date`, `timestamp`, `duration`.** The value model has five
-  primitives and nothing temporal, so a date column out of §13's CSV/JSONL/Parquet
-  lands as a string or an int and there is no arithmetic over it. This engine needs
-  them *more* than a semantic-layer engine does, because it imports real files where
-  date columns are ubiquitous. **Read the sibling engine's finding before designing
-  it** (`notes/tsdl-cross-project-review.md`): a subject asked for "days" got
-  `172800000` with no error, because the cast it wrote was not wrong — it yielded
-  milliseconds — and they closed it by *deleting* the cast in favour of
-  `duration / duration → number`, so the divisor is where a program names its unit.
-  A unit that has to be documented is the design being wrong.
-  **Ranked above the profile 2026-08-18**: date columns are ubiquitous in the files
-  §13 exists to read, and a fast engine that cannot read one loses to a slow engine
-  that can — and unlike the profile's leads, this item's design input is already in
-  hand. _queued (own session) — **v1** (S4: "met except dates")._ — §4/§8/§13, [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
+- **Temporal types — `date`, `timestamp`, `duration`.** Designed 2026-08-19:
+  `@`-sigilled literals, points-and-vectors arithmetic with `duration / duration
+  → float` as the only route to a number, CSV inference, and extraction/truncation
+  as gated `std/time` relations. _building — **v1** (S4: "met except dates")._
+  — §3/§4/§8/§9/§13, §16.14, [`notes/temporal-values.md`](notes/temporal-values.md).
 
 ### Termination & value-creating recursion (§6/§10) — shipped
 
@@ -367,6 +359,15 @@ them. Except where noted these are documented v1 limits rather than defects.
   (2026-08-18), since a profile is under pressure to make the recorder optional and
   pillar 1 is the only argument that it should not be. _queued (after profiling) — **v1**, decided with the query surface._
   — §11/engine, [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
+
+### `std` modules (§8/§12/§13)
+
+- **The mechanism, and `std/time` as its first module.** A builtin is a *relation*
+  from a gated module; `std/` is a reserved virtual path prefix; a name collision
+  is an error naming both origins. Designed and normative 2026-08-19; ships with
+  temporal types above. `std/math` and `std/text` are designed, **not built**, and
+  stay deferred until a consumer needs them. _building — **v1** (rides S4)._ —
+  §13, [`notes/temporal-values.md`](notes/temporal-values.md).
 
 ### Import follow-ons (§13)
 

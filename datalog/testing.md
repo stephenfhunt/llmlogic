@@ -692,8 +692,8 @@ did-you-mean set, one test each).
 **§3's keyword lists are asserted, not just written** (2026-07-27, `bugs/003`).
 `every_reserved_word_is_rejected_as_a_relation_name` and
 `contextual_keywords_are_ordinary_relation_names` are table-driven over the two
-lists §3 states — the eight reserved words, and the eleven contextual ones
-(`table`, the five type names, the five aggregate operators) — plus a field-name
+lists §3 states — the eight reserved words, and the fourteen contextual ones
+(`table`, the eight type names, the five aggregate operators) — plus a field-name
 case for the other half of "relation *or field* names". They exist because §3 had
 silently fallen two words behind the lexer: `absent` and `is` were reserved with
 no §3 edit, and nothing failed. A doc list a test walks is the only version of
