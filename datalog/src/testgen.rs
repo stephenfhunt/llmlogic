@@ -283,6 +283,45 @@ pub(crate) fn arb_safe_program() -> impl Strategy<Value = Program> {
     arb_program_spec(lowering_bounds()).prop_map(build_program)
 }
 
+/// One program and a **permutation of its statements** — for the claim that
+/// source order carries no meaning (§5/§7).
+///
+/// Built at [`eval_bounds`] rather than `lowering_bounds` because the property
+/// evaluates both halves; `arb_safe_program`'s wider bounds are affordable for
+/// lowering and not for a fixpoint.
+///
+/// Permuting statements is a coarser move than B6's, and deliberately so. B6
+/// swaps two rules *within a stratum*; this reorders facts, `declare`s, rules
+/// and queries against each other, which varies three things at once — the order
+/// predicates are **interned** (so `PredId`s differ, and comparisons must go by
+/// name), the numbers **Ullman relaxation** assigns, and the order **type
+/// inference** unifies columns.
+pub(crate) fn arb_statement_permutation() -> impl Strategy<Value = (Program, Program)> {
+    (
+        arb_program_spec(eval_bounds()),
+        proptest::collection::vec(any::<u16>(), 0..24),
+    )
+        .prop_map(|(spec, picks)| {
+            let base = build_program(spec);
+            // Fisher-Yates by repeated removal, so any permutation is reachable
+            // and shrinking a pick shortens the displacement rather than
+            // scrambling the rest.
+            let mut pool: Vec<Statement> = base.statements.clone();
+            let mut permuted: Vec<Statement> = Vec::with_capacity(pool.len());
+            let mut picks = picks.into_iter();
+            while !pool.is_empty() {
+                let pick = picks.next().unwrap_or(0) as usize % pool.len();
+                permuted.push(pool.remove(pick));
+            }
+            (
+                base,
+                Program {
+                    statements: permuted,
+                },
+            )
+        })
+}
+
 /// A lowered, evaluation-ready program with its EDB (testing.md Phases B/E):
 /// [`arb_program_spec`] under [`eval_bounds`], built and lowered. Lowering is
 /// total on safe-by-construction programs (property A11), so the `expect`

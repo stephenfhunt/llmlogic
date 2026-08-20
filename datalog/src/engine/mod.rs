@@ -4015,6 +4015,108 @@ mod tests {
                 prop_assert_eq!(model_facts(&eval(&swapped).unwrap()), expected);
             }
 
+            /// **C13 — statement order carries no meaning**, in three senses at
+            /// once: permuting a program's statements changes neither the
+            /// accept/reject verdict, nor the inferred column types, nor the
+            /// model.
+            ///
+            /// B6 swaps two rules *within a stratum*. This reorders facts,
+            /// `declare`s, rules and queries against each other, which varies
+            /// three things B6 holds fixed — the order predicates are
+            /// **interned** (so `PredId`s differ and every comparison here goes
+            /// by name), the numbers **Ullman relaxation** assigns, and the
+            /// order **type inference** unifies columns.
+            ///
+            /// The type half is the one with nothing else looking at it.
+            /// **Inference confluence has no other property**: C4 checks
+            /// soundness and C5 completeness, both at one fixed statement order,
+            /// so a unifier that seeded a column from whichever constraint it
+            /// met first would satisfy both and fail here.
+            ///
+            /// Verified free of ordering constraints before being written: a
+            /// program with its query first and its facts last runs identically,
+            /// and §13 puts no position requirement on an `import` either — so
+            /// an unconstrained permutation is the right generator and not an
+            /// over-reach.
+            ///
+            /// **Mutation-verified, and the pair of results is the record worth
+            /// keeping.** Making `set_type` take the *last* constraint rather
+            /// than unifying reddens C13 while **C4, C5 and C6 all stay green** —
+            /// the measurement behind the confluence claim above. (It also
+            /// reddens three conflict-detection tests, since last-wins removes
+            /// the error too, so the aim is broad; the C4/C5/C6-versus-C13
+            /// contrast is the part that discriminates.)
+            ///
+            /// The second is an **equivalent mutant, deliberately**: gathering
+            /// fact constraints in reverse order reddens *nothing at all*. That
+            /// is not a gap — it is what confluence means, and it is the
+            /// positive evidence that C13 asserts something true rather than
+            /// something merely unbroken. A property whose claim is "order does
+            /// not matter" should be immune to a pure reordering of the code
+            /// that implements it.
+            #[test]
+            fn c13_statement_order_changes_nothing(
+                (base, permuted) in crate::testgen::arb_statement_permutation()
+            ) {
+                let (a, b) = (lower(&base), lower(&permuted));
+                let (a, b) = match (a, b) {
+                    (Ok(a), Ok(b)) => (a, b),
+                    (Err(_), Err(_)) => return Ok(()),
+                    (a, b) => {
+                        prop_assert!(
+                            false,
+                            "reordering changed whether the program lowers: {} vs {}",
+                            a.is_ok(),
+                            b.is_ok()
+                        );
+                        unreachable!("prop_assert!(false) returns")
+                    }
+                };
+
+                // The verdict, and the inferred types behind it.
+                match (crate::typecheck::typecheck(&a), crate::typecheck::typecheck(&b)) {
+                    (Ok(ta), Ok(tb)) => {
+                        // By predicate *name*: interning order differs, which is
+                        // half of what this property is about.
+                        for pred in (0..a.predicates.len() as u32).map(PredId) {
+                            let info = a.pred_info(pred);
+                            let other = (0..b.predicates.len() as u32)
+                                .map(PredId)
+                                .find(|p| b.pred_info(*p).name == info.name);
+                            let Some(other) = other else {
+                                prop_assert!(false, "predicate {} vanished", info.name);
+                                unreachable!("prop_assert!(false) returns")
+                            };
+                            for col in 0..info.arity as usize {
+                                prop_assert_eq!(
+                                    ta.column_type(pred, col),
+                                    tb.column_type(other, col),
+                                    "column {}.{} inferred differently under a reordering",
+                                    info.name,
+                                    col
+                                );
+                            }
+                        }
+                    }
+                    (Err(_), Err(_)) => return Ok(()),
+                    (ta, tb) => {
+                        prop_assert!(
+                            false,
+                            "reordering changed the type verdict: {} vs {}",
+                            ta.is_ok(),
+                            tb.is_ok()
+                        );
+                        unreachable!("prop_assert!(false) returns")
+                    }
+                }
+
+                prop_assert_eq!(
+                    named_facts(&eval(&a).unwrap(), &a),
+                    named_facts(&eval(&b).unwrap(), &b),
+                    "reordering changed the model"
+                );
+            }
+
             /// B7 — independent oracle: random edges through the §16.1
             /// ancestor program equal a hand-rolled DFS transitive closure.
             #[test]
