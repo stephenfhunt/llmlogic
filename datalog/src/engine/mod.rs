@@ -4341,6 +4341,112 @@ mod tests {
                 }
             }
 
+            /// **C14 — the *explanations* are order-invariant too**, not just
+            /// the model. Permuting a stratum's rules, or a rule's body,
+            /// leaves the set of recorded derivations unchanged.
+            ///
+            /// B5 and B6 compare `model_facts` and nothing else. So the model
+            /// was order-invariant by property and the derivations were
+            /// order-invariant only by hope — and provenance is pillar 1, where
+            /// an answer to "why?" that depends on how the body was typed out is
+            /// the failure the pillar cannot afford. E1–E4 all check derivations
+            /// against a *single* evaluation and never across two.
+            ///
+            /// The comparison is exact rather than a multiset, because
+            /// `premises[i]` is aligned with body literal `i`
+            /// ([`crate::ir::BodyIdx`]): swapping body positions `i` and `j`
+            /// must swap exactly those two premises, so the property un-swaps
+            /// them and asserts equality. Keying by rule + premise multiset
+            /// would have been the weaker claim, and would not have noticed a
+            /// premise landing at the wrong `BodyIdx` — which is precisely what
+            /// E3's replay depends on and what
+            /// `a_computed_negated_argument_is_recorded_as_a_closed_no_match`
+            /// pins for one shape.
+            ///
+            /// **Mutation-verified, and it is the cleanest kill in the suite.**
+            /// Recording premises in *schedule* order rather than at their
+            /// `BodyIdx` — evaluation untouched, only the recording changed —
+            /// reddens **C14 and nothing else**. B5 and B6 stay green because
+            /// they compare models; the model is genuinely unaffected.
+            ///
+            /// **E3 stays green too, and that is worth recording.** Replay zips
+            /// body literals against premises and `continue`s on a mismatched
+            /// pair rather than failing, so a permutation that moves a positive
+            /// premise opposite a negated literal slips straight through the
+            /// strongest provenance property in the suite. E1/E2/E4 are equally
+            /// blind, checking derivations against a single evaluation. Nothing
+            /// before this asserted that an explanation is a function of the
+            /// program's *meaning* rather than of how its body was typed out.
+            #[test]
+            fn c14_reordering_does_not_change_the_derivations(
+                program in arb_program_with_edb(),
+                rule_sel in any::<u8>(),
+                stratum_sel in any::<u8>(),
+                i in any::<u8>(),
+                j in any::<u8>(),
+                swap_body in any::<bool>(),
+            ) {
+                let base = eval(&program).unwrap();
+
+                if swap_body {
+                    if program.rules.is_empty() {
+                        return Ok(());
+                    }
+                    let rule_idx = rule_sel as usize % program.rules.len();
+                    let len = program.rules[rule_idx].body.len();
+                    if len < 2 {
+                        return Ok(());
+                    }
+                    let (a, b) = (i as usize % len, j as usize % len);
+                    let swapped = crate::testgen::with_swapped_body(
+                        program.clone(), rule_sel, i, j,
+                    );
+                    let after = eval(&swapped).unwrap();
+
+                    for fact in base.facts() {
+                        let want: BTreeSet<Derivation> =
+                            base.derivations_of(&fact).cloned().collect();
+                        // Un-swap: premises follow their body literal, so the
+                        // two moved positions come back before comparing.
+                        let got: BTreeSet<Derivation> = after
+                            .derivations_of(&fact)
+                            .map(|d| {
+                                let mut d = d.clone();
+                                if d.rule.0 as usize == rule_idx && a != b {
+                                    d.premises.swap(a, b);
+                                }
+                                d
+                            })
+                            .collect();
+                        prop_assert_eq!(
+                            got, want,
+                            "swapping body literals {} and {} of rule {} changed the \
+                             derivations of {:?}",
+                            a, b, rule_idx, &fact
+                        );
+                    }
+                } else {
+                    let swapped = crate::testgen::with_swapped_stratum_rules(
+                        program.clone(), stratum_sel, i, j,
+                    );
+                    let after = eval(&swapped).unwrap();
+                    // Rule ids are unchanged by a stratum reordering, so this
+                    // half needs no remapping at all.
+                    for fact in base.facts() {
+                        let want: BTreeSet<Derivation> =
+                            base.derivations_of(&fact).cloned().collect();
+                        let got: BTreeSet<Derivation> =
+                            after.derivations_of(&fact).cloned().collect();
+                        prop_assert_eq!(
+                            got, want,
+                            "reordering rules within a stratum changed the \
+                             derivations of {:?}",
+                            &fact
+                        );
+                    }
+                }
+            }
+
             /// E1 — every derived fact has at least one derivation, and at
             /// least one of them is *well-founded*: every fact premise first
             /// appeared in a strictly earlier round than the fact itself
