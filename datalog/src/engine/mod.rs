@@ -863,9 +863,20 @@ pub(crate) struct AggregateOutcome {
 /// - `sum` folds through the §8 arithmetic (same overflow/type rules); `avg` is
 ///   the float mean of the present values; `min`/`max` take the natural-order
 ///   extreme of a single ordered type.
+///
+/// The present values are folded in **§14 order**, not the order they were
+/// collected in (`bugs/007`). §9 defines the aggregate over a *multiset*, so the
+/// caller's enumeration order must not reach the answer — and it did: witnesses
+/// arrive in the order the goal's literals happen to be scheduled, which is a
+/// spelling §17 (2026-07-25) promises is irrelevant. Sorting is what makes that
+/// promise true wherever the fold is not associative over the value type.
 pub(crate) fn fold_aggregate(op: AggOp, values: &[Value]) -> Result<AggregateOutcome> {
     let total = values.len();
-    let present: Vec<&Value> = values.iter().filter(|v| !v.is_absent()).collect();
+    let mut present: Vec<&Value> = values.iter().filter(|v| !v.is_absent()).collect();
+    // One multiset, one answer. `Value`'s derived `Ord` is the total cross-type
+    // order §14 already publishes, so this introduces no new notion of order —
+    // and `count` reads `total`, so it is untouched by the sort.
+    present.sort();
     let skipped = total - present.len();
     let value = match op {
         // A binding is a binding (§9): absent-valued ones are counted, not skipped.
@@ -5109,22 +5120,29 @@ mod tests {
             /// float-valued and deliberately ill-conditioned — a large magnitude
             /// beside small ones is the classic case where `(a + b) + c` and
             /// `a + (c + b)` differ in the last bits. Determinism of output is a
-            /// ratified design claim (`testing.md`, "Why PBT fits"), so if this
-            /// **It does redden — this is `bugs/007`.** Written `#[ignore]`d and
-            /// failing in the sitting the defect was found, the way
-            /// `dash_q_rule_equals_the_same_rule_in_a_file` was written for
-            /// `bugs/002` and `ordered_comparison_and_minmax_agree_on_every_type`
-            /// for `bugs/006`: deleting the `#[ignore]` is what closing the
-            /// defect looks like. The shrunk counterexample is committed in
-            /// `proptest-regressions/engine/mod.txt`.
+            /// ratified design claim (`testing.md`, "Why PBT fits").
             ///
-            /// Two spellings of one goal, two answers — `r(0.0)` against
-            /// `r(0.1)` over floats, and answer-versus-`exit 2` over the int
-            /// overflow check. §17 (2026-07-25) rules that out in terms:
-            /// "Two orderings of one conjunction, two answers, which no
-            /// declarative reading permits."
+            /// **It did redden, and that was `bugs/007`** — two spellings of one
+            /// goal giving `r(0.0)` against `r(0.1)` over floats, and
+            /// answer-versus-`exit 2` over the int overflow check, which §17
+            /// (2026-07-25) rules out in terms: "Two orderings of one
+            /// conjunction, two answers, which no declarative reading permits."
+            /// Written `#[ignore]`d and failing in the sitting the defect was
+            /// found, the way `dash_q_rule_equals_the_same_rule_in_a_file` was
+            /// written for `bugs/002`; `fold_aggregate` folds in §14 order now,
+            /// so the answer is a function of the multiset rather than of the
+            /// enumeration, and the `#[ignore]` is gone. The shrunk
+            /// counterexample stays committed in
+            /// `proptest-regressions/engine/mod.txt`: it is the case this has to
+            /// keep passing.
+            ///
+            /// **Mutation-verified**: deleting the `present.sort()` reddens
+            /// **this and nothing else** — the whole suite is otherwise blind to
+            /// witness order, `b1_aggregate_goal_shapes_agree` and
+            /// `b5_aggregate_body_order_does_not_change_the_model` included,
+            /// because both are still int-pooled. That measurement is the case
+            /// for widening them, which is `007`'s second acceptance half.
             #[test]
-            #[ignore = "bugs/007: sum/avg fold in enumeration order"]
             fn fold_is_permutation_invariant(
                 floats in prop::collection::vec(
                     prop_oneof![
