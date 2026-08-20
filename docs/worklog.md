@@ -24,6 +24,58 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-20 — A coverage audit finds `bugs/007`, and six laws that were never stated
+
+No feature work: an audit of the property suite, asked for before the profile,
+which turned up one wrong-answer defect and six algebraic laws with nothing
+asserting them. **533 tests green**, clippy and rustfmt clean; the one
+`--ignored` failure is `007`'s acceptance criterion, by design.
+
+**Done**
+- **`bugs/007`** — `sum`/`avg` fold in witness-*enumeration* order, so two
+  spellings of one goal give `r(0.0)` and `r(0.1)` over floats, and an answer
+  versus **exit 2** on the int overflow check. §17's 2026-07-25 entry is
+  ***Falsified***: its standard holds, its generalisation does not — body order
+  is unobservable only where the fold is associative over the value type.
+- **The root cause**: `arb_constant` never followed the language past five
+  types. Widened to eight, and *measured* — swapping `Date` and `Bool` in
+  `ir::Value`'s variant order is a mutation **A4 passes on the old generator and
+  fails on the new**.
+- **Six properties**: **C11** negation is antitone by parity (the half B4
+  excludes rather than covers), **C12** join/union idempotence, **C13** statement
+  order changes nothing — verdict, types *and* model, **C14** the derivations are
+  order-invariant too, **B11** the aggregate monoid laws, **D5** §14's closure at
+  the program level. Plus §9's temporal folds, §8's cast table widened 5×5 → 8×8,
+  and C10's eleventh shape for §10's `std`-builtin exemption.
+- **`testing.md` swept**: F1–F7 and C8 were green and still `[ ]`, and one entry
+  described a test that does not exist (`filtered_atom_query_…`, superseded
+  2026-08-17). Coverage map gained four rows.
+
+**Decided**
+- **Widen the generator globally, then narrow deliberately.** The `unreachable!`
+  that hid temporal was an accident of ordering; a narrowing with a comment is a
+  decision. It found no defect in §8/§9's temporal rules — the design was right
+  and only the coverage was thin.
+- **Record a mutation that could not be aimed, rather than a tidier one.** C12,
+  D5 and C11 each have no unique kill and say why. A plausible-sounding mutation
+  nobody ran is what rule 3 exists to stop.
+- **An equivalent mutant is evidence, not a gap** (C13's reversed gather order
+  reddens *nothing* — which is what confluence means); and **mutation-verify
+  against the full suite**, since the `holds.` mutant is invisible to `--lib`.
+
+**Removed**
+- Ten proptest regression seeds recording deliberate mutants rather than defects
+  (kept: `007`'s). The stale `filtered_atom_query_…` entry, replaced by what
+  shipped. ROADMAP's "no known `--ignored` failures" and "defect set is empty"
+  lines, both now false.
+
+**Next up**
+- **`bugs/007`'s fix is a user call** — sort witnesses before folding (the bug
+  file's recommendation) versus documenting the restriction. Blocked on it: the
+  float widening of B1's and B5's aggregate arms, `007`'s second acceptance half.
+- **The profile**, unchanged and unblocked — what this session ran ahead of.
+- Still open: **E5**/**E6**, whose hole now covers every temporal derivation.
+
 ## 2026-08-19 — Temporal values ship, and a builtin turns out to be a relation
 
 S4 read "met **except dates**"; it now reads met. Three primitive types with
@@ -126,60 +178,3 @@ pass, clippy and rustfmt clean.
 - **Temporal types**, then **the profile** — unchanged by this session.
 - Filed while building: **a conversion inside a comparison is still silent**
   (`X as int > 5` narrows a filter with no premise to report on) — v1, §8/§12.
-
-## 2026-08-18 — §1 is written, and three of §2's four principles ratify *scoped*
-
-The definition of done, taken first on the stock-take's recommendation. §1 now has
-goals, non-goals, target users and six success criteria; **v1 = S2–S6 hold and S1
-has been measured at least once**; every open backlog item is ruled v1 or post-v1
-against those criteria — **17 v1, 19 post-v1**, argued item by item in
-[`datalog/notes/v1-scope.md`](../datalog/notes/v1-scope.md). **No `src/` change, by
-design** — 386 lib tests unchanged, clippy and rustfmt clean.
-
-**Done**
-- **§2 ratified**, and the interesting part is *how*: three of the four went in
-  **scoped to what the implementation delivers**, each checked against source
-  before being written. The measurement that did the most work — spans are attached
-  in the **lexer and parser only**, and *all* 46 `Error::semantic` and 33
-  `Error::source` sites carry none. §12 said "many"; it is all of them, and §12 now
-  says so.
-- **§1 written** (12 → 94 lines): pillars unchanged, two goals beyond them, five
-  non-goals each pointing at the §17 entry that settled it, three target users **in
-  priority order**, and S1–S6 with an instrument and a today-status per row.
-- **`ROADMAP.md`** tags each item v1/post-v1 on an axis orthogonal to status;
-  **swept** §12's span claim and `EXPERIMENTS.md`'s header, now S1's instrument.
-
-**Decided**
-- **v1 requires S1 to have been *measured*, not to have come out favourably.** The
-  repo exists to test a hypothesis, so a negative result is a finding; shipping
-  having never run the experiment would leave the three pillars — cited throughout
-  §17 as settled authority — resting on an unmeasured premise. That is what moves
-  `EXPERIMENTS.md` from near the bottom of the backlog to a v1 item.
-- **A principle is a claim about the implementation: ratify it scoped or not at
-  all.** The sharp case — *explainability and the agent API are first-class* is
-  true of the engine (all derivations, unconditionally, no flag) and **false at the
-  surface** (`?why` unbuilt, `RunResult` carries none, the CLI's only flag is `-q`).
-  As written it would have made §2 assert what §11 and `src/lib.rs` contradict.
-  *Rejected: leaving the four as candidates* — a permanent candidate constrains
-  nothing.
-- **The criteria were tested against the ruling, not only used for it**: if a
-  ruling cannot be derived from a stated criterion, the **criterion** is missing.
-  It fired once — S4 went from "met" to "met **except dates**", which is what makes
-  temporal types v1 rather than a preference.
-
-**Removed**
-- The whole *Ratify §1 and §2* ROADMAP item, superseded by shipped text; the
-  backlog preamble's "**the order below is under review**"; §1's and §2's *Not
-  covered* footers, which existed only to say the sections were unwritten.
-- The 2026-08-18 termination entry rotated verbatim to `worklog-archive/2026-08.md`.
-
-**Next up**
-- **The caller's contract** — constraints + exit code + the truncation contract's
-  open half; one session, one vocabulary. Now v1 by S1 and pillar 3 rather than by
-  recommendation. Then **temporal types** (S4), then the **provenance surface** as
-  one session with the recorder-cost and row-anchoring calls, which the **profile**
-  feeds.
-- **`EXPERIMENTS.md` as a harness** is v1 and sits *alongside* these, not after:
-  until it runs, v1 is undefined rather than unfinished.
-- Open, in §17: what a caller learns from a run that completed — unchanged, and the
-  caller's-contract session is what answers it.
