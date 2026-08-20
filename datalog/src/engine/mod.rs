@@ -860,9 +860,10 @@ pub(crate) struct AggregateOutcome {
 ///
 /// - `count` counts every binding, absent ones included (skip `0`).
 /// - `sum`/`avg`/`min`/`max` skip absents; an empty present-set yields `absent`.
-/// - `sum` folds through the §8 arithmetic (same overflow/type rules); `avg` is
-///   the float mean of the present values; `min`/`max` take the natural-order
-///   extreme of a single ordered type.
+/// - `sum` folds the multiset in §14 order — compensated over floats, wide over
+///   ints and durations (§9) — and keeps §8's type rules; `avg` is the float
+///   mean of the present values; `min`/`max` take the natural-order extreme of a
+///   single ordered type.
 ///
 /// The present values are folded in **§14 order**, not the order they were
 /// collected in (`bugs/007`). §9 defines the aggregate over a *multiset*, so the
@@ -934,12 +935,14 @@ fn compensated_sum(xs: impl Iterator<Item = f64>) -> f64 {
 /// Sums present values through the §8 arithmetic (`int+int`/`float+float`,
 /// checked overflow, type errors on a mix or a non-numeric). Empty → `absent`.
 ///
-/// A run of floats takes the compensated path; **every other shape keeps the
-/// `apply_arith` fold**, which is what preserves the type errors exactly — a
-/// mixed `int`/`float` list and a list of strings still fail where and how they
-/// did. The single-element case falls through it untouched, so `sum` over one
-/// `date` still returns that date rather than erroring (§9 rejects it in the
-/// type checker, ahead of here).
+/// Each single-typed numeric run takes its own path — compensated for floats,
+/// **wide** for ints and durations, where overflow is a property of the total
+/// and not of an association nobody wrote (§9, §17 2026-08-20). **Every other
+/// shape keeps the `apply_arith` fold**, which is what preserves the type errors
+/// exactly: a mixed `int`/`float` list and a list of strings still fail where
+/// and how they did. The single-element case falls through it untouched, so
+/// `sum` over one `date` still returns that date rather than erroring (§9
+/// rejects it in the type checker, ahead of here).
 fn sum_values(present: &[&Value]) -> Result<Value> {
     let Some((first, rest)) = present.split_first() else {
         return Ok(Value::Absent);
@@ -951,6 +954,43 @@ fn sum_values(present: &[&Value]) -> Result<Value> {
             _ => unreachable!("every value in this arm is a float"),
         }));
         return F64::new(total).map(Value::Float);
+    }
+    // Ints and durations accumulate **wide** (§17, 2026-08-20): the partial sums
+    // of a multiset fold are not observable, so only the total has to fit. An
+    // `i128` cannot itself overflow here — it would take 2⁶⁴ terms.
+    if present.iter().all(|v| matches!(v, Value::Int(_))) {
+        let total: i128 = present
+            .iter()
+            .map(|v| match v {
+                Value::Int(i) => i128::from(*i),
+                _ => unreachable!("every value in this arm is an int"),
+            })
+            .sum();
+        return i64::try_from(total).map(Value::Int).map_err(|_| {
+            Error::semantic(format!(
+                "arithmetic error: integer overflow — the sum of {} values is {total}, \
+                 outside the int range",
+                present.len(),
+            ))
+        });
+    }
+    if present.iter().all(|v| matches!(v, Value::Duration(_))) {
+        let total: i128 = present
+            .iter()
+            .map(|v| match v {
+                Value::Duration(d) => i128::from(d.micros()),
+                _ => unreachable!("every value in this arm is a duration"),
+            })
+            .sum();
+        return i64::try_from(total)
+            .map(|micros| Value::Duration(temporal::Duration::from_micros(micros)))
+            .map_err(|_| {
+                Error::semantic(format!(
+                    "arithmetic error: the sum of {} durations is outside the \
+                     representable range",
+                    present.len(),
+                ))
+            });
     }
     let mut acc = (*first).clone();
     for value in rest {
@@ -3323,6 +3363,54 @@ mod tests {
         assert_eq!(
             fold_aggregate(AggOp::Avg, &values).unwrap().value,
             float(0.1 / 3.0)
+        );
+    }
+
+    /// **An int sum overflows only when its own total does** (§9, §17
+    /// 2026-08-20), not when some association of it does.
+    ///
+    /// `bugs/007` reached this by reordering a conjunction — one spelling
+    /// answered and the other exited 2. Sorting made that deterministic;
+    /// accumulating wide is what makes it *right*, because the partial sums of a
+    /// multiset fold are not something the program asked for. The first case
+    /// below has a representable total and errored under every fixed
+    /// association, sorted included.
+    #[test]
+    fn an_int_sum_overflows_only_when_its_total_does() {
+        let big = i64::MAX;
+        let values = vec![int(-big), int(-big), int(big), int(big)];
+        assert_eq!(fold_aggregate(AggOp::Sum, &values).unwrap().value, int(0));
+
+        // The total itself does not fit, so this is still an error.
+        let err = fold_aggregate(AggOp::Sum, &[int(big), int(big)]).unwrap_err();
+        assert!(
+            err.to_string().contains("integer overflow"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// The same rule for durations, which are `i64` microseconds underneath
+    /// (§4) and so have the same edge.
+    #[test]
+    fn a_duration_sum_overflows_only_when_its_total_does() {
+        let big = temporal::Duration::from_micros(i64::MAX);
+        let small = temporal::Duration::from_micros(-i64::MAX);
+        let values = vec![
+            Value::Duration(big),
+            Value::Duration(small),
+            Value::Duration(big),
+            Value::Duration(small),
+        ];
+        assert_eq!(
+            fold_aggregate(AggOp::Sum, &values).unwrap().value,
+            Value::Duration(temporal::Duration::from_micros(0))
+        );
+
+        let err =
+            fold_aggregate(AggOp::Sum, &[Value::Duration(big), Value::Duration(big)]).unwrap_err();
+        assert!(
+            err.to_string().contains("representable range"),
+            "unexpected error: {err}"
         );
     }
 

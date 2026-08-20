@@ -1049,6 +1049,19 @@ two equal salaries twice (the "duplicates and aggregates" question, §17;
 `references.md`). Deduping the projected values instead is *not* what these
 aggregates do.
 
+**The fold is over that multiset, in §14 order.** How the witnesses were
+enumerated never reaches the answer: the collected values are sorted before they
+are folded, so an aggregate is a function of its multiset alone. A sorted fold
+still has to pick *an* association, and §14's order is by value rather than by
+magnitude, so two rules keep the canonical answer the right one:
+
+- `sum` over `float` is **compensated**, carrying the low-order bits a naive fold
+  drops. The multiset `{ 1e16, -1e16, 0.1 }` sums to `0.1`.
+- `sum` over `int` and `duration` **accumulates wide**: overflow is a property of
+  the total, never of an intermediate. A multiset whose sum is representable has
+  that sum, even where some association of it would overflow. §8's binary `+` is
+  unchanged — there the operand pair is what the program wrote.
+
 A **wildcard inside a goal is a witness dimension**, not an existential: `count
 { P | parent(P, _) }` counts *edges*, not distinct parents, because each `_` is a
 fresh goal variable and distinct fillings are distinct witnesses. This matches
@@ -2338,6 +2351,22 @@ never say.
 
 ### Decisions
 
+- **2026-08-20** — **An aggregate is a fold over a multiset, so only its result
+  is defined** (§9). `fold_aggregate` sorts its present values into §14 order
+  before folding, closing `bugs/resolved/007`: witnesses used to arrive in
+  whatever order the goal's literals were scheduled in, which reached the answer
+  wherever the fold is not associative over the value type.
+  - Sorting picks *an* association, and §14's order is by value, not magnitude —
+    deterministic without being good. So **floats sum with Neumaier
+    compensation** and **ints and durations accumulate in `i128`**: overflow is a
+    property of the total, not of an intermediate nobody wrote. §8's binary `+`
+    keeps its operand-pair overflow — there the pair *is* the program.
+  - **Rejected: documenting the restriction** (`007`'s cheapest candidate), which
+    keeps a case where reordering a conjunction changes an exit code — ruled out
+    by the 2026-07-25 entry below. **Rejected: sorting alone**, which canonises
+    `0.0` for `{ 1e16, -1e16, 0.1 }`: the worse of the two answers the defect
+    reported.
+
 - **2026-08-19** — **Temporal values: three types, one algebra, and the unit at the
   divisor** (§3/§4/§8/§9/§13). The design space, the measurements and the four
   rejected alternatives are in
@@ -3217,6 +3246,14 @@ never say.
     overflow check, one answers and the other exits 2. The guarantee is
     **conditional on the fold being associative over the value type**, and
     `bugs/007` holds the four candidate fixes.
+
+    ***Amended 2026-08-20 — the generalisation is restored, by a second
+    mechanism.*** `bugs/resolved/007` is fixed, so body order is unobservable
+    again — but because *two* things are order-independent now, not one. The
+    scheduler settles which literal is outer; the fold no longer cares, having
+    become a function of its witness multiset (2026-08-20, above). The fix taken
+    was **not** among the four candidates named here; the resolution note says
+    which and why.
 
     Negated atoms stay in their own phase, before every builtin: §10 requires
     their named variables to be bound *positively*, and folding them into the
