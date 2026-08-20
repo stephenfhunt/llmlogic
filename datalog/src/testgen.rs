@@ -650,6 +650,65 @@ pub(crate) fn arb_disjunction_spellings() -> impl Strategy<Value = (String, Stri
         })
 }
 
+/// **The structural laws of a conjunction and a disjunction**, as spellings.
+///
+/// Returns `(base, variant)` — two programs that must answer identically —
+/// for three laws the language embodies and had no property for until
+/// 2026-08-20:
+///
+/// - **join idempotence**: repeating a body literal changes nothing;
+/// - **union idempotence**: writing a rule twice changes nothing.
+///
+/// **Distribution is deliberately absent, and that is a finding rather than an
+/// omission.** `(q ; r), s ≡ q, s ; r, s` needs two spellings to compare, and
+/// §5 gives the language only one: disjunction is "top-level DNF (**no
+/// parentheses in v1**)", so a body is already in the distributed form and
+/// `(q ; r), s` is a syntax error. The law holds vacuously because the surface
+/// cannot express its left-hand side. Written down here because the first
+/// attempt at this generator emitted it and the property failed on
+/// *acceptance* — which is the useful way to learn that an algebraic law has no
+/// content in a given surface.
+///
+/// The EDB is `arb_edb_text`, which emits **no `absent`** — and that exclusion
+/// is the point rather than a convenience. Join idempotence is exactly the law
+/// `repeating_a_body_literal_drops_absent_rows` shows *failing* over `absent`,
+/// deliberately, because `NULL ≠ NULL` makes a repeated literal an anti-join on
+/// absent rows. Stating the positive law over absent-free data is what turns
+/// that asymmetry into a decision on the record: without it, the only written
+/// form of the law is its exception.
+pub(crate) enum StructuralLaw {
+    JoinIdempotence,
+    UnionIdempotence,
+}
+
+impl std::fmt::Debug for StructuralLaw {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            StructuralLaw::JoinIdempotence => "join idempotence",
+            StructuralLaw::UnionIdempotence => "union idempotence",
+        })
+    }
+}
+
+pub(crate) fn arb_structural_law_spellings()
+-> impl Strategy<Value = (StructuralLaw, String, String)> {
+    (arb_edb_text(), arb_disjunct(), any::<bool>()).prop_map(|(edb, q, join)| {
+        if join {
+            (
+                StructuralLaw::JoinIdempotence,
+                format!("{edb}d(K) :- {q}.\n?- d(K).\n"),
+                format!("{edb}d(K) :- {q}, {q}.\n?- d(K).\n"),
+            )
+        } else {
+            (
+                StructuralLaw::UnionIdempotence,
+                format!("{edb}d(K) :- {q}.\n?- d(K).\n"),
+                format!("{edb}d(K) :- {q}.\nd(K) :- {q}.\n?- d(K).\n"),
+            )
+        }
+    })
+}
+
 /// The surface text of every primitive type's constants, three apiece (two for
 /// `bool`, which has no third). Grouped by type because §4's value order is
 /// *within* a type — a pair drawn across two of these pools is a cross-type

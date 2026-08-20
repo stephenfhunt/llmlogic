@@ -866,6 +866,64 @@ banned(\"carol\").
     }
 
     proptest! {
+        /// **The structural laws of the relational algebra the language
+        /// embodies** — join idempotence and union idempotence (§5/§6).
+        /// Distribution is *not* here: §5 makes a body top-level DNF with no
+        /// parentheses, so `(q ; r), s` has no spelling and the law has no two
+        /// sides to compare (the generator's doc records how that was found).
+        ///
+        /// Each is a "these two spellings mean the same thing" claim, so by
+        /// `testing.md` rule 1 each wants a property; none had one. B5 covers
+        /// the *commutativity* of a conjunction and B6 the commutativity of a
+        /// union, which left the idempotent and distributive laws as the two
+        /// sides of the algebra with nothing looking at them.
+        ///
+        /// **Join idempotence is the pointed one.** Its only written form in
+        /// this crate was `repeating_a_body_literal_drops_absent_rows`, which
+        /// pins the case where the law *fails* — deliberately, since idempotence
+        /// over `absent` is a join property and restoring it means giving up
+        /// `NULL ≠ NULL` (§4). A law recorded only as its own exception reads as
+        /// an accident; stating the positive over absent-free data is what makes
+        /// the asymmetry legible as a decision.
+        ///
+        /// **Mutation, and the honest result.** No single-site mutation
+        /// isolates these two arms, and finding that out is worth more than a
+        /// tidier record. Rebinding rather than re-checking an already-bound
+        /// variable in `try_match` — the change that should break a self-join —
+        /// reddens eight other tests including B1 and the group-by oracle, and
+        /// the reason is structural: **the engine has no code path for a
+        /// repeated literal or a duplicated rule.** Both laws are consequences
+        /// of set semantics and the join loop, not behaviours implemented
+        /// anywhere, so there is nothing to mutate that touches only them.
+        ///
+        /// That makes these regression guards against a *future* optimisation —
+        /// a body-literal deduplicator, a rule-level CSE — rather than guards on
+        /// current code, which is a legitimate thing for a property to be as
+        /// long as the record says so rather than implying a kill it never had.
+        #[test]
+        fn the_structural_laws_hold(
+            (law, base, variant) in crate::testgen::arb_structural_law_spellings()
+        ) {
+            let a = run(&base).map(|r| r.answers);
+            let b = run(&variant).map(|r| r.answers);
+            match (a, b) {
+                (Ok(a), Ok(b)) => prop_assert_eq!(
+                    a, b,
+                    "{:?} does not hold\n--- base ---\n{}\n--- variant ---\n{}",
+                    law, &base, &variant
+                ),
+                (Err(_), Err(_)) => {}
+                (a, b) => prop_assert!(
+                    false,
+                    "{:?}: the two spellings disagreed on acceptance: {:?} vs {:?}\n\
+                     --- base ---\n{}\n--- variant ---\n{}",
+                    law, a.is_ok(), b.is_ok(), &base, &variant
+                ),
+            }
+        }
+    }
+
+    proptest! {
         /// **C8** — a `-q` rule answers exactly as the same rule written into
         /// the file would (§14: `-q` "is sugar for appending `?- …` to the
         /// loaded program").
