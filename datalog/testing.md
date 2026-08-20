@@ -199,6 +199,22 @@ it. A future audit starts here.
 | Absent value (§4/§8) | `arb_fact_constant` (absent in *data*, ~1 in 10) + `absent_ir` (join / self-join / anti-join / comparison / arithmetic / presence over a `{0, 1, absent}` pool) | B1 absent differential (`b1_absent_programs_agree`); value laws (annihilation, comparison-false, unify-vs-eq, sorts-first); `generator_emits_absent_in_facts_only` |
 | Declarative semantics (§6) | nothing of its own — §6 describes the semantics every generator above already exercises | the match relation: `try_match_binds_a_var_to_a_stored_absent_but_never_rematches_it`, `values_unify_matches_eq_off_absent`; its two derived consequences: `repeating_a_body_literal_drops_absent_rows` and `a_fact_never_satisfies_its_own_negation` (**C9**); the perfect model: **C1**–**C3**; the aggregate fold: the group-by oracle above; the fixpoint: **C10**; the error rule: B1's error path |
 
+| Idempotence (join, union) | `arb_structural_law_spellings` | **C12**; its absent-valued *exception* is `repeating_a_body_literal_drops_absent_rows` |
+| Distribution (∧ over ∨) | **unspellable** — §5 is top-level DNF, no parentheses in v1 | nothing, and nothing is correct: the law has one spelling, so no two sides to compare |
+| Antitonicity (negation) | `arb_program_with_edb`, parity walk recomputed in-test | **C11**, with `c11_generator_reaches_a_non_empty_odd_dependent` |
+| Aggregate monoid laws (§9) | int pools + partition split | **B11** — `avg_is_sum_over_count`, `folding_a_partitioned_group_combines`; **`fold_is_permutation_invariant` is red (`bugs/007`)** |
+
+**The 2026-08-20 audit's lesson, for whoever reads this map next.** Every row
+above answers "is this operation exercised". The gaps that audit found were a
+different question — **is each property's generator still as wide as its
+sentence** — and three of the four it found were invisible from this table
+because the operation *was* covered, over a value space that had stopped
+matching the language. The first check on a future audit is therefore not this
+map but `arb_constant`: read what it draws, against §4's list of types. The
+second is to look for laws stated only as their exceptions (join idempotence was
+one) and for claims relating two constructs rather than describing one (the
+aggregate monoid laws were three).
+
 | The caller's contract (§14) | nothing generated — the exit code is a property of the *process*, not of a program a generator can emit | `tests/system.rs`, listed under Phase D below: one test per code, §16.13's check in both halves, a warning shown not to move the code, and the any-query boundary |
 
 **§14's contract is pinned only at the system layer, and that is not a thin spot**
@@ -246,6 +262,27 @@ Value layer (`src/ir.rs`):
   duration (§14).
 - [x] **A5** `Fact` set semantics: `HashSet` size equals Ord-dedup size under
   arbitrary duplication.
+
+**The value pools reached all eight types on 2026-08-20, not before.**
+`arb_constant` drew symbol/string/int/float/bool and `arb_value` carried an
+`unreachable!("arb_constant generates no temporal")`, so A4's sentence — the
+derived `Ord` respects §14's cross-type order — was certifying five-eighths of
+the order it names, and the three variants whose **enum position is that order**
+(`ir.rs`, `Date`/`Timestamp`/`Duration` appended after `Bool`) were exactly the
+ones it could not see. Everything downstream of `arb_constant` inherited it:
+A5–A15, D1/D2/D3, and the whole B/C/E series.
+
+*Measured, not assumed:* with `Date` and `Bool` swapped in `ir::Value`'s variant
+order, **A4 passes on the pre-widening generator and fails on the widened one**.
+D1 does *not* fail on that mutation and was never going to — it is a set-equality
+closure, blind to ordering by construction; the order claim belongs to A4 and to
+the printer's sort. Non-vacuity is `generator_emits_every_temporal_type`, which
+asserts against `arb_value` and `arb_safe_program` rather than against
+`arb_temporal`, since certifying the pool would certify nothing downstream of it.
+
+This is `testing.md` rule 4 read in reverse — the *language* widened and the
+generator did not follow — and it is the shape to look for first in any future
+coverage audit.
 
 Lowering (`src/lower.rs`), over `arb_safe_program()` and defect-injected
 variants:
@@ -366,6 +403,38 @@ compared keyed by predicate *name*, not `PredId`.
   single generated program shape (one relation, no empty groups, single-atom
   goal), so the query-position panic and the source-order grouping hole both sat
   inside the untested region.
+- [x] **B11** **The aggregate laws** (§9, 2026-08-20) — three claims about the
+  fold that were each pinned in isolation, or not at all:
+  - **`avg = sum / count`** over the present values
+    (`avg_is_sum_over_count`). `avg_values` is a separate code path from
+    `sum_values` and nothing tied them together. *Mutation*: perturbing
+    `avg_values`' own accumulator reddens **this and nothing else** —
+    `avg_is_the_float_mean_of_present_values` and
+    `absent_inputs_are_skipped_not_folded` both stay green, because each compares
+    avg against avg.
+  - **The fold is a monoid homomorphism over group partition**
+    (`folding_a_partitioned_group_combines`): splitting a group's witnesses and
+    combining equals folding the whole, for `count`/`sum`/`min`/`max`. This pins
+    **grouping** as a law where B7's oracle pins it for one shape. `avg` is
+    deliberately excluded — the mean is not a homomorphism, and asserting it
+    would be stating a false law. *Mutation*: `extreme_value` keeping the first
+    present value reddens the min/max halves (broadly, alongside five sibling
+    min/max tests — a broad aim rather than a wrong one).
+  - **Permutation invariance** (`fold_is_permutation_invariant`) — **red, and
+    that is `bugs/007`**: `sum`/`avg` fold in witness-*enumeration* order, so two
+    spellings of one goal give `r(0.0)` against `r(0.1)` over floats, and an
+    answer against `exit 2` over the int overflow check. Written `#[ignore]`d and
+    failing in the sitting the defect was found, per the `002`/`006` precedent;
+    deleting the `#[ignore]` is what closing it looks like.
+
+  **Why these were invisible until now.** Every aggregate generator was
+  int-pooled with values in `-1000..1000`, where `sum` is associative and cannot
+  overflow — so `b1_aggregate_goal_shapes_agree` (six goal orderings) and
+  `b5_aggregate_body_order_does_not_change_the_model` both *state* the
+  order-invariance claim and neither can reach the case that breaks it. The
+  float-pooled versions of those two are the second half of `007`'s acceptance
+  criteria and land with the fix, since they are red until then.
+
 - [x] **B8** Query/rule equivalence: `Model::answer(q)` equals the relation of
   a synthesized rule whose head projects `q`'s named variables over `q`'s
   body, evaluated in a fresh final stratum. A query is a rule plus projection,
@@ -373,8 +442,9 @@ compared keyed by predicate *name*, not `PredId`.
   query bodies. (Added by the 2026-07-20 coverage audit — queries were the
   one near-untested half of the algebra.)
 - [x] **B9** **§8's conversion table, as an independent oracle**
-  (`the_conversion_table_matches_section_8`, 2026-08-16). Every cell of the 5×5
-  grid plus `absent` and each column's edge values, with the expected outcome —
+  (`the_conversion_table_matches_section_8`, 2026-08-16; **widened to 8×8
+  2026-08-20**). Every cell of the grid plus `absent` and each column's edge
+  values, with the expected outcome —
   a value, `absent`, *lossy*, or *undefined* — transcribed from §8 rather than
   derived from the code. It has to be independent: `naive.rs` deliberately
   **calls** `apply_cast` rather than reimplementing it (what that oracle varies
@@ -383,6 +453,21 @@ compared keyed by predicate *name*, not `PredId`.
   forever. *Mutation*: dropping `ir::f64_as_exact_i64`'s fractional-part guard
   turns `2.5 as int` from *lossy* into `2`; moving `apply_cast`'s absent
   short-circuit below the undefined-pair check reddens the `absent` row.
+  **The temporal rows and columns (2026-08-20)** are transcribed from §8's second
+  table: a temporal renders to `string` and reads back from one, `date as
+  timestamp` widens exactly, `timestamp as date` is a *lossy* structured error,
+  and **every other pair is a `—`** — in particular `duration` against `int` or
+  `float` in both directions, which §8 excludes deliberately because a duration
+  rendered as a bare number is a number of nothing. That last row is the one most
+  worth pinning, being a hazard decision rather than a mechanical consequence.
+  The table passed on its first run, so the widening found no defect; what it
+  bought is that the implementation and §8 are now checked against each other on
+  24 cells that previously had none. *Mutation*: making `timestamp as date`
+  truncate instead of erroring reddens it.
+  The `string` cell is the **unsigilled** canonical spelling — the `@` is a
+  delimiter the printer supplies, as a string's quotes are — which is what makes
+  render and read inverse against the text a CSV cell actually holds.
+
   - Three algebraic laws beside it, none of which asks a second evaluator
     anything: **`V as string as T == V`** (`casting_through_string_is_the_identity`)
     — D1's closure property at the value level, holding because the renderer is
@@ -463,7 +548,7 @@ compared keyed by predicate *name*, not `PredId`.
 
   *Known gap:* derivation **replay** does not reach a deferred negation, whose
   no-match pattern depends on an assignment-bound value — see **E6** below.
-- [ ] **C8** **Surface-spelling equivalence** — the language's "form A means the
+- [x] **C8** **Surface-spelling equivalence** — the language's "form A means the
   same as form B" claims, each as a property rather than a unit test. This group
   exists because the record was unambiguous: every such claim carrying a property
   held, and both carrying only a unit test became defects.
@@ -591,23 +676,17 @@ compared keyed by predicate *name*, not `PredId`.
     `comparison_generator_is_well_typed`. **Widening a generator therefore needs
     a matching acceptance property, not just a wider differential.**
 
-  - **One answer set, two output shapes**
-    `filtered_atom_query_answers_like_its_unfiltered_shape` — **specified, not
-    yet green**; the acceptance criterion for §14's widening (§17 2026-08-03,
-    `notes/query-answer-shape.md`). For a body of one positive atom plus literals
-    that bind nothing, the rows are the same set whichever shape §14 selects;
-    only the functor differs. Written `#[ignore]`d and failing, the way
-    `dash_q_rule_equals_the_same_rule_in_a_file` was written for `bugs/002` —
-    deleting the `#[ignore]` is what closing the item looks like.
-
-    Its generator must be built **backwards from a fact the EDB contains**, and
-    then filtered by a comparison chosen to hold on that fact. This is the
-    `bugs/005` lesson applied before the fact rather than after: three things
-    must coincide before the shapes can differ — one positive atom, a
-    non-binding literal beside it, and a matching fact — and over arbitrary
-    programs the third almost never holds, so both shapes print nothing and
-    agree. The non-vacuity guard asserts the generated queries **answer**, not
-    merely that they type-check.
+  - **One answer set, two output shapes** — `filtered_atom_query_answers_like_its_unfiltered_shape`
+    was specified here as written-`#[ignore]`d-and-failing, the acceptance
+    criterion for §14's widening. **It was never written under that name.** The
+    widening shipped 2026-08-17 with
+    `c8_an_answer_shape_neither_drops_nor_collapses_a_row` above, whose generator
+    is built backwards from facts the EDB contains — the same "backwards from a
+    matching fact" discipline this entry specified — and the entry was not swept
+    at the time. Recorded as a substitution rather than deleted, because a
+    catalog line describing a test that does not exist is the failure mode this
+    document exists to prevent, and the 2026-08-20 audit found it by grepping for
+    the name (**swept 2026-08-20**).
 
   Non-vacuity is guarded in `testgen::tests`, per the generator-coverage
   convention above:
@@ -680,6 +759,63 @@ compared keyed by predicate *name*, not `PredId`.
   `=`-chain, and a check that does not look under a `Cast` node. Each certifies a
   program that then runs to the cap, which is exactly the failure the property
   exists to catch.
+
+- [x] **C11** **Negation is antitone, by parity** (2026-08-20). Adding a fact to
+  an EDB relation grows every predicate depending on it through an **even**
+  number of negations and shrinks every predicate depending on it through an
+  **odd** one; predicates reachable both ways carry no claim
+  (`c11_adding_a_fact_moves_dependents_by_negation_parity`).
+
+  **The half B4 excludes rather than covers.** `with_extra_fact` adds only to
+  `negation_independent_preds`, because over a negated predicate the monotone
+  claim is false — and excluding it left the *true* law for that half unstated.
+  B4 is C11's even case restricted to parity-0-only predicates; C11 derives which
+  direction applies from a dependency walk it recomputes from the lowered rules,
+  in the C1 style. The simple form ("negation shrinks") is wrong two strata up:
+  if `h` negates `q` then `h` shrinks, but `s :- not h.` grows again.
+
+  *Mutation, and what aiming it taught:* dropping the strictness of a negated
+  dependency in Ullman relaxation reddens C11 **while C2 stays green** — C2's
+  program is a hand-built fixture, so the exact oracle covering that shape cannot
+  see a stratification bug at all. That contrast is C11's justification: not a
+  stronger claim than C2's, a wider one, over generated multi-stratum programs.
+  Two earlier aims failed and are recorded at the property: mutating the
+  anti-join itself reddens fourteen tests including B1, because a change at one
+  call site is *one-sided* and B1 catches those by construction. Isolating C11
+  would need the same change made in **both** evaluators — the same reason C9 is
+  asserted against the model rather than across them.
+  Non-vacuity: `c11_generator_reaches_a_non_empty_odd_dependent`, a deterministic
+  sampler asserting an odd-parity dependent with a **non-empty** relation is
+  reached, since `∅ ⊆ ∅` proves nothing.
+
+- [x] **C12** **The structural laws** (2026-08-20) — join idempotence (repeating
+  a body literal changes nothing) and union idempotence (writing a rule twice
+  changes nothing), over absent-free data (`the_structural_laws_hold`).
+
+  B5 covers the *commutativity* of a conjunction and B6 that of a union, which
+  left the **idempotent** laws with nothing looking at them. Join idempotence is
+  the pointed one: its only written form in this crate was
+  `repeating_a_body_literal_drops_absent_rows`, which pins the case where the law
+  **fails** — deliberately, since idempotence over `absent` is a join property
+  and restoring it means giving up `NULL ≠ NULL` (§4). A law recorded only as its
+  own exception reads as an accident; stating the positive is what makes the
+  asymmetry legible as a decision.
+
+  **Distribution is absent, and that is a finding.** `(q ; r), s ≡ q, s ; r, s`
+  needs two spellings, and §5 gives the language one: disjunction is top-level
+  DNF, **no parentheses in v1**, so `(q ; r), s` is a syntax error and a body is
+  already distributed. The first version of the generator emitted it and the
+  property failed on *acceptance*, which is how the law was found to have no
+  content in this surface.
+
+  *Mutation — the honest result:* **no single-site mutation isolates these two.**
+  Rebinding rather than re-checking an already-bound variable in `try_match`
+  reddens eight other tests including B1, because the engine has **no code path
+  for a repeated literal or a duplicated rule** — both laws are consequences of
+  set semantics and the join loop, not behaviours implemented anywhere. That
+  makes C12 a regression guard against a *future* optimisation (a body-literal
+  deduplicator, rule-level CSE) rather than a guard on current code, which is a
+  legitimate thing for a property to be as long as the record says so.
 
 ### Phase D — lexer + parser (roadmap step 5) — generalizes all §16 source texts
 
@@ -833,23 +969,23 @@ lane pins the structured feature-error path. Temp files via a small hand-rolled
 scratch-dir helper in tests (`std::env::temp_dir()` + pid + counter — no
 `tempfile` dep). The URL happy path is `#[ignore]` (network).
 
-- [ ] **F1** CSV round-trip: arbitrary cell strings (incl. quotes, commas,
+- [x] **F1** CSV round-trip: arbitrary cell strings (incl. quotes, commas,
   newlines, CRLF) → test-side RFC 4180 writer → import ≡ the original table.
   Doubles as a conformance check on the DuckDB read options (`all_varchar`,
   `header=false`).
-- [ ] **F2** Inference oracle: generated text tables import with column types
+- [x] **F2** Inference oracle: generated text tables import with column types
   matching an independent in-test implementation of the §13 literal-grammar
   rules (lexer-classified cells, column unification).
-- [ ] **F3** **Import ≡ inline facts** (the anchor property): a generated typed
+- [x] **F3** **Import ≡ inline facts** (the anchor property): a generated typed
   table, imported, evaluates to the same model and answers as the same facts
   written as in-program literals — the full pipeline run twice.
-- [ ] **F4** JSONL round-trip: generated typed records → test-side writer →
+- [x] **F4** JSONL round-trip: generated typed records → test-side writer →
   import ≡ the original values (JSON strings never re-inferred).
-- [ ] **F5** Module diamond: root→{a,b}, a→c, b→c import graphs evaluate
+- [x] **F5** Module diamond: root→{a,b}, a→c, b→c import graphs evaluate
   identically to the flat concatenation of the four files (once-only splice).
-- [ ] **F6** Module cycles: mutually-importing files terminate and equal the
+- [x] **F6** Module cycles: mutually-importing files terminate and equal the
   union of their statements.
-- [ ] **F7** Parquet round-trip: fixture written at test time via DuckDB `COPY`
+- [x] **F7** Parquet round-trip: fixture written at test time via DuckDB `COPY`
   (no binary files in the repo), imported, ≡ the original typed table.
 
 ### Phase T — temporal values (§4/§8/§13) — generalizes §16.14
@@ -902,6 +1038,31 @@ implementation.
   epoch weekday off by one. A property that cannot fail on a wrong answer is
   the case rule 3 exists to expose, and here it took the mutation to find that
   the property needed an example beside it.
+- [x] **T7** **The temporal fold rules** (§9, 2026-08-20), reachable only after
+  the value pools widened: **`avg` over durations is a `duration`, not a
+  `float`** (`avg_over_durations_is_a_duration`) — the rule §9 argues for at
+  length, which had exactly one hand test; and **`sum` over a point type is a
+  type error** (`sum_over_a_point_type_is_rejected`), the rejection half the
+  corollary asks for beside it. `min`/`max` over dates and timestamps come from
+  `min_and_max_bound_every_value`, widened off its int-only pool to
+  `arb_value` filtered to one type per fold.
+  *Mutation:* removing `avg_values`' duration branch reddens
+  `avg_over_durations_is_a_duration` — the message becomes "avg requires values
+  it can fold and divide … got duration", which is the numeric branch refusing
+  the vector case.
+
+- [x] **T8** **The cast laws reach all eight types** (2026-08-20).
+  `absent_survives_every_cast` now selects from eight `TypeName`s, and
+  `casting_through_string_is_the_identity` carries the three temporal arms —
+  the half **T1 cannot reach**, since T1 round-trips through
+  `temporal::parse_temporal` directly while this goes through `apply_cast`, so
+  the reading side is `lexer::classify_cell` and the writing side is the
+  render-minus-`@`. `casting_to_a_values_own_type_is_the_identity` reached all
+  eight **without an edit**, because it takes `arb_value` — which is the argument
+  for fixing the pool rather than each property.
+  *Mutation:* making the `date` render keep its `@` reddens
+  `casting_through_string_is_the_identity` on the first date drawn.
+
 - [x] **T6** Import anchoring (the rule-4 acceptance property for the widened
   generators): a CSV of temporal cells imports to exactly the values the
   corresponding `@`-sigilled literals denote — **F3**'s claim extended to the
