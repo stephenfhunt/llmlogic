@@ -4714,14 +4714,37 @@ mod tests {
             lower(&ast).expect("generated aggregate program lowers")
         }
 
+        /// The pool the aggregate order-invariance arms draw their **values**
+        /// from (`bugs/007`, 2026-08-20): a huge magnitude beside small ones, so
+        /// that `(a + b) + c` and `a + (c + b)` differ. Every aggregate
+        /// generator used to be int-pooled in a small range, where `sum` is
+        /// associative and cannot overflow — which is why the arms below stated
+        /// order-invariance for a month while unable to reach the case that
+        /// breaks it.
+        ///
+        /// Kept as **source text** rather than `f64`s formatted at use: Rust
+        /// prints `1e16` as `10000000000000000`, which the lexer reads back as
+        /// an `int` (`lexer.rs`), silently restoring the int-pooled generator
+        /// this exists to replace.
+        const ILL_CONDITIONED_FLOATS: [&str; 6] = ["1e16", "-1e16", "0.1", "1e-16", "2.5", "-3.5"];
+
+        /// The pool member `index` selects, wrapping — so a generator can draw a
+        /// plain `u8` and stay a value the shrinker understands.
+        fn float_literal(index: u8) -> &'static str {
+            ILL_CONDITIONED_FLOATS[index as usize % ILL_CONDITIONED_FLOATS.len()]
+        }
+
         /// The §16.4 shape with the rule's three body literals in a chosen
         /// order — two positive atoms supplying the group key and the aggregate.
         /// Returns `None` if that order does not lower (see
         /// `b5_aggregate_body_order_does_not_change_the_model`).
+        ///
+        /// The aggregated column is float-pooled (`float_literal`); the group
+        /// key stays an int.
         fn aggregate_ir_permuted(op: &str, edges: &[(u8, u8)], perm: usize) -> Option<Program> {
             let mut src = String::new();
             for (a, b) in edges {
-                src.push_str(&format!("edge({a}, {b}).\nnode({a}).\n"));
+                src.push_str(&format!("edge({a}, {}).\nnode({a}).\n", float_literal(*b)));
             }
             let literals = [
                 "edge(K, _)".to_string(),
@@ -4753,6 +4776,17 @@ mod tests {
             /// against: before scheduling, moving a group key's binder past the
             /// aggregate was rejected; before *that*, it silently turned the key
             /// existential and aggregated over everything.
+            ///
+            /// Float-pooled since 2026-08-20 (`bugs/007`), which widens what the
+            /// permutations carry — typing, grouping and printing now see floats
+            /// — but **measured, this arm cannot see witness order at all**, and
+            /// deleting `fold_aggregate`'s sort leaves it green. Its goal is the
+            /// single atom `edge(K, V)`, so for a fixed group key the witnesses
+            /// arrive in the relation's own `BTreeSet` order, which *is* `V`
+            /// ascending, which is what sorting produces: an equivalent mutant,
+            /// not a hole. The arm that carries the order claim is
+            /// `b1_aggregate_goal_shapes_agree`, whose goal has two atoms and so
+            /// has two enumeration orders to disagree about.
             #[test]
             fn b5_aggregate_body_order_does_not_change_the_model(
                 edges in prop::collection::vec((0u8..4, 0u8..6), 0..10),
@@ -4892,10 +4926,10 @@ mod tests {
         ) -> Program {
             let mut src = String::new();
             for (a, b) in edges {
-                src.push_str(&format!("edge({a}, {b}).\nnode({a}).\n"));
+                src.push_str(&format!("edge({a}, {}).\nnode({a}).\n", float_literal(*b)));
             }
             for b in blocked {
-                src.push_str(&format!("blocked({b}).\n"));
+                src.push_str(&format!("blocked({}).\n", float_literal(*b)));
             }
             src.push_str("tag(0, 9).\ntag(1, 8).\n");
             let literals = ["edge(K, V)", "tag(_, _)", "not blocked(V)"];
@@ -4956,6 +4990,19 @@ mod tests {
             /// literal orderings, the B5 invariant *inside* a goal: a goal is a
             /// body, so its positives are scheduled before its negation whatever
             /// the source order.
+            ///
+            /// **Float-pooled since 2026-08-20**, which is `bugs/007`'s second
+            /// acceptance half: the six goal orderings were compared over ints in
+            /// `-1000..1000`, where `sum` is associative and cannot overflow, so
+            /// this stated the order-invariance claim for a month without being
+            /// able to reach a case that breaks it. The two-atom goal is what
+            /// makes the widening bite — with `tag(_, _)` outer the witnesses
+            /// arrive grouped by tag, with `edge(K, V)` outer they arrive in `V`
+            /// order, and the same multiset in two orders is exactly the defect.
+            ///
+            /// *Mutation*: deleting `fold_aggregate`'s `present.sort()` reddens
+            /// this and `fold_is_permutation_invariant`, and nothing else in the
+            /// suite.
             #[test]
             fn b1_aggregate_goal_shapes_agree(
                 edges in prop::collection::vec((0u8..4, 0u8..6), 0..10),
@@ -5137,11 +5184,12 @@ mod tests {
             /// keep passing.
             ///
             /// **Mutation-verified**: deleting the `present.sort()` reddens
-            /// **this and nothing else** — the whole suite is otherwise blind to
-            /// witness order, `b1_aggregate_goal_shapes_agree` and
-            /// `b5_aggregate_body_order_does_not_change_the_model` included,
-            /// because both are still int-pooled. That measurement is the case
-            /// for widening them, which is `007`'s second acceptance half.
+            /// this and `b1_aggregate_goal_shapes_agree` — the end-to-end arm
+            /// that `007`'s second acceptance half float-pooled — and nothing
+            /// else in the suite. `b5_aggregate_body_order_does_not_change_the_model`
+            /// stays green even float-pooled, for a reason recorded there: its
+            /// goal is a single atom, so it has only one enumeration order to
+            /// offer.
             #[test]
             fn fold_is_permutation_invariant(
                 floats in prop::collection::vec(
