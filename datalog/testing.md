@@ -204,6 +204,11 @@ it. A future audit starts here.
 | Antitonicity (negation) | `arb_program_with_edb`, parity walk recomputed in-test | **C11**, with `c11_generator_reaches_a_non_empty_odd_dependent` |
 | Aggregate monoid laws (§9) | int pools + partition split | **B11** — `avg_is_sum_over_count`, `folding_a_partitioned_group_combines`; **`fold_is_permutation_invariant` is red (`bugs/007`)** |
 
+| Confluence (inference, interning, strata) | `arb_statement_permutation` | **C13** — the type half has nothing else; C4/C5 both fix statement order |
+| Order-invariance of *explanations* | B5/B6's mutators, compared at the derivation level | **C14**; E1–E4 check one evaluation each and are blind to it |
+| Closure at the program level (§14) | `arb_closure_program` | **D5**; D1 is the fact-set half |
+| §10's std-builtin exemption | `ArithShape::StdBuiltin` | **C10**'s guard — the mutation lands on the classification, not the fixpoint |
+
 **The 2026-08-20 audit's lesson, for whoever reads this map next.** Every row
 above answers "is this operation exercised". The gaps that audit found were a
 different question — **is each property's generator still as wide as its
@@ -760,6 +765,22 @@ compared keyed by predicate *name*, not `PredId`.
   program that then runs to the cap, which is exactly the failure the property
   exists to catch.
 
+  **The `StdBuiltin` shape (2026-08-20)** is the eleventh, and it exercises the
+  one §10 exemption that had no test: a `std` relation is exempt from
+  value-creating recursion as a *finite-domain map* (`stdlib.rs`,
+  `schedule::has_arithmetic`'s `Expr::Builtin` arm), which is a
+  termination-soundness claim whose failure mode is a program that never
+  finishes. The shape puts `truncate` in a genuine positive cycle; it terminates
+  because truncation is idempotent (**T5**). *Mutation*: making `has_arithmetic`
+  return `true` for `Expr::Builtin` reddens the **non-vacuity guard and only it**
+  ("shape StdBuiltin changed sides") — C10 itself stays green, since a warned
+  program is skipped by its `prop_assume!(!warned)`. That is the argument for
+  guarding the *classification* separately from the fixpoint.
+
+  The generator now runs `parse → resolve_modules → lower`, since a `std` import
+  is spliced by the resolver and lowering an unresolved one is a structured error
+  by design.
+
 - [x] **C11** **Negation is antitone, by parity** (2026-08-20). Adding a fact to
   an EDB relation grows every predicate depending on it through an **even**
   number of negations and shrinks every predicate depending on it through an
@@ -817,6 +838,48 @@ compared keyed by predicate *name*, not `PredId`.
   deduplicator, rule-level CSE) rather than a guard on current code, which is a
   legitimate thing for a property to be as long as the record says so.
 
+- [x] **C13** **Statement order carries no meaning** (2026-08-20), in three
+  senses at once: permuting a program's statements changes neither the
+  accept/reject verdict, nor the inferred column types, nor the model
+  (`c13_statement_order_changes_nothing` over `arb_statement_permutation`).
+
+  B6 swaps two rules *within a stratum*; this reorders facts, `declare`s, rules
+  and queries against each other, varying three things B6 holds fixed — predicate
+  **interning** order (so every comparison goes by name), the numbers **Ullman
+  relaxation** assigns, and the order **inference** unifies columns.
+
+  **The type half is the one with nothing else looking at it**: C4 checks
+  soundness and C5 completeness, both at one fixed statement order, so a unifier
+  seeding a column from whichever constraint it met first satisfies both.
+
+  *Two mutations, and the pair is the record.* Making `set_type` take the last
+  constraint rather than unifying reddens C13 while **C4, C5 and C6 all stay
+  green** — that contrast is the confluence claim, measured. Gathering fact
+  constraints in reverse order reddens **nothing at all**: an equivalent mutant,
+  which is not a gap but what confluence *means*, and the positive evidence that
+  C13 asserts something true rather than something merely unbroken.
+
+- [x] **C14** **The explanations are order-invariant too** (2026-08-20) —
+  permuting a stratum's rules, or a rule's body, leaves the recorded derivation
+  set unchanged (`c14_reordering_does_not_change_the_derivations`).
+
+  B5 and B6 compare `model_facts` and nothing else, so the model was
+  order-invariant by property while the **derivations** were order-invariant only
+  by hope — and provenance is pillar 1. The comparison is exact rather than a
+  premise multiset, because `premises[i]` is `BodyIdx`-aligned: the property
+  un-swaps the two moved positions and asserts equality, where a multiset would
+  not notice a premise landing at the wrong index.
+
+  *Mutation — the cleanest kill in the suite:* recording premises in **schedule**
+  order rather than at their `BodyIdx`, with evaluation untouched, reddens **C14
+  and nothing else**.
+
+  **E3 staying green is the finding.** Replay zips body literals against premises
+  and `continue`s on a mismatched pair rather than failing, so a permutation that
+  moves a positive premise opposite a negated literal slips through the strongest
+  provenance property in the suite. E1/E2/E4 are equally blind, each checking
+  derivations against a *single* evaluation.
+
 ### Phase D — lexer + parser (roadmap step 5) — generalizes all §16 source texts
 
 Implemented 2026-07-22 (`src/lexer.rs`, `src/parser.rs`, `src/print.rs`). The
@@ -840,6 +903,36 @@ that list that cannot drift.
   output form → parse → lower → identical `Fact` set
   (`d1_fact_set_closure` over `arb_printable_fact_set`). Datalog-out is
   Datalog-in, mechanically checked.
+- [x] **D5** **§14's closure at the *program* level** (2026-08-20) — a run's own
+  output, appended to the program that produced it, re-runs to the same answers
+  (`a_runs_output_appended_to_it_changes_nothing` over `arb_closure_program`).
+  D1 closes *fact sets*; this is the claim pillar 3 actually makes, and it
+  existed only as one hand-written example in `tests/pipeline.rs`. It is B2's
+  fixpoint idempotence carried through the **text** layer, and not implied by
+  B2: B2 saturates the IR, where this appends what the *printer* emitted and the
+  *parser* read back.
+
+  The generator covers all three §14 rendering paths — substituted atom,
+  `answer/N`, and the ground yes `holds(true).` — and the appended output is
+  deliberately not inert: a single-relation query answers under that relation's
+  name, so the facts land in a relation the program already derives, and in one
+  shape in one another rule negates.
+
+  *Mutation — the honest result after five aims.* It has **no kill of its own**,
+  because it is a composition claim over stages that each already carry a guard:
+  a wrong value rendering reddens D1 too, a wrong answer shape reddens C8 and not
+  this, an unparseable ground yes reddens `tests/system.rs` and not this.
+  Recorded rather than smoothed over — "no unique kill" is the expected result
+  for an end-to-end claim over well-guarded stages, and it is still the only
+  check that the stages *compose*.
+
+  **A lesson for the whole catalog came out of that fifth aim**: the `holds.`
+  mutation is invisible to `cargo test --lib`, so a mutation check run under that
+  filter records a kill that never happened. **Mutation-verify against the full
+  suite**, not a filtered one.
+  Non-vacuity is `closure_generator_produces_runs_that_answer`, asserting both
+  that runs answer at all and that some answer under a real relation's name.
+
 - [x] **D2** `parse(print(ast)) == ast` modulo spans, over generated
   parse-reachable ASTs incl. named-argument and arithmetic forms
   (`d2_ast_round_trip` over `arb_ast_program`; expressions are **arbitrarily
