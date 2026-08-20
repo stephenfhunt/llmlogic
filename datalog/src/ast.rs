@@ -112,7 +112,7 @@ pub struct FieldDecl {
     pub span: Span,
 }
 
-/// The five primitive type names (§4).
+/// The eight primitive type names (§4).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum TypeName {
     Symbol,
@@ -120,6 +120,9 @@ pub enum TypeName {
     Int,
     Float,
     Bool,
+    Date,
+    Timestamp,
+    Duration,
 }
 
 impl TypeName {
@@ -134,7 +137,26 @@ impl TypeName {
             TypeName::Int => "int",
             TypeName::Float => "float",
             TypeName::Bool => "bool",
+            TypeName::Date => "date",
+            TypeName::Timestamp => "timestamp",
+            TypeName::Duration => "duration",
         }
+    }
+
+    /// Is this one of the three temporal types (§4)? The predicate §8's
+    /// heterogeneous arithmetic rule is stated against.
+    pub fn is_temporal(self) -> bool {
+        matches!(
+            self,
+            TypeName::Date | TypeName::Timestamp | TypeName::Duration
+        )
+    }
+
+    /// Is this a *point* in §8's algebra — a position rather than a
+    /// displacement? Point minus point is a `Duration`; point plus point is a
+    /// type error.
+    pub fn is_temporal_point(self) -> bool {
+        matches!(self, TypeName::Date | TypeName::Timestamp)
     }
 }
 

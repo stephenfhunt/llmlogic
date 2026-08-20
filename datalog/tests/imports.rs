@@ -78,6 +78,9 @@ fn json_value(value: &Value) -> String {
         // A missing value serializes back to a JSON null (§13).
         Value::Absent => "null".to_string(),
         Value::Symbol(_) => unreachable!("JSONL carries no symbols"),
+        Value::Date(_) | Value::Timestamp(_) | Value::Duration(_) => {
+            unreachable!("the JSONL generator emits no temporal values")
+        }
     }
 }
 
@@ -112,6 +115,9 @@ fn type_name(ty: TypeName) -> &'static str {
         TypeName::Int => "int",
         TypeName::Float => "float",
         TypeName::Bool => "bool",
+        TypeName::Date => "date",
+        TypeName::Timestamp => "timestamp",
+        TypeName::Duration => "duration",
     }
 }
 
@@ -274,6 +280,9 @@ proptest! {
                     Value::String(_) => "string",
                     Value::Symbol(_) => "symbol",
                     Value::Absent => "absent",
+                    Value::Date(_) => "date",
+                    Value::Timestamp(_) => "timestamp",
+                    Value::Duration(_) => "duration",
                 };
                 prop_assert_eq!(actual, expected, "column {}", col);
             }

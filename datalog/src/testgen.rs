@@ -2046,6 +2046,9 @@ pub(crate) fn fold_ground_atom_args(program: &Program) -> Program {
             // See the doc comment: a literal `absent` is banned in a body atom
             // argument, so folding to one would test the ban, not the claim.
             ir::Value::Absent => return None,
+            // Temporal constants are not generated yet — the generators widen
+            // with the lexer that can spell them (`testing.md`).
+            ir::Value::Date(_) | ir::Value::Timestamp(_) | ir::Value::Duration(_) => return None,
         })
     }
 

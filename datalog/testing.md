@@ -242,7 +242,8 @@ Value layer (`src/ir.rs`):
 - [x] **A3** Every NaN bit pattern is rejected by `F64::new`; every non-NaN
   value round-trips (modulo `-0.0 → +0.0`).
 - [x] **A4** `Value`'s derived `Ord` is lawful and respects the canonical
-  cross-type order symbol < string < int < float < bool (§14).
+  cross-type order symbol < string < int < float < bool < date < timestamp <
+  duration (§14).
 - [x] **A5** `Fact` set semantics: `HashSet` size equals Ord-dedup size under
   arbitrary duplication.
 
@@ -850,3 +851,36 @@ scratch-dir helper in tests (`std::env::temp_dir()` + pid + counter — no
   union of their statements.
 - [ ] **F7** Parquet round-trip: fixture written at test time via DuckDB `COPY`
   (no binary files in the repo), imported, ≡ the original typed table.
+
+### Phase T — temporal values (§4/§8/§13) — generalizes §16.14
+
+Ratified 2026-08-19 (`notes/temporal-values.md`). The value layer is
+`src/temporal.rs`, which is dependency-free: civil↔day conversion is Hinnant's
+algorithm, so **the oracle is the calendar's own algebra** rather than a second
+implementation.
+
+- [x] **T1** Canonical text round-trips: `parse(print(v)) == v` for all three
+  types, with the duration generator's non-vacuity guard (it reaches every unit
+  of the decomposition and both signs). This is §14's closure property at the
+  value layer. `t1_date_text_round_trips`,
+  `t1_timestamp_text_round_trips`, `t1_duration_text_round_trips`,
+  `t1_duration_generator_reaches_every_unit`; plus the calendar bijection
+  (`civil_conversion_round_trips`, `consecutive_days_are_one_apart`).
+  *Mutation:* dropped the `us` component from `Duration`'s decomposition —
+  T1 and its non-vacuity guard both went red (the guard first, which is the
+  point of having it).
+- [ ] **T2** Affine laws: `(D + Dur) - D == Dur` and `(D2 - D1) + D1 == D2`,
+  over dates and timestamps — §8's algebra as an equation rather than a table.
+- [ ] **T3** **The unit is the divisor**: `(D2 - D1) / @1d` equals an
+  independently computed civil day difference. This is the property that pins
+  the sibling engine's `172800000` finding; its mutation is making
+  `duration / duration` return a truncating `int`, which must fail it on
+  `@36h / @1d`.
+- [ ] **T4** Ordering agreement: for ISO-shaped inputs, `date` comparison
+  agrees with the string comparison it replaces — the migration-safety oracle,
+  and free, because filtering already worked that way.
+- [ ] **T5** `truncate` is idempotent and monotone; `year`/`month`/`day` agree
+  with the components of the printed form.
+- [ ] **T6** Import anchoring (the rule-4 acceptance property for the widened
+  generators): a CSV of printed temporal values imports to exactly the facts the
+  corresponding literals would give — **F3** extended to the sigil.

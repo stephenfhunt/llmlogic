@@ -16,6 +16,7 @@ use crate::ast::{FieldDecl, TypeName};
 use crate::error::Error;
 use crate::ir::{F64, Value};
 use crate::lexer::{CellClass, classify_cell, classify_symbol};
+use crate::temporal;
 
 /// One loaded data import after every §13 rule has been applied: field names
 /// are valid and unique, rows are rectangular and column-uniform, and the row
@@ -383,6 +384,28 @@ fn coerce(value: &RawValue, ty: TypeName) -> Result<Value, String> {
             },
             _ => fail(value),
         },
+        // A declared temporal type *coerces*, and is deliberately more
+        // permissive than inference (§13): `parse_timestamp_lenient` is what
+        // reads the space-separated and zone-suffixed forms real exports carry,
+        // which inference leaves as strings on purpose.
+        TypeName::Date => match value {
+            RawValue::Text(t) | RawValue::Str(t) => temporal::parse_date(t.trim())
+                .map(Value::Date)
+                .or(fail(value)),
+            _ => fail(value),
+        },
+        TypeName::Timestamp => match value {
+            RawValue::Text(t) | RawValue::Str(t) => temporal::parse_timestamp_lenient(t)
+                .map(Value::Timestamp)
+                .or(fail(value)),
+            _ => fail(value),
+        },
+        TypeName::Duration => match value {
+            RawValue::Text(t) | RawValue::Str(t) => temporal::parse_duration(t.trim())
+                .map(Value::Duration)
+                .or(fail(value)),
+            _ => fail(value),
+        },
     }
 }
 
@@ -437,6 +460,9 @@ fn type_label(ty: TypeName) -> &'static str {
         TypeName::Int => "an int",
         TypeName::Float => "a float",
         TypeName::Bool => "a bool",
+        TypeName::Date => "a date",
+        TypeName::Timestamp => "a timestamp",
+        TypeName::Duration => "a duration",
     }
 }
 

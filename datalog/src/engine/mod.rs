@@ -50,6 +50,7 @@ use crate::ir::{
 };
 use crate::lexer::{CellClass, classify_cell, classify_symbol};
 use crate::provenance::{Derivation, LostConversion, NoMatchPattern, Premise};
+use crate::temporal;
 
 /// The result of evaluation: every predicate's full extent, plus provenance.
 ///
@@ -1173,9 +1174,22 @@ pub(super) fn apply_cast(value: Value, ty: TypeName) -> Result<Value> {
         return Ok(Value::Absent);
     }
     let undefined = || {
+        // A duration against a number is the one undefined pair worth its own
+        // message: it is the conversion §8 excludes *by construction* (a bare
+        // number of what?), and the program wanted the divisor form instead.
+        let unit_hazard = matches!(value, Value::Duration(_)) && is_numeric_type(ty)
+            || matches!(value, Value::Int(_) | Value::Float(_)) && ty == TypeName::Duration;
+        if unit_hazard {
+            return Err(Error::semantic(format!(
+                "type error: there is no conversion between duration and {}; divide by \
+                 a duration to name the unit (`(C - O) / @1d` is a number of days)",
+                ty.keyword(),
+            )));
+        }
         Err(Error::semantic(format!(
             "type error: there is no conversion from {} to {}; `as` converts \
-             between numbers, and between text and any other type",
+             between numbers, between text and any other type, and from a date to \
+             a timestamp",
             value_type_name(&value),
             ty.keyword(),
         )))
@@ -1218,8 +1232,44 @@ pub(super) fn apply_cast(value: Value, ty: TypeName) -> Result<Value> {
         // the §14 spelling, so `V as string` and printing `V` agree.
         TypeName::String => Ok(Value::String(match &value {
             Value::String(_) => return Ok(value),
+            // A temporal value renders **without** its `@` (§8): the sigil is a
+            // delimiter the printer adds, exactly as a string's quotes are, and
+            // dropping it is what makes `"2026-08-19" as date` — the shape a CSV
+            // cell has — the inverse of this direction.
+            Value::Date(d) => d.to_string(),
+            Value::Timestamp(t) => t.to_string(),
+            Value::Duration(d) => d.to_string(),
             other => crate::print::print_value(other),
         })),
+        TypeName::Date => match &value {
+            Value::Date(_) => Ok(value),
+            Value::String(s) => Ok(read_temporal(temporal::parse_date(s), Value::Date)),
+            // Truncation is lossy, and `as` never truncates (§8) — so this is
+            // the one refusal that names another construct as its fix, because
+            // the thing the program wants does exist.
+            Value::Timestamp(_) => Err(Error::semantic(format!(
+                "conversion error: `{}` has a time of day, and `as` does not truncate; \
+                 use `truncate(T, day, D)` from `import \"std/time\".`",
+                crate::print::print_value(&value),
+            ))),
+            _ => undefined(),
+        },
+        TypeName::Timestamp => match &value {
+            Value::Timestamp(_) => Ok(value),
+            // Exact, and exact only because a timestamp is civil: no zone can
+            // move midnight (§4).
+            Value::Date(d) => Ok(Value::Timestamp(d.at_midnight())),
+            Value::String(s) => Ok(read_temporal(
+                temporal::parse_timestamp(s),
+                Value::Timestamp,
+            )),
+            _ => undefined(),
+        },
+        TypeName::Duration => match &value {
+            Value::Duration(_) => Ok(value),
+            Value::String(s) => Ok(read_temporal(temporal::parse_duration(s), Value::Duration)),
+            _ => undefined(),
+        },
         TypeName::Symbol => match &value {
             Value::Symbol(_) => Ok(value),
             // Not every string is a legal symbol — `"two words"` and `"Cap"`
@@ -1230,6 +1280,27 @@ pub(super) fn apply_cast(value: Value, ty: TypeName) -> Result<Value> {
             }),
             _ => undefined(),
         },
+    }
+}
+
+/// Is this one of the two numeric types?
+fn is_numeric_type(ty: TypeName) -> bool {
+    matches!(ty, TypeName::Int | TypeName::Float)
+}
+
+/// A temporal read from text: the value, or `absent` when the text is not that
+/// literal.
+///
+/// **Unrepresentable, not lossy** (§8): a cell that does not spell a date is the
+/// data being dirty rather than the program being wrong, so it takes the same
+/// branch `"abc" as int` does and stays guardable with `is not absent`.
+fn read_temporal<T>(
+    parsed: std::result::Result<T, crate::temporal::TemporalError>,
+    wrap: fn(T) -> Value,
+) -> Value {
+    match parsed {
+        Ok(value) => wrap(value),
+        Err(_) => Value::Absent,
     }
 }
 
@@ -1325,6 +1396,9 @@ fn value_type_name(value: &Value) -> &'static str {
         Value::Int(_) => "int",
         Value::Float(_) => "float",
         Value::Bool(_) => "bool",
+        Value::Date(_) => "date",
+        Value::Timestamp(_) => "timestamp",
+        Value::Duration(_) => "duration",
     }
 }
 
@@ -2804,6 +2878,9 @@ mod tests {
                 Value::Int(_) => TypeName::Int,
                 Value::Float(_) => TypeName::Float,
                 Value::Bool(_) => TypeName::Bool,
+                Value::Date(_) => TypeName::Date,
+                Value::Timestamp(_) => TypeName::Timestamp,
+                Value::Duration(_) => TypeName::Duration,
             }
         }
 

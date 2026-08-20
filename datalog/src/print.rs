@@ -85,13 +85,9 @@ fn print_fields(fields: &[FieldDecl]) -> String {
 }
 
 fn print_type(ty: TypeName) -> &'static str {
-    match ty {
-        TypeName::Symbol => "symbol",
-        TypeName::String => "string",
-        TypeName::Int => "int",
-        TypeName::Float => "float",
-        TypeName::Bool => "bool",
-    }
+    // The spelling is [`TypeName::keyword`]'s: printing a type and parsing one
+    // must agree for the closure property, so there is one list, not two.
+    ty.keyword()
 }
 
 fn print_clause(clause: &Clause) -> String {
@@ -305,6 +301,13 @@ pub fn print_value(value: &Value) -> String {
         Value::Int(n) => n.to_string(),
         Value::Float(f) => print_f64(f.get()),
         Value::Bool(b) => b.to_string(),
+        // A temporal value prints as its §3 literal, sigil included, so a
+        // computed date composes back as input (§14's closure). The `@` lives
+        // here and not in `Display` because `as string` renders the same value
+        // *without* it — §8's read/render pair is the unsigilled text.
+        Value::Date(d) => format!("@{d}"),
+        Value::Timestamp(t) => format!("@{t}"),
+        Value::Duration(d) => format!("@{d}"),
     }
 }
 

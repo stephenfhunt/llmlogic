@@ -214,13 +214,18 @@ predictability ratified above is about *knowing which class a program is in*.
     symbol constant, a distinct type from the string `"red"`.
   - *Temporal* — an `@` sigil then the value, self-delimiting and whitespace-free:
     a **date** `@2026-08-19`, a **timestamp** `@2026-08-19T10:30:00` (an optional
-    fractional part, `@2026-08-19T10:30:00.500`), or a **duration** written as
+    fractional part, `@2026-08-19T10:30:00.500`, up to microsecond precision), or
+    a **duration** written as
     unit-suffixed components, largest first — `@1d`, `@36h`, `@1d12h`, `@90m`,
     `@500ms`, `@-1d12h`, `@0s`. Duration units are `d h m s ms us`; there is no
     month or year unit, which is what leaves `m` unambiguously *minutes* (§4).
-    ISO-8601 durations (`@P1D`, `@PT36H`) are accepted as an input alias and
-    print in the form above. The sigil is required: an unsigilled `2026-08-19` is
-    arithmetic over three integers, and stays so.
+    Dates and timestamps are **fixed width** — a four-digit year, two-digit
+    month, day and clock fields — which is what makes the form unambiguous, and
+    bounds every temporal value to years 0000–9999. A timestamp carries no zone
+    offset: §4's timestamp is civil, so there is nothing for one to mean.
+    ISO-8601 durations (`@P1D`, `@PT36H`, `@PT0.5S`) are accepted as an input
+    alias and print in the form above. The sigil is required: an unsigilled
+    `2026-08-19` is arithmetic over three integers, and stays so.
 - **Punctuation / operators** — `:-` (rule), `?-` (query), `.` (statement end),
   `,` (conjunction), `(` `)`, `:` (named argument), `@` (temporal literal, above),
   comparisons `=` `!=` `<` `<=`
@@ -913,7 +918,10 @@ rendering is its inverse and drops the `@` for the same reason.
 "Render" is §14's canonical spelling and "read" is §3's literal grammar — the
 same one §13 types an untyped CSV cell with. The two directions are therefore
 inverse: `V as string as T` recovers `V`, and `"30" as int` is `30` exactly when
-writing `30` would be that literal.
+writing `30` would be that literal. For a temporal value, render is that
+spelling **minus the `@`**: the sigil is a delimiter the printer supplies, as a
+string's quotes are, and dropping it is what makes the inverse hold against the
+text a CSV cell actually holds.
 
 **Two failure modes, and the line between them** (2026-08-16). Both are reachable
 only in the conversions the table defines:

@@ -64,6 +64,9 @@ fn type_of(value: &ir::Value) -> Option<TypeName> {
         ir::Value::Int(_) => TypeName::Int,
         ir::Value::Float(_) => TypeName::Float,
         ir::Value::Bool(_) => TypeName::Bool,
+        ir::Value::Date(_) => TypeName::Date,
+        ir::Value::Timestamp(_) => TypeName::Timestamp,
+        ir::Value::Duration(_) => TypeName::Duration,
     })
 }
 

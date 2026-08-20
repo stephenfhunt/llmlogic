@@ -231,6 +231,13 @@ pub enum Value {
     Int(i64),
     Float(F64),
     Bool(bool),
+    /// A civil day (§4). After `Bool` because the variant order *is* the
+    /// cross-type output order (§14), and the temporal types were added to it.
+    Date(crate::temporal::Date),
+    /// A civil date and time, microsecond precision (§4).
+    Timestamp(crate::temporal::Timestamp),
+    /// An exact elapsed quantity, in microseconds (§4).
+    Duration(crate::temporal::Duration),
 }
 
 impl Value {
@@ -869,6 +876,9 @@ mod tests {
                 Value::Int(_) => 3,
                 Value::Float(_) => 4,
                 Value::Bool(_) => 5,
+                Value::Date(_) => 6,
+                Value::Timestamp(_) => 7,
+                Value::Duration(_) => 8,
             }
         }
 
