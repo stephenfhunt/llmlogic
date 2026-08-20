@@ -881,9 +881,12 @@ implementation.
   `t3_generator_reaches_both_signs` as the non-vacuity half.
   *Mutation:* made `duration / duration` return a truncating `int` — T3 and
   `a_duration_divided_by_a_duration_keeps_the_half_day` both went red.
-- [ ] **T4** Ordering agreement: for ISO-shaped inputs, `date` comparison
-  agrees with the string comparison it replaces — the migration-safety oracle,
-  and free, because filtering already worked that way.
+- [x] **T4** Ordering agreement: comparing two dates gives what comparing their
+  ISO text gives. The old behaviour is a free reference implementation —
+  ISO-8601 sorts lexicographically, which is why date *filtering* already worked
+  before this feature (`bugs/006`) — so this is the property that says the
+  feature took nothing away. `t4_date_order_agrees_with_the_text_order_it_replaces`.
+  *Mutation:* reversed `Date`'s `Ord` — T4 went red on the first pair.
 - [x] **T5** `truncate` is idempotent and monotone — the two properties that
   make a truncated value usable as a group key, since a key that moved under
   re-truncation would double-count and one that reordered would sort wrong. The

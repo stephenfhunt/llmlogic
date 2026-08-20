@@ -515,6 +515,32 @@ proptest! {
     }
 }
 
+proptest! {
+    /// **T4** — ordering agreement, the migration-safety oracle. ISO-8601 text
+    /// sorts lexicographically, which is why date *filtering* already worked
+    /// before this feature existed (`bugs/006` widened `<` to the types §8
+    /// orders). So the old behaviour is a free reference implementation: for
+    /// any two dates, comparing them as dates must give what comparing their
+    /// ISO text gives.
+    ///
+    /// It is the property that says this feature took nothing away.
+    #[test]
+    fn t4_date_order_agrees_with_the_text_order_it_replaces(a in arb_date(), b in arb_date()) {
+        let src = format!(
+            "d(@{a}, @{b}). t(\"{a}\", \"{b}\").\n\
+             as_date(true) :- d(A, B), A < B.\n\
+             as_text(true) :- t(A, B), A < B.\n\
+             ?- as_date(true).\n?- as_text(true)."
+        );
+        let out = answers(&src);
+        prop_assert_eq!(
+            out.iter().filter(|line| line.starts_with("as_date")).count(),
+            out.iter().filter(|line| line.starts_with("as_text")).count(),
+            "date and text order disagreed on {} < {}", a, b
+        );
+    }
+}
+
 /// The non-vacuity half of T3: the generator must actually produce differences
 /// of both signs and a nonzero one, or the property is a claim about `0.0`.
 #[test]

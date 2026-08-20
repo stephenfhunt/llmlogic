@@ -651,6 +651,61 @@ fn a_consistency_check_answers_through_the_exit_code() {
     assert!(violated.stdout.is_empty(), "{}", violated.stdout);
 }
 
+/// §16.14 — the temporal corpus program, end to end through the binary: a date
+/// column typed from the file with no schema line, `duration / duration` naming
+/// its unit, a range filter over dates, and a period key from `std/time`.
+#[test]
+fn temporal_program_types_dates_and_groups_by_period() {
+    let out = run_file_args(
+        "16_14_temporal.dl",
+        &[
+            "-q",
+            "days_open(T, N).",
+            "-q",
+            "slow(T).",
+            "-q",
+            "recent(T).",
+            "-q",
+            "june(T).",
+            "-q",
+            "month_opened(T, M).",
+            "-q",
+            "per_month(M, N).",
+        ],
+    );
+    assert_eq!(out.code, 0);
+    assert_eq!(
+        out.stdout,
+        "days_open(1, 2.0).\n\
+         days_open(2, 3.0).\n\
+         days_open(3, 1.0).\n\
+         slow(2).\n\
+         recent(2).\n\
+         recent(3).\n\
+         june(1).\n\
+         month_opened(1, @2026-06-01).\n\
+         month_opened(2, @2026-07-01).\n\
+         month_opened(3, @2026-07-01).\n\
+         per_month(@2026-06-01, 1).\n\
+         per_month(@2026-07-01, 2).\n"
+    );
+    assert!(out.stderr.is_empty(), "{}", out.stderr);
+}
+
+/// The closure property over temporal values (§14): the answers above are
+/// valid input, so piping them back in and querying them gives the same rows.
+#[test]
+fn temporal_answers_compose_as_input() {
+    let first = run_file_args("16_14_temporal.dl", &["-q", "month_opened(T, M)."]);
+    assert_eq!(first.code, 0);
+    let again = run_stdin_args(&first.stdout, &["-q", "month_opened(T, M)."]);
+    assert_eq!(again.code, 0);
+    assert_eq!(
+        again.stdout, first.stdout,
+        "answers did not re-parse as facts"
+    );
+}
+
 /// A query that found rows exits `0`; the same query over facts that match
 /// nothing exits `1`. Both are answers — the difference from a `2` is that the
 /// run completed and the engine knows the answer is "none".

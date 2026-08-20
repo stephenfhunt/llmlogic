@@ -1,0 +1,24 @@
+% §16.14 — temporal values: a typed date column, its arithmetic, and a period
+% key (§3/§4/§8/§13). Run by tests/system.rs::temporal_program_types_dates_and_groups_by_period.
+
+% §13 types both date columns with no explicit schema — the cells are ISO-8601.
+import "data/tickets.csv" as ticket.
+% The extraction and truncation relations are gated; without this line `month`
+% and `truncate` are ordinary undefined predicates (§12 says so, with the fix).
+import "std/time".
+
+% §8's algebra: point - point is a vector, and the divisor is where the unit is
+% named. There is no `as number` to get this wrong with.
+days_open(T, N) :- ticket(id: T, opened: O, closed: C), N = (C - O) / @1d.
+slow(T)         :- days_open(T, N), N > 2.0.
+
+% A date range filter, with no cast and no string comparison standing in for one.
+recent(T) :- ticket(id: T, opened: O), O >= @2026-07-01.
+
+% Extraction reads a component; the same relation is a filter when its output
+% position is a constant.
+june(T) :- ticket(id: T, opened: O), month(O, 6).
+
+% A period key is one sortable value, so grouping is an ordinary join.
+month_opened(T, M) :- ticket(id: T, opened: O), truncate(O, month, M).
+per_month(M, N)    :- month_opened(_, M), N = count { T | month_opened(T, M) }.
