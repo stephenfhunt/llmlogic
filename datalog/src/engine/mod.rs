@@ -3732,6 +3732,18 @@ mod tests {
             /// property could hold over nothing but arithmetic-free programs,
             /// which have never been in doubt: what has to be certified *and*
             /// evaluated is a program with arithmetic **and** a positive cycle.
+            ///
+            /// **The `StdBuiltin` shape (2026-08-20) is what makes this guard
+            /// more than bookkeeping.** §10 exempts a `std` relation from
+            /// value-creating recursion as a finite-domain map — a
+            /// termination-soundness claim whose failure mode is a program that
+            /// never finishes — and no shape exercised it. *Mutation*: making
+            /// `schedule::has_arithmetic` return `true` for `Expr::Builtin`
+            /// reddens **this and only this**, with "shape StdBuiltin changed
+            /// sides". C10 itself stays green, because a warned program is
+            /// skipped by its `prop_assume!(!warned)` — which is precisely why
+            /// the exemption needs a guard watching the *classification* and not
+            /// only the fixpoint.
             #[test]
             fn c10_generator_certifies_programs_that_do_arithmetic_in_a_cycle(
                 generated in arb_recursive_arithmetic_program()
@@ -3747,6 +3759,13 @@ mod tests {
                         | ArithShape::Ground
                         | ArithShape::Aggregated
                         | ArithShape::FilterOnly
+                        // A `std/time` builtin in a positive cycle (2026-08-20).
+                        // §10 exempts it as a finite-domain map, so it must land
+                        // on the certified side — and C10 above then has to show
+                        // it actually reaches a fixpoint, which is the whole
+                        // point of exercising an exemption whose failure mode is
+                        // a program that never finishes.
+                        | ArithShape::StdBuiltin
                 );
                 prop_assert_eq!(
                     !warned,

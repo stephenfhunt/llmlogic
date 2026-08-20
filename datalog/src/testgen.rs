@@ -515,6 +515,15 @@ pub(crate) enum ArithShape {
     Aggregated,
     /// A computed value that is only ever compared, so it never reaches a head.
     FilterOnly,
+    /// A **`std/time` builtin inside a positive cycle** — `truncate` mapping a
+    /// date to a date, over and over. §10 exempts a `std` relation from
+    /// value-creating recursion on the grounds that it is a finite-domain map:
+    /// it reads a bound value and returns one no larger, so it propagates but
+    /// never accumulates (`stdlib.rs`, `schedule::has_arithmetic`'s
+    /// `Expr::Builtin` arm). That exemption is a **termination-soundness**
+    /// claim whose failure mode is a program that never finishes, and until
+    /// 2026-08-20 nothing exercised it: the other ten shapes contain no builtin.
+    StdBuiltin,
 }
 
 impl ArithShape {
@@ -546,6 +555,19 @@ impl ArithShape {
             ArithShape::FilterOnly => {
                 "acc(V) :- step(_, _, V).\nacc(V) :- acc(V), K = V + 1, K < 100.\n"
             }
+            // Its own seed relation, because `step` is int-valued and
+            // `truncate` needs a temporal point. The recursion is genuine — the
+            // head feeds the body — and terminates because truncation is
+            // idempotent (T5), which is precisely the "finite-domain map"
+            // §10 exempts. The `import` sits mid-file on purpose: §13 puts no
+            // ordering constraint on one, and a generator that quietly assumed
+            // otherwise would be testing a rule that does not exist.
+            ArithShape::StdBuiltin => {
+                "import \"std/time\".\n\
+                 seed(@2026-01-15).\n\
+                 acc_d(D) :- seed(D).\n\
+                 acc_d(T) :- acc_d(D), truncate(D, month, T).\n"
+            }
         }
     }
 }
@@ -562,6 +584,7 @@ fn arb_arith_shape() -> impl Strategy<Value = ArithShape> {
         Just(ArithShape::Ground),
         Just(ArithShape::Aggregated),
         Just(ArithShape::FilterOnly),
+        Just(ArithShape::StdBuiltin),
     ]
 }
 
@@ -591,9 +614,17 @@ pub(crate) fn arb_recursive_arithmetic_program()
         src.push_str("reach(A, B) :- step(A, B, _).\n");
         src.push_str("reach(A, C) :- reach(A, B), step(B, C, _).\n");
         src.push_str(shape.rules());
+        // Through `resolve_modules`, not straight to `lower`: `StdBuiltin`
+        // carries an `import "std/time".`, and a `std` import is spliced by the
+        // resolver — lowering an unresolved one is a structured error by
+        // design. The other ten shapes import nothing and pass through
+        // untouched, so routing every shape this way costs them nothing and
+        // keeps one path.
         let ast = crate::parser::parse(&src).expect("generated source parses");
-        let program =
-            crate::lower::lower(&ast).expect("generated programs are safe by construction");
+        let resolved = crate::resolve::resolve_modules(ast, None)
+            .expect("generated programs import only `std` modules");
+        let program = crate::lower::lower(&resolved.program)
+            .expect("generated programs are safe by construction");
         (src, program, shape)
     })
 }
