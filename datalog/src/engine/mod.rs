@@ -2279,17 +2279,40 @@ mod tests {
         // 2^53 + 1: the smallest positive integer with no exact `f64`.
         let inexact: i64 = 9_007_199_254_740_993;
 
-        // (value, [int, float, string, symbol, bool])
-        let table: Vec<(Value, [Conversion; 5])> = vec![
+        // §4's own worked examples, so the expected text is the spec's
+        // spelling rather than this module's rendering of it.
+        let date = temporal::Date::from_ymd(2026, 8, 19).expect("a real day");
+        let noon =
+            temporal::Timestamp::from_parts(2026, 8, 19, 12, 30, 0, 0).expect("parts are in range");
+        let day_and_half = temporal::Duration::from_micros(129_600_000_000);
+
+        // (value, [int, float, string, symbol, bool, date, timestamp, duration])
+        //
+        // The temporal columns are transcribed from §8's second table
+        // (spec.md, "Temporal conversions"): a temporal renders to `string` and
+        // reads back from one, `date as timestamp` widens exactly,
+        // `timestamp as date` is a *lossy* structured error, and **every other
+        // pair is a `—`** — in particular `duration` against `int` or `float`
+        // in both directions, which §8 excludes deliberately because a duration
+        // rendered as a bare number is a number of nothing.
+        let table: Vec<(Value, [Conversion; 8])> = vec![
             // `absent` annihilates into every column (§4/§8) — it inhabits any
             // type, so it is never an undefined pair.
-            (Value::Absent, [Missing, Missing, Missing, Missing, Missing]),
+            (
+                Value::Absent,
+                [
+                    Missing, Missing, Missing, Missing, Missing, Missing, Missing, Missing,
+                ],
+            ),
             (
                 Value::Int(30),
                 [
                     Is(Value::Int(30)),
                     Is(float(30.0)),
                     Is(string("30")),
+                    Undefined,
+                    Undefined,
+                    Undefined,
                     Undefined,
                     Undefined,
                 ],
@@ -2304,6 +2327,9 @@ mod tests {
                     Is(string("9007199254740993")),
                     Undefined,
                     Undefined,
+                    Undefined,
+                    Undefined,
+                    Undefined,
                 ],
             ),
             (
@@ -2312,6 +2338,9 @@ mod tests {
                     Is(Value::Int(2)),
                     Is(float(2.0)),
                     Is(string("2.0")),
+                    Undefined,
+                    Undefined,
+                    Undefined,
                     Undefined,
                     Undefined,
                 ],
@@ -2324,6 +2353,9 @@ mod tests {
                     Lossy,
                     Is(float(2.5)),
                     Is(string("2.5")),
+                    Undefined,
+                    Undefined,
+                    Undefined,
                     Undefined,
                     Undefined,
                 ],
@@ -2339,11 +2371,23 @@ mod tests {
                     Is(string("30")),
                     Missing,
                     Missing,
+                    Missing,
+                    Missing,
+                    Missing,
                 ],
             ),
             (
                 string("2.5"),
-                [Missing, Is(float(2.5)), Is(string("2.5")), Missing, Missing],
+                [
+                    Missing,
+                    Is(float(2.5)),
+                    Is(string("2.5")),
+                    Missing,
+                    Missing,
+                    Missing,
+                    Missing,
+                    Missing,
+                ],
             ),
             (
                 string("true"),
@@ -2354,6 +2398,9 @@ mod tests {
                     // `true` lexes as the reserved literal, not an identifier.
                     Missing,
                     Is(Value::Bool(true)),
+                    Missing,
+                    Missing,
+                    Missing,
                 ],
             ),
             (
@@ -2364,12 +2411,24 @@ mod tests {
                     Is(string("abc")),
                     Is(symbol("abc")),
                     Missing,
+                    Missing,
+                    Missing,
+                    Missing,
                 ],
             ),
             (
                 // Not an identifier, so not a symbol either.
                 string("two words"),
-                [Missing, Missing, Is(string("two words")), Missing, Missing],
+                [
+                    Missing,
+                    Missing,
+                    Is(string("two words")),
+                    Missing,
+                    Missing,
+                    Missing,
+                    Missing,
+                    Missing,
+                ],
             ),
             (
                 symbol("red"),
@@ -2378,6 +2437,9 @@ mod tests {
                     Undefined,
                     Is(string("red")),
                     Is(symbol("red")),
+                    Undefined,
+                    Undefined,
+                    Undefined,
                     Undefined,
                 ],
             ),
@@ -2389,12 +2451,114 @@ mod tests {
                     Is(string("true")),
                     Undefined,
                     Is(Value::Bool(true)),
+                    Undefined,
+                    Undefined,
+                    Undefined,
+                ],
+            ),
+            // --- §8's temporal rows (2026-08-20) ---
+            //
+            // The `string` cell is the **unsigilled** canonical spelling: the
+            // `@` is a delimiter the printer supplies, as a string's quotes
+            // are, and dropping it is what makes render and read inverse
+            // against the text a CSV cell actually holds (§8, §13).
+            (
+                Value::Date(date),
+                [
+                    Undefined,
+                    Undefined,
+                    Is(string("2026-08-19")),
+                    Undefined,
+                    Undefined,
+                    Is(Value::Date(date)),
+                    // The one widening §8 allows: midnight of that day.
+                    Is(Value::Timestamp(date.at_midnight())),
+                    Undefined,
+                ],
+            ),
+            (
+                Value::Timestamp(noon),
+                [
+                    Undefined,
+                    Undefined,
+                    Is(string("2026-08-19T12:30:00")),
+                    Undefined,
+                    Undefined,
+                    // The one conversion §8 rejects for being *lossy* rather
+                    // than meaningless — `truncate(T, day, D)` is the construct
+                    // that does it, and the error says so.
+                    Lossy,
+                    Is(Value::Timestamp(noon)),
+                    Undefined,
+                ],
+            ),
+            (
+                Value::Duration(day_and_half),
+                [
+                    // §8's deliberate hazard exclusion: no conversion between a
+                    // duration and a number **in either direction**. This row
+                    // and the `string` rows below are the whole of it.
+                    Undefined,
+                    Undefined,
+                    Is(string("1d12h")),
+                    Undefined,
+                    Undefined,
+                    Undefined,
+                    Undefined,
+                    Is(Value::Duration(day_and_half)),
+                ],
+            ),
+            // --- the reading direction, per §3's grammar minus the `@` ---
+            (
+                string("2026-08-19"),
+                [
+                    Missing,
+                    Missing,
+                    Is(string("2026-08-19")),
+                    Missing,
+                    Missing,
+                    Is(Value::Date(date)),
+                    // §3's timestamp grammar wants a time component; a bare
+                    // date is not one, so this reads nothing rather than
+                    // widening. `as date as timestamp` is the spelling that
+                    // widens.
+                    Missing,
+                    Missing,
+                ],
+            ),
+            (
+                string("2026-08-19T12:30:00"),
+                [
+                    Missing,
+                    Missing,
+                    Is(string("2026-08-19T12:30:00")),
+                    Missing,
+                    Missing,
+                    Missing,
+                    Is(Value::Timestamp(noon)),
+                    Missing,
+                ],
+            ),
+            (
+                string("1d12h"),
+                [
+                    Missing,
+                    Missing,
+                    Is(string("1d12h")),
+                    Missing,
+                    Missing,
+                    Missing,
+                    Missing,
+                    Is(Value::Duration(day_and_half)),
                 ],
             ),
         ];
 
         for (value, expected) in table {
-            for (ty, want) in [Int, Float, String, Symbol, Bool].into_iter().zip(expected) {
+            for (ty, want) in [Int, Float, String, Symbol, Bool, Date, Timestamp, Duration]
+                .into_iter()
+                .zip(expected)
+            {
                 let got = match apply_cast(value.clone(), ty) {
                     Ok(Value::Absent) => Missing,
                     Ok(v) => Is(v),
@@ -4430,14 +4594,91 @@ mod tests {
             }
 
             /// min and max bound every present value, over one ordered type (§9).
+            ///
+            /// Widened past `int` (2026-08-20): §9 accepts `min`/`max` over
+            /// **any single type**, so an int-only pool was stating one eighth
+            /// of the sentence. The temporal arms matter most — they read the
+            /// same `Ord` A4 pins and `ordered_comparison_and_minmax_agree_on_every_type`
+            /// ties to `<`, and they were the types that `Ord` had most recently
+            /// gained.
             #[test]
-            fn min_and_max_bound_every_value(ints in prop::collection::vec(-1000i64..1000, 1..8)) {
-                let vs: Vec<Value> = ints.iter().map(|n| Value::Int(*n)).collect();
+            fn min_and_max_bound_every_value(
+                vs in prop::collection::vec(crate::testgen::arb_value(), 1..8)
+                    .prop_filter(
+                        "one type per fold (§9 has no cross-type order to fold over)",
+                        |vs| vs.windows(2).all(|w| {
+                            std::mem::discriminant(&w[0]) == std::mem::discriminant(&w[1])
+                        }),
+                    ),
+            ) {
                 let lo = fold_aggregate(AggOp::Min, &vs).unwrap().value;
                 let hi = fold_aggregate(AggOp::Max, &vs).unwrap().value;
                 for v in &vs {
                     prop_assert!(lo <= *v && *v <= hi);
                 }
+            }
+
+            /// **`avg` over durations is a `duration`, not a `float`** (§9,
+            /// spec.md:1077) — and it equals the sum scaled by the count, since
+            /// §8 makes `duration / int` a scaling rather than a division that
+            /// leaves the type behind.
+            ///
+            /// The rule §9 argues for at length had exactly one hand test
+            /// (`tests/pipeline.rs`) before this. It is the arm a future
+            /// refactor toward a uniform "avg is int → float" would silently
+            /// break, because every *other* avg property is numeric.
+            ///
+            /// **Mutation**: making `avg_values` fall through to the numeric
+            /// branch for durations reddens this and nothing else.
+            #[test]
+            fn avg_over_durations_is_a_duration(
+                us in prop::collection::vec(-1_000_000_000i64..1_000_000_000, 1..8),
+            ) {
+                let vs: Vec<Value> = us
+                    .iter()
+                    .map(|n| Value::Duration(temporal::Duration::from_micros(*n)))
+                    .collect();
+                let got = fold_aggregate(AggOp::Avg, &vs).unwrap().value;
+                let total: i64 = us.iter().sum();
+                prop_assert_eq!(
+                    got,
+                    Value::Duration(temporal::Duration::from_micros(total / us.len() as i64)),
+                    "avg over durations left the vector type behind"
+                );
+            }
+
+            /// `sum` over a **point** type is a type error (§9, spec.md:1076) —
+            /// the rejection half, which `testing.md`'s corollary asks for
+            /// beside every acceptance claim. Adding two dates has no meaning,
+            /// and §9 requires the message to say that rather than "not
+            /// numeric".
+            #[test]
+            fn sum_over_a_point_type_is_rejected(
+                days in prop::collection::vec(0i64..3000, 1..6),
+                as_timestamp in any::<bool>(),
+            ) {
+                let vs: Vec<Value> = days
+                    .iter()
+                    .map(|d| {
+                        let date = temporal::Date::from_days(
+                            temporal::Date::from_ymd(2020, 1, 1).expect("a real day").days()
+                                as i64
+                                + d,
+                        )
+                        .expect("inside the range");
+                        if as_timestamp { Value::Timestamp(date.at_midnight()) } else { Value::Date(date) }
+                    })
+                    .collect();
+                if vs.len() == 1 {
+                    // A one-element fold never applies `+`, so it cannot report
+                    // the error — §9's claim is about *adding* two points.
+                    return Ok(());
+                }
+                let err = fold_aggregate(AggOp::Sum, &vs).unwrap_err();
+                prop_assert!(
+                    err.to_string().contains("type error"),
+                    "summing points should be a type error, got: {}", err
+                );
             }
 
             /// **The fold does not depend on the order its witnesses arrive
@@ -4557,11 +4798,31 @@ mod tests {
                 n in any::<i64>(),
                 f in proptest::num::f64::NORMAL,
                 b in any::<bool>(),
+                temporal in crate::testgen::arb_temporal(),
             ) {
-                for value in [Value::Int(n), Value::Float(F64::new(f).unwrap()), Value::Bool(b)] {
+                // The temporal arms (2026-08-20) are the half T1 cannot reach.
+                // T1 round-trips a value through `temporal::parse_temporal`
+                // directly; this goes through `apply_cast`, so the reading side
+                // is `lexer::classify_cell` and the writing side is
+                // `print::print_value` **minus the `@`** — the sigil is a
+                // delimiter the printer supplies, and §8's render/read pair is
+                // inverse only if it is dropped and re-supplied consistently.
+                let (as_date, as_ts, as_dur) = match temporal {
+                    crate::temporal::Temporal::Date(d) => (Some(Value::Date(d)), None, None),
+                    crate::temporal::Temporal::Timestamp(t) => (None, Some(Value::Timestamp(t)), None),
+                    crate::temporal::Temporal::Duration(d) => (None, None, Some(Value::Duration(d))),
+                };
+                let temporal_values = [as_date, as_ts, as_dur].into_iter().flatten();
+                for value in [Value::Int(n), Value::Float(F64::new(f).unwrap()), Value::Bool(b)]
+                    .into_iter()
+                    .chain(temporal_values)
+                {
                     let ty = match value {
                         Value::Int(_) => TypeName::Int,
                         Value::Float(_) => TypeName::Float,
+                        Value::Date(_) => TypeName::Date,
+                        Value::Timestamp(_) => TypeName::Timestamp,
+                        Value::Duration(_) => TypeName::Duration,
                         _ => TypeName::Bool,
                     };
                     let text = apply_cast(value.clone(), TypeName::String).unwrap();
@@ -4588,15 +4849,25 @@ mod tests {
                 ty in prop::sample::select(vec![
                     TypeName::Int, TypeName::Float, TypeName::String,
                     TypeName::Symbol, TypeName::Bool,
+                    // All eight since 2026-08-20 — "every `T`" had meant five
+                    // since the temporal types landed, and the annihilation
+                    // short-circuit sits ahead of the undefined-pair check
+                    // precisely so the pairs with *no* conversion still hold.
+                    TypeName::Date, TypeName::Timestamp, TypeName::Duration,
                 ]),
             ) {
                 prop_assert_eq!(apply_cast(Value::Absent, ty).unwrap(), Value::Absent);
             }
 
             /// A cast is **idempotent at its own type**: `V as T` where `V`
-            /// already has type `T` is `V`, for every one of the five. Pins the
-            /// identity diagonal of §8's table, which is the part most easily
-            /// broken by a reorganisation of `apply_cast`'s match arms.
+            /// already has type `T` is `V`, for every one of the **eight**.
+            /// Pins the identity diagonal of §8's table, which is the part most
+            /// easily broken by a reorganisation of `apply_cast`'s match arms.
+            ///
+            /// It reaches all eight since 2026-08-20 without an edit here,
+            /// because `arb_value` was widened — which is the argument for
+            /// fixing the pool rather than each property: the diagonal's
+            /// temporal cells came along for free.
             ///
             /// **Mutation-verified**: dropping `TypeName::String`'s
             /// `Value::String(_) => return Ok(value)` early return reddens it —
