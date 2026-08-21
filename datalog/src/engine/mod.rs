@@ -38,6 +38,7 @@
 
 #[cfg(test)]
 pub(crate) mod naive;
+mod seek;
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -655,16 +656,24 @@ fn enumerate_from(
         BodyLiteralKind::Atom(atom) => {
             let full = cx.model.relation(atom.pred);
             let atom_delta = cx.delta.get(&atom.pred);
+            // The atom's constants and already-bound variables are a prefix of
+            // leading columns, and a relation is ordered by column — so the
+            // tuples that can match are one contiguous range, not the whole
+            // relation ([`seek`], §17 2026-08-21). `try_match` still filters:
+            // the range is exact on the prefix and a superset past it.
+            let Some(prefix) = seek::bound_prefix(atom, bindings) else {
+                return Ok(());
+            };
             let candidates: Box<dyn Iterator<Item = &Tuple>> =
                 match cx.views[idx] {
-                    AtomView::Full => Box::new(full.iter()),
+                    AtomView::Full => Box::new(seek::tuples_with_prefix(full, &prefix)),
                     AtomView::Delta => match atom_delta {
-                        Some(delta) => Box::new(delta.iter()),
+                        Some(delta) => Box::new(seek::tuples_with_prefix(delta, &prefix)),
                         None => return Ok(()),
                     },
-                    AtomView::Old => Box::new(full.iter().filter(move |tuple| {
-                        atom_delta.is_none_or(|delta| !delta.contains(*tuple))
-                    })),
+                    AtomView::Old => Box::new(seek::tuples_with_prefix(full, &prefix).filter(
+                        move |tuple| atom_delta.is_none_or(|delta| !delta.contains(*tuple)),
+                    )),
                 };
             for tuple in candidates {
                 if let Some(bound) = try_match(atom, tuple, bindings) {

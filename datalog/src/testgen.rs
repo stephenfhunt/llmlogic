@@ -109,9 +109,9 @@ pub(crate) fn arb_fact_constant() -> impl Strategy<Value = Constant> {
     prop_oneof![9 => arb_constant(), 1 => Just(Constant::Absent)]
 }
 
-/// A ground IR value, via the same constant pools.
-pub(crate) fn arb_value() -> impl Strategy<Value = ir::Value> {
-    arb_constant().prop_map(|c| match c {
+/// The IR value a surface constant denotes.
+fn constant_value(constant: Constant) -> ir::Value {
+    match constant {
         Constant::Symbol(s) => ir::Value::Symbol(s),
         Constant::String(s) => ir::Value::String(s),
         Constant::Int(i) => ir::Value::Int(i),
@@ -120,10 +120,22 @@ pub(crate) fn arb_value() -> impl Strategy<Value = ir::Value> {
         Constant::Temporal(crate::temporal::Temporal::Date(d)) => ir::Value::Date(d),
         Constant::Temporal(crate::temporal::Temporal::Timestamp(t)) => ir::Value::Timestamp(t),
         Constant::Temporal(crate::temporal::Temporal::Duration(d)) => ir::Value::Duration(d),
-        // `arb_constant` never produces absent — generated programs stay in the
-        // typed value space (absent has its own targeted tests).
-        Constant::Absent => unreachable!("arb_constant generates no absent"),
-    })
+        Constant::Absent => ir::Value::Absent,
+    }
+}
+
+/// A ground IR value, via the same constant pools. Never absent — generated
+/// programs stay in the typed value space (§4/§8 reject a literal `absent` in a
+/// body), so absent enters through [`arb_fact_value`] instead.
+pub(crate) fn arb_value() -> impl Strategy<Value = ir::Value> {
+    arb_constant().prop_map(constant_value)
+}
+
+/// A ground IR value as it can appear **in stored data**, absent included —
+/// [`arb_fact_constant`]'s pool, lowered. This is the pool a relation's tuples
+/// are drawn from, so it is what the B12 seek properties generate over.
+pub(crate) fn arb_fact_value() -> impl Strategy<Value = ir::Value> {
+    arb_fact_constant().prop_map(constant_value)
 }
 
 /// The field name for argument position `i` of a schema-carrying predicate.
