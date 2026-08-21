@@ -114,7 +114,7 @@ criterion rather than an assumption.
 | **S3** | A rejected program can be repaired from the diagnostic alone, without reading the spec. | §12's fields; the near-miss corpus (§3) | met for lex/parse; **scoped** (§2) |
 | **S4** | A question over a real external table is answerable end-to-end with no preprocessing step. | §13 + the USDA dogfood | met (dates included, 2026-08-19) |
 | **S5** | Every fact in an answer can be explained **through the surface the caller used**. | §11's query surface | **not met** — designed, unbuilt |
-| **S6** | No *exponent* worse than a comparable engine on the shared corpus. | `notes/cross-engine-benchmark.md` | met |
+| **S6** | No *exponent* worse than a comparable engine on the shared corpus. | `notes/cross-engine-benchmark.md`, re-measured in `notes/profile-2026-08-20.md` | met |
 
 ### What v1 means
 
@@ -3838,6 +3838,19 @@ never say.
     tag on the other side of it. Ours stays unmeasured, and still needs a temporary
     build: **there is no flag to disable recording**, which is now the single
     cheapest thing standing between the profiling item and its top hypothesis.
+  - ***Consequences 2026-08-20*** — **ours is measured**, by exactly that temporary
+    build ([`notes/profile-2026-08-20.md`](notes/profile-2026-08-20.md)). The
+    recorder is **70–78% of peak RSS** on every recursive shape and only **2–24% of
+    wall clock**, with its time share *falling* as the workload grows — the opposite
+    of the sibling engine's 13×, and the 2026-08-17 corroboration above does not
+    transfer. It is a **memory** decision, not a speed one.
+    **But the number to decide against is not this one.** The recorder's time share
+    is small only because an unindexed relation scan is hiding it; with that scan
+    fixed (a prototype, measured, green) the same recorder is **50–60% of a run**.
+    A decision taken today would price pillar 1 at 2% of a run that will not exist.
+    The rejected alternative is unchanged in kind and now costed: backwards
+    extraction would return ~78% of peak memory and, post-fix, half the wall clock,
+    in exchange for one proof instead of all of them.
 - **2026-07-19** — **Step-2 comparison policy**: the core evaluator reports
   comparison literals as a structured "not yet supported" error (the same
   pattern lowering uses for negation and named arguments). §8 semantics —
