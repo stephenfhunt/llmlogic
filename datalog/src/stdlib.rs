@@ -117,3 +117,55 @@ pub fn provider(name: &str, arity: u32) -> Option<&'static str> {
 pub fn module_names() -> Vec<&'static str> {
     MODULES.iter().map(|module| module.name).collect()
 }
+
+/// The source name of `op`, recovered from the module tables above.
+///
+/// The inverse of the [`relation`] lookup, and it reads the same tables rather
+/// than restating the names: a second list would be free to drift from the one
+/// the parser resolves against. Total by construction — every [`BuiltinOp`] is
+/// some module's relation — so a missing entry is a bug in [`MODULES`], not a
+/// caller's error to handle. Used by the §11 proof renderer, which prints a
+/// lowered [`crate::ir::Expr::Builtin`] back in its surface spelling.
+pub fn op_name(op: BuiltinOp) -> &'static str {
+    MODULES
+        .iter()
+        .flat_map(|module| module.relations)
+        .find(|relation| relation.op == op)
+        .map(|relation| relation.name)
+        .expect("every BuiltinOp is provided by some std module")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// [`op_name`]'s totality, which its `expect` asserts and prose cannot keep
+    /// true: a [`BuiltinOp`] added without a [`MODULES`] entry would panic in the
+    /// §11 renderer, at the moment someone asked why a fact holds. The match is
+    /// exhaustive, so a new variant fails to compile here rather than surviving
+    /// to that point.
+    #[test]
+    fn every_builtin_op_has_a_name() {
+        for op in [
+            BuiltinOp::Year,
+            BuiltinOp::Month,
+            BuiltinOp::Day,
+            BuiltinOp::Hour,
+            BuiltinOp::Minute,
+            BuiltinOp::Second,
+            BuiltinOp::Truncate,
+        ] {
+            // Exhaustiveness: extending `BuiltinOp` reddens this arm.
+            match op {
+                BuiltinOp::Year
+                | BuiltinOp::Month
+                | BuiltinOp::Day
+                | BuiltinOp::Hour
+                | BuiltinOp::Minute
+                | BuiltinOp::Second
+                | BuiltinOp::Truncate => {}
+            }
+            assert!(!op_name(op).is_empty(), "{op:?} has no name");
+        }
+    }
+}
