@@ -2351,6 +2351,29 @@ never say.
 
 ### Decisions
 
+- **2026-08-21** — **The relation is already an index: a bound prefix is sought,
+  not scanned** (§15/engine; the argument in full is `src/engine/seek.rs`'s module
+  header, the numbers are `ROADMAP.md`'s *Performance* item).
+  - A relation's `BTreeSet` is ordered by column, so the tuples an atom's
+    constants and bound variables can match are one contiguous range. The
+    positive-atom arm and the anti-join seek it; an aggregate goal inherits it,
+    its sub-join running through the same arm with the group keys bound. Up to
+    **13.4×**, and an *exponent* on three shapes; peak RSS unchanged.
+  - **Exact, not approximate**: `Value`'s `Ord` agrees with its `Eq` (2026-07-19
+    float totality) and `unifies_with` is `==` off `absent`, so the range applies
+    the predicate the scan applied. Both callers still re-check every candidate,
+    so an over-yield is invisible and only an under-yield loses answers — which is
+    why the B1 differential is **not** the guard here. **B12b/B12c fail if
+    contiguity breaks**, B12a if the range does.
+  - **The `absent` asymmetry.** An atom with a known-`absent` position is
+    *impossible* and gets no range; a refutation compares structurally
+    (2026-07-29), so `absent` is a legal key there. Two prefix builders, one per
+    §4 notion of sameness.
+  - **Rejected: secondary indexes over arbitrary binding patterns.** They would
+    also serve a bound column that is not *leading* — worth 29× on a 3-way join
+    written in the pessimal order — at a second copy of every relation, on top of
+    a recorder already 78% of peak RSS. Filed on `ROADMAP.md` with that number.
+
 - **2026-08-20** — **An aggregate is a fold over a multiset, so only its result
   is defined** (§9). `fold_aggregate` sorts its present values into §14 order
   before folding, closing `bugs/007`: witnesses used to arrive in
@@ -3851,6 +3874,14 @@ never say.
     The rejected alternative is unchanged in kind and now costed: backwards
     extraction would return ~78% of peak memory and, post-fix, half the wall clock,
     in exchange for one proof instead of all of them.
+  - ***Consequences 2026-08-21*** — **that engine now exists.** The prefix seek
+    landed (2026-08-21 above), so the run this decision has to be priced against
+    is the current one, not the scanned one: peak RSS is unchanged by the seek,
+    so the recorder's ~78% of it stands, and the profile's cut RB put its
+    wall-clock share at 50–60% of a seeking engine against 2–24% of a scanning
+    one. That was measured on a prototype, not on this code, so the number to
+    decide against wants re-running. Nothing here is decided yet — the
+    sequencing note has simply run out of things to wait for.
 - **2026-07-19** — **Step-2 comparison policy**: the core evaluator reports
   comparison literals as a structured "not yet supported" error (the same
   pattern lowering uses for negation and named arguments). §8 semantics —

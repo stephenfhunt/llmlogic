@@ -54,8 +54,8 @@ each; detail in §17 and `docs/worklog.md`.
 > [`notes/v1-scope.md`](notes/v1-scope.md), and the evidence that prompted the
 > exercise in [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
 > The stock-take's recommended order survives the ruling — the caller's contract
-> (✅ 2026-08-18), **temporal types (✅ 2026-08-19), then the profile** — with one
-> change:
+> (✅ 2026-08-18), **temporal types (✅ 2026-08-19), the profile (✅ 2026-08-20) and
+> the seek it found (✅ 2026-08-21)** — with one change:
 > **S1's harness (`EXPERIMENTS.md`) now sits alongside them** instead of near the
 > bottom, since §1 names it as the instrument v1 is defined against.
 >
@@ -357,15 +357,14 @@ them. Except where noted these are documented v1 limits rather than defects.
 - **Does the derivation store earn its cost?** A sibling engine extracts a proof
   *backwards* from the retained model — no recorder in the fixpoint, no re-run — so
   a run nobody questions pays one integer per row. It is not a free swap: we record
-  *all* derivations (§17, 2026-07-19) and backwards extraction yields one. But
-  **Measured 2026-08-20** ([`notes/profile-2026-08-20.md`](notes/profile-2026-08-20.md)):
-  the recorder is **70–78% of peak RSS** but only **2–24% of wall clock**, and its
-  time share *falls* with scale because the unindexed scan swamps it — so
-  `performance-baseline.md`'s "top hypothesis for the 35× cliff" is killed on time
-  and confirmed on memory. **Decide it against the post-seek engine, not this one**:
-  with the prefix seek applied the same recorder is **50–60%** of a run. Still to be
-  settled in the same session as the query surface above (2026-08-18).
-  _queued (after the seek) — **v1**, decided with the query surface._
+  *all* derivations (§17, 2026-07-19) and backwards extraction yields one.
+  **Measured** ([`notes/profile-2026-08-20.md`](notes/profile-2026-08-20.md)): the
+  recorder is **70–78% of peak RSS**, and a prototype put it at **50–60% of wall
+  clock** on every recursive shape once the prefix seek removes the scan that was
+  hiding it. The seek shipped 2026-08-21 and left peak RSS untouched, so the memory
+  half stands as measured and the time half wants re-running against this code
+  before the decision is taken. Settled in the same session as the query surface
+  above (2026-08-18). _queued — **v1**, decided with the query surface._
   — §11/engine, [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
 
 ### `std` modules (§8/§12/§13) — shipped
@@ -400,31 +399,36 @@ deferred until a consumer needs them (§8's *Not covered*). — §13,
 The profile falsified the ranking both earlier notes gave, so the items below are
 its ranking, not theirs.
 
-- **Seek the bound prefix instead of scanning the relation** — a relation's
-  `BTreeSet` is already ordered by column, so the tuples matching a bound prefix are
-  a contiguous range that nothing seeks. A ~20-line prototype measured **10.2× on
-  `sparse_800`, 12.7× on `join_4000`, 9.0× on `agg_50000`**, moved sparse from
-  n^4.16 to n^2.14 and a fixpoint-free join from n^2.00 to n^1.06, and passed the
-  full suite with byte-identical answers. Subsumes the aggregation item below.
-  _queued — **v1** (S6: it is an exponent, and it is the input the recorder decision must be re-measured against)._ — §9/engine.
-- **Aggregation does not scale with the aggregated relation** — mechanism confirmed
-  (the goal rescans the whole relation per group; cost tracks groups × rows), but the
-  recorded "2.5× the rows costs 9.6×" is an artifact of a generator that moves rows
-  and groups together, and **`tsdl` does not win this shape** — re-measured today,
-  1.73 s ours against 2.92 s theirs. The prefix seek collapses it to Θ(rows) and
-  makes groups free. _folded into the item above — **v1**._ — §9/engine.
-- **Interning / `Rc<str>` for values** — value comparison is ~70% of `agg_50000`
-  and ~31% of `sparse_400` today (`Value::eq` plus libc `memcmp`), so interning is a
-  real time lead against *this* engine — but **not against the post-seek one**: under
-  the prefix seek `Value::eq` falls to 2–3%, because the seek deletes the comparisons
-  rather than making each cheaper. Symbol *length* is not the driver either (16× the
-  width costs 7.5%). A memory item if the seek goes first, a time item if it does not.
-  [`notes/profile-2026-08-20.md`](notes/profile-2026-08-20.md). _queued (after the seek) — **post-v1**: memory once sequenced, and S6 is about exponents._ — §4/engine.
+- **Seek the bound prefix instead of scanning the relation** — **shipped ✅
+  2026-08-21** (§17 that date; `src/engine/seek.rs`; `testing.md` **B12**). Up to
+  **13.4×**, and an *exponent* on three shapes — sparse 400→800 n^4.25 → **n^2.17**,
+  join 2000→4000 n^2.07 → **n^1.00** — at unchanged peak RSS, answers byte-identical
+  on all 26 corpus programs. Subsumed the aggregation item, closed with it.
+  — §9/engine.
+- **A bound column that is not *leading* still scans** — the seek is the relation's
+  own column order, so `p(X, Y) :- q(A, X), r(Y, X)` gets nothing for `r`. Priced
+  while measuring the item above: the `join_4000` body written in the pessimal atom
+  order takes **0.86 s against 0.03 s**, and the seek buys it *nothing* (0.84 s
+  before). Fixing it means secondary indexes on the binding patterns a program
+  actually uses — a second copy of every relation, on top of a recorder already at
+  78% of peak RSS, which is the decision above. _queued — **post-v1**._ — §15/engine.
+- **Seeking makes body order matter more** — the same measurement, read the other
+  way: good-vs-pessimal atom order cost **2.0×** before the seek and **29×** after.
+  The scheduler runs positive atoms in strict source order with no cost model
+  (`schedule.rs`), and reordering them is observable on the error path — whether a
+  runtime error fires at all — so this is its own design session, not a patch.
+  B5/C14 already assert the *answer* is order-invariant. _queued — **post-v1**._
+  — §15/engine.
+- **Interning / `Rc<str>` for values** — a **memory** item, not a time one.
+  `Value::eq` plus libc `memcmp` is 2–3% of a run: the seek deletes the comparisons
+  rather than making each cheaper, and symbol *length* was never the driver (16× the
+  width costs 7.5% of wall clock, but 75% more allocated bytes and 32% more RSS).
+  [`notes/profile-2026-08-20.md`](notes/profile-2026-08-20.md). _queued — **post-v1**: memory only, and S6 is about exponents._ — §4/engine.
 - **Parallelism** — assess how much of semi-naive evaluation and joins can go
   parallel (independent rules within a stratum, partitioned/hash joins) while
   preserving the deterministic canonical output and full provenance recording,
   which are load-bearing guarantees. Scope follows from the profile, which now
-  exists and puts the prefix seek ahead of it. _queued (after the seek) —
+  exists and puts the prefix seek ahead of it, which shipped 2026-08-21. _queued —
   **post-v1**: S6 is about exponents, which parallelism does not change._ — engine.
 
 ### Declarative semantics (§6) — shipped

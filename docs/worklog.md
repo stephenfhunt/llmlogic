@@ -24,6 +24,60 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-21 — The seek lands, and body order becomes the thing that matters
+
+The profile's finding, shipped: **the positive-atom arm and the anti-join seek a
+bound prefix instead of scanning the relation**, in `src/engine/seek.rs` with
+`testing.md` **B12** pinning the equivalence. Answers byte-identical on all 26
+corpus programs, 553 tests green, clippy and rustfmt clean.
+
+**Done**
+- **Up to 13.4×, and an exponent on three shapes.** `join_4000` 13.4×,
+  `sparse_800` 10.8×, `agg_50000` 9.3×, `chain_800` 2.4×, `negation_400` 2.85×.
+  Sparse 400→800 goes n^4.25 → **n^2.17**, join 2000→4000 n^2.07 → **n^1.00**.
+  Peak RSS identical to the megabyte — same model, same recorder.
+- **The anti-join seeks too**, which the prototype did not. It needs the *opposite*
+  `absent` rule: a refutation compares structurally (§4/§7), so `absent` is a legal
+  key there where a join calls the atom impossible. Two prefix builders, one per
+  notion of sameness. Worth a further 1.22× on `negation_400` — and recording that
+  it is *small* is the point: the anti-join was not what was left in those shapes.
+- **B12a/b/c**, each mutation-verified and each mutation written on its catalog
+  line: `.skip(1)` on the range; a prefix that extends past an unbound variable;
+  `map_while` → `filter_map` in the refutation's key.
+- Swept: §17 (the decision, plus a ***Consequences*** on the 2026-07-19 recorder
+  entry), `ROADMAP.md` ×5, `testing.md` (B12 + a coverage-map row), and an
+  annotation on `notes/profile-2026-08-20.md`.
+
+**Decided**
+- **The differential is not the guard here.** Both callers re-check every
+  candidate, so an over-yield is invisible and only an under-yield loses answers —
+  B1 cannot see the failure mode this change has. B12b/B12c are the tests that
+  fail if contiguity breaks, and every recorded mutation is under-yielding.
+- **Secondary indexes are rejected for now, and priced.** The seek is the
+  relation's own column order, so a bound column that is not *leading* still
+  scans. Fixing it means a second copy of every relation on top of a recorder
+  already at 78% of peak RSS — which is the next decision, not this one.
+- **Body order is now 29×, where it was 2.0×.** `join_4000` written in the
+  pessimal atom order takes 0.86 s against 0.03 s, and the seek buys that order
+  *nothing*. The profile's "seeking makes body order matter more" has a number.
+  `schedule.rs` is deliberately untouched: reordering positive atoms is observable
+  on the error path, so it is its own session.
+
+**Removed**
+- **The per-group schedule hoist — written, measured, dropped.** `literal_order`
+  runs once per group inside the aggregate arm, and the guess was that the seek
+  would expose it. It is noise: 0.7% at `agg_50000`, unchanged at 50 000 groups of
+  one row each. A `Plan` type for a non-existent win, so it went back out.
+- `ROADMAP.md`'s aggregation item, subsumed and closed, and the interning item's
+  "memory if the seek goes first, time if not" conditional — now just *memory*.
+
+**Next up**
+- **The three-way decision session** (recorder / query surface / row provenance),
+  against this engine — but the 50–60% was measured on the prototype, so re-run it
+  against the shipped code first.
+- Still open: **E5**/**E6**, and `--no-default-features` does not pass its own
+  test suite (two temporal tests).
+
 ## 2026-08-20 — The profile, and the scan that was hiding everything else
 
 The last of the stock-take's four. It answered pillar 1's question and then
@@ -126,55 +180,3 @@ failures, and the open defect set empty again.
   of it is closed.
 - Still open: **E5**/**E6**, and §17's period arithmetic, whether a truncated
   value should print as its period, and the `avg`-over-mixed-column question.
-
-## 2026-08-20 — A coverage audit finds `bugs/007`, and six laws that were never stated
-
-No feature work: an audit of the property suite, asked for before the profile,
-which turned up one wrong-answer defect and six algebraic laws with nothing
-asserting them. **533 tests green**, clippy and rustfmt clean; the one
-`--ignored` failure is `007`'s acceptance criterion, by design.
-
-**Done**
-- **`bugs/007`** — `sum`/`avg` fold in witness-*enumeration* order, so two
-  spellings of one goal give `r(0.0)` and `r(0.1)` over floats, and an answer
-  versus **exit 2** on the int overflow check. §17's 2026-07-25 entry is
-  ***Falsified***: its standard holds, its generalisation does not — body order
-  is unobservable only where the fold is associative over the value type.
-- **The root cause**: `arb_constant` never followed the language past five
-  types. Widened to eight, and *measured* — swapping `Date` and `Bool` in
-  `ir::Value`'s variant order is a mutation **A4 passes on the old generator and
-  fails on the new**.
-- **Six properties**: **C11** negation is antitone by parity (the half B4
-  excludes rather than covers), **C12** join/union idempotence, **C13** statement
-  order changes nothing — verdict, types *and* model, **C14** the derivations are
-  order-invariant too, **B11** the aggregate monoid laws, **D5** §14's closure at
-  the program level. Plus §9's temporal folds, §8's cast table widened 5×5 → 8×8,
-  and C10's eleventh shape for §10's `std`-builtin exemption.
-- **`testing.md` swept**: F1–F7 and C8 were green and still `[ ]`, and one entry
-  described a test that does not exist (`filtered_atom_query_…`, superseded
-  2026-08-17). Coverage map gained four rows.
-
-**Decided**
-- **Widen the generator globally, then narrow deliberately.** The `unreachable!`
-  that hid temporal was an accident of ordering; a narrowing with a comment is a
-  decision. It found no defect in §8/§9's temporal rules — the design was right
-  and only the coverage was thin.
-- **Record a mutation that could not be aimed, rather than a tidier one.** C12,
-  D5 and C11 each have no unique kill and say why. A plausible-sounding mutation
-  nobody ran is what rule 3 exists to stop.
-- **An equivalent mutant is evidence, not a gap** (C13's reversed gather order
-  reddens *nothing* — which is what confluence means); and **mutation-verify
-  against the full suite**, since the `holds.` mutant is invisible to `--lib`.
-
-**Removed**
-- Ten proptest regression seeds recording deliberate mutants rather than defects
-  (kept: `007`'s). The stale `filtered_atom_query_…` entry, replaced by what
-  shipped. ROADMAP's "no known `--ignored` failures" and "defect set is empty"
-  lines, both now false.
-
-**Next up**
-- **`bugs/007`'s fix is a user call** — sort witnesses before folding (the bug
-  file's recommendation) versus documenting the restriction. Blocked on it: the
-  float widening of B1's and B5's aggregate arms, `007`'s second acceptance half.
-- **The profile**, unchanged and unblocked — what this session ran ahead of.
-- Still open: **E5**/**E6**, whose hole now covers every temporal derivation.

@@ -208,6 +208,7 @@ it. A future audit starts here.
 | Order-invariance of *explanations* | B5/B6's mutators, compared at the derivation level | **C14**; E1–E4 check one evaluation each and are blind to it |
 | Closure at the program level (§14) | `arb_closure_program` | **D5**; D1 is the fact-set half |
 | §10's std-builtin exemption | `ArithShape::StdBuiltin` | **C10**'s guard — the mutation lands on the classification, not the fixpoint |
+| The physical access path (§15, evaluator-internal) | small collision-rich tuple pools with `absent`; prefixes drawn from the generated relation | **B12a/b/c**, with their three guards — the differential is blind to an over-yield, so these are what pin the seek |
 
 **The 2026-08-20 audit's lesson, for whoever reads this map next.** Every row
 above answers "is this operation exercised". The gaps that audit found were a
@@ -494,6 +495,34 @@ compared keyed by predicate *name*, not `PredId`.
   result reddens **only** the accepting half, which is what shows both directions
   are load-bearing; dropping `set_type` reddens both and so discriminates
   nothing.
+- [x] **B12** **The seek is the scan** (§15/engine, 2026-08-21) — the equivalence
+  the prefix seek rests on, in three parts, all in `src/engine/seek.rs`.
+  - **B12a** `b12a_the_seek_is_the_scan` — `tuples_with_prefix` yields exactly
+    what `set.iter().filter(starts_with)` yields, in the same order. The oracle
+    is the filter: an independent restatement, not a call to the code under
+    test. Its prefix is usually drawn *from* the generated relation, so the range
+    is non-empty by construction. *Mutation*: `.range(prefix..)` →
+    `.range(prefix..).skip(1)`.
+  - **B12b** `b12b_the_bound_prefix_loses_no_match` — every tuple `try_match`
+    accepts starts with `bound_prefix`'s key, and a `None` key means no tuple is
+    accepted. This is the half that licenses replacing the scan; it never calls
+    the seek. *Mutation*: let the prefix keep extending past an unbound variable,
+    so a bound column at a non-leading position joins the key.
+  - **B12c** `b12c_the_closed_prefix_loses_no_refutation` — B12b for the
+    anti-join, where the comparison is structural and `absent` is therefore a
+    legal key. *Mutation*: `map_while` → `filter_map` in `closed_prefix`.
+
+  **Why B1 is not the guard here, and why these had to be written.** Both
+  callers re-check every candidate, so a seek that returns *too many* tuples is
+  silently corrected and only costs time. The differential (`naive.rs` scans,
+  the engine seeks) therefore cannot see an over-yield at all, and every
+  mutation above is deliberately an **under**-yielding one. Guards: B12a's
+  `b12a_generator_reaches_a_proper_non_empty_sub_range` (some tuples kept *and*
+  some rejected, or contiguity is untested); B12b's
+  `b12b_generator_reaches_matches_with_a_prefix_and_both_impossibilities` (a
+  match on a non-empty prefix, plus `None` reached from a constant `absent` and
+  from a slot bound to one); B12c's
+  `b12c_generator_reaches_refutations_on_a_prefix_and_on_an_absent_key`.
 
 ### Phase C — negation + type inference (roadmap step 4) — generalizes §16.2, §16.3
 
