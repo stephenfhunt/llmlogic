@@ -86,6 +86,8 @@ the checks — **any** query answering makes the run `0`.
   ```sh
   ./datalog family.dl -q 'grandparent(X, Z) :- parent(X, Y), parent(Y, Z)'
   ```
+- **An explanation goal** — `?why <fact>` or `?whynot <fact>`; see *When the
+  answer looks wrong* below.
 A trailing `.` is optional. Multiple `-q` apply in order (a later one may use a
 predicate an earlier one defined); each prints its own block of answers.
 
@@ -118,6 +120,50 @@ in the output says so. **Name the query** and that ambiguity is gone:
 relation wears. A name is also a real relation, so a later `-q` can read it. Note
 it publishes **every** variable the body binds — that one is `adult/2`; to choose
 the columns, write the rule (`-q 'adult(N) :- person(N, A), A >= 18'`).
+
+## When the answer looks wrong
+
+An empty answer and a query whose join quietly connects nothing print exactly the
+same thing. Two goals tell them apart. **`?-` enumerates; `?why` / `?whynot`
+interrogate one of the rows it returned.**
+
+```sh
+# a row you did not expect — what derived it?
+./datalog /tmp/family.dl -q '?why ancestor("alice","dave")'
+# % why ancestor("alice", "dave")
+# % 0  ancestor("alice", "dave")  by ancestor(X, Y) :- parent(X, Z), ancestor(Z, Y)
+# % 1    parent("alice", "bob")  [fact]
+# % 1    ancestor("bob", "dave")  by ancestor(X, Y) :- parent(X, Z), ancestor(Z, Y)
+# % 2      parent("bob", "carol")  [fact]
+# % 2      ancestor("carol", "dave")  by ancestor(X, Y) :- parent(X, Y)
+# % 3        parent("carol", "dave")  [fact]
+
+# a row you expected and did not get — how far did each rule get?
+./datalog /tmp/family.dl -q '?whynot ancestor("zoe","dave")'
+# % whynot ancestor("zoe", "dave")
+# % not derivable
+# % 0  ancestor(X, Y) :- parent(X, Y)
+# % 1    blocked at parent(X, Y)
+# % 1    repair: add parent("zoe", "dave")
+# % 0  ancestor(X, Y) :- parent(X, Z), ancestor(Z, Y)
+# % 1    blocked at parent(X, Z)
+# % 1    repair: none names one fact — parent("zoe", _) leaves a slot open
+```
+
+- **A goal names one fact**, so no variables: `?why ancestor("alice", W)` is an
+  error telling you to run `?- ancestor("alice", W)` first and ask about one row.
+- **Pick the sigil by what you saw, and a wrong guess still answers** — `?why`
+  over a fact that does not hold gives the trace, `?whynot` over one that does
+  gives the proof.
+- **A proof bottoms out in the facts it rests on**, tagged `[fact]` or `[fact from
+  "employees.csv"]`. When an answer is wrong, that is usually where the problem
+  is — check those rows before rereading the rules.
+- **A trace names the first literal that blocked**, under the bindings that
+  reached it, and one **repair**: a step that advances *that rule*, not a promise
+  that the goal then holds. When the blocked predicate is itself derived, the
+  repair is the next question — `repair: ask ?whynot …`.
+- **The answer is `%` comments**: it never enters the fact stream and never
+  changes the exit code, so it is safe to append to a `&& deploy` pipeline.
 
 ## Datalog in 30 seconds
 

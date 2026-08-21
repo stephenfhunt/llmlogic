@@ -113,7 +113,7 @@ criterion rather than an assumption.
 | **S2** | The engine's stdout is valid input to the engine, byte-for-byte. | property **D2**, `print::tests::corpus_round_trips` | met |
 | **S3** | A rejected program can be repaired from the diagnostic alone, without reading the spec. | §12's fields; the near-miss corpus (§3) | met for lex/parse; **scoped** (§2) |
 | **S4** | A question over a real external table is answerable end-to-end with no preprocessing step. | §13 + the USDA dogfood | met (dates included, 2026-08-19) |
-| **S5** | Every fact in an answer can be explained **through the surface the caller used**. | §11's query surface | **not met** — designed, unbuilt |
+| **S5** | Every fact in an answer can be explained **through the surface the caller used**. | §11's goal form (§16.6, §16.15), its system tests, **E5** | met (2026-08-21) |
 | **S6** | No *exponent* worse than a comparable engine on the shared corpus. | `notes/cross-engine-benchmark.md`, re-measured in `notes/profile-2026-08-20.md` | met |
 
 ### What v1 means
@@ -166,14 +166,14 @@ how it is built.
   stage. A stable per-diagnostic **code** is still missing, so a consumer branches
   on one of four `ErrorKind` categories or on prose (§12, ROADMAP).
 - **Explainability and the agent API are first-class** — *ratified, scoped to the
-  engine.* Provenance is designed in from the start and is not an add-on: the
-  fixpoint records **all** derivations of every derived fact, deduplicated by rule
-  instance, unconditionally and with no flag to turn it off (§11). At the
-  **surface** it is not yet first-class, and this principle must not be read as
-  claiming otherwise — `?why`/`?whynot` are designed and unbuilt (§17, 2026-08-16),
-  the CLI's only flag is `-q`, and `RunResult` carries the model, the answers and
-  the warnings, not derivations. Pillar 1 therefore pays on every run and returns
-  nothing at pillar 3's surface; closing that is a v1 goal (§1).
+  engine and the goal form.* Provenance is designed in from the start and is not
+  an add-on: the fixpoint records **all** derivations of every derived fact,
+  deduplicated by rule instance, in a run **provisioned** to record them — which
+  the program's own goals decide (§11; §17 2026-08-21). It reaches the surface as
+  `?why` / `?whynot` (§5), in a file or a `-q`, and `RunResult` carries the
+  explanations beside the answers. What is *not* first-class is the machine-
+  readable edge: there is no JSON encoding of a proof or a trace, and §12's
+  diagnostics still carry no stable code (§12, ROADMAP).
 - **Predictable evaluation** — *ratified 2026-08-18, and scoped.* Termination is
   decided **statically and reported before the run**: a program the engine
   certifies terminates, and one it cannot is named, with the reason, on stderr
@@ -470,7 +470,7 @@ ancestor(X, Y) :- parent(X, Y).             % rule
 
 ```ebnf
 program     = { statement } ;
-statement   = import | declaration | clause | query ;
+statement   = import | declaration | clause | query | goal ;
 
 import        = data_import | module_import ;
 module_import = "import" string "." ;
@@ -483,6 +483,7 @@ type        = "int" | "float" | "string" | "symbol" | "bool"
 
 clause      = atom [ ":-" body ] "." ;          (* fact when no body, else rule *)
 query       = "?-" [ ident ":" ] conjunction "." ;  (* conjunctive; the ident names the answer, §14 *)
+goal        = ( "?why" | "?whynot" ) atom "." ;  (* one ground fact, §11 *)
 body        = conjunction { ";" conjunction } ;  (* rule bodies: DNF, §17 *)
 conjunction = literal { "," literal } ;
 literal     = [ "not" ] atom | comparison ;
@@ -529,6 +530,14 @@ Notes:
   the meaning of the surrounding form: in a *fact* (`p(1+1).` → `p(2).`), and —
   when it is **ground** — in a *query*, whose answer shape §14 reads off the body
   (§17, 2026-07-27).
+- **An explanation goal** `?why <fact>.` / `?whynot <fact>.` (§11) is a statement,
+  not a query: its argument is one **atom**, not a conjunction, because a goal
+  names one fact. A goal that is not ground is a semantic error naming the
+  variable and pointing at `?-` — enumerate with a query, then ask about one of
+  the rows it returned. The two sigils are single tokens (`? why` is not one),
+  and neither is a selector over the answer: which of `proof` / `underivable` /
+  `unknown` comes back is a fact about the model, while the sigil decides what
+  the *run* records (§11, §17 2026-08-21).
 - **Disjunction `;`** in a rule body is top-level DNF (no parentheses in v1);
   `,` binds tighter than `;`. The parser expands each disjunct into its own
   clause sharing the head, so the AST/IR stay conjunction-only. Queries stay
@@ -1347,15 +1356,45 @@ alignment (§17, 2026-08-21).
   twice and a deep proof is deep — §15's no-budget-anywhere decision applied
   here, not a second policy.
 
-*Not covered:* the query surface, which is designed but not built — `?why` and
-`?whynot` return one union of `proof` / `underivable` / `unknown`, the sigil being
-a cost hint rather than a selector, and a near-miss is a *rule* and not a binding
-(§17, 2026-08-16). §5 has no form for a goal, the CLI no flag, and `RunResult` no
-field, so nothing reaches the renderer above from outside the library yet. The
-JSON encoding is open. **Proof trees as
-facts are not coming**: a proof tree is not a fact, so it rides in `%` comments,
-which keeps Datalog-out-is-Datalog-in intact. Also not covered: semiring provenance
-under negation and tropical cheapest-proof selection
+**The goal that asks** (§5): `?why <fact>.` and `?whynot <fact>.`, over a ground
+atom, in a program file or inside a `-q` argument. Both answer with the same
+union — `proof` / `underivable` / `unknown` — so **the sigil is not a selector**:
+`?why` over a fact that does not hold is an ordinary question, and so is
+`?whynot` over one that does (§17, 2026-08-16).
+
+What the sigil *does* decide is what the run records. `?why` provisions the
+derivation store; `?whynot` re-solves out of the finished model and provisions
+nothing, which is why a run that only asks why-not pays no provenance cost at all
+(`Provenance`, §17 2026-08-21). The cross case — `?whynot` over a fact that turns
+out to hold — re-runs the **fixpoint** with recording on, reusing the lowered
+program, and says so in one line rather than answering partially.
+
+An explanation is **not a row**. It rides in the same stdout stream as `%`
+comments and is invisible to §14's exit code, so appending a goal to a run
+changes neither what it answers nor how a shell pipeline branches on it. Stripping
+the comments leaves the fact stream byte for byte (`testing.md` **E5**).
+
+**Underivable** is a *failure trace*: one **near-miss per rule whose head unifies**
+with the goal, in rule order, carrying the premises the body satisfied, the first
+literal it could not, and one **repair**. A near-miss is a rule and not a binding,
+and that is the whole bound — nothing truncates and no budget is spent, the size
+of the answer being the program's own rule count. Each rule's body is re-solved
+through the **scheduler the fixpoint uses**, so the literal reported as blocked is
+the one the run really failed; an extractor choosing its own literal order would
+be a second evaluator. A repair is a **step, not a promise**: the literals past
+the block were never evaluated, so supplying what it names advances that rule's
+prefix and need not derive the goal. Three of the five repairs name no fact — a
+blocked *derived* premise (the repair is the next question, `ask ?whynot …`), a
+pattern with a slot nothing bound, and a refuted negation, which names the row
+that refuted it since the language has no retraction. A fourth names none either:
+a slot bound to `absent` can be matched by no row at all (§4), so no fact would
+repair it (`testing.md` E10).
+
+*Not covered:* the **JSON encoding** of a proof or a trace (§14), which is the one
+piece of this surface still undecided. **Proof trees as facts are not coming**: a
+proof tree is not a fact, so it rides in `%` comments, which keeps
+Datalog-out-is-Datalog-in intact. Also not covered: semiring provenance under
+negation and tropical cheapest-proof selection
 (`notes/semiring-provenance.md`), and lineage annotations on answer rows — Tier 1
 in tsdl's sense — which this engine does not have at all.
 
@@ -1768,6 +1807,13 @@ produced rows, not whether it was happy about them. A program with **no queries*
 exits `0` — nothing was asked, so "no rows" is not an answer to anything, and
 `datalog p.dl` stays usable as a plain check that a program loads and runs.
 
+**Nor does an explanation** (§11, 2026-08-21). A `?why` / `?whynot` goal is not a
+query and its answer is not a row, so the code is computed over the queries alone:
+adding a goal to a run cannot change which way a shell pipeline branches on it,
+and a run whose *only* statements are goals exits `0` for the same reason a run
+with no queries does. This is the exit-code half of the guard that stripping an
+explanation's comments leaves the fact stream byte for byte (`testing.md` E5).
+
 **A consistency check is a query, not a construct** (2026-08-18). The language
 needs nothing for it: a negation-only body answers `holds(true).` when it holds,
 and §10 exempts wildcard-fresh variables under negation from range restriction, so
@@ -1801,10 +1847,15 @@ datalog family.dl -q 'grandparent(X, Z) :- parent(X, Y), parent(Y, Z)'
 # composition over pipes ("-" reads stdin)
 datalog people.dl -q 'adult(N) :- person(name: N, age: A), A >= 18.' \
   | datalog - -q 'adult(N), N != "bob"'
+
+# an explanation goal (§11) — the same statement a program file would carry
+datalog family.dl -q 'ancestor("alice", X)' -q '?why ancestor("alice","dave")'
 ```
 
 `-q` semantics: an argument is classified by **parsing** it (never by splitting
-on `:-`, which a string literal may contain). **One rule** with a non-empty body
+on `:-`, which a string literal may contain). An argument opening with **`?why`
+or `?whynot`** is already a §5 statement and is appended verbatim — which is why
+explanations need no flag of their own. **One rule** with a non-empty body
 — however many clauses it desugars to, since a top-level `;` expands to one
 clause per disjunct sharing the head (§5) — is appended verbatim, followed by a
 synthesized `?- <head>.` over that head atom. Anything else (a bare atom, a
@@ -1917,8 +1968,7 @@ sets, indexes, parallelism, incremental maintenance.
 > **An example is a claim about the engine, so it should name the test that runs
 > it.** §16.9 onward do — a ROADMAP item for the other eight, and the reason a
 > block nobody wired up could quietly stop being true (§17, 2026-08-16).
-> Everything below is ratified in §3–§5, §8, §9 and §13 except §16.6's `?why`
-> form, whose surface was designed 2026-08-16 and is not built.
+> Everything below is ratified in §3–§5, §8, §9, §11 and §13.
 
 ### 16.1 Recursion — ancestry / reachability
 
@@ -2029,15 +2079,17 @@ program and pins the block byte for byte. Depth rides in two channels — the
 leading integer for a reader with no column, the indentation for one with; §11
 carries the rule and its reasons.
 
-*Designed (§17, 2026-08-16), not built:* the surface that would *ask*. `?why` and
-`?whynot` answer with one union of `proof` / `underivable` / `unknown`, the sigil
-being a cost hint rather than a selector — but §5 has no goal form, the CLI no
-flag and `RunResult` no field, so the renderer above is reachable only from the
-library. *Still open:* the JSON encoding (§14). How a fact with several
-independent derivations chooses one is governed by §11's well-founded order and
-not by anything the user asks for — and the answer does not say how many others
-there were, which is what keeps the rendering independent of whether the engine
-keeps recording all of them (`ROADMAP.md`).
+The goal is a §5 statement, so it works in a file or inside a `-q` — run by
+`tests/system.rs::a_why_goal_prints_the_proof_the_spec_shows`:
+
+```sh
+datalog family.dl -q '?why ancestor("alice","carol")'
+```
+
+How a fact with several independent derivations chooses one is governed by §11's
+well-founded order and not by anything the user asks for — and the answer does not
+say how many others there were. *Still open:* the JSON encoding (§14). The other
+half of the surface — a goal that does **not** hold — is §16.15.
 
 ### 16.7 Named arguments & partial selection
 
@@ -2380,6 +2432,38 @@ printed as `@2026-06-01` is a *date*, and a reader who wants "June 2026" is
 reading a start-of-period convention rather than a month value, the price of not
 adding a granularity type (§17).
 
+### 16.15 Provenance — "why not?"
+
+```datalog
+defined("a", "id42").
+callsite("id42", "b_impl").
+calls(A, B) :- defined(A, Id), callsite(Id, N), defined(B, N).
+
+?whynot calls("a", "b").
+% % whynot calls("a", "b")
+% % not derivable
+% % 0  calls(A, B) :- defined(A, Id), callsite(Id, N), defined(B, N)
+% % 1    defined("a", "id42")
+% % 1    callsite("id42", "b_impl")
+% % 1    blocked at defined(B, N)
+% % 1    repair: add defined("b", "b_impl")
+```
+
+Run by
+`tests/system.rs::a_whynot_goal_names_the_literal_that_blocked_and_the_step_that_would_pass_it`,
+which pins the block byte for byte.
+
+**Why this shape and not "no rows".** A query returning nothing and a query whose
+join silently connects two id-spaces print the same thing — which is the failure
+`EXPERIMENTS.md` recorded on a real workload and could only catch by re-reading
+the extractor. The trace names the literal the run actually failed at, under the
+bindings that reached it, and one step that would pass it.
+
+**A query cannot ask this**, which is why the form exists (§17, 2026-08-21). The
+commonest why-not is about a query that *succeeded* — rows came back and an
+expected one was missing — where the expectation appears nowhere in the program,
+so only a goal naming the missing fact can carry it.
+
 ## 17. Decisions log & open questions
 
 This section is an **append-only record**: history is what it is for. Amend
@@ -2407,6 +2491,56 @@ marker that records a decision working out *well*, which the log would otherwise
 never say.
 
 ### Decisions
+
+- **2026-08-21** — **The asking form, and the sigil's real job** (§5/§11/§14; the
+  flows, the rejected alternatives and the two-run argument are in
+  [`notes/provenance-asking-form.md`](notes/provenance-asking-form.md)). The
+  three-way session `ROADMAP.md` sequenced — in which the asking form and "does
+  the derivation store earn its cost" turned out to be **one decision**.
+  - **Two sigils; a query cannot stand in for them.** The dominant why-not shape
+    is a query that *succeeded* — rows came back with one expected fact absent
+    among them — so the expectation exists nowhere in the program, and only a form
+    naming the missing fact carries it. §16.13 forecloses the implicit version
+    besides: silence-plus-exit-1 is the designed answer for *no*.
+  - **The sigil's real job is provisioning, not the cost hint.** After the fixpoint
+    the engine knows whether the fact holds and needs no hint; *before* it, the
+    sigil is the only thing that says whether the run needs a derivation store. So
+    `?why` records and `?whynot` does not, and the cross case re-runs the
+    **fixpoint only** — reusing the lowered `ir::Program` — so 2026-08-16's union
+    survives intact. Rejected: union provisioning (it overpays on the commonest
+    explanation run) and per-sigil with no re-run (one form could then only answer
+    one way, which is what that ruling exists to prevent).
+  - **Explanations are exit-code-neutral, and ride inside `-q`.** Appending `?why`
+    to a `&& deploy` pipeline changes neither its fact stream (E5) nor its branch.
+  - **The store's cost is answered by proportioning it, not by replacing it**:
+    gated, it is paid by the run that asks. Backwards extraction demotes to a
+    post-v1 optimisation of the explaining path alone.
+  - ***Consequences 2026-08-21 — built the same day, and the measurement holds.***
+    On a 400-node sparse closure: no goals **0.23 s / 44 MB**, `?whynot` over a
+    fact that does not hold **0.23 s / 44 MB**, `?why` **0.55 s / 202 MB**,
+    `?whynot` over a fact that *does* **0.79 s / 219 MB** — 78% of peak RSS and
+    58% of wall clock, matching `notes/profile-2026-08-20.md`'s projection, with
+    the per-sigil precision visible as the second row. The scratch build that
+    profile needed is obsolete: the A/B is now two ordinary invocations.
+  - ***Amended 2026-08-21 — "the goals decide" was too narrow, and a test found
+    it, not the reasoning.*** §9's absent-skip count and §12's conversion-loss
+    count for a **rule** site are read back out of the recorded premises
+    (deduplicated by rule instance, because a counter beside the fixpoint would
+    count a rediscovered instance twice). So *skip but **report*** is a provenance
+    surface that predates the asking form, and a program with an aggregate or an
+    `as` in a rule body provisions the recorder whether or not it asks anything —
+    `Program::reports_through_provenance`, shared with the scan that reads them so
+    the two cannot drift. The claim that the three maps are "provenance-only" is
+    true of *answers* (E9) and was never true of *warnings*. A **query**'s
+    aggregate is unaffected: `answer_reporting` hands its premises straight to the
+    caller and nothing is stored.
+  - ***Consequences 2026-08-21 — a repair could fail to repair.*** E10's *a repair
+    must repair* clause fired on its first run: a blocked pattern with a slot
+    bound to `absent` rendered as `repair: add p(…, absent)`, and asserting that
+    row would not advance the rule, since `absent` unifies with nothing (§4).
+    `Repair::AbsentKey` is the arm that replaced it. The design said "a repair is
+    a step, not a promise"; what it had not said is that a step must at least be a
+    step.
 
 - **2026-08-21** — **A proof line carries its depth twice, because it has two
   readers** (§11 has the form, §16.6 the worked block, `src/print.rs` the code).
@@ -2591,6 +2725,14 @@ never say.
     criterion is missing rather than the ruling wrong. It fired once — S4 was
     written "met" and corrected to "met **except dates**", which is what makes
     temporal types v1 rather than a preference. — §1/§2.
+  - ***Consequences 2026-08-21*** — **S5 is met**, and the scoping above was the
+    thing that made it actionable: naming the surface gap in §2 rather than
+    ratifying the principle as written is why the asking form was a tracked
+    criterion instead of an aspiration. The scoping sentence itself is now
+    narrower — the engine/surface split closed, and what is left un-first-class is
+    the *machine-readable edge* (no JSON for a proof or a trace, no stable
+    diagnostic code). S1 remains the only unmet criterion, which is what v1 now
+    turns on.
 
 - **2026-08-18** — **§6 accounts for the whole language, and a run that errors has
   no model** (§4/§6/§8/§9; long form in
@@ -2864,6 +3006,14 @@ never say.
     piece the derivation-store question cannot invalidate. The guard named here is
     E5 and it is *still* blocked: byte-for-byte stripping needs program-level
     output, so what landed is **E7**, its lexical precondition.
+  - ***Amended 2026-08-21*** — **the cost hint is doing a second job this entry did
+    not know about.** Held to its own terms the sigil is decoration: the engine
+    reads holds-ness off the model and needs no hint to dispatch, which is nearly
+    an argument for one form. What it misses is that the distinction is needed
+    *before* the fixpoint, to decide whether to record derivations at all — and
+    holds-ness is not yet known there. The hint is therefore load-bearing, and the
+    ruling it protects (neither form may answer only one way) is what forces the
+    cross-case re-run rather than a partial answer (Decisions above).
 
 - **2026-08-16** — **Three names, because one word doing two jobs needs a footnote
   at every use** (§4/§7/§11; adopted verbatim from tsdl `spec.md` §13). The
@@ -3965,6 +4115,16 @@ never say.
     one. That was measured on a prototype, not on this code, so the number to
     decide against wants re-running. Nothing here is decided yet — the
     sequencing note has simply run out of things to wait for.
+  - ***Amended 2026-08-21*** — **recording is now conditional on the run's goals**,
+    which is the scope change this entry never had: *all* derivations, of every
+    derived fact, **in a run that asked for a proof**. The question four
+    amendments have circled was the wrong shape — the store did not need replacing,
+    it needed proportioning, and it was costing 70–78% of peak RSS on every run
+    while earning it on none, since nothing could ask. The rejected alternative
+    (backwards extraction) stays rejected for v1 and is now *smaller*: it optimises
+    only the explaining path, gives up all-derivations, needs its own cycle guard
+    in place of the round stamp, and could change which proof prints — which §16.6
+    and E7/E8 pin byte for byte. Decisions above, 2026-08-21.
 - **2026-07-19** — **Step-2 comparison policy**: the core evaluator reports
   comparison literals as a structured "not yet supported" error (the same
   pattern lowering uses for negation and named arguments). §8 semantics —
@@ -4561,6 +4721,13 @@ never say.
   `proof` / `underivable` / `unknown`, the sigil a cost hint, a near-miss a rule.
   What stays open is the **rendering**, the **JSON encoding**, and sequencing
   against the truncation contract, whose distinction `unknown` is.
+
+  ***Answered 2026-08-21*** — and the **form that asks** is decided too (Decisions
+  above): `?why` / `?whynot` as §5 statements, carried into a `-q` argument by the
+  same parse-classifier that reads a query body, exit-code-neutral, with recording
+  provisioned per sigil. The rendering shipped 2026-08-21. **What stays open is the
+  JSON encoding alone** — the truncation-contract sequencing came with the exit-code
+  ruling, `unknown` being the arm it distinguishes.
 - **Semiring provenance under negation:** parked research thread with a worked
   sketch in `notes/semiring-provenance.md` — the derivation store is already a
   boolean provenance circuit, `Premise::Absent` a factored dual token; candidate

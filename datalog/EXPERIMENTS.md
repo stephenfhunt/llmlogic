@@ -77,6 +77,22 @@ import them, and ask what reaches what. Recipe and the traps:
   real ones — a wrong encoding, a silently empty join, a closure that does not
   terminate in the time available.
 
+### 7. Ask the engine why (the gap task 6 found)
+
+Run task 6, then take a `dead(F)` row that looks wrong and a `calls(A, B)` pair
+that should exist and does not, and ask about each:
+`?why dead("…")`, `?whynot calls("…","…")`.
+- **Watch for:** does the model reach for the goals at all, or go back to
+  `grep`/re-reading the extractor? Does it distinguish the two sigils? Does a
+  proof's `[fact from "…"]` leaves send it to the fact base rather than the rules?
+- **Why:** task 6's recorded failure was *"on well-formed programs asking the
+  wrong question, no [self-correction] — `dead(F)` returning six plainly-used
+  functions read exactly like `dead(F)` returning nothing"*. The goals are the
+  instrument for exactly that, shipped 2026-08-21, and this is the task that says
+  whether they are reached for. The predicted failure is **not** sigil confusion —
+  the choice is observable from the output the model is holding — but never
+  asking, which is the same silence the skill's missing features produced.
+
 ---
 
 **Notes / observations**

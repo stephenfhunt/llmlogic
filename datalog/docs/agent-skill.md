@@ -25,7 +25,7 @@ messages on stderr) · **2** usage error (bad arguments, unreadable file).
 
 ## `-q` query forms
 
-A `-q` argument is one of two things, decided by parsing it:
+A `-q` argument is one of three things, decided by parsing it:
 
 1. **A query body** — a bare atom or a comma-separated conjunction. Answered
    directly.
@@ -42,12 +42,19 @@ A `-q` argument is one of two things, decided by parsing it:
    datalog family.dl -q 'grandparent(X, Z) :- parent(X, Y), parent(Y, Z)'
    ```
 
+3. **An explanation goal** — `?why <fact>` or `?whynot <fact>`. Already a
+   statement, so it is passed through as written. See *Explaining an answer*.
+
+   ```sh
+   datalog family.dl -q '?why ancestor("alice","dave")'
+   ```
+
 Notes:
 - A trailing `.` is optional (`-q 'p(X)'` and `-q 'p(X).'` are the same).
 - Later `-q` flags can use predicates defined by earlier ones. Each `-q` prints
   its own block of answers, in order.
 - A file may contain its own `?-` queries; those answers print first, then the
-  `-q` blocks.
+  `-q` blocks. Explanations print after **all** answers, in program order.
 
 ## Output shape (so you can pipe it back)
 
@@ -157,6 +164,43 @@ a clean roster.
 One thing to know: **any** query answering makes the run `0`. So impose your check
 on a program whose queries *are* the checks — a `-q` added to a file that asks its
 own questions is not a check, because the file's own answers set the code.
+
+## Explaining an answer
+
+`?-` enumerates rows; `?why` and `?whynot` interrogate **one** of them. Reach for
+them when a row surprises you, or when one you expected is missing — an empty
+answer and a join that quietly connects nothing print the same thing.
+
+```sh
+datalog family.dl -q '?why ancestor("alice","dave")'
+datalog family.dl -q '?whynot ancestor("zoe","dave")'
+```
+
+A `?why` that finds the fact prints a **proof**: one line per node, depth as both
+a leading integer and indentation, each derived node citing the rule that fired
+and each leaf tagged `[fact]` or `[fact from "employees.csv"]`. Those leaves are
+where a wrong answer usually comes from — check the rows before rereading the
+rules.
+
+A goal that does not hold prints a **failure trace**: one entry per rule whose
+head could have produced it, the premises that rule satisfied, the first literal
+that blocked, and a **repair**. A repair is a *step*, not a promise — it advances
+that rule past the block, which need not be enough to derive the goal. Some name
+no fact at all: a blocked derived predicate answers `repair: ask ?whynot …`, a
+pattern with an unbound slot says so, a refuted negation names the row that
+refuted it (there is no retraction in the language), and a slot bound to `absent`
+cannot be matched by any row.
+
+Three properties worth relying on:
+
+- **A goal names one fact**, so it takes no variables. `?why ancestor("alice", W)`
+  is an error that tells you to run the query first and pick a row.
+- **Either sigil answers either way.** `?why` over a fact that does not hold gives
+  the trace; `?whynot` over one that does gives the proof, and says that it re-ran
+  to get it. Pick by what you saw — a wrong guess costs nothing but a line.
+- **An explanation is `%` comments.** It never enters the fact stream, so
+  `datalog p.dl -q '?why …' | datalog - -q '…'` composes exactly as without it,
+  and it never changes the exit code, so it is safe to append to `&& deploy`.
 
 ## Errors
 

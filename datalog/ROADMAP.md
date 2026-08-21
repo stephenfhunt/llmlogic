@@ -294,26 +294,15 @@ them. Except where noted these are documented v1 limits rather than defects.
 
 ### Provenance surface (§11)
 
-- **Provenance query syntax — designed 2026-08-16, rendering built 2026-08-21.**
-  One union of `proof` / `underivable` / `unknown`; the sigil is a cost hint; a
-  near-miss is a *rule*, not a binding; a repair is a step, not a promise; the
-  trace re-solves through the scheduler the fixpoint uses. §17 has both decisions.
-  **What a proof looks like is settled** (§11, `print_proof`): a `%`-comment block
-  carrying depth as a leading integer *and* as indentation, guarded by **E7/E8**.
-  What remains open is **the form that asks** — §5 has no goal production, the
-  lexer one `?-` token, the CLI no flag, `RunResult` no field — plus the exit-code
-  ruling for a run that explains but returns no rows, `?whynot`'s near-miss and
-  repair rendering, the JSON encoding, and sequencing against the truncation
-  contract, whose distinction `unknown` is (unreachable today: §15 says nothing
-  here produces a short relation). **Decide the asking form together with "does the
-  derivation store earn its cost" below, and with the profile** (2026-08-18): the
-  recorder runs unconditionally, and pillar 1 still returns nothing *at the
-  surface*, since a renderer no one can invoke is not one. The profile
-  ([`notes/profile-2026-08-20.md`](notes/profile-2026-08-20.md)) priced what is
-  being paid: 78% of memory today, half the run once the scan is fixed. **The
-  rendering was deliberately taken first** because it is the piece that question
-  cannot invalidate — backwards extraction yields a `ProofTree` too, and the
-  rendering says nothing about how many derivations exist. _queued — rendering built; asking form **v1** (S5)._ — §11/§14, [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
+- **Provenance surface — ✅ shipped 2026-08-21.** `?why` / `?whynot` over a ground
+  goal, as §5 statements a `-q` may also carry; one union of `proof` /
+  `underivable` / `unknown` with neither sigil a selector; a near-miss per rule,
+  a repair that is a step; explanations exit-code-neutral. Recording is
+  **provisioned per sigil** — measured on a 400-node sparse closure: a run with no
+  goals is **2.4× faster and 4.5× smaller**, and a `?whynot` over an absent fact
+  pays nothing. **Still open: the JSON encoding** (§14, low value, parked).
+  _shipped; JSON parked._ — §5/§11/§14,
+  [`notes/provenance-asking-form.md`](notes/provenance-asking-form.md).
 - **First appearance, not first round** — **closed 2026-08-16 without building it:
   the rationale was adopted from a sibling engine and does not hold here.** Ours
   *batches* application, so the derivation that first produces a fact always has
@@ -330,54 +319,36 @@ them. Except where noted these are documented v1 limits rather than defects.
   flattens a tree into rows that no longer compose. It rides in `%` comments
   instead, which keeps Datalog-out-is-Datalog-in intact byte-for-byte.
   _rejected — §17, 2026-08-16._ — §11/§14.
-- **E3 replay does not cover §8 builtins** — a coverage hole, not a defect, but
-  the one place provenance is least checked. `e3_derivations_replay` reapplies
-  each derivation's rule instance to its premises and asserts it rederives the
-  fact; its `replay` helper rebuilds the environment from **fact premises only**
-  and returns `None` on any `Premise::Builtin`. It passes solely because its
-  generator (`arb_program_with_edb`) emits no comparisons — every column is a
-  symbol after `monotype`, so arithmetic cannot appear. So the strongest
-  provenance property has never seen an `=`-assignment, a presence test, or an
-  aggregate, and by extension never sees a deferred negation, whose absence
-  pattern is closed by an assignment-bound value (§7/§10, 2026-07-25).
-
-  The work: teach `replay` to fold builtin premises into the environment in
-  schedule order, then run E3 over a generator that emits them —
-  `arb_comparison_program` already exists and is int-typed. Expect it to surface
-  the same class of question `Premise::Builtin` raised when it was added: a
-  self-justifying leaf records the *values*, not the expression, so replay has to
-  re-evaluate rather than re-check. Catalogued as **E6** in `testing.md`.
-  _queued — **v1**: S5 ships a proof surface, so its strongest property must have seen a builtin._ — §11/§15.
+- **E3 replay now covers §8 builtins — ✅ shipped 2026-08-21 as E6.** `replay`
+  folds builtin premises into the environment in **schedule order** and
+  re-evaluates rather than re-checks them, and E3's claim runs over
+  `arb_comparison_program`, which reaches an `=`-assignment, a presence test, an
+  aggregate and a deferred negation. An aggregate's value is bound, not
+  recomputed — a stated limit, the fold having B11. _shipped._ — §11/§15,
+  `testing.md` E6.
 - **Imported facts are anchored by *relation*, not by row.** ✅ **Ruled 2026-08-21**
-  — §11 now states it where the anchor is defined, and a proof prints
-  `[fact from "employees.csv"]`. A row-level anchor stays a memory trade to take
-  with the two items above, not a gap. The original framing: `engine::validate`
-  records that an import's facts "are ordinary base facts by the time the engine
-  runs… `ImportSpec` survives only as provenance/definedness metadata", so `?why`
-  will answer "because `employees.csv`" and never "because row 4,182" — the answer
-  §13's workloads actually want, and §11's "anchored by the program text (or,
-  later, the import)" reads as a granularity that does not exist. Retaining the row
-  costs memory on exactly the shapes already at 1.2 GB, so it is a **trade to
-  decide with the two items above**, not a default to add. _queued — **v1** as a ruling, not necessarily as a feature._ — §11/§13,
-  [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
+  — §11 states it where the anchor is defined, and a proof prints
+  `[fact from "employees.csv"]`. §13 materializes an import into ordinary base facts
+  before lowering, so `ImportSpec` is the finest anchor there is. A row-level anchor
+  costs memory on exactly the shapes already at 1.2 GB and stays a **trade, not a
+  gap** — now standalone, both items it was to be decided with having been ruled the
+  same day. _ruled; the row-level trade parked — **post-v1**._ — §11/§13.
 - **Semiring provenance under negation** — tropical cheapest-proof selection and
   the algebra behind it; sketch in `notes/semiring-provenance.md`. **`?whynot` with
   minimal repairs is no longer part of this item**: it was designed 2026-08-16
   without a semiring, a near-miss being a *rule* rather than a binding, which is
   what bounds it. What stays parked is the algebra. _parked (research) — **post-v1**._ — §11.
-- **Does the derivation store earn its cost?** A sibling engine extracts a proof
-  *backwards* from the retained model — no recorder in the fixpoint, no re-run — so
-  a run nobody questions pays one integer per row. It is not a free swap: we record
-  *all* derivations (§17, 2026-07-19) and backwards extraction yields one.
-  **Measured** ([`notes/profile-2026-08-20.md`](notes/profile-2026-08-20.md)): the
-  recorder is **70–78% of peak RSS**, and a prototype put it at **50–60% of wall
-  clock** on every recursive shape once the prefix seek removes the scan that was
-  hiding it. **§11's rendering does not constrain this** (2026-08-21): it prints
-  one proof and never says how many others exist, so either store satisfies it. The seek shipped 2026-08-21 and left peak RSS untouched, so the memory
-  half stands as measured and the time half wants re-running against this code
-  before the decision is taken. Settled in the same session as the query surface
-  above (2026-08-18). _queued — **v1**, decided with the query surface._
-  — §11/engine, [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
+- **Does the derivation store earn its cost? — ✅ Ruled and built 2026-08-21: yes,
+  once it is only paid by the run that asks.** It was 70–78% of peak RSS on every
+  run while nothing could ask ([`notes/profile-2026-08-20.md`](notes/profile-2026-08-20.md));
+  gated, the question is answered by proportioning rather than replacing.
+  Measured after the gate: 202 MB → 44 MB and 0.55 s → 0.23 s on `sparse_400`, and
+  the profile's scratch build is no longer needed — the A/B is two ordinary
+  invocations. _shipped._ — §11/engine, §17 2026-08-21.
+- **Backwards proof extraction** — no recorder in the fixpoint, one proof extracted
+  from the retained model (tsdl's answer). Optimises the *explaining* path only, and
+  gives up all-derivations, the round-stamp cycle guard, and possibly which proof
+  prints (§16.6 and E7/E8 pin it byte for byte). _parked — **post-v1**._ — §11/engine.
 
 ### `std` modules (§8/§12/§13) — shipped
 
@@ -422,8 +393,10 @@ its ranking, not theirs.
   while measuring the item above: the `join_4000` body written in the pessimal atom
   order takes **0.86 s against 0.03 s**, and the seek buys it *nothing* (0.84 s
   before). Fixing it means secondary indexes on the binding patterns a program
-  actually uses — a second copy of every relation, on top of a recorder already at
-  78% of peak RSS, which is the decision above. _queued — **post-v1**._ — §15/engine.
+  actually uses — a second copy of every relation. The memory argument against it
+  weakened 2026-08-21: the recorder is now paid only by a run that asks for a
+  proof, so an index would no longer be stacked on 78% of peak RSS in the common
+  case. _queued — **post-v1**._ — §15/engine.
 - **Seeking makes body order matter more** — the same measurement, read the other
   way: good-vs-pessimal atom order cost **2.0×** before the seek and **29×** after.
   The scheduler runs positive atoms in strict source order with no cost model

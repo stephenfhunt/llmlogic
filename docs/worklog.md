@@ -24,6 +24,58 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-21 — The surface that asks, and provenance stops being free of charge
+
+The three-way session `ROADMAP.md` had been sequencing — asking form, derivation
+store, row provenance — held as one and then built. **S5 is met**, and S1 is now
+the only unmet v1 criterion. 578 tests green, clippy and rustfmt clean.
+
+**Done**
+- **`?why` / `?whynot`** as §5 statements, in a file or inside a `-q` (one more
+  arm in the classifier, no new flag). Lexer sigils, a fifth `StatementKind`, a
+  groundness check in lowering, `RunResult.explanations`, `§16.6` and a new
+  `§16.15`, both pinned byte-for-byte by system tests.
+- **The failure trace** — `FailureTrace`/`NearMiss`/`Repair`, one entry per rule
+  whose head unifies, re-solved through `schedule.rs` via a probe threaded into
+  the *same* join the fixpoint runs. Five repair arms, four of which name no fact.
+- **Demand-provisioned recording** (`engine::Provenance`). Measured, `sparse_400`:
+  no goals **0.23 s / 44 MB**, `?why` **0.55 s / 202 MB** — 78% of peak RSS and
+  58% of wall clock, matching the profile's projection. A `?whynot` over an absent
+  fact pays nothing; over one that holds it re-runs the fixpoint and says so.
+- **Four properties**: **E9** (provisioning changes no answer, and an unrecorded
+  model says `Unrecorded`), **E10** (a near-miss holds against the model),
+  **E5** unblocked at last (comment-stripping), **E6** closed (E3 through
+  builtins, replaying in schedule order). All mutation-verified.
+
+**Decided**
+- **The sigil's real job is provisioning, not the cost hint.** Post-fixpoint the
+  engine knows whether the fact holds and needs no hint; *before* it, the sigil is
+  the only thing that says whether to record. That is the first argument for two
+  forms this project generated rather than adopted — and it makes the asking form
+  and "does the store earn its cost" **one decision**, not two.
+- **A query cannot stand in for `?whynot`.** The commonest why-not is about a
+  query that *succeeded*; the expectation is nowhere in the program, so only a
+  goal naming the missing fact carries it. §16.13 forecloses the implicit version
+  besides.
+- **Explanations are exit-code-neutral** — the exit-code twin of E5.
+- **Backwards extraction demoted to post-v1**: gating answers the store's cost by
+  proportioning it, at a fraction of the risk.
+
+**Removed**
+- ROADMAP's provenance section shrank from ~90 lines to ~55: the query-syntax and
+  derivation-store items collapsed into shipped entries, the row-anchor item's
+  stale "decide with the two items above" (both now ruled), and E3-over-builtins.
+- `api::expr_casts`, folded into `Program::reports_through_provenance` so the scan
+  and the provisioning test cannot drift.
+- §2's engine/surface scoping sentence and §16's "except §16.6's `?why` form".
+
+**Next up**
+- **S1** — `EXPERIMENTS.md` rebuilt as a harness, now the only unmet criterion.
+  Task 7 was added for the goals themselves; the predicted failure is not sigil
+  confusion but never asking.
+- Still open: the **JSON encoding** (parked, low value), `--no-default-features`
+  failing two temporal tests, and §17's period-arithmetic questions.
+
 ## 2026-08-21 — A proof gets a shape, and depth gets two channels
 
 §11's rendering — the half of the provenance surface the 2026-08-16 decision left
@@ -132,53 +184,3 @@ corpus programs, 553 tests green, clippy and rustfmt clean.
   against the shipped code first.
 - Still open: **E5**/**E6**, and `--no-default-features` does not pass its own
   test suite (two temporal tests).
-
-## 2026-08-20 — `bugs/007` closes, and the aggregate becomes a fold over a multiset
-
-The defect the morning's audit filed, fixed the same day in four commits.
-**538 tests green**, clippy and rustfmt clean, `--ignored` back to no known
-failures, and the open defect set empty again.
-
-**Done**
-- **The sort** — `fold_aggregate` folds its present values in §14 order, so an
-  aggregate is a function of its witness multiset and the goal's literal order
-  cannot reach the answer. `fold_is_permutation_invariant` loses its `#[ignore]`.
-- **Compensated floats** — Neumaier summation, shared structurally by
-  `sum_values` and `avg_values`, with a finiteness guard: `F64::new` permits
-  infinities, so an overflowing sum is already an answer and `inf + -inf` in the
-  correction term would have made it an error.
-- **Wide ints** — `sum` over ints and durations accumulates in `i128`, so
-  overflow is a property of the total: `{ -MAX, -MAX, MAX, MAX }` sums to `0`
-  where every fixed association, the sorted one included, errored.
-- **Swept**: §9 (the fold-order rule, a new normative home), §17 ×2, `bugs/007`'s
-  resolution and `git mv`, `ROADMAP.md` ×3, `testing.md`'s B11 and two coverage
-  rows.
-
-**Decided**
-- **Sorting alone was rejected** — the bug file's own recommendation, and enough
-  to close the defect. §14's order is by value, not magnitude, so it would have
-  canonised `0.0` for `{ 1e16, -1e16, 0.1 }`, the worse of the two answers the
-  defect reported. The sort carries determinism, compensation accuracy.
-- **The `i128` half is not a bug fix**, and took its own commit: spec and code
-  agreed that the fold inherited §8's operand-pair overflow, so it is a §9
-  widening — and the one option none of the file's four candidates named.
-- **The float half was not split into a second defect.** One contradiction, one
-  root cause, one fix, one acceptance test; two files sharing a fix is the
-  stale-cross-reference failure mode `bugs/README.md` exists to prevent.
-- **B5 cannot see this defect, and its doc comment now says so.** Float-pooling
-  it was still right, but with the sort deleted it stays green: a single-atom
-  goal enumerates in the relation's own order, which *is* the sorted order. An
-  equivalent mutant, measured rather than assumed.
-
-**Removed**
-- ROADMAP's one-open-defect block and its known-`--ignored`-failure paragraph,
-  including the parenthetical recording which window the previous line was true
-  for — narration a current-state document should not carry.
-- `avg_values`' private float accumulator, which duplicated `sum_values`' fold.
-- The 2026-08-18 entry, rotated verbatim to `worklog-archive/2026-08.md`.
-
-**Next up**
-- **The profile** — unblocked, and now genuinely next: the defect that ran ahead
-  of it is closed.
-- Still open: **E5**/**E6**, and §17's period arithmetic, whether a truncated
-  value should print as its period, and the `avg`-over-mixed-column question.
