@@ -3580,25 +3580,48 @@ mod tests {
         /// pattern (the negated literal's own kind must match too). The
         /// caller separately checks `Absent` patterns as non-matches against
         /// the model.
+        /// The replayed environment as a slot vector, for the evaluators that
+        /// take one.
+        fn slots(rule: &Rule, env: &HashMap<crate::ir::Var, Value>) -> Vec<Option<Value>> {
+            let mut bindings = vec![None; rule.var_names.len()];
+            for (var, value) in env {
+                if let Some(slot) = bindings.get_mut(var.0 as usize) {
+                    *slot = Some(value.clone());
+                }
+            }
+            bindings
+        }
+
+        /// Reapplies one recorded derivation's rule instance to its premises,
+        /// returning the fact it rederives (testing.md **E3**).
+        ///
+        /// **In schedule order, and that is not a detail** (E6, 2026-08-21): an
+        /// `=`-assignment binds a variable a later builtin reads, so replaying
+        /// in body order would evaluate an expression whose operand is not bound
+        /// yet and report a sound derivation as broken.
+        ///
+        /// A self-justifying premise records the **values**, not the expression,
+        /// so replaying one is *re-evaluation* and not re-checking: the
+        /// expression is evaluated against the replayed environment and the
+        /// result compared with what was recorded. The exception is a §9
+        /// aggregate, whose fold is over the model this helper does not have —
+        /// its value is bound rather than recomputed, and the fold has its own
+        /// properties (B11).
         fn replay(program: &Program, derivation: &Derivation) -> Option<Fact> {
             let rule = program.rules.get(derivation.rule.0 as usize)?;
             if derivation.premises.len() != rule.body.len() {
                 return None;
             }
-            let mut env = HashMap::new();
-            for (literal, premise) in rule.body.iter().zip(&derivation.premises) {
-                let (BodyLiteralKind::Atom(atom), Premise::Fact(fact)) = (&literal.kind, premise)
-                else {
-                    continue;
-                };
-                if atom.pred != fact.pred {
-                    return None;
-                }
-                env = match_atom(atom, &fact.tuple, &env)?;
-            }
-            for (literal, premise) in rule.body.iter().zip(&derivation.premises) {
-                match (&literal.kind, premise) {
-                    (BodyLiteralKind::Atom(_), Premise::Fact(_)) => {}
+            let order = crate::schedule::schedule_body(&rule.body).ok()?;
+            let mut env: HashMap<crate::ir::Var, Value> = HashMap::new();
+            for idx in order {
+                match (&rule.body[idx].kind, &derivation.premises[idx]) {
+                    (BodyLiteralKind::Atom(atom), Premise::Fact(fact)) => {
+                        if atom.pred != fact.pred {
+                            return None;
+                        }
+                        env = match_atom(atom, &fact.tuple, &env)?;
+                    }
                     (BodyLiteralKind::NegAtom(atom), Premise::NoMatch(pattern)) => {
                         if atom.pred != pattern.pred {
                             return None;
@@ -3614,6 +3637,64 @@ mod tests {
                         if expected != pattern.args {
                             return None;
                         }
+                    }
+                    (
+                        BodyLiteralKind::Compare { op, lhs, rhs },
+                        Premise::Builtin {
+                            op: recorded_op,
+                            lhs: recorded_lhs,
+                            rhs: recorded_rhs,
+                            ..
+                        },
+                    ) => {
+                        if op != recorded_op {
+                            return None;
+                        }
+                        let bindings = slots(rule, &env);
+                        match eval_compare(*op, lhs, rhs, &bindings).ok()? {
+                            // A recorded premise says the literal *held*.
+                            CompareOutcome::Fail => return None,
+                            CompareOutcome::Pass { lhs, rhs } => {
+                                if &lhs != recorded_lhs || &rhs != recorded_rhs {
+                                    return None;
+                                }
+                            }
+                            // An assignment records the assigned value on both
+                            // sides (§17), and binding it is what lets the rest
+                            // of the body replay. The value bound comes from the
+                            // **record**, not from this re-evaluation — replaying
+                            // the derivation is the claim, so a recorded value
+                            // that disagrees has to reach the head and fail
+                            // there, not be quietly overwritten.
+                            CompareOutcome::Bind { slot, value } => {
+                                if &value != recorded_lhs || &value != recorded_rhs {
+                                    return None;
+                                }
+                                env.insert(crate::ir::Var(slot as u32), recorded_lhs.clone());
+                            }
+                        }
+                    }
+                    (
+                        BodyLiteralKind::Presence { expr, negated },
+                        Premise::Presence {
+                            value,
+                            negated: recorded_negated,
+                        },
+                    ) => {
+                        if negated != recorded_negated {
+                            return None;
+                        }
+                        let bindings = slots(rule, &env);
+                        let evaluated = eval_expr(expr, &bindings).ok()?;
+                        if &evaluated != value || evaluated.is_absent() == *negated {
+                            return None;
+                        }
+                    }
+                    (
+                        BodyLiteralKind::Aggregate { result, .. },
+                        Premise::Aggregate { value, .. },
+                    ) => {
+                        env.insert(*result, value.clone());
                     }
                     _ => return None, // premise kind does not match its literal
                 }
@@ -4745,6 +4826,41 @@ mod tests {
                         }
                         let replayed = replay(&program, derivation);
                         prop_assert_eq!(replayed.as_ref(), Some(&fact));
+                    }
+                }
+            }
+
+            /// **E6** — E3 over a generator that emits §8 builtins.
+            ///
+            /// E3's own generator makes every column a symbol (`monotype`), so
+            /// arithmetic cannot appear and its strongest provenance property
+            /// had never seen an `=`-assignment, a presence test, an aggregate
+            /// or a **deferred negation** — one whose no-match pattern is closed
+            /// by an assignment-bound value (§7/§10, 2026-07-25), which is
+            /// exactly what `arb_comparison_program`'s `NegShift` rules build.
+            ///
+            /// The claim is E3's, unchanged: every recorded derivation replays
+            /// to the fact it was recorded for. What had to change is `replay`,
+            /// which now folds builtin premises into the environment **in
+            /// schedule order** and re-evaluates rather than re-checks them —
+            /// see its doc comment for why a self-justifying premise leaves no
+            /// other option.
+            #[test]
+            fn e6_derivations_replay_through_builtins(
+                program in crate::testgen::arb_comparison_program(),
+            ) {
+                // The generator can emit `V / 0`, which is a §8 runtime error
+                // and not a derivation to replay.
+                let Ok(model) = eval(&program) else { return Ok(()) };
+                for fact in model.facts() {
+                    for derivation in model.derivations_of(&fact) {
+                        let replayed = replay(&program, derivation);
+                        prop_assert_eq!(
+                            replayed.as_ref(),
+                            Some(&fact),
+                            "a derivation over builtins did not replay: {:?}",
+                            derivation
+                        );
                     }
                 }
             }
