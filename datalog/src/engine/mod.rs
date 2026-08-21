@@ -710,10 +710,14 @@ fn enumerate_from(
             // relation is complete and frozen here. A match refutes the
             // negation; no match records the no-match pattern and moves on. Negated
             // atoms bind nothing.
-            if cx
-                .model
-                .relation(atom.pred)
-                .iter()
+            //
+            // Only the pattern's closed leading slots can be sought, and every
+            // tuple `matches` accepts carries them — so the range holds all of
+            // them, and `matches` still runs (it checks arity, which a prefix
+            // does not). `absent` is a legal key here and an impossible one in
+            // the join above; [`seek::closed_prefix`] carries the asymmetry.
+            let prefix = seek::closed_prefix(&pattern);
+            if seek::tuples_with_prefix(cx.model.relation(atom.pred), &prefix)
                 .any(|tuple| pattern.matches(tuple))
             {
                 return Ok(());

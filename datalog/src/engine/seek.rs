@@ -53,6 +53,7 @@
 use std::collections::BTreeSet;
 
 use crate::ir::{Atom, Term, Tuple, Value};
+use crate::provenance::NoMatchPattern;
 
 /// The tuples of `set` whose leading columns equal `prefix`, in set order.
 ///
@@ -99,6 +100,20 @@ pub(crate) fn bound_prefix(atom: &Atom, bindings: &[Option<Value>]) -> Option<Tu
         }
     }
     Some(Tuple(prefix))
+}
+
+/// The closed prefix of a refutation pattern — its leading slots that a
+/// constant or a bound variable has closed.
+///
+/// The anti-join's counterpart to [`bound_prefix`], and it differs in exactly
+/// one way: [`NoMatchPattern::matches`] compares **structurally**, because a
+/// refutation is a membership test rather than a join (§4/§7, §17 2026-07-29).
+/// So `absent` is a legal key here — `not p(X)` with `X` bound to `absent` asks
+/// whether `p(absent)` is in the relation, and it is — where in a join it means
+/// the atom cannot match at all. There is correspondingly no impossible case:
+/// every pattern has a range, possibly the whole relation.
+pub(crate) fn closed_prefix(pattern: &NoMatchPattern) -> Tuple {
+    Tuple(pattern.args.iter().map_while(|arg| arg.clone()).collect())
 }
 
 #[cfg(test)]
@@ -325,6 +340,83 @@ mod tests {
         );
     }
 
+    // ---- B12c: the closed prefix loses no refutation ---------------------
+
+    /// A refutation pattern and a tuple at its arity — the same invariant
+    /// B12b's generator honours, and the one `matches` checks for itself.
+    fn arb_refutation_case() -> impl Strategy<Value = (NoMatchPattern, Tuple)> {
+        (1usize..=3)
+            .prop_flat_map(|arity| {
+                (
+                    prop::collection::vec(prop::option::of(arb_cell()), arity),
+                    prop::collection::vec(arb_cell(), arity),
+                )
+            })
+            .prop_map(|(args, cells)| {
+                (
+                    NoMatchPattern {
+                        pred: PredId(0),
+                        args,
+                    },
+                    Tuple(cells),
+                )
+            })
+    }
+
+    proptest! {
+        /// **B12c** — every tuple a refutation pattern matches starts with its
+        /// closed prefix, `absent` keys included. B12b for the anti-join,
+        /// where the comparison is structural.
+        ///
+        /// *Mutation:* `map_while` → `filter_map` in `closed_prefix`, so a
+        /// closed slot past an open one joins the key and breaks contiguity.
+        #[test]
+        fn b12c_the_closed_prefix_loses_no_refutation(
+            (pattern, candidate) in arb_refutation_case()
+        ) {
+            let prefix = closed_prefix(&pattern);
+            prop_assert!(
+                !pattern.matches(&candidate) || candidate.0.starts_with(&prefix.0),
+                "refuted on a tuple outside the sought range"
+            );
+        }
+    }
+
+    /// **B12c's non-vacuity guard.** A pattern that closes nothing satisfies
+    /// the property trivially. Checked against B12c's *sentence* — "`absent`
+    /// keys included" — so the run must see refutations carrying a non-empty
+    /// prefix, and must see one whose prefix **contains `absent`**, which is
+    /// the case a join would have called impossible.
+    #[test]
+    fn b12c_generator_reaches_refutations_on_a_prefix_and_on_an_absent_key() {
+        use proptest::strategy::{Strategy, ValueTree};
+        use proptest::test_runner::TestRunner;
+
+        let mut runner = TestRunner::deterministic();
+        let strategy = arb_refutation_case();
+        let (mut on_prefix, mut on_absent) = (0, 0);
+        for _ in 0..600 {
+            let (pattern, candidate) = strategy
+                .new_tree(&mut runner)
+                .expect("strategy produces a value")
+                .current();
+            if !pattern.matches(&candidate) {
+                continue;
+            }
+            let prefix = closed_prefix(&pattern);
+            if !prefix.0.is_empty() {
+                on_prefix += 1;
+            }
+            if prefix.0.iter().any(Value::is_absent) {
+                on_absent += 1;
+            }
+        }
+        assert!(
+            on_prefix >= 20 && on_absent >= 10,
+            "refutations: {on_prefix} on a non-empty prefix, {on_absent} on an absent key"
+        );
+    }
+
     // ---- the cases the properties are too coarse to pin ------------------
 
     #[test]
@@ -401,6 +493,38 @@ mod tests {
             bound_prefix(&atom, &[None, Some(Value::Int(7))]),
             Some(Tuple(vec![sym("a")]))
         );
+    }
+
+    #[test]
+    fn a_refutation_seeks_an_absent_key_the_join_would_call_impossible() {
+        // `not p(absent)` against a stored `p(absent)`: the anti-join is a
+        // structural membership test, so this refutes (§4/§7) — and the seek
+        // must therefore *find* the tuple a join would have ruled out.
+        let set = relation(&[&[Value::Absent], &[sym("a")]]);
+        let pattern = NoMatchPattern {
+            pred: PredId(0),
+            args: vec![Some(Value::Absent)],
+        };
+        let prefix = closed_prefix(&pattern);
+        assert!(tuples_with_prefix(&set, &prefix).any(|tuple| pattern.matches(tuple)));
+
+        // The join's side of the same asymmetry, for contrast.
+        let atom = Atom {
+            pred: PredId(0),
+            args: vec![Term::Const(Value::Absent)],
+        };
+        assert_eq!(bound_prefix(&atom, &[]), None);
+    }
+
+    #[test]
+    fn the_closed_prefix_stops_at_the_first_open_slot() {
+        // `not p(a, _, b)`: only `a` is contiguous. The `b` slot still filters
+        // in `matches`, it just cannot be sought.
+        let pattern = NoMatchPattern {
+            pred: PredId(0),
+            args: vec![Some(sym("a")), None, Some(sym("b"))],
+        };
+        assert_eq!(closed_prefix(&pattern), Tuple(vec![sym("a")]));
     }
 
     #[test]
