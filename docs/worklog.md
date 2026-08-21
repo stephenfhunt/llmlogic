@@ -24,6 +24,59 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-20 — The profile, and the scan that was hiding everything else
+
+The last of the stock-take's four. It answered pillar 1's question and then
+falsified the ranking that made the question urgent: **the recorder is a memory
+cost, and the thing actually burning the clock is a full-relation scan nobody had
+named.** Long form, with method and every table, in
+[`datalog/notes/profile-2026-08-20.md`](../datalog/notes/profile-2026-08-20.md).
+No engine code changed.
+
+**Done**
+- **The recorder is priced** — 70–78% of peak RSS, 2–24% of wall clock, its time
+  share *falling* as the workload grows (2% at `sparse_800`). Four scratch builds in
+  a throwaway worktree, each guarded by byte-identical answers on all 26 programs.
+- **The finding neither note had**: a relation's `BTreeSet` is already ordered by
+  column, so a bound prefix is a contiguous range — and nothing seeks it. A ~20-line
+  prototype is **10.2× on `sparse_800`, 12.7× on `join_4000`, 9.0× on `agg_50000`**,
+  takes sparse from n^4.16 to n^2.14, and passes all 422 library tests.
+- **Aggregation**: mechanism confirmed (goal rescans per group), quantification
+  corrected; under the seek, groups become free and rows go linear.
+- **`samply` sampling** put ~70% of `agg_50000` in value comparison, collapsing to
+  2% under the seek.
+
+**Decided**
+- **The recorder question must be re-measured against the post-seek engine.** Its
+  share there is **50–60%**, not 2–24%. Deciding today would price pillar 1 at 2% of
+  a run that will not exist. §17's 2026-07-19 entry is annotated with both numbers.
+- **Interning is a memory item only if the seek goes first** — a nuance the A/B
+  builds got wrong and the sampler corrected. Symbol *length* costs 7.5% at 16× the
+  width, but value *comparison* is 70% of an aggregate today and 2% after the seek.
+- **`cross-engine-benchmark.md`'s wall clock does not reproduce at the top end.**
+  Rebuilding `0356b04` on the same machine: `sparse_800` 43.25 s vs its 65.14 s,
+  `agg_50000` 1.28 s vs its 3.77 s, while peak RSS reproduces to 0.3%. So **`tsdl`
+  does not win `agg` outright** — 1.73 s ours vs 2.92 s theirs today — and that claim
+  was cited in `ROADMAP.md`, `v1-scope.md` and §17.
+- **Measure with `min`-of-N, not best-of-3-and-a-spread-claim.** `agg_50000` spans
+  61% across consecutive runs of one binary — not thermal, not core placement, and
+  it hits every build equally.
+
+**Removed**
+- The Performance section's framing that ranked the recorder first, and the "one
+  shape a sibling engine wins outright" clause from `ROADMAP.md` and `v1-scope.md`
+  both. Nothing deleted from `notes/`: both earlier performance notes are
+  append-annotated, since their numbers record what was believed when.
+
+**Next up**
+- **Land the seek** — unreviewed, and it does not touch the negated-atom or
+  aggregate-goal arms, which still scan. Seeking makes body order matter *more*, so
+  its interaction with join-order selection needs looking at.
+- **Then** the three-way decision session (recorder / query surface / row
+  provenance), against the post-seek engine.
+- Still open: **E5**/**E6**, and `--no-default-features` does not pass its own test
+  suite (two temporal tests, found while profiling, now a ROADMAP item).
+
 ## 2026-08-20 — `bugs/007` closes, and the aggregate becomes a fold over a multiset
 
 The defect the morning's audit filed, fixed the same day in four commits.
@@ -125,54 +178,3 @@ asserting them. **533 tests green**, clippy and rustfmt clean; the one
   float widening of B1's and B5's aggregate arms, `007`'s second acceptance half.
 - **The profile**, unchanged and unblocked — what this session ran ahead of.
 - Still open: **E5**/**E6**, whose hole now covers every temporal derivation.
-
-## 2026-08-19 — Temporal values ship, and a builtin turns out to be a relation
-
-S4 read "met **except dates**"; it now reads met. Three primitive types with
-`@`-sigilled literals, one arithmetic rule, and `std/time` behind a gate. Design
-and rejected alternatives in
-[`notes/temporal-values.md`](../datalog/notes/temporal-values.md); two §17
-decisions, both annotated with what building them taught the same day.
-
-**Done**
-- **`src/temporal.rs`** — civil dates, civil timestamps, exact durations, and
-  Hinnant's calendar algorithms. **Zero new dependencies**, which is affordable
-  only because the design excludes zones and calendar durations.
-- **§8's algebra as one rule** — points and vectors — replacing a table to
-  memorize. `duration / duration → float` is the only route from a duration to a
-  number, so the sibling engine's `172800000` finding is excluded *by
-  construction* rather than by a paragraph in a guide.
-- **`std` modules**: `std/` is a reserved virtual path prefix; a builtin is a
-  **relation**, which is what dodges the `ident (` ambiguity that ruled out
-  `float(A)`. `std/time` ships; `std/math` and `std/text` are designed, not built.
-- **§13 types temporal columns** — CSV by the literal grammar, Parquet from its
-  declared type. §16.14 is the worked example, with a system test and a
-  pipe-it-back-in test.
-- **Properties T1–T6**, all six with mutations recorded.
-
-**Decided**
-- **The sigil is decided by §14's closure, not taste.** Output must re-parse, so
-  a computed date needs a spelling. Bare ISO was rejected because `2026-08-19`
-  already evaluates to `1999`.
-- **`timestamp as date` stays a lossy error**, with `truncate` named as the fix —
-  the one tension resolved *for* an existing rule. §16.14 records the cost.
-- **The gate buys the short names**, not safety: `year`/`month`/`day` are the
-  names a program wants *and* the names a column has.
-- **A duration is never inferred from any source** — reversing what §13 said this
-  morning about `INTERVAL`. Reading DuckDB's `1 day 02:00:00` would mean a second
-  duration grammar, and one grammar is what keeps reading and rendering inverse.
-
-**Removed**
-- §13's "date/time-like types become their ISO text as strings", §4's *Not
-  covered* temporal clause, `duckdb.rs`'s VARCHAR cast for `DATE`/`TIME*`, and
-  §8's scan-ahead candidate for the `ident (` ambiguity — **withdrawn**, not
-  parked: a relational spelling means the ambiguity never arises.
-- `print_type`'s duplicate type-name list, now `TypeName::keyword`'s.
-
-**Next up**
-- **The profile**, with pillar 1's question and the row-provenance trade attached
-  — the last of the stock-take's four, and `EXPERIMENTS.md` still sits alongside
-  it as the thing v1 is defined against.
-- Open, in §17: period arithmetic ("same day next month" is not expressible),
-  whether a truncated value should print as its period, and the `avg`-over-mixed
-  column question T5 does not reach.
