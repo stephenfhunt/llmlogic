@@ -220,3 +220,27 @@ In priority order, what it says to look at:
 3. **Value representation**, which the short-symbol throughput gap points at again.
 4. **Cyclic graphs specifically** — `sparse_800`, not the chain, is where the engine
    falls over, and the chain is what everyone benchmarks.
+
+---
+
+## Profiled 2026-08-20 — and two of this file's numbers did not reproduce
+
+[`profile-2026-08-20.md`](profile-2026-08-20.md) ran that list. **The ranking above
+is wrong**: the recorder is a memory cost (78% of peak RSS, 2–24% of wall clock),
+value representation is not a time lead at all, and lead 4 and lead 2 are **the same
+defect** — an unindexed full-relation scan, where the `BTreeSet` is already ordered
+by column and nothing seeks the bound prefix. Seeking it is 10.2× on `sparse_800`.
+
+Two claims here should not be cited further:
+
+- **`agg_50000` is not a cell `tsdl` wins.** Re-run 2026-08-20 on this same corpus
+  with `tsdl` still at `fe8dae2`: **1.73 s ours against 2.92 s theirs.** The
+  superlinearity is real, but its quantification here charges to *rows* a cost that
+  is really the rows × groups product, because `gen_agg` ties groups to `n // 50`.
+- **The wall clock does not reproduce at the top end.** Rebuilding `0356b04` on this
+  machine gives `sparse_800` in 43.25 s against the 65.14 s above, and `agg_50000`
+  in 1.28 s against 3.77 s, while peak RSS reproduces to within 0.3%. The "under 2%"
+  spread claim also fails for `agg`, which spans 61% across consecutive runs.
+
+What stands: both engines agreeing byte-for-byte, the third-party oracle, the
+front-end/evaluation split, and semi-naive-vs-naive as an exponent.

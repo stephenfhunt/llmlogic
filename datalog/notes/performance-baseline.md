@@ -95,3 +95,31 @@ non-deterministic across commits.
 **Do not optimise from this file.** It says where the time goes at one scale on
 one machine; it does not say why. The ROADMAP item's rule — profile before
 changing anything — is what these numbers are for.
+
+---
+
+## Answered 2026-08-20 by [`profile-2026-08-20.md`](profile-2026-08-20.md)
+
+The four hypotheses above were tested. Two are **wrong**, and both were ranked
+first:
+
+1. **Provenance recording** — not the cost of the 11.6 s. It is 2–24% of wall clock
+   and 70–78% of *peak RSS*; its time share falls as the workload grows. A memory
+   cost, not a speed one.
+2. **Value representation** — **half right, for the wrong reason.** Symbol *length*
+   is not the driver (16× the width costs 7.5% of wall clock and zero extra
+   allocations), so this file's ~15 k tuples/s against the cross-engine note's
+   ~270 k/s is not the long identifiers. But value *comparison* is ~70% of an
+   aggregate and ~31% of a cyclic closure, so interning would pay in time today —
+   and stops paying once the scan is fixed, which deletes the comparisons instead of
+   cheapening them. Sequence it after the seek, where it is a memory win.
+3. **Join strategy** — this was the answer, though not in the form asked. The
+   relations are `BTreeSet`s already ordered by column and nothing *seeks* a bound
+   prefix; every join position is a full scan. Seeking it is 10.2× on the worst
+   corpus shape and takes it from n^4.16 to n^2.14.
+4. **Where the 35× goes** — still open. The corpus has no imports and no unused rule
+   library, so nothing here reproduces the shape that produced it.
+
+The fact base this file measured no longer exists, so its own numbers were not
+re-run; the two notes' numbers are also not as comparable as they claim (see that
+file's *The baseline did not reproduce*).

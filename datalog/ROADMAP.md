@@ -301,10 +301,11 @@ them. Except where noted these are documented v1 limits rather than defects.
   is the rendering, the JSON encoding, and sequencing against the truncation
   contract, whose distinction `unknown` is. **Decide it together with "does the
   derivation store earn its cost" below, and with the profile** (2026-08-18): the
-  recorder runs unconditionally and is the top profiling target, while its only
-  consumer is unbuilt — so pillar 1 pays full price on every run and returns
-  nothing at the surface it exists for. Whichever is settled first constrains the
-  other. _queued — decided, not built; **v1** (S5)._ — §11/§14, [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
+  recorder runs unconditionally, while its only consumer is unbuilt — so pillar 1
+  pays full price on every run and returns nothing at the surface it exists for.
+  Whichever is settled first constrains the other, and the profile
+  ([`notes/profile-2026-08-20.md`](notes/profile-2026-08-20.md)) has now priced what
+  is being paid: 78% of memory today, half the run once the scan is fixed. _queued — decided, not built; **v1** (S5)._ — §11/§14, [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
 - **First appearance, not first round** — **closed 2026-08-16 without building it:
   the rationale was adopted from a sibling engine and does not hold here.** Ours
   *batches* application, so the derivation that first produces a fact always has
@@ -357,12 +358,14 @@ them. Except where noted these are documented v1 limits rather than defects.
   *backwards* from the retained model — no recorder in the fixpoint, no re-run — so
   a run nobody questions pays one integer per row. It is not a free swap: we record
   *all* derivations (§17, 2026-07-19) and backwards extraction yields one. But
-  `notes/performance-baseline.md` names this recorder as its top hypothesis for the
-  35× cliff and has never measured it, so **the profiling item below now has a
-  concrete architecture to profile against.** Sequence after the profile, never
-  before — and **settle it in the same session as the query surface above**
-  (2026-08-18), since a profile is under pressure to make the recorder optional and
-  pillar 1 is the only argument that it should not be. _queued (after profiling) — **v1**, decided with the query surface._
+  **Measured 2026-08-20** ([`notes/profile-2026-08-20.md`](notes/profile-2026-08-20.md)):
+  the recorder is **70–78% of peak RSS** but only **2–24% of wall clock**, and its
+  time share *falls* with scale because the unindexed scan swamps it — so
+  `performance-baseline.md`'s "top hypothesis for the 35× cliff" is killed on time
+  and confirmed on memory. **Decide it against the post-seek engine, not this one**:
+  with the prefix seek applied the same recorder is **50–60%** of a run. Still to be
+  settled in the same session as the query surface above (2026-08-18).
+  _queued (after the seek) — **v1**, decided with the query surface._
   — §11/engine, [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
 
 ### `std` modules (§8/§12/§13) — shipped
@@ -379,6 +382,11 @@ deferred until a consumer needs them (§8's *Not covered*). — §13,
 - **Database loading** — SQLite/DuckDB files via the reserved `table "…"`
   grammar; Postgres via DuckDB attach. Grammar ratified, loading deferred until
   a real consumer. _queued — **post-v1** (awaiting a consumer)._ — §13.
+- **`--no-default-features` does not pass its own test suite** — `system.rs`'s
+  `temporal_answers_compose_as_input` and `temporal_program_types_dates_and_groups_by_period`
+  fail there (exit 2), because they import date columns and the reader is gated.
+  A supported configuration (§17 2026-07-23) with no green build; found while
+  profiling, unrelated to it. _queued — **v1** (S3-adjacent: a shipped configuration should build green)._ — §13/§15.
 - **TSV** — an easy format add, deferred with database loading. _queued — **post-v1**._ — §13.
 - **Filter pushdown for large sources** — v1 eagerly materializes every import;
   push selections into SQL when a consumer hits the wall (the path/`table`
@@ -386,30 +394,38 @@ deferred until a consumer needs them (§8's *Not covered*). — §13,
 - **Module namespacing** — v1 module imports share one global namespace;
   qualified names / visibility deferred until needed. _queued — **post-v1**._ — §13.
 
-### Performance (now unblocked)
+### Performance
 
-Deliberately sequenced **after** aggregation and the absent value (both shipped
-2026-07-24): tune a feature-complete surface rather than re-profiling as core
-semantics change (both added evaluation paths that would move the hotspots). Now
-the highest-signal next item.
+**Profiled ✅ 2026-08-20**, in [`notes/profile-2026-08-20.md`](notes/profile-2026-08-20.md).
+The profile falsified the ranking both earlier notes gave, so the items below are
+its ranking, not theirs.
 
-- **Profile the engine** — never profiled. The benchmark half is now done:
-  [`notes/cross-engine-benchmark.md`](notes/cross-engine-benchmark.md) stands up a
-  regenerating corpus and ranks the leads, first among them the derivation recorder
-  (a second engine measures 13× for its own on a cyclic graph). Earlier one-off
-  numbers: [`notes/performance-baseline.md`](notes/performance-baseline.md).
-  _queued — **v1** by dependency: the input the recorder decision is sequenced behind, not on its own merits (S6 is met)._ — engine.
-- **Aggregation does not scale with the aggregated relation** — 2.5× the rows at a
-  fixed group count costs 9.6×, and it is the one shape where `tsdl` wins outright;
-  groups scale sublinearly, so the suspect is a rescan rather than a group-key
-  reach. Measured in [`notes/cross-engine-benchmark.md`](notes/cross-engine-benchmark.md).
-  _queued (after profiling) — **v1** (S6: the one shape a sibling engine wins outright)._ — §9/engine.
+- **Seek the bound prefix instead of scanning the relation** — a relation's
+  `BTreeSet` is already ordered by column, so the tuples matching a bound prefix are
+  a contiguous range that nothing seeks. A ~20-line prototype measured **10.2× on
+  `sparse_800`, 12.7× on `join_4000`, 9.0× on `agg_50000`**, moved sparse from
+  n^4.16 to n^2.14 and a fixpoint-free join from n^2.00 to n^1.06, and passed the
+  full suite with byte-identical answers. Subsumes the aggregation item below.
+  _queued — **v1** (S6: it is an exponent, and it is the input the recorder decision must be re-measured against)._ — §9/engine.
+- **Aggregation does not scale with the aggregated relation** — mechanism confirmed
+  (the goal rescans the whole relation per group; cost tracks groups × rows), but the
+  recorded "2.5× the rows costs 9.6×" is an artifact of a generator that moves rows
+  and groups together, and **`tsdl` does not win this shape** — re-measured today,
+  1.73 s ours against 2.92 s theirs. The prefix seek collapses it to Θ(rows) and
+  makes groups free. _folded into the item above — **v1**._ — §9/engine.
+- **Interning / `Rc<str>` for values** — value comparison is ~70% of `agg_50000`
+  and ~31% of `sparse_400` today (`Value::eq` plus libc `memcmp`), so interning is a
+  real time lead against *this* engine — but **not against the post-seek one**: under
+  the prefix seek `Value::eq` falls to 2–3%, because the seek deletes the comparisons
+  rather than making each cheaper. Symbol *length* is not the driver either (16× the
+  width costs 7.5%). A memory item if the seek goes first, a time item if it does not.
+  [`notes/profile-2026-08-20.md`](notes/profile-2026-08-20.md). _queued (after the seek) — **post-v1**: memory once sequenced, and S6 is about exponents._ — §4/engine.
 - **Parallelism** — assess how much of semi-naive evaluation and joins can go
   parallel (independent rules within a stratum, partitioned/hash joins) while
   preserving the deterministic canonical output and full provenance recording,
-  which are load-bearing guarantees. Scope follows from the profile. _queued
-  (after profiling) — **post-v1**: S6 is about exponents, which parallelism does
-  not change._ — engine.
+  which are load-bearing guarantees. Scope follows from the profile, which now
+  exists and puts the prefix seek ahead of it. _queued (after the seek) —
+  **post-v1**: S6 is about exponents, which parallelism does not change._ — engine.
 
 ### Declarative semantics (§6) — shipped
 

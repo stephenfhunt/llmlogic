@@ -29,11 +29,12 @@ than the session count:
 |---|---|---|
 | **`EXPERIMENTS.md` as an instrument** | skill | **S1** outright. This is the only item S1 names, and until it exists v1 is undefined rather than unfinished. |
 | **Provenance query surface (`?why`/`?whynot`)** | §11 | **S5**: "explained *through the surface the caller used*". The engine records everything and the CLI exposes none of it. |
-| **Does the derivation store earn its cost** | §11/engine | Decided in the same session as the row above, per the stock-take: a profile pressures the recorder toward optional, and pillar 1 is the only argument against. Whichever settles first constrains the other. |
+| **Does the derivation store earn its cost** | §11/engine | Decided in the same session as the row above, per the stock-take: a profile pressures the recorder toward optional, and pillar 1 is the only argument against. Whichever settles first constrains the other. **Priced 2026-08-20**: 78% of peak memory, 2–24% of wall clock today — but 50–60% of a *post-seek* run, so decide it against that engine, not this one. |
 | **Imported facts anchored by relation, not row** | §11/§13 | Third input to that same decision. **v1 as a ruling**, not necessarily as a feature — retaining rows costs memory on the 1.2 GB shapes, so "no, and §11 says so plainly" is a legitimate outcome. |
 | **E3 replay does not cover §8 builtins (E6)** | §11/§15 | If S5 ships a proof surface, the strongest provenance property must have seen an `=`-assignment. It never has: its generator emits no comparisons. |
-| **Profile the engine** | engine | Not required by **S6** directly (S6 is met), but it is the input the recorder decision above is sequenced behind. v1 by that dependency, not on its own merits. |
-| **Aggregation does not scale with the aggregated relation** | §9/engine | **S6**: 2.5× the rows at fixed group count costs 9.6×, and it is the one shape a sibling engine wins outright. The suspect is a rescan, so the fix is expected to be small once profiled. |
+| **Profile the engine** | engine | ✅ **2026-08-20** ([`profile-2026-08-20.md`](profile-2026-08-20.md)). Was v1 by dependency, not on its own merits (S6 is met); it delivered that dependency and re-ranked everything below. |
+| **Seek the bound prefix instead of scanning** | §9/engine | **S6**, and the strongest such claim in the backlog: it is an *exponent* (sparse n^4.16 → n^2.14, a fixpoint-free join n^2.00 → n^1.06), measured at 9–12.7× on three shapes by a prototype that passes the full suite. Also the engine the recorder decision has to be re-measured against. |
+| **Aggregation does not scale with the aggregated relation** | §9/engine | **S6**, mechanism confirmed — but the "2.5× the rows costs 9.6×" quantification was a generator artifact, and `tsdl` does **not** win this shape (1.73 s ours vs 2.92 s theirs, re-measured 2026-08-20). Subsumed by the row above, which makes groups free. |
 | **Integrity constraints + an exit code that carries an answer** | §12/§14/§15 | **S1** and pillar 3: the measured question class includes constraint/consistency checking, and today the caller must parse stdout to learn the answer. `datalog check.dl && deploy` cannot mean what it looks like. |
 | **The truncation contract's open half** | §9/§13/§15 | Merged with the row above by §17 2026-08-16/2026-08-18 — one exit code, one stdout discipline, one vocabulary. |
 | **Make the malformed/missing reclassification visible** | §8/§9/§11 | Rides the same session: `"abc" as int` is `absent`, so a dirty column reads as a sparse one and nothing says otherwise. It is the truncation question asked of `=`. |
@@ -95,10 +96,12 @@ cheap half, taken now.
 
 ## What this ruling does not do
 
-It does not sequence the v1 items among themselves — that stays `ROADMAP.md`'s job,
-and the stock-take's recommended order (the caller's contract, then temporal types,
-then the profile) survives this note unchanged, with S1's harness now sitting
-alongside them rather than near the bottom.
+It does not sequence the v1 items among themselves — that stays `ROADMAP.md`'s job.
+The stock-take's recommended order (the caller's contract, then temporal types, then
+the profile) has now been worked through in full, and the profile added one ordering
+constraint the stock-take could not have known: **the seek goes before the recorder
+decision**, because measuring the recorder against the unfixed engine understates it
+by an order of magnitude.
 
 It also does not claim the criteria are complete. The check run while writing this
 was: *if an item's ruling cannot be derived from a stated criterion, the criterion
