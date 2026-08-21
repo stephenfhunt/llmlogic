@@ -28,9 +28,9 @@
 //!   lexer.
 
 use crate::ast::{
-    AggOp, Aggregate, Args, Atom, Clause, Comparison, Constant, Declaration, Expr, ExprKind,
-    FieldDecl, Ident, Import, ImportKind, Literal, LiteralKind, NamedArg, Program, Query, Span,
-    Statement, StatementKind, Term, TermKind, TypeName,
+    AggOp, Aggregate, Args, Atom, Clause, Comparison, Constant, Declaration, Explain, Expr,
+    ExprKind, FieldDecl, Ident, Import, ImportKind, Literal, LiteralKind, NamedArg, Program, Query,
+    Sigil, Span, Statement, StatementKind, Term, TermKind, TypeName,
 };
 use crate::error::Error;
 use crate::lexer::{Token, TokenKind, lex};
@@ -193,6 +193,8 @@ impl Parser<'_> {
             TokenKind::Import => Ok(vec![self.parse_import()?]),
             TokenKind::Declare => Ok(vec![self.parse_declare()?]),
             TokenKind::QuestionDash => Ok(vec![self.parse_query()?]),
+            TokenKind::QuestionWhy => Ok(vec![self.parse_explain(Sigil::Why)?]),
+            TokenKind::QuestionWhyNot => Ok(vec![self.parse_explain(Sigil::WhyNot)?]),
             _ => self.parse_clause(),
         }
     }
@@ -373,6 +375,39 @@ impl Parser<'_> {
             kind: StatementKind::Query(Query {
                 name,
                 body,
+                span: join(start, end),
+            }),
+            span: join(start, end),
+        })
+    }
+
+    /// Parses an explanation goal: `?why <fact>.` / `?whynot <fact>.` (§11).
+    ///
+    /// The goal is a **single atom**, not a conjunction: it names one fact, and
+    /// a conjunction would be a query. Groundness is not checked here — an atom
+    /// carrying a variable parses fine and is rejected in lowering, where the
+    /// diagnostic can point at `?-` and name the variable (§17, 2026-08-21).
+    fn parse_explain(&mut self, sigil: Sigil) -> PResult<Statement> {
+        let start = self.span();
+        self.bump(); // `?why` / `?whynot`
+        let goal = self.parse_atom()?;
+        if matches!(self.kind(), TokenKind::Comma) {
+            let span = self.span();
+            let form = match sigil {
+                Sigil::Why => "?why",
+                Sigil::WhyNot => "?whynot",
+            };
+            return Err(self.error_suggesting(
+                span,
+                format!("`{form}` explains one fact, so its goal is a single atom"),
+                "ask `?- <conjunction>.` for the rows a body matches, then explain one of them",
+            ));
+        }
+        let end = self.expect(&TokenKind::Dot, "`.` to end the goal")?.span;
+        Ok(Statement {
+            kind: StatementKind::Explain(Explain {
+                sigil,
+                goal,
                 span: join(start, end),
             }),
             span: join(start, end),
@@ -990,6 +1025,10 @@ mod tests {
                         name.span = Span::DUMMY;
                     }
                     query.body.iter_mut().for_each(zero_literal);
+                }
+                StatementKind::Explain(explain) => {
+                    explain.span = Span::DUMMY;
+                    zero_atom(&mut explain.goal);
                 }
             }
         }

@@ -44,12 +44,13 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 
 use crate::ast::StatementKind;
-use crate::engine::{Model, eval};
+use crate::engine::{Model, Provenance, eval_with, trace_failure};
 use crate::error::{AggregateSite, Error, Warning};
 use crate::ir;
 use crate::lower::{check_program, lower_with_sources};
 use crate::parser::parse;
-use crate::print::{print_atom, print_ground_fact};
+use crate::print::{print_atom, print_explanation, print_ground_fact};
+use crate::provenance::{Explained, ProofTree};
 use crate::resolve::resolve_modules;
 use crate::sources::load_imports;
 use crate::typecheck::typecheck;
@@ -62,17 +63,29 @@ pub struct RunResult {
     /// One entry per query, each a list of canonical fact lines (no trailing
     /// newline).
     pub answers: Vec<Vec<String>>,
+    /// One entry per explanation goal (§11), each a block of `%`-comment lines.
+    ///
+    /// Kept apart from `answers` because an explanation is **not a row**: it
+    /// rides in the same text stream and is invisible to the exit code, so
+    /// appending `?why` to a check cannot change what the check answers (§17,
+    /// 2026-08-21). Stripping these lines leaves the fact stream byte for byte
+    /// (`testing.md` E5).
+    pub explanations: Vec<Vec<String>>,
     /// Non-fatal diagnostics (e.g. referenced-but-undefined predicates). The
     /// program still ran; these belong on stderr, never in the fact stream.
     pub warnings: Vec<Warning>,
 }
 
 impl RunResult {
-    /// All answer lines across every query, joined with newlines (a trailing
-    /// newline is added iff there is any output). This is the binary's stdout.
+    /// All answer lines across every query, then every explanation block,
+    /// joined with newlines (a trailing newline is added iff there is any
+    /// output). This is the binary's stdout.
+    ///
+    /// Answers first, explanations after, both in program order: an explanation
+    /// is commentary on a run and reads after the rows it is about.
     pub fn output(&self) -> String {
         let mut out = String::new();
-        for lines in &self.answers {
+        for lines in self.answers.iter().chain(&self.explanations) {
             for line in lines {
                 out.push_str(line);
                 out.push('\n');
@@ -127,7 +140,11 @@ pub fn run_at_reporting(
     for warning in &warnings {
         report(warning);
     }
-    let model = eval(&program).map_err(|e| vec![e])?;
+    // The run provisions its own recorder from its goals (§17, 2026-08-21):
+    // `?why` needs a derivation store, `?whynot` needs the model and a re-solve,
+    // and a run with no goals at all needs neither — which is the case that was
+    // paying 70–78% of peak RSS for nothing.
+    let model = eval_with(&program, program.provenance()).map_err(|e| vec![e])?;
     warnings.extend(absent_skip_warnings(&model, &program));
 
     let mut answers = Vec::with_capacity(program.queries.len());
@@ -178,9 +195,57 @@ pub fn run_at_reporting(
         }));
         answers.push(answer_lines(query, &rows, &program));
     }
+    // The cross case, decided before the loop so at most one extra fixpoint is
+    // ever run: `?whynot` over a fact that turns out to hold wants a proof, and
+    // its own sigil provisioned no recorder. Re-evaluating reuses the lowered
+    // program, so it costs the fixpoint and not the parse or the imports.
+    let needs_recorded = model.provenance() == Provenance::Unrecorded
+        && program
+            .explanations
+            .iter()
+            .any(|explanation| model.contains(&explanation.goal));
+    let recorded = if needs_recorded {
+        Some(eval_with(&program, Provenance::Recorded).map_err(|e| vec![e])?)
+    } else {
+        None
+    };
+
+    let mut explanations = Vec::with_capacity(program.explanations.len());
+    for explanation in &program.explanations {
+        let (answer, reran) = match recorded.as_ref() {
+            Some(recorded) if model.contains(&explanation.goal) => {
+                (ProofTree::explain(recorded, &explanation.goal), true)
+            }
+            _ if model.provenance() == Provenance::Recorded => {
+                (ProofTree::explain(&model, &explanation.goal), false)
+            }
+            // Unprovisioned and the goal does not hold: the model alone answers
+            // that, and no store was needed to say so.
+            _ => (Explained::DoesNotHold, false),
+        };
+        // The trace is solved out of the finished model, so the arm that needs
+        // no store is the one that costs a search — which is the shape that
+        // makes `?whynot` cheap to provision for (§17, 2026-08-21).
+        let trace = match &answer {
+            Explained::DoesNotHold => {
+                Some(trace_failure(&program, &model, &explanation.goal).map_err(|e| vec![e])?)
+            }
+            Explained::Proof(_) | Explained::Unrecorded => None,
+        };
+        explanations.push(print_explanation(
+            explanation.sigil,
+            &explanation.goal,
+            &answer,
+            trace.as_ref(),
+            reran,
+            &program,
+        ));
+    }
+
     Ok(RunResult {
         model,
         answers,
+        explanations,
         warnings,
     })
 }
@@ -195,6 +260,10 @@ pub fn run_at_reporting(
 /// - A **define-and-select rule** — a single clause with a non-empty body, e.g.
 ///   `gp(X,Z) :- parent(X,Y), parent(Y,Z)` — appends the rule plus a synthesized
 ///   query over its head, `?- gp(X, Z).`.
+/// - An **explanation goal** — `?why dead("x")`, `?whynot calls("a","b")` — is
+///   already a §5 statement and is passed through verbatim (§11). This is why
+///   the surface needs no flag of its own: `-q` classifies by parsing, so the
+///   sigil is one more arm.
 /// - Anything else (a **bare atom** `ancestor("alice", X)`, a **comma-body**
 ///   `adult(N), N != "bob"`) is a query body and appends `?- <arg>.`.
 ///
@@ -218,6 +287,16 @@ fn query_source(arg: &str) -> Result<String, Vec<Error>> {
     // Normalize: trim surrounding whitespace and any single trailing `.`.
     let core = arg.trim();
     let core = core.strip_suffix('.').unwrap_or(core).trim_end();
+
+    // An explanation goal carries its own sigil, so it is passed through as the
+    // statement it already is (§17, 2026-08-21). It is classified first because
+    // `?why p(…)` would otherwise reach the query-body path below and be lexed
+    // as a stray `?`.
+    if core.starts_with("?why") || core.starts_with("?whynot") {
+        let goal = format!("{core}.");
+        parse(&goal)?;
+        return Ok(format!("{goal}\n"));
+    }
 
     // A define-and-select rule parses as one *rule* with a non-empty body —
     // however many clauses that rule desugars to, since the parser expands a
@@ -302,16 +381,18 @@ pub fn run_with_queries_at_reporting(
 /// used to discard; a query records no derivations, so this scan cannot see it.
 fn absent_skip_warnings(model: &Model, program: &ir::Program) -> Vec<Warning> {
     // Only a program that aggregates or converts has anything to report here;
-    // skipping the derivation scan keeps this free for everything else.
-    if !program.rules.iter().any(|rule| {
-        rule.body.iter().any(|literal| match &literal.kind {
-            ir::BodyLiteralKind::Aggregate { .. } => true,
-            ir::BodyLiteralKind::Compare { lhs, rhs, .. } => expr_casts(lhs) || expr_casts(rhs),
-            _ => false,
-        })
-    }) {
+    // skipping the derivation scan keeps this free for everything else. It is
+    // the same predicate that provisions the recorder, shared so the two cannot
+    // drift — if this scan ever runs on an unprovisioned model it reports
+    // nothing, silently.
+    if !program.reports_through_provenance() {
         return Vec::new();
     }
+    debug_assert_eq!(
+        model.provenance(),
+        crate::engine::Provenance::Recorded,
+        "a program whose warnings are read out of derivations must provision them"
+    );
 
     // (rule, body index) → (op, total skipped, groups that skipped).
     let mut sites: BTreeMap<(u32, usize), (&'static str, usize, usize)> = BTreeMap::new();
@@ -398,17 +479,6 @@ fn assignment_is_guarded(body: &[ir::BodyLiteral], idx: usize) -> bool {
             } if *var == bound
         )
     })
-}
-
-/// Whether an expression contains an `as` cast (§8) — the cheap static test that
-/// keeps the derivation scan off programs with nothing to report.
-fn expr_casts(expr: &ir::Expr) -> bool {
-    match expr {
-        ir::Expr::Cast { .. } => true,
-        ir::Expr::Binary { lhs, rhs, .. } => expr_casts(lhs) || expr_casts(rhs),
-        ir::Expr::Builtin { args, .. } => args.iter().any(expr_casts),
-        ir::Expr::Term(_) => false,
-    }
 }
 
 /// Renders one query's answer rows to canonical fact lines per the §14 output
@@ -974,6 +1044,57 @@ banned(\"carol\").
                 "re-running with its own output changed the answers\n\
                  --- program ---\n{}--- appended ---\n{}",
                 &program, &appended
+            );
+        }
+
+        /// **E5 — comment-stripping is the closure guard.** Proof trees are not
+        /// facts (§17, 2026-08-16, decided in the negative), so there is no
+        /// fact-shaped provenance output to run D1 over. What replaces it:
+        /// stripping every comment from a program's output must leave
+        /// **byte-for-byte** what the same program prints without its goals.
+        ///
+        /// Blocked since 2026-08-16 on there being nothing that could *ask* —
+        /// E7 (every proof line is a comment) is its lexical precondition and
+        /// landed 2026-08-21 with the rendering; this is the program-level half,
+        /// unblocked by the §5 goal form (§17, 2026-08-21).
+        ///
+        /// It guards two things at once, which is why it is cheap: that an
+        /// explanation never leaks a fact into the stream, and that
+        /// **provisioning the recorder does not change what a run prints** —
+        /// `?why` evaluates with the store on and the plain run without it
+        /// (E9 states the engine-level half).
+        #[test]
+        fn e5_stripping_the_comments_leaves_the_output_without_the_goals(
+            program in crate::testgen::arb_closure_program()
+        ) {
+            let Ok(plain) = run(&program) else { return Ok(()) };
+            let Some(fact) = plain.answers.iter().flatten().next() else {
+                return Ok(());
+            };
+            // Both sigils over a fact that holds, and one over a fact that does
+            // not — so the trace arm is exercised beside the proof arm.
+            let held = fact.trim_end_matches('.');
+            let goals = format!("?why {held}.\n?whynot {held}.\n?whynot n(\"zzz\", -99).\n");
+            let explained = run(&format!("{program}{goals}"))
+                .map_err(|e| TestCaseError::fail(format!(
+                    "a program with goals did not run:\n                     --- program ---\n{program}--- goals ---\n{goals}--- {e:?}"
+                )))?;
+
+            let output = explained.output();
+            prop_assert!(
+                output.lines().any(|line| line.starts_with('%')),
+                "no explanation was printed, so stripping is vacuous:\n{}",
+                &output
+            );
+            let stripped: String = output
+                .lines()
+                .filter(|line| !line.starts_with('%'))
+                .map(|line| format!("{line}\n"))
+                .collect();
+            prop_assert_eq!(
+                stripped, plain.output(),
+                "an explanation changed the fact stream\n                 --- program ---\n{}--- goals ---\n{}",
+                &program, &goals
             );
         }
     }

@@ -773,3 +773,222 @@ fn usage_and_program_errors_share_the_did_not_answer_code() {
     let program = run_file("broken_types.dl");
     assert_eq!(program.code, 2);
 }
+
+/// §11's asking form, end to end through the binary: a `?why` goal reaches the
+/// renderer that until now was library-only, and its block is byte-for-byte
+/// §16.6's.
+#[test]
+fn a_why_goal_prints_the_proof_the_spec_shows() {
+    let out = run_file_args(
+        "16_1_ancestry.dl",
+        &["-q", "?why ancestor(\"alice\",\"carol\")"],
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(
+        out.stdout.ends_with(
+            "% why ancestor(\"alice\", \"carol\")\n\
+             % 0  ancestor(\"alice\", \"carol\")  by ancestor(X, Y) :- parent(X, Z), ancestor(Z, Y)\n\
+             % 1    parent(\"alice\", \"bob\")  [fact]\n\
+             % 1    ancestor(\"bob\", \"carol\")  by ancestor(X, Y) :- parent(X, Y)\n\
+             % 2      parent(\"bob\", \"carol\")  [fact]\n"
+        ),
+        "unexpected proof block:\n{}",
+        out.stdout
+    );
+}
+
+/// **The sigil is not a selector**: either form answers whichever arm the model
+/// turns out to hold (§17, 2026-08-16). `?why` over a fact that does not hold is
+/// an ordinary question, and `?whynot` over one that does gets a proof — the
+/// second at the cost of a second fixpoint, which the answer says out loud
+/// because its own sigil provisioned no recorder (§17, 2026-08-21).
+#[test]
+fn either_sigil_answers_whichever_arm_holds() {
+    let why_missing = run_file_args(
+        "16_1_ancestry.dl",
+        &["-q", "?why ancestor(\"dave\",\"alice\")"],
+    );
+    assert!(
+        why_missing
+            .stdout
+            .contains("% why ancestor(\"dave\", \"alice\")\n% not derivable\n"),
+        "stdout: {}",
+        why_missing.stdout
+    );
+
+    let whynot_holding = run_file_args(
+        "16_1_ancestry.dl",
+        &["-q", "?whynot ancestor(\"alice\",\"carol\")"],
+    );
+    assert!(
+        whynot_holding
+            .stdout
+            .contains("% whynot ancestor(\"alice\", \"carol\")\n"),
+        "the header names what was asked: {}",
+        whynot_holding.stdout
+    );
+    assert!(
+        whynot_holding
+            .stdout
+            .contains("% the goal holds; re-ran with provenance recorded\n"),
+        "the cross case owes its cost a line: {}",
+        whynot_holding.stdout
+    );
+    assert!(
+        whynot_holding.stdout.contains("  by ancestor(X, Y) :-"),
+        "and then answers with the proof: {}",
+        whynot_holding.stdout
+    );
+}
+
+/// **Adding an explanation cannot change what a run answers** (§17,
+/// 2026-08-21) — the exit-code half of E5's comment-stripping guard, and what
+/// makes `?why` safe to append to `datalog check.dl -q '…' && deploy`. Stripping
+/// the comments leaves the fact stream byte for byte, which is the other half.
+#[test]
+fn an_explanation_changes_neither_the_exit_code_nor_the_fact_stream() {
+    // A program of its own, because the corpus file carries a query that
+    // answers — and this is about a run whose answer is *no*.
+    const PROGRAM: &str = "parent(\"alice\", \"bob\").\n";
+    let plain = run_stdin_args(PROGRAM, &["-q", "parent(\"zoe\", X)"]);
+    let explained = run_stdin_args(
+        PROGRAM,
+        &[
+            "-q",
+            "parent(\"zoe\", X)",
+            "-q",
+            "?whynot parent(\"zoe\",\"alice\")",
+        ],
+    );
+    assert_eq!(plain.code, 1, "the query answers no");
+    assert_eq!(
+        explained.code, 1,
+        "and still answers no with a goal beside it"
+    );
+
+    let stripped: String = explained
+        .stdout
+        .lines()
+        .filter(|line| !line.starts_with('%'))
+        .map(|line| format!("{line}\n"))
+        .collect();
+    assert_eq!(stripped, plain.stdout, "comments carried a fact");
+
+    // A run whose only goals are explanations asked no question, so it succeeds
+    // for the same reason `datalog p.dl` does.
+    let only = run_stdin_args(PROGRAM, &["-q", "?why parent(\"alice\",\"bob\")"]);
+    assert_eq!(only.code, 0, "stderr: {}", only.stderr);
+}
+
+/// A goal names **one fact**, and the diagnostic teaches the division of labour
+/// rather than only refusing: `?-` enumerates, `?why`/`?whynot` interrogate one
+/// of the rows it returned. This is a likelier mistake than picking the wrong
+/// sigil, because both sigils answer.
+#[test]
+fn a_goal_with_a_variable_is_told_to_ask_a_query_first() {
+    let out = run_file_args("16_1_ancestry.dl", &["-q", "?why ancestor(\"alice\", W)"]);
+    assert_eq!(out.code, 2);
+    assert!(
+        out.stderr.contains("is not ground: variable `W`") && out.stderr.contains("?- ancestor(…)"),
+        "stderr: {}",
+        out.stderr
+    );
+
+    let conjunction = run_file_args(
+        "16_1_ancestry.dl",
+        &["-q", "?why parent(\"a\",\"b\"), parent(\"b\",\"c\")"],
+    );
+    assert_eq!(conjunction.code, 2);
+    assert!(
+        conjunction.stderr.contains("explains one fact"),
+        "stderr: {}",
+        conjunction.stderr
+    );
+}
+
+/// `?whynot`'s half of the union: a failure trace, one near-miss per rule whose
+/// head unifies, re-solved through the scheduler the fixpoint uses so the
+/// literal reported as blocked is the one the run really failed.
+///
+/// The program is the shape `EXPERIMENTS.md` task 6 lost silently — a join
+/// across two id-spaces that derived nothing, indistinguishable from a correct
+/// empty answer.
+#[test]
+fn a_whynot_goal_names_the_literal_that_blocked_and_the_step_that_would_pass_it() {
+    const PROGRAM: &str = "defined(\"a\", \"id42\").\n\
+                           callsite(\"id42\", \"b_impl\").\n\
+                           calls(A, B) :- defined(A, Id), callsite(Id, N), defined(B, N).\n";
+    let out = run_stdin_args(PROGRAM, &["-q", "?whynot calls(\"a\",\"b\")"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert_eq!(
+        out.stdout,
+        "% whynot calls(\"a\", \"b\")\n\
+         % not derivable\n\
+         % 0  calls(A, B) :- defined(A, Id), callsite(Id, N), defined(B, N)\n\
+         % 1    defined(\"a\", \"id42\")\n\
+         % 1    callsite(\"id42\", \"b_impl\")\n\
+         % 1    blocked at defined(B, N)\n\
+         % 1    repair: add defined(\"b\", \"b_impl\")\n",
+        "unexpected trace"
+    );
+}
+
+/// The repair vocabulary, one case each. **A repair is a step, not a promise**,
+/// and three of the five name no fact at all (§17, 2026-08-16).
+#[test]
+fn a_repair_names_a_fact_only_when_there_is_one_to_name() {
+    // Nothing derives the relation: that is the answer, and the commonest one
+    // for a mistyped name.
+    let asserted = run_stdin_args("p(\"a\").\n", &["-q", "?whynot p(\"z\")"]);
+    assert!(
+        asserted
+            .stdout
+            .contains("% no rule derives `p`, so the goal could only be asserted"),
+        "stdout: {}",
+        asserted.stdout
+    );
+
+    // A blocked *derived* premise: the repair is the next question to ask.
+    let derived = run_stdin_args(
+        "parent(\"alice\", \"bob\").\n\
+         ancestor(X, Y) :- parent(X, Y).\n\
+         old(X, Y) :- ancestor(X, Y), parent(X, \"bob\").\n",
+        &["-q", "?whynot old(\"alice\",\"dan\")"],
+    );
+    assert!(
+        derived
+            .stdout
+            .contains("repair: ask `?whynot ancestor(\"alice\", \"dan\").`"),
+        "stdout: {}",
+        derived.stdout
+    );
+
+    // A refuted negation names the row that refuted it — there is no retraction
+    // in the language, so it is not phrased as a deletion.
+    let refuted = run_stdin_args(
+        "thing(\"a\").\ncovered(\"a\").\nbare(X) :- thing(X), not covered(X).\n",
+        &["-q", "?whynot bare(\"a\")"],
+    );
+    assert!(
+        refuted
+            .stdout
+            .contains("repair: none — refuted by covered(\"a\")"),
+        "stdout: {}",
+        refuted.stdout
+    );
+
+    // A blocked comparison prints the values it was evaluated on, the same
+    // literal-beside-its-values pairing a proof uses for a satisfied one.
+    let compared = run_stdin_args(
+        "age(\"bob\", 15).\nadult(X) :- age(X, A), A >= 18.\n",
+        &["-q", "?whynot adult(\"bob\")"],
+    );
+    assert!(
+        compared.stdout.contains("blocked at A >= 18  (15 >= 18)")
+            && compared
+                .stdout
+                .contains("repair: none — this literal names no fact to add"),
+        "stdout: {}",
+        compared.stdout
+    );
+}

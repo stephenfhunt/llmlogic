@@ -391,6 +391,69 @@ pub struct Query {
     pub span: Span,
 }
 
+/// A lowered explanation goal (§11): one ground fact, and the sigil that asked.
+///
+/// The goal is a [`Fact`] rather than an atom because groundness is checked in
+/// lowering — a variable in it is rejected there, pointing at `?-` — so by the
+/// time the engine sees it there is nothing left to bind.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Explanation {
+    pub sigil: crate::ast::Sigil,
+    pub goal: Fact,
+    pub span: Span,
+}
+
+impl Program {
+    /// What this program's goals require the run to record (§17, 2026-08-21).
+    ///
+    /// A `?why` goal needs a derivation store; `?whynot` re-solves and needs
+    /// none. The cross case — `?whynot` over a fact that turns out to hold — is
+    /// *not* provisioned for here, because whether it holds is not known until
+    /// the fixpoint has run: that case re-evaluates instead.
+    pub fn provenance(&self) -> crate::engine::Provenance {
+        let asked = self
+            .explanations
+            .iter()
+            .any(|explanation| explanation.sigil == crate::ast::Sigil::Why);
+        if asked || self.reports_through_provenance() {
+            crate::engine::Provenance::Recorded
+        } else {
+            crate::engine::Provenance::Unrecorded
+        }
+    }
+
+    /// Does any **rule** carry a §9 aggregate or an §8 conversion?
+    ///
+    /// These are the second reason a run needs the store, and they are not a
+    /// concession: §9's skip count and §12's *malformed* count are read back out
+    /// of the recorded premises, deduplicated by rule instance, because a
+    /// counter beside the fixpoint would count a rediscovered instance twice
+    /// (§17, 2026-07-24 and 2026-08-16). "Skip but **report**" is a provenance
+    /// surface that predates the asking form, so a program with an aggregate in
+    /// a rule provisions the recorder whether or not it asks anything.
+    ///
+    /// A *query*'s aggregate needs nothing here: `Model::answer_reporting`
+    /// hands its premises straight to the caller and the model never stores
+    /// them (§14).
+    pub fn reports_through_provenance(&self) -> bool {
+        fn casts(expr: &Expr) -> bool {
+            match expr {
+                Expr::Cast { .. } => true,
+                Expr::Binary { lhs, rhs, .. } => casts(lhs) || casts(rhs),
+                Expr::Builtin { args, .. } => args.iter().any(casts),
+                Expr::Term(_) => false,
+            }
+        }
+        self.rules.iter().any(|rule| {
+            rule.body.iter().any(|literal| match &literal.kind {
+                BodyLiteralKind::Aggregate { .. } => true,
+                BodyLiteralKind::Compare { lhs, rhs, .. } => casts(lhs) || casts(rhs),
+                _ => false,
+            })
+        })
+    }
+}
+
 /// An import binding carried through lowering; inert until the source layer
 /// ([`crate::sources`]) lands.
 #[derive(Debug, Clone, PartialEq)]
@@ -410,6 +473,8 @@ pub struct Program {
     /// Rules in source order: `RuleId(i)` → `rules[i]`.
     pub rules: Vec<Rule>,
     pub queries: Vec<Query>,
+    /// Explanation goals in source order (§11): `?why` / `?whynot`.
+    pub explanations: Vec<Explanation>,
     pub imports: Vec<ImportSpec>,
     /// Evaluation order: each inner vec is one stratum, evaluated to fixpoint
     /// before the next (§7). Rules keep source order within a stratum; a
@@ -560,6 +625,7 @@ pub(crate) mod fixtures {
                     span: Span::DUMMY,
                 },
             ],
+            explanations: Vec::new(),
             imports: Vec::new(),
             strata: vec![vec![RuleId(0), RuleId(1)]],
         }
@@ -631,6 +697,7 @@ pub(crate) mod fixtures {
                 },
             ],
             queries: Vec::new(),
+            explanations: Vec::new(),
             imports: Vec::new(),
             strata: vec![vec![RuleId(0)]],
         }
@@ -769,6 +836,7 @@ pub(crate) mod fixtures {
                 path: "data/employees.csv".to_string(),
                 span: Span::DUMMY,
             }],
+            explanations: Vec::new(),
             strata: vec![vec![RuleId(0), RuleId(1)]],
         }
     }

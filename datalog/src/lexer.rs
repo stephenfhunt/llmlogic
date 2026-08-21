@@ -75,6 +75,10 @@ pub enum TokenKind {
     ColonDash,
     /// `?-`
     QuestionDash,
+    /// `?why` — the goal that asks for a proof (§11).
+    QuestionWhy,
+    /// `?whynot` — the goal that asks for a failure trace (§11).
+    QuestionWhyNot,
     /// `.`
     Dot,
     /// `,`
@@ -139,6 +143,8 @@ impl TokenKind {
             TokenKind::Is => "`is`".to_string(),
             TokenKind::ColonDash => "`:-`".to_string(),
             TokenKind::QuestionDash => "`?-`".to_string(),
+            TokenKind::QuestionWhy => "`?why`".to_string(),
+            TokenKind::QuestionWhyNot => "`?whynot`".to_string(),
             TokenKind::Dot => "`.`".to_string(),
             TokenKind::Comma => "`,`".to_string(),
             TokenKind::LParen => "`(`".to_string(),
@@ -293,11 +299,22 @@ impl<'a> Lexer<'a> {
                 }
             }
             b'?' => {
+                // The three sigils are lexed here rather than as `?` plus an
+                // identifier, so `?whynot` cannot be spelled `? whynot` and
+                // `why` stays an ordinary name a program may use for a relation.
+                // Longest match first: `?whynot` is a prefix-extension of `?why`.
                 if self.peek_at(1) == Some(b'-') {
                     self.punct(TokenKind::QuestionDash, 2);
+                } else if self.rest_starts_with_word("?whynot") {
+                    self.punct(TokenKind::QuestionWhyNot, 7);
+                } else if self.rest_starts_with_word("?why") {
+                    self.punct(TokenKind::QuestionWhy, 4);
                 } else {
                     self.pos += 1;
-                    self.error(start, "stray `?`; a query is written `?- <body>.`");
+                    self.error(
+                        start,
+                        "stray `?`; a query is written `?- <body>.`, and a proof is                          asked for with `?why <fact>.` or `?whynot <fact>.`",
+                    );
                 }
             }
             b'=' => {
@@ -376,6 +393,18 @@ impl<'a> Lexer<'a> {
             }
             _ => self.scan_unknown(start),
         }
+    }
+
+    /// Does the input at the cursor start with `word`, ending at a boundary?
+    ///
+    /// The boundary test is what keeps `?whynotable` from lexing as `?whynot`
+    /// followed by a name — the same rule §3's keywords are recognised under.
+    fn rest_starts_with_word(&self, word: &str) -> bool {
+        let bytes = word.as_bytes();
+        self.bytes[self.pos..].starts_with(bytes)
+            && !self
+                .peek_at(bytes.len())
+                .is_some_and(|c| c == b'_' || c.is_ascii_alphanumeric())
     }
 
     fn punct(&mut self, kind: TokenKind, len: usize) {

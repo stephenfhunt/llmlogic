@@ -400,6 +400,7 @@ fn monotype(mut program: Program) -> Program {
                 monotype_body(&mut clause.body);
             }
             StatementKind::Query(query) => monotype_body(&mut query.body),
+            StatementKind::Explain(explain) => monotype_atom(&mut explain.goal),
             StatementKind::Import(_) | StatementKind::Declare(_) => {}
         }
     }

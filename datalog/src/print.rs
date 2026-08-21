@@ -17,12 +17,12 @@
 
 use crate::ast::AggOp;
 use crate::ast::{
-    Args, Atom, Clause, Comparison, Constant, Declaration, Expr, ExprKind, FieldDecl, Import,
-    ImportKind, Literal, LiteralKind, NamedArg, Program, Query, Statement, StatementKind, Term,
-    TermKind, TypeName,
+    Args, Atom, Clause, Comparison, Constant, Declaration, Explain, Expr, ExprKind, FieldDecl,
+    Import, ImportKind, Literal, LiteralKind, NamedArg, Program, Query, Sigil, Statement,
+    StatementKind, Term, TermKind, TypeName,
 };
 use crate::ir::{self, PredicateInfo, Value};
-use crate::provenance::{NoMatchPattern, ProofTree};
+use crate::provenance::{Explained, FailureTrace, NoMatchPattern, Premise, ProofTree, Repair};
 
 /// Renders a surface program to canonical Datalog text, one statement per line.
 pub fn print_program(program: &Program) -> String {
@@ -40,6 +40,7 @@ fn print_statement(statement: &Statement) -> String {
         StatementKind::Declare(declaration) => print_declare(declaration),
         StatementKind::Clause(clause) => print_clause(clause),
         StatementKind::Query(query) => print_query(query),
+        StatementKind::Explain(explain) => print_explain(explain),
     }
 }
 
@@ -112,6 +113,17 @@ fn print_query(query: &Query) -> String {
         Some(name) => format!("?- {}: {}.", name.name, print_body(&query.body)),
         None => format!("?- {}.", print_body(&query.body)),
     }
+}
+
+/// Round-trips an explanation goal (§11). The sigil is part of the source, so a
+/// program carrying goals re-parses as itself — which is what E5 strips comments
+/// down to.
+fn print_explain(explain: &Explain) -> String {
+    let sigil = match explain.sigil {
+        Sigil::Why => "?why",
+        Sigil::WhyNot => "?whynot",
+    };
+    format!("{sigil} {}.", print_atom(&explain.goal))
 }
 
 fn print_body(body: &[Literal]) -> String {
@@ -380,6 +392,44 @@ pub fn print_proof(tree: &ProofTree, program: &ir::Program) -> Vec<String> {
     out
 }
 
+/// Renders one explanation goal's answer (§11), header included.
+///
+/// The header names **what was asked**, not what came back, so a `?whynot` over
+/// a fact that holds still reads `% whynot …` — the sigil is not a selector, and
+/// a reader has to be able to see that their guess was the other way round
+/// (§17, 2026-08-16). `reran` is the one line the cross case owes: answering it
+/// cost a second fixpoint, because `?whynot` provisions no recorder and a proof
+/// needs one (§17, 2026-08-21).
+pub fn print_explanation(
+    sigil: Sigil,
+    goal: &ir::Fact,
+    answer: &Explained,
+    trace: Option<&FailureTrace>,
+    reran: bool,
+    program: &ir::Program,
+) -> Vec<String> {
+    let asked = match sigil {
+        Sigil::Why => "why",
+        Sigil::WhyNot => "whynot",
+    };
+    let mut out = vec![format!("% {asked} {}", print_ir_fact(goal, program))];
+    if reran {
+        out.push("% the goal holds; re-ran with provenance recorded".to_string());
+    }
+    match answer {
+        Explained::Proof(tree) => proof_lines(tree, program, 0, None, &mut out),
+        Explained::DoesNotHold => match trace {
+            Some(trace) => trace_lines(trace, program, &mut out),
+            None => out.push("% not derivable".to_string()),
+        },
+        // Unreachable from the CLI, which provisions from the goals and re-runs
+        // for the cross case; a library caller can still evaluate unprovisioned
+        // and ask, and gets told which of the two silences this is.
+        Explained::Unrecorded => out.push("% no proof recorded for this run".to_string()),
+    }
+    out
+}
+
 /// Where a premise sat in its parent: the rule, and which body literal it
 /// answers. `None` at the root, which answers no literal.
 ///
@@ -396,7 +446,30 @@ fn proof_lines(
     site: Site<'_>,
     out: &mut Vec<String>,
 ) {
-    let content = match tree {
+    out.push(line(depth, &node_text(tree, program, site)));
+
+    if let ProofTree::Derived { rule, children, .. } = tree {
+        let rule_id = *rule;
+        let rule = &program.rules[rule_id.0 as usize];
+        for (i, child) in children.iter().enumerate() {
+            // `children[i]` proves `premises[i]`, which answers body literal `i`
+            // — the `BodyIdx` alignment the whole provenance record rests on.
+            proof_lines(child, program, depth + 1, Some((rule, i)), out);
+        }
+    }
+}
+
+/// One rendered line: depth as a leading integer *and* as indentation, the two
+/// channels §17 2026-08-21 decided on. Every explanation line goes through here,
+/// so E7's "every line is a comment" and E8's "the integer is the depth" are
+/// properties of one function.
+fn line(depth: usize, content: &str) -> String {
+    format!("% {depth}  {:indent$}{content}", "", indent = depth * 2)
+}
+
+/// One proof node's text, without its depth channels.
+fn node_text(tree: &ProofTree, program: &ir::Program, site: Site<'_>) -> String {
+    match tree {
         ProofTree::Leaf(fact) => {
             let anchor = match import_path(program, fact.pred) {
                 // Relation-level, never row-level: §13 materializes an import
@@ -469,21 +542,116 @@ fn proof_lines(
                 None => format!("{} {held}", op.keyword()),
             }
         }
-    };
-    out.push(format!(
-        "% {depth}  {:indent$}{content}",
-        "",
-        indent = depth * 2
-    ));
+    }
+}
 
-    if let ProofTree::Derived { rule, children, .. } = tree {
-        let rule_id = *rule;
-        let rule = &program.rules[rule_id.0 as usize];
-        for (i, child) in children.iter().enumerate() {
-            // `children[i]` proves `premises[i]`, which answers body literal `i`
-            // — the `BodyIdx` alignment the whole provenance record rests on.
-            proof_lines(child, program, depth + 1, Some((rule, i)), out);
+/// Renders a failure trace (§11) — `?whynot`'s half of the union.
+///
+/// One block per rule whose head unifies with the goal, in rule order, and no
+/// block at all when nothing derives the relation, which is itself the answer
+/// and the commonest one for a mistyped name. Nothing truncates: the bound is
+/// the program's rule count, because a near-miss is a **rule** and not a binding
+/// (§17, 2026-08-16).
+fn trace_lines(trace: &FailureTrace, program: &ir::Program, out: &mut Vec<String>) {
+    out.push("% not derivable".to_string());
+    if trace.near_misses.is_empty() {
+        let name = &program.predicates[trace.goal.pred.0 as usize].name;
+        out.push(format!(
+            "% no rule derives `{name}`, so the goal could only be asserted"
+        ));
+        return;
+    }
+    for near_miss in &trace.near_misses {
+        let rule = &program.rules[near_miss.rule.0 as usize];
+        out.push(line(0, &print_ir_rule(rule, program)));
+        for (idx, premise) in near_miss.satisfied.iter().enumerate() {
+            if let Some(premise) = premise {
+                out.push(line(1, &premise_text(premise, program, Some((rule, idx)))));
+            }
         }
+        let literal =
+            print_ir_body_literal(&rule.body[near_miss.blocked], &RuleCx::new(program, rule));
+        let blocked = match &near_miss.blocked_values {
+            Some((op, lhs, rhs)) => format!(
+                "blocked at {literal}  ({} {} {})",
+                print_value(lhs),
+                crate::ast::cmp_symbol(*op),
+                print_value(rhs)
+            ),
+            None => format!("blocked at {literal}"),
+        };
+        out.push(line(1, &blocked));
+        out.push(line(1, &repair_text(&near_miss.repair, program)));
+    }
+}
+
+/// What a satisfied premise looks like inside a trace.
+///
+/// A positive premise prints as the bare fact it matched, with **no `[fact]`
+/// anchor**: a trace claims only that the literal matched this row, and the row
+/// may well be derived — where a proof's leaf is a base fact by construction.
+/// The self-justifying kinds are identical in both, so they share [`node_text`].
+fn premise_text(premise: &Premise, program: &ir::Program, site: Site<'_>) -> String {
+    match premise {
+        Premise::Fact(fact) => print_ir_fact(fact, program),
+        Premise::NoMatch(pattern) => node_text(&ProofTree::NoMatch(pattern.clone()), program, site),
+        Premise::Builtin { op, lhs, rhs, lost } => node_text(
+            &ProofTree::Builtin {
+                op: *op,
+                lhs: lhs.clone(),
+                rhs: rhs.clone(),
+                lost: *lost,
+            },
+            program,
+            site,
+        ),
+        Premise::Presence { value, negated } => node_text(
+            &ProofTree::Presence {
+                value: value.clone(),
+                negated: *negated,
+            },
+            program,
+            site,
+        ),
+        Premise::Aggregate {
+            op,
+            value,
+            present,
+            skipped,
+        } => node_text(
+            &ProofTree::Aggregate {
+                op: *op,
+                value: value.clone(),
+                present: *present,
+                skipped: *skipped,
+            },
+            program,
+            site,
+        ),
+    }
+}
+
+/// A repair is a **step, not a promise**, and the wording has to say so: the
+/// literals past the block were never evaluated, so supplying what this names
+/// advances the rule's prefix and need not derive the goal (§17, 2026-08-16).
+fn repair_text(repair: &Repair, program: &ir::Program) -> String {
+    match repair {
+        Repair::Add(fact) => format!("repair: add {}", print_ir_fact(fact, program)),
+        Repair::Ask(fact) => format!("repair: ask `?whynot {}.`", print_ir_fact(fact, program)),
+        Repair::Unbound(pattern) => format!(
+            "repair: none names one fact — {} leaves a slot open",
+            print_no_match(pattern, program)
+        ),
+        Repair::AbsentKey(pattern) => format!(
+            "repair: none — {} has an `absent` key, and `absent` matches nothing here",
+            print_no_match(pattern, program)
+        ),
+        // There is no retraction in the language, so a refuted negation names
+        // the row rather than proposing a deletion.
+        Repair::Refuted(fact) => {
+            format!("repair: none — refuted by {}", print_ir_fact(fact, program))
+        }
+        Repair::Builtin => "repair: none — this literal names no fact to add".to_string(),
     }
 }
 
@@ -951,7 +1119,9 @@ mod tests {
             pred: ir::PredId(pred as u32),
             tuple: ir::Tuple(args.to_vec()),
         };
-        let tree = ProofTree::explain(&model, &fact).expect("fact holds");
+        let tree = ProofTree::explain(&model, &fact)
+            .proof()
+            .expect("fact holds");
         print_proof(&tree, &program).join("\n")
     }
 
@@ -1159,7 +1329,9 @@ mod tests {
                 .facts()
                 .filter(|fact| !model.is_base(fact))
                 .map(|fact| {
-                    let tree = ProofTree::explain(&model, &fact).expect("a held fact has a proof");
+                    let tree = ProofTree::explain(&model, &fact)
+                        .proof()
+                        .expect("a held fact has a proof");
                     print_proof(&tree, program)
                 })
                 .collect()
@@ -1228,7 +1400,7 @@ mod tests {
             fn e8_declared_depth_is_the_nodes_depth(program in arb_program_with_edb()) {
                 let model = eval(&program).unwrap();
                 for fact in model.facts().filter(|f| !model.is_base(f)) {
-                    let tree = ProofTree::explain(&model, &fact).unwrap();
+                    let tree = ProofTree::explain(&model, &fact).proof().unwrap();
                     let mut want = Vec::new();
                     node_depths(&tree, 0, &mut want);
                     // The header carries no depth number, which is what keeps it

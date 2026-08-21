@@ -54,10 +54,7 @@ pub struct Statement {
     pub span: Span,
 }
 
-/// The four statement forms of §5.
-///
-/// A future provenance query statement (`?why …`, §11/§16.6, provisional) will
-/// become a new variant here once its syntax is ratified.
+/// The five statement forms of §5.
 #[derive(Debug, Clone, PartialEq)]
 pub enum StatementKind {
     /// `import "<path>" [table "<t>"] as rel [ (field [: type], …) ].` or the
@@ -69,6 +66,36 @@ pub enum StatementKind {
     Clause(Clause),
     /// `?- body.`
     Query(Query),
+    /// `?why <fact>.` / `?whynot <fact>.` (§11)
+    Explain(Explain),
+}
+
+/// Which sigil asked, and what it provisions.
+///
+/// Both forms answer with the same union — either may return a proof, a failure
+/// trace, or nothing at all — so this is **not** a selector over the answer
+/// (§17, 2026-08-16). What it selects is what the run has to *record*: `?why`
+/// needs a derivation store, `?whynot` needs the model and a re-solve, and that
+/// distinction has to be made before the fixpoint, where whether the fact holds
+/// is not yet known (§17, 2026-08-21).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sigil {
+    /// `?why` — expects a proof, and provisions the recorder.
+    Why,
+    /// `?whynot` — expects a failure trace, and provisions nothing.
+    WhyNot,
+}
+
+/// An explanation goal: `?why <fact>.` or `?whynot <fact>.` (§11).
+///
+/// The goal names **one fact**, so its atom is ground. A variable in it is its
+/// own diagnostic pointing at `?-`: a claim about *this* row has nothing to bind
+/// a goal standing for many (§17, 2026-08-16).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Explain {
+    pub sigil: Sigil,
+    pub goal: Atom,
+    pub span: Span,
 }
 
 /// An `import` statement (§13): external data bound to a relation, or another

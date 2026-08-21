@@ -208,6 +208,9 @@ it. A future audit starts here.
 | Order-invariance of *explanations* | B5/B6's mutators, compared at the derivation level | **C14**; E1–E4 check one evaluation each and are blind to it |
 | Closure at the program level (§14) | `arb_closure_program` | **D5**; D1 is the fact-set half |
 | The rendered proof's structure (§11) | `arb_program_with_edb`, every derived fact explained and printed | **E7** (every line is a comment — E5's lexical precondition) and **E8** (the declared depth is the node's); a guard pins the generator reaches a proof deeper than one node |
+| Explanations against the fact stream (§11/§14) | `arb_closure_program` plus both sigils over a fact the run answered and one it did not | **E5** — stripping the comments leaves the run without its goals, byte for byte; also the printed half of E9 |
+| Demand-provisioned provenance (§11/§15) | `arb_program_with_edb`, evaluated both ways | **E9** — identical model and answers, and an unrecorded model says `Unrecorded` rather than `DoesNotHold` |
+| The failure trace (§11) | `arb_program_with_edb`, goals built from the model's own value pool that do **not** hold | **E10** — five claims about a near-miss, including *a repair must repair*, which found `Repair::AbsentKey` |
 | §10's std-builtin exemption | `ArithShape::StdBuiltin` | **C10**'s guard — the mutation lands on the classification, not the fixpoint |
 | The physical access path (§15, evaluator-internal) | small collision-rich tuple pools with `absent`; prefixes drawn from the generated relation | **B12a/b/c**, with their three guards — the differential is blind to an over-yield, so these are what pin the seek |
 
@@ -1048,9 +1051,10 @@ E1–E4 were pulled forward to roadmap step 2 (decided 2026-07-19, spec §17):
 provenance recording lands inside the evaluator's fixpoint, so its properties
 are tested the session it is written. E3's replay deliberately reuses the
 naive oracle's matcher, keeping the check independent of the semi-naive join
-loop that recorded the derivation. E5 waits on the §11/§14 output surface, and E6
-is a coverage hole in E3 rather than a new claim. E7/E8 arrived 2026-08-21 with
-the rendering (§11).
+loop that recorded the derivation. E6 is E3's claim over a wider generator rather
+than a new claim. E7/E8 arrived 2026-08-21 with
+the rendering (§11); E9 and E10 the same day with demand-provisioned recording
+and the asking form, which is also what unblocked E5.
 
 - [x] **E1** Every derived fact has at least one derivation, and at least one
   is *well-founded* — every fact premise first appeared strictly earlier than
@@ -1067,29 +1071,47 @@ the rendering (§11).
 - [x] **E3** Replay: each derivation node's rule instance applied to its child
   facts rederives exactly the fact (and every premise holds in the model).
 - [x] **E4** A base fact's provenance is a leaf.
-- [ ] **E5** **Comment-stripping is the closure guard.** Proof trees are *not*
+- [x] **E5** **Comment-stripping is the closure guard.** Proof trees are *not*
   facts (§17, 2026-08-16 — decided in the negative), so there is no fact-shaped
   provenance output to run D1 over. What replaces it: a proof rides in `%`
   comments, so stripping every comment from a program's output must leave
   **byte-for-byte** what the same program prints without its goals. That is what
   keeps Datalog-out-is-Datalog-in true in the presence of provenance, and it is
-  cheaper than the closure test it replaces. Still waits on the §11/§14 output
-  surface — a §5 goal form, specifically: there is no program-level output to
-  strip until a program can *ask*. **Its lexical precondition landed 2026-08-21 as
-  E7**, which is the half testable without one.
-- [ ] **E6** Extend **E3 to §8 builtins**. E3 passes today only because
-  `arb_program_with_edb` emits no comparisons — `monotype` makes every column a
-  symbol, so arithmetic cannot appear — and its `replay` helper rebuilds the
-  environment from *fact* premises alone, returning `None` on any
-  `Premise::Builtin`. The strongest provenance property has therefore never seen
-  an `=`-assignment, a presence test or an aggregate, and by extension never sees
-  a **deferred negation**, whose no-match pattern is closed by an assignment-bound
-  value (§7/§10, 2026-07-25). The work: fold builtin premises into the replayed
-  environment in schedule order, then run E3 over `arb_comparison_program`, which
-  is int-typed and already emits them. Note what replay has to become — a
-  `Premise::Builtin` records the *values*, not the expression, so replaying it is
-  re-evaluation, not re-checking. Tracked in `ROADMAP.md` under "Provenance
-  surface".
+  cheaper than the closure test it replaces. Over `arb_closure_program` with both
+  sigils appended over a fact the run answered, plus one over a fact it did not,
+  so the trace arm is exercised beside the proof arm.
+  - **It guards a second thing for free**: `?why` provisions the recorder and the
+    plain run does not, so this is also *provisioning does not change what a run
+    prints* — the printed half of **E9**'s engine-level claim.
+  - *Mutations (both killed):* drop the `%` from the trace's `not derivable`
+    line; drop it from the explanation header. Non-vacuity: the property asserts
+    at least one `%` line was printed, since stripping nothing is trivially
+    byte-identical. Its lexical precondition is **E7**.
+- [x] **E6** **E3 over §8 builtins.** E3's own generator makes every column a
+  symbol (`monotype`), so arithmetic cannot appear and the strongest provenance
+  property had never seen an `=`-assignment, a presence test, an aggregate, or a
+  **deferred negation** — one whose no-match pattern is closed by an
+  assignment-bound value (§7/§10, 2026-07-25). Same claim, wider generator:
+  `arb_comparison_program`, which is int-typed and emits all four.
+  - **`replay` folds builtin premises in *schedule order*, and that is the whole
+    fix.** An `=`-assignment binds a variable a later builtin reads, so body
+    order evaluates an expression whose operand is not bound yet and reports a
+    sound derivation as broken. A self-justifying premise records the **values**,
+    not the expression, so replaying it is *re-evaluation*: the expression is
+    evaluated against the replayed environment and compared with the record. The
+    bound value comes from the **record**, not the re-evaluation — replaying the
+    derivation is the claim, so a wrong recorded value must reach the head and
+    fail there.
+  - **A §9 aggregate is bound, not recomputed**, its fold being over a model this
+    helper does not have. Stated as a limit rather than left to be rediscovered;
+    the fold has B11.
+  - *Mutations:* replay in body order rather than schedule order — killed;
+    **the recorder writes the wrong operand for an assignment** — killed.
+    Deleting replay's own agreement check is an **equivalent mutant** and was
+    measured as one: it can only fire on an engine already broken, which is why
+    the mutation that kills it has to be made in the *recorder*. Non-vacuity: a
+    guard pins that the generator reaches both a `Premise::Builtin` and a
+    `Premise::NoMatch`, i.e. that E6 is genuinely wider than E3.
 - [x] **E7** **Every proof line is a comment** — it starts with `%` and holds no
   newline. What E5 rests on: stripping comments can leave the fact stream
   untouched only if every rendered line *is* one, and a value carrying a newline
@@ -1105,6 +1127,51 @@ the rendering (§11).
   see it. Non-vacuity: a guard pins that `arb_program_with_edb` reaches a proof
   deeper than one node, both properties holding trivially over a program with
   nothing to explain.
+- [x] **E9** **Provisioning provenance changes nothing an answer can see.** The
+  recorder is provisioned by the run (§17, 2026-08-21), so the same program under
+  `Provenance::Recorded` and `Provenance::Unrecorded` must produce the identical
+  model and the identical answer to every query — which is the claim that the
+  three provenance-only maps (`derivations`, `base`, `first_round`) never feed the
+  fixpoint. This is the profile's own answer guard promoted to a property: it was
+  a stdout digest over 26 programs run from a scratch build
+  (`notes/profile-2026-08-20.md`) that was then thrown away, and as a property it
+  outlives the build and the corpus both.
+  - **Its second half is the one that had to exist.** An unrecorded model must
+    answer `Explained::Unrecorded` about a fact that *holds* — never
+    `DoesNotHold`, which would be a wrong answer rather than a missing one, and
+    is exactly what a two-valued `Option` return would have made unavoidable.
+  - *Mutations (both killed):* collapse `Unrecorded` into `DoesNotHold` in
+    `ProofTree::explain` — the second half reddens; invert the gate in
+    `insert_derived` so an unrecorded run records — the emptiness assertion
+    reddens. Non-vacuity: a guard pins that the generator reaches a program with
+    a derived fact *and* a query, both halves holding trivially over an EDB.
+- [x] **E10** **A near-miss holds against the model.** `?whynot`'s guard: for a
+  goal that does not hold, `trace_failure` re-solves each candidate rule through
+  the scheduler the fixpoint uses, so everything it reports must be true of the
+  finished model — checked here with this property's own scan, independent of the
+  engine's matcher, exactly as E3 checks a no-match premise. Five claims: the
+  rule's head really could have produced the goal (stated as the spec states it,
+  not asked of the engine); a premise the body *satisfied* holds; a fact a repair
+  says to **add** or **ask** about does not already hold; a negation reported
+  **refuted** is refuted by a row that is really there; and **a repair must
+  repair**.
+  - **That last claim is not decoration — it found a defect on the property's
+    first run.** A blocked pattern with a slot bound to `absent` was rendered as
+    `repair: add p(…, absent)`, and asserting that fact would not advance the
+    rule at all: `absent` unifies with nothing (§4), so the join cannot use the
+    row even once it exists. A repair that does not repair is the one thing a
+    repair must not be, and `Repair::AbsentKey` is what the arm became.
+  - **`Repair::Unbound` is checked for shape only, deliberately.** A
+    `NoMatchPattern` cannot express a *repeated variable*, so `p(X, X)` blocked
+    with `X` unbound renders as the all-open `p(_, _)`, which any row matches
+    while the atom is genuinely blocked. The pattern is a rendering of the block,
+    not a decidable statement of it — learned by asserting the stronger claim and
+    watching it fail on a correct trace.
+  - *Mutations (all three killed):* report the blocked literal one past the
+    deepest prefix reached; drop the head-unification guard so every rule of the
+    predicate near-misses; drop the absent-key guard. Non-vacuity: a guard pins
+    that the generator reaches a near-miss carrying both a satisfied premise and
+    a fact-naming repair.
 
 ### Phase F — §13 imports (roadmap step 7) — generalizes §16.5, §16.7
 

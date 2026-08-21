@@ -111,6 +111,7 @@ pub fn lower_with_sources(
             ast::StatementKind::Declare(_) => {}
             ast::StatementKind::Clause(clause) => lowerer.lower_clause(clause, &mut out),
             ast::StatementKind::Query(query) => lowerer.lower_query(query, &mut out),
+            ast::StatementKind::Explain(explain) => lowerer.lower_explanation(explain, &mut out),
         }
     }
 
@@ -344,6 +345,10 @@ impl Lowerer {
                         self.collect_literal(literal);
                     }
                 }
+                // A goal *references* a relation and never defines one, so it
+                // interns like a body atom: asking why a fact holds must not be
+                // what stops §12's referenced-but-never-defined warning firing.
+                ast::StatementKind::Explain(explain) => self.collect_atom(&explain.goal),
             }
         }
         self.check_std_collisions();
@@ -609,6 +614,72 @@ impl Lowerer {
             out.facts.push(ir::Fact {
                 pred: head.pred,
                 tuple: ir::Tuple(values),
+            });
+        }
+    }
+
+    /// Lowers an explanation goal (§11) to a ground [`ir::Explanation`].
+    ///
+    /// A goal names **one fact**, so it is ground under exactly the rule an
+    /// asserted fact is. The diagnostic for a variable is the load-bearing part:
+    /// it teaches the division of labour rather than only refusing — `?-`
+    /// enumerates, `?why`/`?whynot` interrogate one of the rows it returned
+    /// (§17, 2026-08-21). Getting this wrong is a likelier mistake than picking
+    /// the wrong sigil, because both sigils answer.
+    fn lower_explanation(&mut self, explain: &ast::Explain, out: &mut ir::Program) {
+        let mut scope = VarScope::default();
+        let mut discard = Vec::new();
+        let form = match explain.sigil {
+            ast::Sigil::Why => "?why",
+            ast::Sigil::WhyNot => "?whynot",
+        };
+        let Some(goal) = self.lower_atom(
+            &explain.goal,
+            &mut scope,
+            AtomPos::Head,
+            ArgMode::Fold,
+            &mut discard,
+        ) else {
+            return;
+        };
+        if !discard.is_empty() {
+            self.errors.push(Error::semantic(format!(
+                "an aggregate cannot appear in a `{form}` goal; a goal names one fact"
+            )));
+            return;
+        }
+
+        let name = &explain.goal.predicate.name;
+        let mut values = Vec::with_capacity(goal.args.len());
+        let mut ground = true;
+        for (position, arg) in goal.args.iter().enumerate() {
+            match arg {
+                ir::Term::Const(value) => values.push(value.clone()),
+                ir::Term::Var(var) => {
+                    ground = false;
+                    let var_name = scope.names[var.0 as usize].as_deref().unwrap_or("_");
+                    let place = self.describe_arg(&explain.goal, position);
+                    self.errors.push(
+                        Error::semantic(format!(
+                            "`{form}` goal `{name}` is not ground: variable \
+                             `{var_name}` in {place}"
+                        ))
+                        .suggest(format!(
+                            "a goal names one fact — run `?- {name}(…).` to see which \
+                             rows hold, then ask about one of them"
+                        )),
+                    );
+                }
+            }
+        }
+        if ground {
+            out.explanations.push(ir::Explanation {
+                sigil: explain.sigil,
+                goal: ir::Fact {
+                    pred: goal.pred,
+                    tuple: ir::Tuple(values),
+                },
+                span: explain.span,
             });
         }
     }

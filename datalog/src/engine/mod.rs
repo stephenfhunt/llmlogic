@@ -17,6 +17,9 @@
 //!   not just a first witness. Each fact is also stamped with the round it
 //!   first appeared in ([`Model::first_round`]), which is what makes finite
 //!   proof extraction possible ([`crate::provenance::ProofTree::explain`]).
+//!   Whether it records at all is **provisioned by the run** ([`Provenance`],
+//!   §17 2026-08-21): the store is paid for by the goal that asks for a proof,
+//!   and `testing.md` **E9** is why skipping it cannot move an answer.
 //! - Comparison and arithmetic builtins (§8) are evaluated as body literals:
 //!   ordered/equality comparisons act as anti-join *filters*, and `=` binds an
 //!   otherwise-unbound variable to the evaluated other side (assignment),
@@ -50,13 +53,42 @@ use crate::ir::{
     Term, Tuple, Value, f64_as_exact_i64, i64_as_exact_f64,
 };
 use crate::lexer::{CellClass, classify_cell, classify_symbol};
-use crate::provenance::{Derivation, LostConversion, NoMatchPattern, Premise};
+use crate::provenance::{
+    Derivation, FailureTrace, LostConversion, NearMiss, NoMatchPattern, Premise, Repair,
+};
 use crate::temporal;
+
+/// Whether a run records what a proof is extracted from (§17, 2026-08-21).
+///
+/// Provenance is **provisioned by demand**: the recorder is 70–78% of peak RSS
+/// and a projected half of a post-seek run (`notes/profile-2026-08-20.md`), and
+/// it was charged on every run while nothing at the surface could ask. The
+/// asking form is what turns it on — a `?why` goal, or a library caller saying
+/// so — and `?whynot` needs the model and a re-solve, not a store, which is what
+/// makes the sigil worth having (`notes/provenance-asking-form.md`).
+///
+/// The three maps it gates are **provenance-only**: nothing in evaluation reads
+/// [`Model::is_base`], [`Model::first_round`] or [`Model::derivations_of`], so
+/// the answers are identical either way — which is `testing.md` **E9**, not an
+/// assumption.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Provenance {
+    /// Derivations, base membership and first-appearance rounds are stored;
+    /// [`crate::provenance::ProofTree::explain`] can answer.
+    Recorded,
+    /// Nothing provenance-only is stored. A proof is not *absent*, it was never
+    /// recorded — a distinction [`Model::provenance`] preserves so that
+    /// "no proof" is never silently read as "does not hold".
+    Unrecorded,
+}
 
 /// The result of evaluation: every predicate's full extent, plus provenance.
 ///
 /// Relations are genuine sets ([`BTreeSet`]), so iteration is deterministic
 /// and already in the §14 canonical order ([`Value`]'s derived `Ord`).
+///
+/// Whether the provenance is *there* is [`Model::provenance`]: a run provisions
+/// the recorder from its own goals (§17, 2026-08-21).
 #[derive(Debug, Clone)]
 pub struct Model {
     /// Indexed by `PredId`: the predicate's full extent (base ∪ derived).
@@ -70,16 +102,29 @@ pub struct Model {
     /// Monotone across strata; guarantees a well-founded derivation choice
     /// exists for every fact, so proof trees are finite.
     first_round: HashMap<Fact, u32>,
+    /// Whether the three maps above were populated at all.
+    provenance: Provenance,
 }
 
 impl Model {
-    fn new(num_predicates: usize) -> Model {
+    fn new(num_predicates: usize, provenance: Provenance) -> Model {
         Model {
             relations: vec![BTreeSet::new(); num_predicates],
             derivations: HashMap::new(),
             base: BTreeSet::new(),
             first_round: HashMap::new(),
+            provenance,
         }
+    }
+
+    /// Whether this run recorded provenance ([`Provenance`]).
+    ///
+    /// Check it before reading [`derivations_of`](Self::derivations_of),
+    /// [`is_base`](Self::is_base) or [`first_round`](Self::first_round): under
+    /// [`Provenance::Unrecorded`] all three answer *empty*, which is not the
+    /// same claim as *nothing derived this fact*.
+    pub fn provenance(&self) -> Provenance {
+        self.provenance
     }
 
     /// Does `fact` hold in the model?
@@ -160,6 +205,7 @@ impl Model {
             delta: &HashMap::new(),
             body: &query.body,
             views: &views,
+            probe: None,
         };
         let mut rows: BTreeSet<Vec<Value>> = BTreeSet::new();
         let mut unbound: Option<u32> = None;
@@ -191,20 +237,33 @@ impl Model {
     }
 
     /// Loads a program-asserted fact (round 0; duplicates collapse).
+    ///
+    /// Base membership and the round stamp are provenance, not evaluation, so
+    /// an [`Provenance::Unrecorded`] run stores neither — each is a second
+    /// fact-keyed copy of the whole EDB, which on an imported table is the
+    /// larger half of what is being saved.
     fn insert_base(&mut self, fact: Fact) {
         self.relations[fact.pred.0 as usize].insert(fact.tuple.clone());
-        self.first_round.entry(fact.clone()).or_insert(0);
-        self.base.insert(fact);
+        if self.provenance == Provenance::Recorded {
+            self.first_round.entry(fact.clone()).or_insert(0);
+            self.base.insert(fact);
+        }
     }
 
     /// Records one derivation, returning whether the fact itself is new.
+    ///
+    /// The return value comes from the relation, never from the derivation
+    /// store, which is what lets the store be skipped without changing the
+    /// delta the fixpoint iterates on (`testing.md` E9).
     fn insert_derived(&mut self, fact: Fact, derivation: Derivation, round: u32) -> bool {
-        self.derivations
-            .entry(fact.clone())
-            .or_default()
-            .insert(derivation);
+        if self.provenance == Provenance::Recorded {
+            self.derivations
+                .entry(fact.clone())
+                .or_default()
+                .insert(derivation);
+        }
         let is_new = self.relations[fact.pred.0 as usize].insert(fact.tuple.clone());
-        if is_new {
+        if is_new && self.provenance == Provenance::Recorded {
             self.first_round.insert(fact, round);
         }
         is_new
@@ -218,7 +277,17 @@ impl Model {
 /// §10's finiteness argument for programs the termination lint certifies; for
 /// the ones it warns about, the interrupt is the operator's.
 pub fn eval(program: &Program) -> Result<Model> {
-    eval_capped(program, u32::MAX).map_err(|error| match error {
+    eval_with(program, Provenance::Recorded)
+}
+
+/// [`eval`], provisioning the recorder explicitly (§17, 2026-08-21).
+///
+/// [`Provenance::Unrecorded`] skips the three provenance-only maps; the model's
+/// relations, and so every answer, are identical (`testing.md` **E9**). Use it
+/// for a run that will not be asked for a proof — which the surface decides from
+/// the program's own goals, and a library caller decides for itself.
+pub fn eval_with(program: &Program, provenance: Provenance) -> Result<Model> {
+    eval_capped(program, u32::MAX, provenance).map_err(|error| match error {
         Capped::Failed(error) => error,
         Capped::Diverged => unreachable!("u32::MAX rounds is not a cap anyone reaches"),
     })
@@ -249,9 +318,10 @@ impl From<Error> for Capped {
 pub(crate) fn eval_capped(
     program: &Program,
     max_rounds: u32,
+    provenance: Provenance,
 ) -> std::result::Result<Model, Capped> {
     validate(program).map_err(Capped::Failed)?;
-    let mut model = Model::new(program.predicates.len());
+    let mut model = Model::new(program.predicates.len(), provenance);
     for fact in &program.facts {
         model.insert_base(fact.clone());
     }
@@ -545,6 +615,26 @@ struct JoinCx<'a> {
     delta: &'a HashMap<PredId, BTreeSet<Tuple>>,
     body: &'a [BodyLiteral],
     views: &'a [AtomView],
+    /// Set only by [`near_misses`]: how far a *failing* body got (§11).
+    ///
+    /// Interior mutability rather than another `&mut` parameter, so the
+    /// near-miss search is the same join the fixpoint runs — literally the same
+    /// function, in the same scheduled order — instead of a second evaluator
+    /// (§17, 2026-08-16, adopting the rule from 2026-07-25).
+    probe: Option<&'a std::cell::RefCell<Probe>>,
+}
+
+/// How far a body got before it failed, recorded by the join itself.
+///
+/// `reached` is the length of the longest scheduled prefix **any** binding
+/// satisfied, and the snapshots are from the *first* binding that reached it —
+/// which is what bounds a near-miss to one entry per rule rather than one per
+/// candidate row (§17, 2026-08-16).
+#[derive(Debug, Default)]
+struct Probe {
+    reached: usize,
+    bindings: Vec<Option<Value>>,
+    premises: Vec<Option<Premise>>,
 }
 
 /// Enumerates all matches of `rule`'s body under `views`, grounding the head
@@ -562,6 +652,7 @@ fn collect_rule_matches(
         delta,
         body: &rule.body,
         views,
+        probe: None,
     };
     enumerate_matches(&cx, rule.var_names.len(), &mut |bindings, premises| {
         let tuple = Tuple(
@@ -647,6 +738,14 @@ fn enumerate_from(
     premises: &mut [Option<Premise>],
     on_match: &mut OnMatch<'_>,
 ) -> Result<()> {
+    if let Some(probe) = cx.probe {
+        let mut probe = probe.borrow_mut();
+        if depth > probe.reached || probe.premises.is_empty() {
+            probe.reached = depth;
+            probe.bindings = bindings.to_vec();
+            probe.premises = premises.to_vec();
+        }
+    }
     if depth == order.len() {
         on_match(bindings, premises);
         return Ok(());
@@ -811,6 +910,9 @@ fn enumerate_from(
                 delta: &empty_delta,
                 body: goal,
                 views: &goal_views,
+                // An aggregate's sub-join is not the outer body's progress, so
+                // it never advances the probe.
+                probe: None,
             };
             let sub_order = literal_order(goal)?;
             let mut sub_premises: Vec<Option<Premise>> = vec![None; goal.len()];
@@ -853,6 +955,172 @@ fn enumerate_from(
         }
     }
     Ok(())
+}
+
+/// Why a goal that does not hold could not be derived (§11): one near-miss per
+/// rule whose head unifies with it.
+///
+/// **No store is read**, which is the point: a failure trace is solved out of
+/// the finished model, so `?whynot` provisions no recorder and a run that only
+/// asks why-not pays nothing for provenance (§17, 2026-08-21).
+///
+/// Each rule's body is re-solved **through the same scheduler the fixpoint
+/// uses**, with the head unified against the goal — so the literal reported as
+/// blocked is the one the run really failed, and an extractor that chose its own
+/// literal order (a second evaluator) is avoided by construction.
+pub fn trace_failure(program: &Program, model: &Model, goal: &Fact) -> Result<FailureTrace> {
+    let empty_delta: HashMap<PredId, BTreeSet<Tuple>> = HashMap::new();
+    let mut near_misses = Vec::new();
+    for (index, rule) in program.rules.iter().enumerate() {
+        if rule.head.pred != goal.pred || rule.head.args.len() != goal.tuple.0.len() {
+            continue;
+        }
+        let Some(mut bindings) = unify_head(rule, goal) else {
+            continue;
+        };
+
+        let order = literal_order(&rule.body)?;
+        let views = vec![AtomView::Full; rule.body.len()];
+        let probe = std::cell::RefCell::new(Probe::default());
+        let cx = JoinCx {
+            model,
+            delta: &empty_delta,
+            body: &rule.body,
+            views: &views,
+            probe: Some(&probe),
+        };
+        let mut premises: Vec<Option<Premise>> = vec![None; rule.body.len()];
+        enumerate_from(&cx, &order, 0, &mut bindings, &mut premises, &mut |_, _| {})?;
+        let probe = probe.into_inner();
+
+        // A full match would have derived the goal, so the goal would hold; this
+        // is unreachable rather than a case, and skipping is the safe reading.
+        let Some(&blocked) = order.get(probe.reached) else {
+            continue;
+        };
+        near_misses.push(NearMiss {
+            rule: RuleId(index as u32),
+            satisfied: probe.premises,
+            blocked,
+            blocked_values: blocked_comparison(&rule.body[blocked], &probe.bindings),
+            repair: repair_for(program, model, &rule.body[blocked], &probe.bindings),
+        });
+    }
+    Ok(FailureTrace {
+        goal: goal.clone(),
+        near_misses,
+    })
+}
+
+/// Binds `rule`'s head variables from `goal`, or `None` if the head cannot
+/// produce it — a constant that differs, or a repeated variable the goal does
+/// not repeat (`p(X, X)` against `p(1, 2)`).
+fn unify_head(rule: &Rule, goal: &Fact) -> Option<Vec<Option<Value>>> {
+    let mut bindings: Vec<Option<Value>> = vec![None; rule.var_names.len()];
+    for (arg, value) in rule.head.args.iter().zip(&goal.tuple.0) {
+        match arg {
+            Term::Const(constant) => {
+                if constant != value {
+                    return None;
+                }
+            }
+            Term::Var(var) => match &bindings[var.0 as usize] {
+                Some(bound) if bound != value => return None,
+                _ => bindings[var.0 as usize] = Some(value.clone()),
+            },
+        }
+    }
+    Some(bindings)
+}
+
+/// The operand values a blocked comparison was evaluated on, so the trace can
+/// print *15 >= 18* beside *A >= 18*.
+///
+/// `None` for every other literal kind, and for operands that do not evaluate —
+/// an arithmetic error here is not the near-miss's business to report, the run
+/// having already reported it or not reached it.
+fn blocked_comparison(
+    literal: &BodyLiteral,
+    bindings: &[Option<Value>],
+) -> Option<(CmpOp, Value, Value)> {
+    let BodyLiteralKind::Compare { op, lhs, rhs } = &literal.kind else {
+        return None;
+    };
+    Some((
+        *op,
+        eval_expr(lhs, bindings).ok()?,
+        eval_expr(rhs, bindings).ok()?,
+    ))
+}
+
+/// The blocked literal instantiated under the bindings that reached it: a
+/// pattern with constants and bound variables closed, unbound slots open.
+fn blocked_pattern(atom: &Atom, bindings: &[Option<Value>]) -> NoMatchPattern {
+    NoMatchPattern {
+        pred: atom.pred,
+        args: atom
+            .args
+            .iter()
+            .map(|term| match term {
+                Term::Const(value) => Some(value.clone()),
+                Term::Var(var) => bindings.get(var.0 as usize).cloned().flatten(),
+            })
+            .collect(),
+    }
+}
+
+/// One step that would advance the blocked rule (§17, 2026-08-16). Never a
+/// promise: the literals past the block were never evaluated.
+fn repair_for(
+    program: &Program,
+    model: &Model,
+    literal: &BodyLiteral,
+    bindings: &[Option<Value>],
+) -> Repair {
+    match &literal.kind {
+        BodyLiteralKind::Atom(atom) => {
+            let pattern = blocked_pattern(atom, bindings);
+            // `absent` unifies with nothing (§4), so a slot bound to it cannot
+            // be matched by any row — including one spelling the pattern
+            // exactly. Naming a fact to add here would be a repair that does
+            // not repair, which is the one thing a repair must not be.
+            if pattern.args.iter().flatten().any(|value| value.is_absent()) {
+                return Repair::AbsentKey(pattern);
+            }
+            let Some(values) = pattern.args.iter().cloned().collect::<Option<Vec<Value>>>() else {
+                return Repair::Unbound(pattern);
+            };
+            let fact = Fact {
+                pred: atom.pred,
+                tuple: Tuple(values),
+            };
+            // A derived predicate has no fact to add — asking about it is the
+            // next question, and answering that is what a repair defers to.
+            if program.rules.iter().any(|rule| rule.head.pred == atom.pred) {
+                Repair::Ask(fact)
+            } else {
+                Repair::Add(fact)
+            }
+        }
+        BodyLiteralKind::NegAtom(atom) => {
+            let pattern = blocked_pattern(atom, bindings);
+            match model
+                .relation(atom.pred)
+                .iter()
+                .find(|tuple| pattern.matches(tuple))
+            {
+                Some(tuple) => Repair::Refuted(Fact {
+                    pred: atom.pred,
+                    tuple: tuple.clone(),
+                }),
+                // An unrefuted negation cannot be what blocked the body.
+                None => Repair::Builtin,
+            }
+        }
+        BodyLiteralKind::Compare { .. }
+        | BodyLiteralKind::Presence { .. }
+        | BodyLiteralKind::Aggregate { .. } => Repair::Builtin,
+    }
 }
 
 /// The result of folding an aggregate over its collected multiset (§9): the
@@ -2071,6 +2339,7 @@ mod tests {
             ],
             queries: Vec::new(),
             imports: Vec::new(),
+            explanations: Vec::new(),
             strata: vec![vec![RuleId(0), RuleId(1)]],
         };
 
@@ -2818,7 +3087,7 @@ mod tests {
 
         use crate::provenance::ProofTree;
         assert_eq!(
-            ProofTree::explain(&model, &alice),
+            ProofTree::explain(&model, &alice).proof(),
             Some(ProofTree::Derived {
                 fact: alice,
                 rule: RuleId(0),
@@ -4007,7 +4276,7 @@ mod tests {
                 });
                 prop_assume!(!warned);
                 // Well above what any generated program needs: 4 nodes, 6 edges.
-                let model = match eval_capped(&program, 200) {
+                let model = match eval_capped(&program, 200, Provenance::Recorded) {
                     Ok(model) => model,
                     Err(Capped::Failed(_)) => return Ok(()),
                     Err(Capped::Diverged) => {
@@ -4782,7 +5051,7 @@ mod tests {
             fn e2_proof_leaves_are_base_facts(program in arb_program_with_edb()) {
                 let model = eval(&program).unwrap();
                 for fact in model.facts() {
-                    let tree = ProofTree::explain(&model, &fact);
+                    let tree = ProofTree::explain(&model, &fact).proof();
                     prop_assert!(tree.is_some(), "no proof for {:?}", fact);
                     assert_leaves_are_base(&tree.unwrap(), &model)?;
                 }
@@ -4872,12 +5141,311 @@ mod tests {
                 for fact in model.facts() {
                     if model.is_base(&fact) {
                         prop_assert_eq!(
-                            ProofTree::explain(&model, &fact),
+                            ProofTree::explain(&model, &fact).proof(),
                             Some(ProofTree::Leaf(fact.clone()))
                         );
                     }
                 }
             }
+
+            /// E9 — provisioning provenance changes nothing an answer can see,
+            /// and an unprovisioned model says so.
+            ///
+            /// The guard on demand-provisioned recording (§17, 2026-08-21).
+            /// Its first half is the profile's own answer guard
+            /// (`notes/profile-2026-08-20.md`), which established this by
+            /// stdout digest over 26 programs from a scratch build that was
+            /// then thrown away; as a property it outlives the build. What it
+            /// pins is that the three provenance-only maps never feed the
+            /// fixpoint — if any of them did, skipping them would move a row.
+            ///
+            /// The second half is what keeps a caller honest, and is the whole
+            /// reason [`Explained`](crate::provenance::Explained) has three
+            /// arms: an unrecorded model must answer **`Unrecorded`** about a
+            /// fact that holds, never `DoesNotHold`. Collapsing those is a
+            /// wrong answer, not a missing one.
+            #[test]
+            fn e9_provisioning_does_not_change_the_answers(
+                program in arb_program_with_edb(),
+            ) {
+                let recorded = eval_with(&program, Provenance::Recorded).unwrap();
+                let unrecorded = eval_with(&program, Provenance::Unrecorded).unwrap();
+
+                let want: Vec<Fact> = recorded.facts().collect();
+                let got: Vec<Fact> = unrecorded.facts().collect();
+                prop_assert_eq!(&got, &want, "provisioning changed the model");
+
+                for query in &program.queries {
+                    prop_assert_eq!(
+                        unrecorded.answer(query).unwrap(),
+                        recorded.answer(query).unwrap(),
+                        "provisioning changed a query's answer"
+                    );
+                }
+
+                for fact in unrecorded.facts() {
+                    prop_assert!(unrecorded.derivations_of(&fact).next().is_none());
+                    prop_assert!(!unrecorded.is_base(&fact));
+                    prop_assert_eq!(unrecorded.first_round(&fact), None);
+                    prop_assert_eq!(
+                        ProofTree::explain(&unrecorded, &fact),
+                        crate::provenance::Explained::Unrecorded,
+                        "an unrecorded model reported a held fact as underivable"
+                    );
+                }
+            }
+
+            /// E10 — a near-miss's claims hold against the model.
+            ///
+            /// The guard on `?whynot`'s half of the union (§17, 2026-08-21).
+            /// `trace_failure` re-solves each candidate rule through the
+            /// scheduler the fixpoint uses, so what it reports has to be true of
+            /// the finished model — and it is checked here with this test's own
+            /// scan, independent of the engine's matcher, exactly as E3 checks a
+            /// no-match premise.
+            ///
+            /// Three claims, one per repair that names a fact: a premise the
+            /// body *satisfied* holds; the fact a repair says to **add** (or to
+            /// **ask** about) does not hold, or it would not have blocked; and a
+            /// negation reported **refuted** is refuted by a row that is really
+            /// there. The `Unbound` arm names no fact, so what is checked is
+            /// that nothing matches its pattern.
+            #[test]
+            fn e10_a_near_miss_holds_against_the_model(program in arb_program_with_edb()) {
+                let model = eval(&program).unwrap();
+                for goal in absent_goals(&program, &model) {
+                    let trace = trace_failure(&program, &model, &goal).unwrap();
+                    prop_assert_eq!(&trace.goal, &goal);
+                    for near_miss in &trace.near_misses {
+                        let rule = &program.rules[near_miss.rule.0 as usize];
+                        prop_assert_eq!(
+                            rule.head.pred, goal.pred,
+                            "a near-miss over the wrong relation"
+                        );
+                        // A rule only near-misses if its head *could* have
+                        // produced the goal. Stated here as the spec states it —
+                        // every head constant equal, every repeated head
+                        // variable seeing one value — rather than by asking the
+                        // engine, which is the whole point of the check.
+                        let mut seen: std::collections::BTreeMap<u32, &Value> =
+                            std::collections::BTreeMap::new();
+                        let mut unifies = rule.head.args.len() == goal.tuple.0.len();
+                        for (arg, value) in rule.head.args.iter().zip(&goal.tuple.0) {
+                            match arg {
+                                Term::Const(constant) => unifies &= constant == value,
+                                Term::Var(var) => {
+                                    unifies &= *seen.entry(var.0).or_insert(value) == value;
+                                }
+                            }
+                        }
+                        prop_assert!(
+                            unifies,
+                            "a near-miss whose head cannot produce {:?}", goal
+                        );
+                        prop_assert!(
+                            near_miss.blocked < rule.body.len(),
+                            "blocked literal out of range"
+                        );
+                        for premise in near_miss.satisfied.iter().flatten() {
+                            if let Premise::Fact(fact) = premise {
+                                prop_assert!(
+                                    model.contains(fact),
+                                    "a satisfied premise {fact:?} does not hold"
+                                );
+                            }
+                        }
+                        match &near_miss.repair {
+                            Repair::Add(fact) | Repair::Ask(fact) => {
+                                prop_assert!(
+                                    !model.contains(fact),
+                                    "a repair names a fact that already holds: {fact:?}"
+                                );
+                                // **A repair must repair.** A fact carrying
+                                // `absent` in a joined slot can be asserted and
+                                // the rule still cannot use it (§4: absent
+                                // unifies with nothing), so naming one is a step
+                                // that is not a step — the defect this property
+                                // found on its first run, and `Repair::AbsentKey`
+                                // is what it became.
+                                prop_assert!(
+                                    !fact.tuple.0.iter().any(Value::is_absent),
+                                    "a repair names a fact the join could not use: {fact:?}"
+                                );
+                            }
+                            // Shape only, and deliberately: a `NoMatchPattern`
+                            // cannot express a **repeated variable**, so
+                            // `p(X, X)` blocked with `X` unbound yields the
+                            // all-open pattern `p(_, _)`, which any row matches
+                            // while the atom itself is genuinely blocked. The
+                            // pattern is a rendering of the block, not a
+                            // decidable statement of it (found by this
+                            // property's first draft, which asserted the
+                            // stronger claim and was wrong).
+                            Repair::Unbound(pattern) => prop_assert!(
+                                pattern.args.iter().any(Option::is_none),
+                                "an unbound repair with every slot closed: {pattern:?}"
+                            ),
+                            Repair::AbsentKey(pattern) => prop_assert!(
+                                pattern.args.iter().flatten().any(Value::is_absent),
+                                "an absent-key repair with no absent slot: {pattern:?}"
+                            ),
+                            Repair::Refuted(fact) => prop_assert!(
+                                model.contains(fact),
+                                "a refuting row {fact:?} is not in the model"
+                            ),
+                            Repair::Builtin => {}
+                        }
+                    }
+                }
+            }
+        }
+
+        /// Ground facts that do **not** hold, built from the model's own value
+        /// pool — the goals a failure trace is asked about. Capped per predicate
+        /// so the property stays a property and not a search.
+        fn absent_goals(program: &Program, model: &Model) -> Vec<Fact> {
+            let mut pool: BTreeSet<Value> = BTreeSet::new();
+            for fact in model.facts() {
+                pool.extend(fact.tuple.0.iter().cloned());
+            }
+            let pool: Vec<Value> = pool.into_iter().take(4).collect();
+            let mut goals = Vec::new();
+            for (index, info) in program.predicates.iter().enumerate() {
+                let pred = PredId(index as u32);
+                let arity = info.arity as usize;
+                if arity == 0 || pool.is_empty() {
+                    continue;
+                }
+                let mut found = 0;
+                // Odometer over the pool, capped: enough to reach a tuple the
+                // model does not hold without enumerating the whole product.
+                for n in 0..pool.len().pow(arity.min(3) as u32).min(64) {
+                    let mut n = n;
+                    let tuple = Tuple(
+                        (0..arity)
+                            .map(|_| {
+                                let value = pool[n % pool.len()].clone();
+                                n /= pool.len();
+                                value
+                            })
+                            .collect(),
+                    );
+                    let fact = Fact { pred, tuple };
+                    if !model.contains(&fact) {
+                        goals.push(fact);
+                        found += 1;
+                        if found == 2 {
+                            break;
+                        }
+                    }
+                }
+            }
+            goals
+        }
+
+        /// **E6's non-vacuity guard** (testing.md rule 2). E6 is E3's claim over
+        /// a *wider* generator, so what has to be pinned is that the generator
+        /// is actually wider: a recorded derivation carrying a
+        /// `Premise::Builtin`, and one carrying a `Premise::NoMatch` — the
+        /// deferred negation, whose pattern is closed by an assignment-bound
+        /// value and which E3's own generator can never produce.
+        #[test]
+        fn e6_generator_reaches_a_builtin_and_a_deferred_negation() {
+            use proptest::strategy::{Strategy, ValueTree};
+            use proptest::test_runner::TestRunner;
+
+            let mut runner = TestRunner::deterministic();
+            let (mut builtin, mut no_match) = (false, false);
+            for _ in 0..256 {
+                let Ok(tree) = crate::testgen::arb_comparison_program().new_tree(&mut runner)
+                else {
+                    continue;
+                };
+                let program = tree.current();
+                let Ok(model) = eval(&program) else { continue };
+                for fact in model.facts() {
+                    for derivation in model.derivations_of(&fact) {
+                        for premise in &derivation.premises {
+                            match premise {
+                                Premise::Builtin { .. } => builtin = true,
+                                Premise::NoMatch(_) => no_match = true,
+                                _ => {}
+                            }
+                        }
+                    }
+                }
+                if builtin && no_match {
+                    return;
+                }
+            }
+            panic!(
+                "arb_comparison_program reached builtin={builtin}, no_match={no_match} \
+                 — E6 is not wider than E3"
+            );
+        }
+
+        /// **E10's non-vacuity guard** (testing.md rule 2). A trace over a
+        /// program whose rules never unify with the goal reports no near-miss at
+        /// all, and every assertion above is then vacuous — so pin that the
+        /// generator reaches a goal with a near-miss carrying both a satisfied
+        /// premise and a fact-naming repair.
+        #[test]
+        fn e10_generator_reaches_a_near_miss_that_names_a_fact() {
+            use proptest::strategy::{Strategy, ValueTree};
+            use proptest::test_runner::TestRunner;
+
+            let mut runner = TestRunner::deterministic();
+            let reached = (0..256).any(|_| {
+                let Ok(tree) = arb_program_with_edb().new_tree(&mut runner) else {
+                    return false;
+                };
+                let program = tree.current();
+                let model = eval(&program).unwrap();
+                absent_goals(&program, &model).iter().any(|goal| {
+                    trace_failure(&program, &model, goal)
+                        .unwrap()
+                        .near_misses
+                        .iter()
+                        .any(|near_miss| {
+                            near_miss.satisfied.iter().flatten().count() > 0
+                                && matches!(
+                                    near_miss.repair,
+                                    Repair::Add(_) | Repair::Ask(_) | Repair::Refuted(_)
+                                )
+                        })
+                })
+            });
+            assert!(
+                reached,
+                "the generator never produced a near-miss naming a fact"
+            );
+        }
+
+        /// **E9's non-vacuity guard** (testing.md rule 2). A program that
+        /// derives nothing satisfies E9 trivially — both models are the EDB —
+        /// so the property is only worth anything if the generator reaches a
+        /// program with a *derived* fact and a query over it.
+        #[test]
+        fn e9_generator_reaches_a_derived_fact_under_a_query() {
+            use proptest::strategy::{Strategy, ValueTree};
+            use proptest::test_runner::TestRunner;
+
+            let mut runner = TestRunner::deterministic();
+            let reached = (0..256).any(|_| {
+                let Ok(tree) = arb_program_with_edb().new_tree(&mut runner) else {
+                    return false;
+                };
+                let program = tree.current();
+                if program.queries.is_empty() {
+                    return false;
+                }
+                let model = eval(&program).unwrap();
+                model.facts().any(|fact| !model.is_base(&fact))
+            });
+            assert!(
+                reached,
+                "arb_program_with_edb never produced a derived fact under a query"
+            );
         }
 
         // --- The absent value (§4/§8) ---
