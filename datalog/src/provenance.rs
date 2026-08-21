@@ -142,7 +142,19 @@ pub enum ProofTree {
     NoMatch(NoMatchPattern),
     /// A satisfied comparison/assignment builtin (§8). Terminates its branch —
     /// a builtin holds on its evaluated operands and needs no sub-proof.
-    Builtin { op: CmpOp, lhs: Value, rhs: Value },
+    ///
+    /// `lost` carries [`Premise::Builtin`]'s conversion losses through to the
+    /// rendering. Without it the §12 *missing* / *malformed* distinction could
+    /// not reach a proof at all: both flow through the value model as `absent`
+    /// (§4), so the record here and the diagnostic are the only two places it
+    /// survives, and a proof that dropped it would be silent about data loss it
+    /// holds the evidence for.
+    Builtin {
+        op: CmpOp,
+        lhs: Value,
+        rhs: Value,
+        lost: Option<LostConversion>,
+    },
     /// A satisfied presence test `expr is [not] absent` (§4/§8). Terminates its
     /// branch — it holds on its evaluated operand and needs no sub-proof.
     Presence { value: Value, negated: bool },
@@ -201,10 +213,11 @@ impl ProofTree {
             .map(|premise| match premise {
                 Premise::Fact(f) => ProofTree::explain(model, f),
                 Premise::NoMatch(pattern) => Some(ProofTree::NoMatch(pattern.clone())),
-                Premise::Builtin { op, lhs, rhs, .. } => Some(ProofTree::Builtin {
+                Premise::Builtin { op, lhs, rhs, lost } => Some(ProofTree::Builtin {
                     op: *op,
                     lhs: lhs.clone(),
                     rhs: rhs.clone(),
+                    lost: *lost,
                 }),
                 Premise::Presence { value, negated } => Some(ProofTree::Presence {
                     value: value.clone(),
