@@ -294,18 +294,26 @@ them. Except where noted these are documented v1 limits rather than defects.
 
 ### Provenance surface (§11)
 
-- **Provenance query syntax — designed 2026-08-16, not built.** One union of
-  `proof` / `underivable` / `unknown`; the sigil is a cost hint; a near-miss is a
-  *rule*, not a binding; a repair is a step, not a promise; the trace re-solves
-  through the scheduler the fixpoint uses. §17 has the decision. What remains open
-  is the rendering, the JSON encoding, and sequencing against the truncation
-  contract, whose distinction `unknown` is. **Decide it together with "does the
+- **Provenance query syntax — designed 2026-08-16, rendering built 2026-08-21.**
+  One union of `proof` / `underivable` / `unknown`; the sigil is a cost hint; a
+  near-miss is a *rule*, not a binding; a repair is a step, not a promise; the
+  trace re-solves through the scheduler the fixpoint uses. §17 has both decisions.
+  **What a proof looks like is settled** (§11, `print_proof`): a `%`-comment block
+  carrying depth as a leading integer *and* as indentation, guarded by **E7/E8**.
+  What remains open is **the form that asks** — §5 has no goal production, the
+  lexer one `?-` token, the CLI no flag, `RunResult` no field — plus the exit-code
+  ruling for a run that explains but returns no rows, `?whynot`'s near-miss and
+  repair rendering, the JSON encoding, and sequencing against the truncation
+  contract, whose distinction `unknown` is (unreachable today: §15 says nothing
+  here produces a short relation). **Decide the asking form together with "does the
   derivation store earn its cost" below, and with the profile** (2026-08-18): the
-  recorder runs unconditionally, while its only consumer is unbuilt — so pillar 1
-  pays full price on every run and returns nothing at the surface it exists for.
-  Whichever is settled first constrains the other, and the profile
-  ([`notes/profile-2026-08-20.md`](notes/profile-2026-08-20.md)) has now priced what
-  is being paid: 78% of memory today, half the run once the scan is fixed. _queued — decided, not built; **v1** (S5)._ — §11/§14, [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
+  recorder runs unconditionally, and pillar 1 still returns nothing *at the
+  surface*, since a renderer no one can invoke is not one. The profile
+  ([`notes/profile-2026-08-20.md`](notes/profile-2026-08-20.md)) priced what is
+  being paid: 78% of memory today, half the run once the scan is fixed. **The
+  rendering was deliberately taken first** because it is the piece that question
+  cannot invalidate — backwards extraction yields a `ProofTree` too, and the
+  rendering says nothing about how many derivations exist. _queued — rendering built; asking form **v1** (S5)._ — §11/§14, [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
 - **First appearance, not first round** — **closed 2026-08-16 without building it:
   the rationale was adopted from a sibling engine and does not hold here.** Ours
   *batches* application, so the derivation that first produces a fact always has
@@ -340,7 +348,10 @@ them. Except where noted these are documented v1 limits rather than defects.
   self-justifying leaf records the *values*, not the expression, so replay has to
   re-evaluate rather than re-check. Catalogued as **E6** in `testing.md`.
   _queued — **v1**: S5 ships a proof surface, so its strongest property must have seen a builtin._ — §11/§15.
-- **Imported facts are anchored by *relation*, not by row.** `engine::validate`
+- **Imported facts are anchored by *relation*, not by row.** ✅ **Ruled 2026-08-21**
+  — §11 now states it where the anchor is defined, and a proof prints
+  `[fact from "employees.csv"]`. A row-level anchor stays a memory trade to take
+  with the two items above, not a gap. The original framing: `engine::validate`
   records that an import's facts "are ordinary base facts by the time the engine
   runs… `ImportSpec` survives only as provenance/definedness metadata", so `?why`
   will answer "because `employees.csv`" and never "because row 4,182" — the answer
@@ -361,7 +372,8 @@ them. Except where noted these are documented v1 limits rather than defects.
   **Measured** ([`notes/profile-2026-08-20.md`](notes/profile-2026-08-20.md)): the
   recorder is **70–78% of peak RSS**, and a prototype put it at **50–60% of wall
   clock** on every recursive shape once the prefix seek removes the scan that was
-  hiding it. The seek shipped 2026-08-21 and left peak RSS untouched, so the memory
+  hiding it. **§11's rendering does not constrain this** (2026-08-21): it prints
+  one proof and never says how many others exist, so either store satisfies it. The seek shipped 2026-08-21 and left peak RSS untouched, so the memory
   half stands as measured and the time half wants re-running against this code
   before the decision is taken. Settled in the same session as the query surface
   above (2026-08-18). _queued — **v1**, decided with the query surface._

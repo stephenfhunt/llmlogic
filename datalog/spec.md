@@ -1112,8 +1112,11 @@ Aggregates treat the absent value (§4) uniformly:
     written in a **query** reports the same way, under the query's 1-based
     position rather than a rule name — a query records no derivations, so its
     counts are read from the premises as its rows are produced;
-  - eventually `?why` ("averaged 8 values, skipped 2 absent") once the §11 query
-    surface exists. The record it reads is already there.
+  - a proof, which prints the fold beside the literal that produced it —
+    `Avg = avg { A | … }  (12.5 over 8 values, 2 absent skipped)`, the clause
+    dropped when nothing was skipped (§11's rendering). `count` reports its value
+    alone: its total already includes absent bindings, so a skip count would
+    describe a fold it did not do.
 
   A user who wants the skip count *as data* writes it directly:
   `S = count { A | Goal, A is absent }` (§17, 2026-07-24 — provenance-only chosen
@@ -1277,8 +1280,11 @@ fixpoint):
   under the rule's bindings, wildcard slots left open.
 - The engine records **all derivations of every derived fact**, deduplicated
   by rule instance (§17): one fact, many proofs. Base facts have no
-  derivation; they are anchored by the program text (or, later, the import)
-  that asserted them.
+  derivation; they are anchored by the program text, or by the **relation** an
+  import bound — never by a source row. §13 materializes an import into ordinary
+  base facts before lowering, so `ImportSpec` is the finest anchor there is: a
+  proof says *because `employees.csv`*, and a row-level anchor is a memory trade
+  rather than an omission (`ROADMAP.md`).
 - A **proof tree** is one finite proof of one fact: derived nodes carry the
   fact, its rule, and child proofs for each premise; **leaves are base facts
   or no-match patterns** (a no-match terminates a branch — "no such fact
@@ -1288,10 +1294,9 @@ fixpoint):
   finite even when facts support each other cyclically.
 - Names for rendering recover from the IR's retained tables: predicate names,
   per-rule variable names, field names (when the predicate has a schema), and
-  spans. A fact over a relation with known field names can therefore be
-  rendered in named form — `employee(name: "alice", title: "manager")` — which
-  matters for wide imported tables, where the positional rendering is mostly
-  noise.
+  spans. The record itself carries none — it is `PredId`/`RuleId` throughout — so
+  a proof is rendered *against* a program, never on its own. What that buys is
+  below.
 
 An **absent value** (§4) appearing in a fact is provenance-anchored like any other
 value, and `X is absent` succeeding is an ordinary positive premise. This is
@@ -1299,19 +1304,60 @@ distinct from the **no-match pattern** above, the why-not record for a *negated*
 literal. The explanation of a *missing answer* is a third thing again — a
 **failure trace** (§17, 2026-08-16, which named all three).
 
+**Rendering** (`print_proof`, `src/print.rs`). A proof is a block of `%` comments,
+one line per node, and every line carries its depth **twice**: as a leading
+integer, and as two spaces of indentation per level. The integer is the
+structural channel and the indentation is the human's — parent/child is the whole
+content of a proof, and a reader with no column cannot recover it from
+alignment (§17, 2026-08-21).
+
+```
+% why ancestor("alice", "carol")
+% 0  ancestor("alice", "carol")  by ancestor(X, Y) :- parent(X, Z), ancestor(Z, Y)
+% 1    parent("alice", "bob")  [fact]
+% 1    ancestor("bob", "carol")  by ancestor(X, Y) :- parent(X, Y)
+% 2      parent("bob", "carol")  [fact]
+```
+
+- The header wears no depth number, which is what distinguishes it from a node.
+- A **derived** node cites the rule that fired; a **leaf** carries `[fact]`, or
+  `[fact from "employees.csv"]` for an imported relation; a **no-match** prints
+  as `no parent(_, "alice")`, `_` for the slots the negation left open.
+- A fact prints in **named form wherever the predicate has field names**,
+  positional otherwise. Unlike §14's answer stream a proof never has to re-parse,
+  which is what makes the named form available — and it is what a wide imported
+  table needs, where eight positional columns say nothing about which is which.
+- A **self-justifying** premise (an §8 comparison or presence test, a §9
+  aggregate) prints the literal it satisfied beside the values it satisfied it
+  with — `A >= 18  (30 >= 18)` — since the record holds only the values, and a
+  body may hold three comparisons of the same shape. An aggregate reports its
+  fold: `(6 over 2 values, 1 absent skipped)`, which is §9's skip-count surface,
+  and the value alone for `count`, whose total already includes absent bindings.
+  A conversion that failed on data appends `[1 value lost converting to int]` —
+  the one place §12's *missing* / *malformed* distinction reaches a proof.
+- The cited rule is the **lowered** one, reconstructed from the IR rather than
+  sliced from the source span: premises align index-for-index with the lowered
+  body, while lowering hoists compound arguments into `=`-assignments, expands
+  each `;` disjunct into its own clause, and makes named arguments positional.
+  A source slice would show a body whose literal count does not match the
+  premises listed under it. Arguments §5's partial selection omitted are omitted
+  again; a lowering-generated slot that occurs more than once keeps an identity
+  (`_g3`), since two temporaries spelled `_` would read as one variable.
+- **Nothing elides and nothing is shared.** A fact proved in two branches prints
+  twice and a deep proof is deep — §15's no-budget-anywhere decision applied
+  here, not a second policy.
+
 *Not covered:* the query surface, which is designed but not built — `?why` and
 `?whynot` return one union of `proof` / `underivable` / `unknown`, the sigil being
 a cost hint rather than a selector, and a near-miss is a *rule* and not a binding
-(§17, 2026-08-16). Its rendering and any JSON encoding are open. **Proof trees as
+(§17, 2026-08-16). §5 has no form for a goal, the CLI no flag, and `RunResult` no
+field, so nothing reaches the renderer above from outside the library yet. The
+JSON encoding is open. **Proof trees as
 facts are not coming**: a proof tree is not a fact, so it rides in `%` comments,
 which keeps Datalog-out-is-Datalog-in intact. Also not covered: semiring provenance
 under negation and tropical cheapest-proof selection
 (`notes/semiring-provenance.md`), and lineage annotations on answer rows — Tier 1
-in tsdl's sense — which this engine does not have at all. Also not covered: an
-imported fact is anchored by its **relation**, not by its source row — §13
-materializes imports into ordinary base facts before lowering — so the import
-anchor above is coarser than the sentence suggests, and a row-level one is a
-memory trade rather than an omission (`ROADMAP.md`).
+in tsdl's sense — which this engine does not have at all.
 
 ## 12. Error model
 
@@ -1968,19 +2014,30 @@ feature, 2026-07-23). *Still open:* database loading and filter pushdown (§17).
 ```datalog
 % given 16.1, ask why a derived fact holds
 ?why ancestor("alice", "carol").
-% expected: a proof tree, e.g.
-%   ancestor("alice","carol")
-%     ├─ via rule: ancestor(X,Y) :- parent(X,Z), ancestor(Z,Y)
-%     ├─ parent("alice","bob")                    [base fact]
-%     └─ ancestor("bob","carol")
-%          ├─ via rule: ancestor(X,Y) :- parent(X,Y)
-%          └─ parent("bob","carol")               [base fact]
+% % why ancestor("alice", "carol")
+% % 0  ancestor("alice", "carol")  by ancestor(X, Y) :- parent(X, Z), ancestor(Z, Y)
+% % 1    parent("alice", "bob")  [fact]
+% % 1    ancestor("bob", "carol")  by ancestor(X, Y) :- parent(X, Y)
+% % 2      parent("bob", "carol")  [fact]
 ```
-*Designed (§17, 2026-08-16), not built:* `?why` and `?whynot` answer with one union
-of `proof` / `underivable` / `unknown`, the sigil being a cost hint rather than a
-selector. *Still open:* the rendering above is a sketch, the JSON encoding (§14) is
-undecided, and how a fact with several independent derivations chooses one is
-governed by §11's well-founded order and not by anything the user asks for.
+(The answer is itself a block of `%` comments, so the expected output above is
+doubly commented — one `%` for this example, one that is the proof's own.)
+
+*Rendering ratified (§11, §17 2026-08-21)* and tested by
+`print::tests::example_16_6_proof_renders_as_the_spec_shows`, which runs this
+program and pins the block byte for byte. Depth rides in two channels — the
+leading integer for a reader with no column, the indentation for one with; §11
+carries the rule and its reasons.
+
+*Designed (§17, 2026-08-16), not built:* the surface that would *ask*. `?why` and
+`?whynot` answer with one union of `proof` / `underivable` / `unknown`, the sigil
+being a cost hint rather than a selector — but §5 has no goal form, the CLI no
+flag and `RunResult` no field, so the renderer above is reachable only from the
+library. *Still open:* the JSON encoding (§14). How a fact with several
+independent derivations chooses one is governed by §11's well-founded order and
+not by anything the user asks for — and the answer does not say how many others
+there were, which is what keeps the rendering independent of whether the engine
+keeps recording all of them (`ROADMAP.md`).
 
 ### 16.7 Named arguments & partial selection
 
@@ -2350,6 +2407,24 @@ marker that records a decision working out *well*, which the log would otherwise
 never say.
 
 ### Decisions
+
+- **2026-08-21** — **A proof line carries its depth twice, because it has two
+  readers** (§11 has the form, §16.6 the worked block, `src/print.rs` the code).
+  Closes the *rendering* half of the 2026-08-16 surface decision; the form that
+  **asks** is unbuilt, so nothing outside the library reaches it yet.
+  - **The integer is the structural channel; the indentation is the human's.**
+    Parent/child is the entire content of a proof, so it cannot rest on the least
+    salient one. Box-drawing was the candidate and fails on the reader that
+    matters: `│`/`└─` mean something to an eye tracking a column down a page and
+    nothing to an agent reading a linear token stream, where no column exists.
+    Bare indentation is worse again — depth becomes a whitespace-run *length*,
+    compared across distant lines. **E8** is what makes the number load-bearing.
+  - **The cited rule is the lowered one.** Premises align with the *lowered* body,
+    so a source slice would list a body whose literal count does not match the
+    premises under it.
+  - **No elision, no sharing, no "1 of N"** — §15's no-budget rule applied, and the
+    omission that keeps this indifferent to whether the recorder survives the
+    derivation-store question (`ROADMAP.md`). It is why rendering could go first.
 
 - **2026-08-21** — **The relation is already an index: a bound prefix is sought,
   not scanned** (§15/engine; the argument in full is `src/engine/seek.rs`'s module
@@ -2781,6 +2856,14 @@ never say.
     proof tree is not a fact and joins a fact stream on no terms; it rides in `%`
     comments, so stripping them leaves byte-for-byte what the same program without
     its goals prints. That is a property, and the guard.
+  - ***Amended 2026-08-21*** — the rendering it left open is settled (Decisions
+    above) and built, and the split this entry drew held up: the shape decided here
+    survived contact with the output unchanged. What it did not anticipate is that
+    the two halves separate cleanly enough to **ship apart** — a renderer with no
+    form to ask it is still testable, and still worth having, because it is the one
+    piece the derivation-store question cannot invalidate. The guard named here is
+    E5 and it is *still* blocked: byte-for-byte stripping needs program-level
+    output, so what landed is **E7**, its lexical precondition.
 
 - **2026-08-16** — **Three names, because one word doing two jobs needs a footnote
   at every use** (§4/§7/§11; adopted verbatim from tsdl `spec.md` §13). The

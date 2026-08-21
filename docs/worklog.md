@@ -24,6 +24,61 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-21 — A proof gets a shape, and depth gets two channels
+
+§11's rendering — the half of the provenance surface the 2026-08-16 decision left
+open. **566 tests green** (+13), clippy and rustfmt clean.
+
+**Done**
+- **`print_proof`** (`src/print.rs`) renders a `ProofTree` as a `%`-comment block:
+  a header, then one line per node carrying depth as a leading integer *and* as
+  indentation. Nine unit tests, one per premise kind, plus the omitted-argument
+  and hoisted-temporary cases.
+- **An IR printer**, which did not exist: `print.rs` printed `ast`, and the rule a
+  proof cites has to be the lowered one. Reuses `print_operand`'s parenthesization
+  rule and `stdlib`'s name tables (new `stdlib::op_name`, with the test its
+  totality `expect` was otherwise only claiming).
+- **E7/E8** in `testing.md`, both mutation-verified, with a shared non-vacuity
+  guard. **§16.6 is now a real block with a test that pins it** — one of the eight
+  §16 examples that named none.
+- **`ProofTree::Builtin` carries `lost`**, which `explain` had been dropping — so
+  §12's *malformed* can reach a proof at all.
+- **Swept**: §11 (rendering is normative there now), §16.6, §9's skip-report
+  bullet, §17 ×2, `ROADMAP.md` ×2, `testing.md` ×4.
+
+**Decided**
+- **Depth rides in two channels because it has two readers.** Box-drawing is a
+  *two-dimensional* encoding — `│`/`└─` mean something to an eye tracking a column
+  and nothing to an agent reading a linear token stream. Bare indentation is worse
+  again: depth becomes a whitespace-run *length*. E8 makes the integer
+  load-bearing; it catches the mutant E7 cannot.
+- **The cited rule is the lowered one.** Premises align index-for-index with the
+  *lowered* body, so a source slice would list a body whose literal count does not
+  match the premises under it. This was the finding that settled the question.
+- **No "1 of N".** The rendering never says how many other derivations exist —
+  which is exactly what makes it indifferent to the derivation-store question, and
+  the reason it could be taken before that decision rather than after.
+- **Named form wherever fields are known**, available only because a proof rides
+  in comments and never re-parses.
+
+**Removed**
+- §16.6's box-drawing sketch, and §11's "its rendering is open" clause.
+- §11's two-places-for-one-rule on the import anchor: the closing "coarser than
+  the sentence suggests" narration is gone and the anchor bullet now just says
+  *relation*. The rendering bullet that restated named form lost the restatement.
+- The 2026-08-20 profile entry, rotated verbatim to `worklog-archive/2026-08.md`.
+
+**Next up**
+- **The form that asks.** §5 has no goal production, the lexer one `?-` token, the
+  CLI no flag, `RunResult` no field — and the exit-code ruling for a run that
+  explains but returns no rows is unmade. E5 unblocks with it.
+- **Then** the recorder / derivation-store decision, now genuinely unconstrained
+  by the surface.
+- Still open: **E6**, `?whynot`'s near-miss rendering, the JSON encoding, and
+  `--no-default-features` failing its own suite.
+
+---
+
 ## 2026-08-21 — The seek lands, and body order becomes the thing that matters
 
 The profile's finding, shipped: **the positive-atom arm and the anti-join seek a
@@ -77,59 +132,6 @@ corpus programs, 553 tests green, clippy and rustfmt clean.
   against the shipped code first.
 - Still open: **E5**/**E6**, and `--no-default-features` does not pass its own
   test suite (two temporal tests).
-
-## 2026-08-20 — The profile, and the scan that was hiding everything else
-
-The last of the stock-take's four. It answered pillar 1's question and then
-falsified the ranking that made the question urgent: **the recorder is a memory
-cost, and the thing actually burning the clock is a full-relation scan nobody had
-named.** Long form, with method and every table, in
-[`datalog/notes/profile-2026-08-20.md`](../datalog/notes/profile-2026-08-20.md).
-No engine code changed.
-
-**Done**
-- **The recorder is priced** — 70–78% of peak RSS, 2–24% of wall clock, its time
-  share *falling* as the workload grows (2% at `sparse_800`). Four scratch builds in
-  a throwaway worktree, each guarded by byte-identical answers on all 26 programs.
-- **The finding neither note had**: a relation's `BTreeSet` is already ordered by
-  column, so a bound prefix is a contiguous range — and nothing seeks it. A ~20-line
-  prototype is **10.2× on `sparse_800`, 12.7× on `join_4000`, 9.0× on `agg_50000`**,
-  takes sparse from n^4.16 to n^2.14, and passes all 422 library tests.
-- **Aggregation**: mechanism confirmed (goal rescans per group), quantification
-  corrected; under the seek, groups become free and rows go linear.
-- **`samply` sampling** put ~70% of `agg_50000` in value comparison, collapsing to
-  2% under the seek.
-
-**Decided**
-- **The recorder question must be re-measured against the post-seek engine.** Its
-  share there is **50–60%**, not 2–24%. Deciding today would price pillar 1 at 2% of
-  a run that will not exist. §17's 2026-07-19 entry is annotated with both numbers.
-- **Interning is a memory item only if the seek goes first** — a nuance the A/B
-  builds got wrong and the sampler corrected. Symbol *length* costs 7.5% at 16× the
-  width, but value *comparison* is 70% of an aggregate today and 2% after the seek.
-- **`cross-engine-benchmark.md`'s wall clock does not reproduce at the top end.**
-  Rebuilding `0356b04` on the same machine: `sparse_800` 43.25 s vs its 65.14 s,
-  `agg_50000` 1.28 s vs its 3.77 s, while peak RSS reproduces to 0.3%. So **`tsdl`
-  does not win `agg` outright** — 1.73 s ours vs 2.92 s theirs today — and that claim
-  was cited in `ROADMAP.md`, `v1-scope.md` and §17.
-- **Measure with `min`-of-N, not best-of-3-and-a-spread-claim.** `agg_50000` spans
-  61% across consecutive runs of one binary — not thermal, not core placement, and
-  it hits every build equally.
-
-**Removed**
-- The Performance section's framing that ranked the recorder first, and the "one
-  shape a sibling engine wins outright" clause from `ROADMAP.md` and `v1-scope.md`
-  both. Nothing deleted from `notes/`: both earlier performance notes are
-  append-annotated, since their numbers record what was believed when.
-
-**Next up**
-- **Land the seek** — unreviewed, and it does not touch the negated-atom or
-  aggregate-goal arms, which still scan. Seeking makes body order matter *more*, so
-  its interaction with join-order selection needs looking at.
-- **Then** the three-way decision session (recorder / query surface / row
-  provenance), against the post-seek engine.
-- Still open: **E5**/**E6**, and `--no-default-features` does not pass its own test
-  suite (two temporal tests, found while profiling, now a ROADMAP item).
 
 ## 2026-08-20 — `bugs/007` closes, and the aggregate becomes a fold over a multiset
 

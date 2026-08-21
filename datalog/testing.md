@@ -207,6 +207,7 @@ it. A future audit starts here.
 | Confluence (inference, interning, strata) | `arb_statement_permutation` | **C13** — the type half has nothing else; C4/C5 both fix statement order |
 | Order-invariance of *explanations* | B5/B6's mutators, compared at the derivation level | **C14**; E1–E4 check one evaluation each and are blind to it |
 | Closure at the program level (§14) | `arb_closure_program` | **D5**; D1 is the fact-set half |
+| The rendered proof's structure (§11) | `arb_program_with_edb`, every derived fact explained and printed | **E7** (every line is a comment — E5's lexical precondition) and **E8** (the declared depth is the node's); a guard pins the generator reaches a proof deeper than one node |
 | §10's std-builtin exemption | `ArithShape::StdBuiltin` | **C10**'s guard — the mutation lands on the classification, not the fixpoint |
 | The physical access path (§15, evaluator-internal) | small collision-rich tuple pools with `absent`; prefixes drawn from the generated relation | **B12a/b/c**, with their three guards — the differential is blind to an over-yield, so these are what pin the seek |
 
@@ -1038,7 +1039,8 @@ integration-level behaviors: the process contract, output shaping, and error
 
 Known remaining thin spots (deliberate, per the pyramid): the full did-you-mean
 near-miss set is unit-tested, not each re-checked through the binary; provenance
-output (§11) has no end-to-end path yet (step 6).
+output (§11) has a renderer and its properties (E7/E8) but no end-to-end path,
+since no §5 form asks for one.
 
 ### Phase E — provenance (§11) — generalizes §16.6
 
@@ -1047,7 +1049,8 @@ provenance recording lands inside the evaluator's fixpoint, so its properties
 are tested the session it is written. E3's replay deliberately reuses the
 naive oracle's matcher, keeping the check independent of the semi-naive join
 loop that recorded the derivation. E5 waits on the §11/§14 output surface, and E6
-is a coverage hole in E3 rather than a new claim.
+is a coverage hole in E3 rather than a new claim. E7/E8 arrived 2026-08-21 with
+the rendering (§11).
 
 - [x] **E1** Every derived fact has at least one derivation, and at least one
   is *well-founded* — every fact premise first appeared strictly earlier than
@@ -1070,7 +1073,10 @@ is a coverage hole in E3 rather than a new claim.
   comments, so stripping every comment from a program's output must leave
   **byte-for-byte** what the same program prints without its goals. That is what
   keeps Datalog-out-is-Datalog-in true in the presence of provenance, and it is
-  cheaper than the closure test it replaces. Waits on the §11/§14 output surface.
+  cheaper than the closure test it replaces. Still waits on the §11/§14 output
+  surface — a §5 goal form, specifically: there is no program-level output to
+  strip until a program can *ask*. **Its lexical precondition landed 2026-08-21 as
+  E7**, which is the half testable without one.
 - [ ] **E6** Extend **E3 to §8 builtins**. E3 passes today only because
   `arb_program_with_edb` emits no comparisons — `monotype` makes every column a
   symbol, so arithmetic cannot appear — and its `replay` helper rebuilds the
@@ -1084,6 +1090,21 @@ is a coverage hole in E3 rather than a new claim.
   `Premise::Builtin` records the *values*, not the expression, so replaying it is
   re-evaluation, not re-checking. Tracked in `ROADMAP.md` under "Provenance
   surface".
+- [x] **E7** **Every proof line is a comment** — it starts with `%` and holds no
+  newline. What E5 rests on: stripping comments can leave the fact stream
+  untouched only if every rendered line *is* one, and a value carrying a newline
+  would end the comment and spill arbitrary text into the stream as syntax (§3's
+  escapes are what stop it, asserted here rather than assumed). *Mutation:* drop
+  the `%` from the node line's format string — E7 reddens, E8 stays green.
+- [x] **E8** **The declared depth is the node's depth.** A proof line carries its
+  depth as a leading integer *and* as indentation (§17, 2026-08-21); read back off
+  each line, the integer must equal that node's depth under an independent walk of
+  the tree. This is what makes the number load-bearing rather than a remark about
+  the spaces beside it. *Mutation:* freeze the emitted number at `0` — every line
+  still a well-formed, correctly-indented comment — and E8 reddens where E7 cannot
+  see it. Non-vacuity: a guard pins that `arb_program_with_edb` reaches a proof
+  deeper than one node, both properties holding trivially over a program with
+  nothing to explain.
 
 ### Phase F — §13 imports (roadmap step 7) — generalizes §16.5, §16.7
 
