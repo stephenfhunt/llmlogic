@@ -1141,4 +1141,135 @@ mod tests {
             "{hoisted}"
         );
     }
+
+    // --- Phase E (E7–E8) properties (testing.md) ---
+
+    mod properties {
+        use proptest::prelude::*;
+
+        use super::super::*;
+        use crate::engine::eval;
+        use crate::provenance::ProofTree;
+        use crate::testgen::arb_program_with_edb;
+
+        /// Every proof of every derived fact in `program`, as rendered lines.
+        fn all_proof_lines(program: &ir::Program) -> Vec<Vec<String>> {
+            let model = eval(program).expect("evaluates");
+            model
+                .facts()
+                .filter(|fact| !model.is_base(fact))
+                .map(|fact| {
+                    let tree = ProofTree::explain(&model, &fact).expect("a held fact has a proof");
+                    print_proof(&tree, program)
+                })
+                .collect()
+        }
+
+        /// The depth a line declares, read back off its `% {n}  ` prefix.
+        fn declared_depth(line: &str) -> Option<usize> {
+            line.strip_prefix("% ")?
+                .split_whitespace()
+                .next()?
+                .parse()
+                .ok()
+        }
+
+        /// The depth of every node of `tree`, in the order [`print_proof`] emits
+        /// them — computed here by an independent walk, so agreeing with the
+        /// renderer is a claim and not a restatement.
+        fn node_depths(tree: &ProofTree, depth: usize, out: &mut Vec<usize>) {
+            out.push(depth);
+            if let ProofTree::Derived { children, .. } = tree {
+                for child in children {
+                    node_depths(child, depth + 1, out);
+                }
+            }
+        }
+
+        proptest! {
+            /// **E7 — every proof line is a comment.** The lexical precondition
+            /// E5 rests on: a proof rides in `%` comments (§17, 2026-08-16), so
+            /// stripping comments can only leave the fact stream untouched if
+            /// every line the renderer emits *is* one. A value carrying a
+            /// newline would end the comment and put arbitrary text into the
+            /// stream as program syntax; §3's string escapes are what stop it,
+            /// and this is where that is asserted rather than assumed.
+            ///
+            /// E5 itself — the byte-for-byte stripping guard — still waits on a
+            /// §5 form for a goal, since there is no program-level output to
+            /// strip until one exists.
+            ///
+            /// *Mutation-verified* (testing.md rule 3): dropping the `%` from
+            /// the node line's format string reddens this and leaves E8 green,
+            /// which is the split the two properties are for.
+            #[test]
+            fn e7_every_proof_line_is_a_comment(program in arb_program_with_edb()) {
+                for proof in all_proof_lines(&program) {
+                    for line in proof {
+                        prop_assert!(line.starts_with('%'), "not a comment: {line:?}");
+                        prop_assert!(!line.contains('\n'), "line contains a newline: {line:?}");
+                    }
+                }
+            }
+
+            /// **E8 — the depth number agrees with the tree.** What makes the
+            /// leading integer load-bearing rather than a remark about the
+            /// indentation beside it (§17): read back off each line it must
+            /// equal that node's actual depth, so a reader may navigate by the
+            /// number alone.
+            ///
+            /// *Mutation-verified* (testing.md rule 3): freezing the emitted
+            /// number at `0` — every line still a well-formed comment, still
+            /// correctly indented — reddens this and leaves E7 green. That is
+            /// the mutant the indentation alone could not catch, and the reason
+            /// the number is asserted against the tree rather than against the
+            /// spaces beside it.
+            #[test]
+            fn e8_declared_depth_is_the_nodes_depth(program in arb_program_with_edb()) {
+                let model = eval(&program).unwrap();
+                for fact in model.facts().filter(|f| !model.is_base(f)) {
+                    let tree = ProofTree::explain(&model, &fact).unwrap();
+                    let mut want = Vec::new();
+                    node_depths(&tree, 0, &mut want);
+                    // The header carries no depth number, which is what keeps it
+                    // distinct from a node; every line after it is one node.
+                    let lines = print_proof(&tree, &program);
+                    let got: Vec<usize> = lines[1..]
+                        .iter()
+                        .map(|line| declared_depth(line).expect("a node line declares a depth"))
+                        .collect();
+                    prop_assert_eq!(got, want);
+                    prop_assert!(declared_depth(&lines[0]).is_none(), "header wears a depth");
+                }
+            }
+        }
+
+        /// **Non-vacuity for E7/E8** (testing.md rule 2). Both properties are
+        /// satisfied trivially by a program with nothing to explain, and
+        /// `arb_program_with_edb` is free to generate one. This pins that the
+        /// generator reaches a *nested* proof — depth ≥ 1 — since a run of
+        /// single-line proofs would exercise neither the recursion nor the
+        /// distinction E8 states.
+        #[test]
+        fn the_generator_reaches_a_nested_proof() {
+            use proptest::strategy::{Strategy, ValueTree};
+            use proptest::test_runner::TestRunner;
+
+            let mut runner = TestRunner::deterministic();
+            let deepest = (0..256)
+                .filter_map(|_| {
+                    let program = arb_program_with_edb().new_tree(&mut runner).ok()?.current();
+                    all_proof_lines(&program)
+                        .iter()
+                        .filter_map(|proof| proof.last().and_then(|line| declared_depth(line)))
+                        .max()
+                })
+                .max()
+                .unwrap_or(0);
+            assert!(
+                deepest >= 1,
+                "generator produced no proof deeper than one node"
+            );
+        }
+    }
 }
