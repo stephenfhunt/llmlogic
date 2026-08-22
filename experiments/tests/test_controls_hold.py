@@ -150,6 +150,10 @@ def test_no_task_is_answered_by_naming_everything():
             continue
         universe = set()
         for contents in task.fixture.files.values():
+            # Text only: a Parquet copy carries the same values as the text one it
+            # mirrors, and a source tree is not a set of values at all.
+            if not isinstance(contents, str):
+                continue
             lines = [ln for ln in contents.splitlines() if ln.strip()]
             for line in lines[1:]:
                 universe.update(field.strip() for field in line.split(","))
