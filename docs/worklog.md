@@ -24,6 +24,57 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-22 — Five domains, and the grid reaches 112 cells
+
+Phase B: the five queued domain packs, so the slate stops being one measured
+domain plus its controls. **164 tests green** (+85), ruff clean, and the full
+112-cell grid runs offline against the stub subject.
+
+**Done**
+- **`ontology`** (multiple inheritance, property overriding, disjointness),
+  **`imports`** (dates, aggregates, missing amounts; CSV + JSONL + a Parquet
+  copy), **`eligibility`** (four criteria in prose, and what a missing value
+  leaves undecided), **`scheduling`** (interval overlap four ways), and
+  **`static_analysis`** (a pinned `sqlparse`, facts the subject extracts itself).
+- **Every one of the 28 tasks answered by hand with the real engine** in a
+  scratch directory, and compared row-for-row against its oracle. All 28 match.
+- **Plumbing**: a `Fixture` can now carry several spellings of one relation,
+  binary contents and nested paths; `catalogue.verify` checks CSV headers, JSONL
+  keys and Parquet schemas alike and requires the copies to agree on row count.
+  `corpus.py` fetches a pinned sdist outside the checkout, and a pack whose
+  corpus is missing says so rather than vanishing from the slate.
+- **`FIXTURE_TOKEN_BUDGET` is enforced**, having only been stated.
+
+**Decided**
+- **Parquet is a redundant copy, never a relation's only spelling.** The sealed
+  workspace has system `python3` and nothing else, so a Parquet-only table is one
+  the *prose arm cannot open* — those cells would be decided by file format.
+- **The `static_analysis` corpus is fetched and pinned, not vendored, and it is
+  Python.** `tsc`'s API is the better extractor and the worse control: control 1
+  wants a plain-Python oracle, and a TS corpus would need one over a hand-rolled
+  parse. `sqlparse` over `requests` because a memorized codebase can be answered
+  from training rather than from the files.
+- **The questions define their abstractions syntactically** — "called" is the
+  callee of a call expression. A semantic oracle would be a guess the answers
+  were then graded against.
+- **A question is tuned in the fixture, never in the grader**, by planting a row
+  or by choosing the seed by search. Four near-misses caught that way, including
+  a roster whose shifts tiled the day so cleanly that nobody could be
+  double-booked.
+
+**Removed**
+- The unsound half of two property tests: overlap-by-distance and
+  overlap-by-extremes disagree on a zero-length interval, and nearest-ancestor
+  read as shortest path is wrong under multiple inheritance. Both replaced with
+  formulations that are independent *and* sound.
+
+**Next up**
+- **The reference corpus** — the 28 verified programs written this session are
+  most of it, and they are sitting in a scratch directory.
+- Then the **doc-line ablation**, and the first paid run.
+- Still open: what *"reached for it"* should mean, the per-cell stopping rule,
+  and whether a full run's transcripts get committed.
+
 ## 2026-08-21 — The instrument gets built, and the first real cell falsifies it twice
 
 S1's harness, as a new top-level project. `experiments/` runs each task twice —
@@ -123,56 +174,3 @@ the only unmet v1 criterion. 578 tests green, clippy and rustfmt clean.
   confusion but never asking.
 - Still open: the **JSON encoding** (parked, low value), `--no-default-features`
   failing two temporal tests, and §17's period-arithmetic questions.
-
-## 2026-08-21 — A proof gets a shape, and depth gets two channels
-
-§11's rendering — the half of the provenance surface the 2026-08-16 decision left
-open. **566 tests green** (+13), clippy and rustfmt clean.
-
-**Done**
-- **`print_proof`** (`src/print.rs`) renders a `ProofTree` as a `%`-comment block:
-  a header, then one line per node carrying depth as a leading integer *and* as
-  indentation. Nine unit tests, one per premise kind, plus the omitted-argument
-  and hoisted-temporary cases.
-- **An IR printer**, which did not exist: `print.rs` printed `ast`, and the rule a
-  proof cites has to be the lowered one. Reuses `print_operand`'s parenthesization
-  rule and `stdlib`'s name tables (new `stdlib::op_name`, with the test its
-  totality `expect` was otherwise only claiming).
-- **E7/E8** in `testing.md`, both mutation-verified, with a shared non-vacuity
-  guard. **§16.6 is now a real block with a test that pins it** — one of the eight
-  §16 examples that named none.
-- **`ProofTree::Builtin` carries `lost`**, which `explain` had been dropping — so
-  §12's *malformed* can reach a proof at all.
-- **Swept**: §11 (rendering is normative there now), §16.6, §9's skip-report
-  bullet, §17 ×2, `ROADMAP.md` ×2, `testing.md` ×4.
-
-**Decided**
-- **Depth rides in two channels because it has two readers.** Box-drawing is a
-  *two-dimensional* encoding — `│`/`└─` mean something to an eye tracking a column
-  and nothing to an agent reading a linear token stream. Bare indentation is worse
-  again: depth becomes a whitespace-run *length*. E8 makes the integer
-  load-bearing; it catches the mutant E7 cannot.
-- **The cited rule is the lowered one.** Premises align index-for-index with the
-  *lowered* body, so a source slice would list a body whose literal count does not
-  match the premises under it. This was the finding that settled the question.
-- **No "1 of N".** The rendering never says how many other derivations exist —
-  which is exactly what makes it indifferent to the derivation-store question, and
-  the reason it could be taken before that decision rather than after.
-- **Named form wherever fields are known**, available only because a proof rides
-  in comments and never re-parses.
-
-**Removed**
-- §16.6's box-drawing sketch, and §11's "its rendering is open" clause.
-- §11's two-places-for-one-rule on the import anchor: the closing "coarser than
-  the sentence suggests" narration is gone and the anchor bullet now just says
-  *relation*. The rendering bullet that restated named form lost the restatement.
-- The 2026-08-20 profile entry, rotated verbatim to `worklog-archive/2026-08.md`.
-
-**Next up**
-- **The form that asks.** §5 has no goal production, the lexer one `?-` token, the
-  CLI no flag, `RunResult` no field — and the exit-code ruling for a run that
-  explains but returns no rows is unmade. E5 unblocks with it.
-- **Then** the recorder / derivation-store decision, now genuinely unconstrained
-  by the surface.
-- Still open: **E6**, `?whynot`'s near-miss rendering, the JSON encoding, and
-  `--no-default-features` failing its own suite.
