@@ -24,6 +24,54 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-21 — The instrument gets built, and the first real cell falsifies it twice
+
+S1's harness, as a new top-level project. `experiments/` runs each task twice —
+once by an agent that has the engine, once by the same agent without it — and
+grades both against truth computed in plain Python. 79 tests green, ruff clean,
+and the full grid runs offline against a stub subject with no API calls.
+
+**Done**
+- **The project**: `AGENTS.md`, `ROADMAP.md`, `decisions.md`, and a package —
+  core types, record store, grading, process signals, report, CLI. The offline
+  `--dry-run` grid is the CI gate, so a change that can only be tested by
+  spending money is a change that stops being tested.
+- **Both arms are the same Claude Agent SDK agent**, same tools, same
+  byte-identical prompt; the engine arm additionally has the binary and skill.
+  The prose arm keeps `bash` and may write a script — the honest counterfactual.
+- **Two domain packs**: `access_control` (four tasks over a generated policy
+  graph, truth a BFS property-checked against a fixpoint formulation) and
+  `controls`, the negative controls that make a null result readable.
+- **Containment** — workspaces outside the checkout, OS bash sandbox with the
+  network denied, a PreToolUse gate against paths that leave the workspace.
+
+**Decided**
+- **Ground truth never comes from the engine**, enforced by an AST test rather
+  than a convention: if the engine grades itself the engine arm is correct by
+  construction, and the run is void while still producing plausible numbers.
+- **`UNPARSEABLE` is kept apart from `WRONG` because of bias, not tidiness.** The
+  prose arm writes sentences more often, so counting a sentence as a wrong answer
+  inflates the engine's margin — the one direction of bias this cannot afford.
+- **Containment is a validity control before a safety one.** Verified by hand:
+  from a workspace inside the checkout, `truth.py` — the answer key — and the
+  engine binary were both reachable, the latter executable by absolute path.
+  Scrubbing `PATH` does nothing against `/abs/path/to/datalog`.
+
+**Removed**
+- `experiments/.workspaces/` as a location — it was inside the repo, which is how
+  the answer key was two directories up. Nothing else: this session was almost
+  entirely new, and the deletions it did make were of its own first drafts.
+
+**Next up**
+- **Five domain packs**: `ontology`, `imports`, `eligibility`, `scheduling`,
+  `static_analysis`. Then the reference corpus, the doc-line ablation, and the
+  first full run.
+- **`spec.md` §1 is deliberately untouched** — S1's instrument does not move to
+  `experiments/` until the harness can actually measure. `datalog/ROADMAP.md`
+  says *building*, which is what is true.
+- Still open: the JSON encoding, `--no-default-features` failing two temporal
+  tests, and §17's period-arithmetic questions.
+
 ## 2026-08-21 — The surface that asks, and provenance stops being free of charge
 
 The three-way session `ROADMAP.md` had been sequencing — asking form, derivation
@@ -128,59 +176,3 @@ open. **566 tests green** (+13), clippy and rustfmt clean.
   by the surface.
 - Still open: **E6**, `?whynot`'s near-miss rendering, the JSON encoding, and
   `--no-default-features` failing its own suite.
-
----
-
-## 2026-08-21 — The seek lands, and body order becomes the thing that matters
-
-The profile's finding, shipped: **the positive-atom arm and the anti-join seek a
-bound prefix instead of scanning the relation**, in `src/engine/seek.rs` with
-`testing.md` **B12** pinning the equivalence. Answers byte-identical on all 26
-corpus programs, 553 tests green, clippy and rustfmt clean.
-
-**Done**
-- **Up to 13.4×, and an exponent on three shapes.** `join_4000` 13.4×,
-  `sparse_800` 10.8×, `agg_50000` 9.3×, `chain_800` 2.4×, `negation_400` 2.85×.
-  Sparse 400→800 goes n^4.25 → **n^2.17**, join 2000→4000 n^2.07 → **n^1.00**.
-  Peak RSS identical to the megabyte — same model, same recorder.
-- **The anti-join seeks too**, which the prototype did not. It needs the *opposite*
-  `absent` rule: a refutation compares structurally (§4/§7), so `absent` is a legal
-  key there where a join calls the atom impossible. Two prefix builders, one per
-  notion of sameness. Worth a further 1.22× on `negation_400` — and recording that
-  it is *small* is the point: the anti-join was not what was left in those shapes.
-- **B12a/b/c**, each mutation-verified and each mutation written on its catalog
-  line: `.skip(1)` on the range; a prefix that extends past an unbound variable;
-  `map_while` → `filter_map` in the refutation's key.
-- Swept: §17 (the decision, plus a ***Consequences*** on the 2026-07-19 recorder
-  entry), `ROADMAP.md` ×5, `testing.md` (B12 + a coverage-map row), and an
-  annotation on `notes/profile-2026-08-20.md`.
-
-**Decided**
-- **The differential is not the guard here.** Both callers re-check every
-  candidate, so an over-yield is invisible and only an under-yield loses answers —
-  B1 cannot see the failure mode this change has. B12b/B12c are the tests that
-  fail if contiguity breaks, and every recorded mutation is under-yielding.
-- **Secondary indexes are rejected for now, and priced.** The seek is the
-  relation's own column order, so a bound column that is not *leading* still
-  scans. Fixing it means a second copy of every relation on top of a recorder
-  already at 78% of peak RSS — which is the next decision, not this one.
-- **Body order is now 29×, where it was 2.0×.** `join_4000` written in the
-  pessimal atom order takes 0.86 s against 0.03 s, and the seek buys that order
-  *nothing*. The profile's "seeking makes body order matter more" has a number.
-  `schedule.rs` is deliberately untouched: reordering positive atoms is observable
-  on the error path, so it is its own session.
-
-**Removed**
-- **The per-group schedule hoist — written, measured, dropped.** `literal_order`
-  runs once per group inside the aggregate arm, and the guess was that the seek
-  would expose it. It is noise: 0.7% at `agg_50000`, unchanged at 50 000 groups of
-  one row each. A `Plan` type for a non-existent win, so it went back out.
-- `ROADMAP.md`'s aggregation item, subsumed and closed, and the interning item's
-  "memory if the seek goes first, time if not" conditional — now just *memory*.
-
-**Next up**
-- **The three-way decision session** (recorder / query surface / row provenance),
-  against this engine — but the 50–60% was measured on the prototype, so re-run it
-  against the shipped code first.
-- Still open: **E5**/**E6**, and `--no-default-features` does not pass its own
-  test suite (two temporal tests).

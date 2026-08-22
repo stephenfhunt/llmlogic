@@ -509,7 +509,10 @@ workaround and §16's preamble-vs-§16.4 contradiction fixed alongside.
   an agent reasons better with a logic engine, and §1 calls the three pillars
   "settled authority" for every decision in §17 — authority resting on a premise
   measured twice by eyeball. It is also the item most able to reorder everything
-  else here, which argues for early rather than first. _queued — **v1**: S1 names this as its instrument, so until it exists v1 is undefined rather than unfinished._ — skill,
+  else here, which argues for early rather than first. _**building** — **v1**: S1 names this as its instrument, so until it exists v1 is undefined rather than unfinished._
+  The harness is [`../experiments/`](../experiments/), its own top-level project;
+  two of seven domain packs are in and nothing has been measured yet, so `spec.md`
+  §1 still names `EXPERIMENTS.md` and will move when a run exists. — skill,
   `EXPERIMENTS.md`, [`notes/taking-stock-2026-08-18.md`](notes/taking-stock-2026-08-18.md).
 - **Other agent-exposure forms** — a Claude API agent-loop harness, and an MCP
   server. Both are deliberately waiting on a trigger: the skill (2026-07-23) is
