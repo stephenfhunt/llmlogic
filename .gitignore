@@ -9,3 +9,22 @@
 *.swp
 *.swo
 *~
+
+# Python projects (experiments/)
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# A run's verdicts and rendered report are the record and are committed; the full
+# per-cell agent transcripts behind them are large and are not (cf. the repo rule
+# against committing session transcripts). See experiments/decisions.md.
+experiments/results/*/transcripts/
+
+# Dry runs are the stub subject talking to itself. They exercise the pipeline;
+# they are not evidence, and results/ is for runs that measured something.
+experiments/results/dry-*/
+experiments/.workspaces/
+.hypothesis/

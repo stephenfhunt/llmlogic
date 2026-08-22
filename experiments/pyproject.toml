@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "llmlogic-experiments"
+version = "0.1.0"
+description = "Does an agent reason better with a logic engine? The harness that measures it."
+requires-python = ">=3.13"
+dependencies = [
+    "claude-agent-sdk",  # the subject: Claude Code as a library, so it has a filesystem and grep
+    "anthropic",         # cost accounting and token counting
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "hypothesis",  # domain fixtures are generated; the oracle is truth.py
+    "ruff",
+]
+
+[project.scripts]
+harness = "harness.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/harness"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

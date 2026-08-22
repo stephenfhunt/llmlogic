@@ -36,6 +36,7 @@ Each project is self-contained: its own build system, tests, and docs.
 | project | what it is | status |
 |---|---|---|
 | [`datalog/`](datalog/) | a Datalog engine in Rust for LLM/agent use, with fact-table imports from CSV / JSONL / Parquet / URLs | v1 core working end-to-end; ships as a [Claude Code](https://claude.com/claude-code) skill |
+| [`experiments/`](experiments/) | a harness that runs the same task twice — once by an agent with the engine, once by the same agent without it — and grades both against independently computed truth | being built; nothing measured yet |
 
 ## See it work
 
