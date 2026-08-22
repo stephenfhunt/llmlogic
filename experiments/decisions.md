@@ -15,6 +15,53 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-08-22** — **The `static_analysis` corpus is fetched and pinned, not
+  vendored, and it is Python.** A cell is sealed, so the tree has to be on disk
+  before the run starts; `harness corpus fetch` downloads a pinned sdist
+  (`sqlparse` 0.6.0, sha256-checked) into `~/.cache`, outside the checkout for
+  the same reason workspaces are. Vendoring would put a third-party licence in a
+  repo whose own licensing is deliberately unsettled.
+  - **`sqlparse` over `requests`**: a heavily memorized codebase lets a subject
+    answer from training instead of from the files, and nothing in the transcript
+    would distinguish the two.
+  - **Python rather than TypeScript**, which was the better *demo*: `tsc`'s API
+    is the nicer extractor, but control 1 requires a plain-Python `truth.py`, so
+    a TS corpus needs its oracle written over a hand-rolled TS parse. Stdlib
+    `ast` gives an oracle that is right by inspection, and the sealed workspace
+    already has it. Left as a post-v1 item.
+  - **The questions define their abstractions syntactically** — "called" means
+    the name is the callee of a call expression. Real name resolution is
+    ambiguous (`../datalog/skill/recipes/source-analysis.md` says so at length),
+    and a semantic oracle would be a guess the answers were then graded against.
+
+- **2026-08-22** — **Parquet ships as a redundant copy of a text table, never as
+  the only spelling of one.** The sealed workspace has system `python3` and
+  nothing else — no pyarrow, no duckdb, no network — so a Parquet-only relation
+  is a table the *prose arm cannot open*. Those cells would be decided by file
+  format, and the delta they contributed would not be a reasoning delta.
+  - So `imports` ships `order` as CSV **and** Parquet, the same rows in each, and
+    `catalogue.verify` checks the schema of every spelling and requires the row
+    counts to agree — otherwise the copy is decoration that can go stale.
+  - *Cost, accepted:* `pyarrow` becomes a dependency, for a file the experiment
+    never requires anyone to read.
+  - *Rejected:* dropping Parquet from v1 (§13's Parquet path then goes untested by
+    the instrument that exists to exercise it), and accepting the asymmetry.
+
+- **2026-08-22** — **A question is tuned in the fixture, never in the grader.**
+  Four cases turned up while building the five packs, each of which would have
+  produced a plausible number instead of an answer: a roster whose shifts tiled
+  the day cleanly had no double bookings at all; a region's "busiest month" was a
+  three-way tie, so the question had no single answer; every applicant with a
+  missing income also met every other criterion, so listing the blanks scored
+  correct; and no applicant was under age, so one criterion of four never decided
+  anything.
+  - **Two instruments for it**: values *planted* over the seeded ones where the
+    case is coverage (`eligibility`'s under-age applicant), and a *seed chosen by
+    search* where the case is a property of the whole draw (`imports` re-draws
+    until every region's busiest month is a strict maximum).
+  - **The tests carry the conditions**, so a reseed cannot quietly lose them —
+    `busiest_month_per_region` raises on a tie rather than picking one.
+
 - **2026-08-21** — **Cells are contained, and containment is a validity control
   before it is a safety one.** The first build had none: `permission_mode` was
   `bypassPermissions`, `sandbox` was unset, and workspaces sat in

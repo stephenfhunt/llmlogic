@@ -18,6 +18,9 @@ run", never "unwanted".
 ### Core
 
 - **Project skeleton** — docs, `pyproject.toml`, package layout. _shipped._
+- **Source corpora** — pinned sdists fetched by `harness corpus fetch` into the
+  cache outside the checkout, sha256-verified; a pack whose corpus is missing
+  says so instead of vanishing. _shipped._ — `corpus.py`.
 - **Core types + record store** — `Task`/`Episode`/`Cell`/`Record`, JSONL store,
   and a stub subject so the whole grid runs `--dry-run` offline. _shipped._ The
   offline grid is the CI gate: `harness run --dry-run --all`.
@@ -43,9 +46,18 @@ what makes the result readable, and a grid of one domain measures one domain.
 
 - **`access_control`** — _shipped._ Four tasks over a generated policy graph;
   truth is a BFS, property-checked against a fixpoint formulation.
-- **`ontology`**, **`imports`**, **`eligibility`**, **`scheduling`** — _queued._
-- **`static_analysis`** — _queued._ The agent extracts its own facts; carries the
-  `grep`-escape finding. — `../datalog/skill/recipes/source-analysis.md`.
+- **`ontology`** — _shipped._ Multiple inheritance, property overriding, and a
+  disjointness check over the same closure.
+- **`imports`** — _shipped._ Dates, aggregates and missing amounts across CSV,
+  JSONL and a redundant Parquet copy. — `decisions.md` 2026-08-22.
+- **`eligibility`** — _shipped._ Four criteria in prose, and the applicants a
+  missing income leaves undecided rather than refused.
+- **`scheduling`** — _shipped._ Interval overlap: double bookings, unstaffable
+  shifts, forced assignments, rest violations.
+- **`static_analysis`** — _shipped._ The agent extracts its own facts from a
+  pinned `sqlparse`; carries the `grep`-escape finding. Its questions define
+  their abstractions syntactically. — `../datalog/skill/recipes/source-analysis.md`,
+  `decisions.md` 2026-08-22.
 - **`controls`** — _shipped._ Four tasks: two single-hop lookups, two one-step.
   Without them a null result is indistinguishable from a broken instrument.
 
@@ -61,6 +73,13 @@ what makes the result readable, and a grid of one domain measures one domain.
 - **Doc-line ablation** — cut one named block from one cell's assembled workspace
   and re-run. _queued — **v1**: this is how a doc line is shown to carry weight
   rather than asserted to._ — `ablate.py`.
+- **TypeScript extraction** — a `tsc`-API fact extractor as a second
+  `static_analysis` corpus. The better demo; blocked as a *control* by control 1,
+  which wants a plain-Python oracle. _parked — **post-v1**._ — `decisions.md`
+  2026-08-22.
+- **A `static_analysis` ceiling case** — the pinned corpus is a whole small
+  package (~36K tokens, inside the budget). A corpus that does *not* fit the prose
+  arm's context is a separate, stated run. _queued — **post-v1**._
 - **Prompt caching** — stable fixture/system prefix behind a breakpoint; assert
   `cache_read_input_tokens` is non-zero across cells. _queued — **post-v1**
   (cost, not validity)._

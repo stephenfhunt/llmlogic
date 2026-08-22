@@ -47,10 +47,10 @@ than to sample topics.
 |---|---|---|
 | `access_control` | multi-hop, negation | generated policy graph |
 | `ontology` | recursion, subsumption | generated class/instance graph |
-| `imports` | aggregation, arithmetic, dates | CSV / Parquet through `datalog` §13 |
+| `imports` | aggregation, arithmetic, dates | CSV + JSONL, with a redundant Parquet copy |
 | `eligibility` | thresholds, negation, *why not* | generated rule set + applicants |
 | `scheduling` | constraint / search | generated roster |
-| `static_analysis` | recursion, negation | facts the agent extracts from a real repo |
+| `static_analysis` | recursion, negation | facts the agent extracts from a pinned real package |
 | `controls` | single-hop, one-step | tiny and closed — the negative controls |
 
 ## Running it
@@ -58,13 +58,14 @@ than to sample topics.
 ```sh
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e '.[dev]'
+harness corpus fetch                           # the pinned source corpus, once
 
 harness run --dry-run --all                    # full grid, stub subject, no API calls
 harness run --domain access_control --smoke    # one real cell, both arms, both strengths
 harness report results/<run-id>                # render to markdown
 ```
 
-A full grid is roughly 112 cells and **$35–40** — cheap enough to re-run whenever
+A full grid is 112 cells and **$35–40** — cheap enough to re-run whenever
 the skill's documentation changes, which is the point of building it rather than
 eyeballing it.
 

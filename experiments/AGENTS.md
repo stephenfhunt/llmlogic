@@ -48,6 +48,7 @@ Python 3.13, stdlib `venv` (`uv` is not installed on this machine; the
 ```sh
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e '.[dev]'
+harness corpus fetch     # `static_analysis`'s corpus; needs the network, a cell does not
 ```
 
 Auth: run `ant auth status` before assuming an API key is needed — a zero-arg
@@ -60,6 +61,7 @@ pytest                          # harness units + property tests
 harness run --dry-run --all     # the full grid, stub subject, zero API calls
 harness run --domain access_control --smoke   # one real cell, both arms
 harness report results/<run-id> # render a run to markdown
+harness domains                 # the slate, and why a pack is unavailable
 ruff check . && ruff format .   # lints + formatting — keep clean
 ```
 
