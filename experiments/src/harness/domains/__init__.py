@@ -34,9 +34,31 @@ SLATE = (
 )
 
 
+def _installed() -> set[str]:
+    return {module.name for module in pkgutil.iter_modules(__path__)}
+
+
+def blocked() -> dict[str, str]:
+    """Packs that exist but cannot run yet, and why.
+
+    A pack states its own prerequisite by exposing ``unavailable()`` — the one
+    case today is ``static_analysis``, whose corpus is fetched rather than
+    vendored. Reporting the reason rather than dropping the pack silently is the
+    difference between a grid that is smaller than it looks and a grid that says
+    so.
+    """
+    reasons = {}
+    for name in sorted(_installed()):
+        module = importlib.import_module(f"{__name__}.{name}")
+        check = getattr(module, "unavailable", None)
+        if check and (reason := check()):
+            reasons[name] = reason
+    return reasons
+
+
 def available() -> list[str]:
-    """Packs that actually exist yet, in slate order."""
-    present = {module.name for module in pkgutil.iter_modules(__path__)}
+    """Packs that exist *and* can run, in slate order."""
+    present = _installed() - set(blocked())
     return [name for name in SLATE if name in present]
 
 

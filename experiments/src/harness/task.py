@@ -29,6 +29,11 @@ QuestionClass = Literal[
 
 FIELD_SEPARATOR = "|"
 
+#: Formats a relation can arrive in — the §13 import formats the engine reads.
+#: A file with one of these suffixes is *data*, so it must have a declared
+#: schema; anything else in a fixture is an asset (a source tree, say).
+DATA_SUFFIXES = (".csv", ".jsonl", ".parquet")
+
 
 @dataclass(frozen=True)
 class Answer:
@@ -89,15 +94,65 @@ class Fixture:
     ``schemas`` is the source the prompt's relation catalogue is derived from
     (control 2): the catalogue is never written by hand, so a renamed field
     cannot silently change what the experiment measures.
+
+    A fixture carries two kinds of file. **Relations** are the declared schemas,
+    each backed by one or more data files — ``<relation>.csv`` by default, and
+    whatever ``sources`` names otherwise. **Assets** are everything else: a source
+    tree the subject extracts its own facts from has no schema, because inventing
+    one is the task.
     """
 
-    #: filename -> file contents, written verbatim into both arms' workspaces.
-    files: dict[str, str]
+    #: filename -> contents, written verbatim into both arms' workspaces. ``str``
+    #: is written as text, ``bytes`` verbatim (Parquet). Keys may be nested paths.
+    files: dict[str, str | bytes]
     #: relation name -> ordered field names, derived from the data, not prose.
     schemas: dict[str, tuple[str, ...]]
+    #: relation name -> every filename that carries it, for relations not stored
+    #: as a single ``<relation>.csv``. More than one spelling is allowed and is
+    #: how a table ships as text *and* as Parquet: the extra copy is redundant on
+    #: purpose, so no cell is decided by which formats an arm can open.
+    sources: dict[str, tuple[str, ...]] = field(default_factory=dict)
+
+    def spellings(self, relation: str) -> tuple[str, ...]:
+        return self.sources.get(relation, (f"{relation}.csv",))
+
+    def source(self, relation: str) -> str:
+        """The canonical file for a relation — the one row counts come from."""
+        return self.spellings(relation)[0]
+
+    def declared_sources(self) -> set[str]:
+        return {name for relation in self.schemas for name in self.spellings(relation)}
+
+    def assets(self) -> list[str]:
+        """Files that are not a relation — the source tree, if there is one."""
+        declared = self.declared_sources()
+        return sorted(
+            name for name in self.files if name not in declared and not name.endswith(DATA_SUFFIXES)
+        )
+
+    def text(self, filename: str) -> str:
+        """The contents of a text file. Raises on a binary one, which is the
+        point: nothing should be quietly decoding Parquet as UTF-8."""
+        contents = self.files[filename]
+        if isinstance(contents, bytes):
+            raise TypeError(f"{filename!r} is binary")
+        return contents
 
     def fact_count(self) -> int:
-        return sum(1 for text in self.files.values() for line in text.splitlines() if line.strip())
+        """Rows across the declared relations, headers excluded.
+
+        Assets are not facts — a source tree is what the subject extracts facts
+        *from*, and counting its lines here would make an extraction domain look
+        like the largest fact base in the slate.
+        """
+        total = 0
+        for relation in self.schemas:
+            filename = self.source(relation)
+            if filename.endswith(".parquet"):
+                continue
+            rows = len([ln for ln in self.text(filename).splitlines() if ln.strip()])
+            total += rows - 1 if filename.endswith(".csv") else rows
+        return total
 
 
 @dataclass(frozen=True)

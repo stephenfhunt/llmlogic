@@ -10,6 +10,7 @@ requires-python = ">=3.13"
 dependencies = [
     "claude-agent-sdk",  # the subject: Claude Code as a library, so it has a filesystem and grep
     "anthropic",         # cost accounting and token counting
+    "pyarrow",           # the `imports` fixture writes a real Parquet copy (decisions.md)
 ]
 
 [project.optional-dependencies]

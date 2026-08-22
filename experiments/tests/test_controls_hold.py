@@ -8,7 +8,7 @@ import pytest
 
 from harness import arms, domains
 from harness.catalogue import SchemaDrift, assemble, verify
-from harness.cell import HAIKU_4_5, OPUS_5, Cell
+from harness.cell import FIXTURE_TOKEN_BUDGET, HAIKU_4_5, OPUS_5, Cell
 from harness.domains.controls import fixture as controls_fixture
 from harness.domains.controls import tasks as controls_tasks
 from harness.task import Fixture
@@ -123,6 +123,22 @@ def test_no_task_ships_with_an_empty_truth():
         assert task.truth.rows, (
             f"{task.key} has an empty truth, so doing nothing scores correct. "
             "Change the fixture, not the grader."
+        )
+
+
+def test_no_fixture_defeats_the_prose_arm_on_size_alone():
+    # The engine arm keeps the fact base on disk; the prose arm has to hold it in
+    # context. A fixture over the budget therefore measures the context window,
+    # and the delta it produces is not a reasoning delta. Binary copies are not
+    # counted: nothing reads a Parquet file into a prompt.
+    for task in domains.load_all():
+        chars = sum(
+            len(contents) for contents in task.fixture.files.values() if isinstance(contents, str)
+        )
+        estimated = chars // 4
+        assert estimated < FIXTURE_TOKEN_BUDGET, (
+            f"{task.key}'s fixture is ~{estimated} tokens, over the "
+            f"{FIXTURE_TOKEN_BUDGET} budget in cell.py"
         )
 
 

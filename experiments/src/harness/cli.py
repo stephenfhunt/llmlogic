@@ -10,7 +10,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from harness import arms, domains, report
+from harness import arms, corpus, domains, report
 from harness.agent import (
     DEFAULT_MAX_BUDGET_USD,
     DEFAULT_MAX_TURNS,
@@ -89,10 +89,25 @@ def cmd_report(args: argparse.Namespace) -> int:
 
 def cmd_domains(_: argparse.Namespace) -> int:
     present = domains.available()
+    blocked = domains.blocked()
     for name in domains.SLATE:
         mark = "✓" if name in present else " "
         count = len(domains.load(name)) if name in present else 0
-        print(f" {mark} {name:<18} {count or '':>2} tasks")
+        note = f"  — {blocked[name]}" if name in blocked else ""
+        print(f" {mark} {name:<18} {count or '':>2} tasks{note}")
+    return 0
+
+
+def cmd_corpus(args: argparse.Namespace) -> int:
+    """Fetching needs the network, which is exactly why it is not part of a run:
+    a cell has none, and a corpus downloaded mid-grid would be a fixture that
+    changed under the experiment."""
+    for item in corpus.CORPORA:
+        if args.action == "fetch" and not item.present():
+            print(f"fetching {item.slug} from {item.url}", file=sys.stderr)
+            corpus.fetch(item)
+        state = "present" if item.present() else "missing"
+        print(f" {item.slug:<24} {state:<8} {item.root}")
     return 0
 
 
@@ -122,6 +137,12 @@ def main(argv: list[str] | None = None) -> int:
     rep.set_defaults(func=cmd_report)
 
     sub.add_parser("domains", help="list the slate and what exists").set_defaults(func=cmd_domains)
+
+    cor = sub.add_parser("corpus", help="fetch the pinned source corpora")
+    cor.add_argument(
+        "action", nargs="?", default="list", choices=("list", "fetch"), help="default: list"
+    )
+    cor.set_defaults(func=cmd_corpus)
 
     args = parser.parse_args(argv)
     return args.func(args)

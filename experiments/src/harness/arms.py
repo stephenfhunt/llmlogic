@@ -114,7 +114,14 @@ def build(cell: Cell, root: Path) -> Workspace:
     path = root / hashlib.sha256(cell.id.encode()).hexdigest()[:16]
     path.mkdir(parents=True, exist_ok=True)
     for filename, contents in cell.task.fixture.files.items():
-        (path / filename).write_text(contents, encoding="utf-8")
+        # Nested keys are how a fixture carries a source tree, and `bytes` is how
+        # it carries a Parquet copy; both arms get the same files either way.
+        destination = path / filename
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(contents, bytes):
+            destination.write_bytes(contents)
+        else:
+            destination.write_text(contents, encoding="utf-8")
 
     search_path = scrubbed_path()
     has_engine = cell.arm == "engine"

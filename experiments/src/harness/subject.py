@@ -39,7 +39,10 @@ class StubSubject:
         transcript = Transcript(cell_id=cell.id)
         turn = 0
 
-        for filename in sorted(cell.task.fixture.files):
+        # The declared relations only. A fixture that carries a source tree has
+        # dozens of files, and a stub that "reads" each of them would inflate
+        # every process signal in a dry run with turns no subject took.
+        for filename in sorted(cell.task.fixture.declared_sources()):
             turn += 1
             transcript.tool_calls.append(
                 ToolCall(turn, "Read", {"file_path": str(workspace.path / filename)})
