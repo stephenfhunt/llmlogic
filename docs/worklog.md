@@ -24,6 +24,57 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-23 — The corpus that pins, the paragraph that can be cut, and a diagnostic that lies
+
+Both remaining **v1** items for the first grid run, plus the bug the first one
+found on its first day. 195 tests green (+31), ruff clean, the 112-cell offline
+grid still renders.
+
+**Done**
+- **Reference corpus** (`experiments/reference/`) — seven correct programs, one
+  per domain, and five malformed ones pinned to their diagnostics. The five
+  domain programs from 2026-08-22 were **rescued out of a scratch directory**
+  before it was swept; `access_control` and `controls` were written and verified
+  this session. `harness reference [--repin]`, and a test that checks the pins
+  *and* every relation against the domain's plain-Python oracle.
+- **Doc-line ablation** — `<!-- block: name -->` in the skill, `harness run
+  --ablate <block>`, `harness blocks` to list them. Four marked. Markers are
+  stripped from every copy, ablated or not, and `cargo package-skill` strips them
+  too, so none reaches a subject or a bundle.
+- **`datalog/bugs/008`** — a rule-level type clash manufactures a *second*, false
+  diagnostic asserting the fact table holds values it does not. `union()` merges
+  the classes after reporting the conflict, and `finish()`'s declared-vs-inferred
+  sweep then reads the poisoned class. The accusation follows operand order,
+  which is the tell. Found while pinning the malformed half.
+- **Cheaper slices** — `--strength`, and `--ablate` implying the engine arm.
+
+**Decided**
+- **Run the grid before fixing count-distinct**, which was the session's opening
+  question. The trap is already documented in two places, and the ROADMAP's own
+  open question is *"`count distinct`, or document it harder"* — the run and the
+  ablation are the evidence that settles it. Fixing first spends a language-design
+  session on a call the run would inform, then wants a re-run.
+- **A pin is a tripwire, not an assertion of correctness** — so the corpus
+  re-checks every relation against the oracle, and a moved pin is a change in the
+  instrument to be read, never a red test that regenerates itself.
+- **Measured, and it sharpens the item**: over `sqlparse`, `widely_used` returns
+  **7 with a two-column `call` and 13 with a three-column one** — same rule text,
+  the extra column a line number it never mentions, exit 0, no warning.
+
+**Removed**
+- One test of my own writing, before it landed: a text-scan for "datalog" in the
+  oracles duplicated `test_truth_independence.py`, which already does it over the
+  AST and does it properly. Nothing else — the session was almost all new.
+
+**Next up**
+- **The pilot**: `harness run --domain controls --smoke --yes` (4 cells), then
+  `--domain access_control --yes` (16). Then read the transcripts and close the
+  two questions `decisions.md` says to settle against real ones — what *"reached
+  for it"* means, and whether `max_turns=30` ever binds.
+- Then the full grid, then rule on count-distinct from what it shows.
+- Still open: `008`, the JSON encoding, `--no-default-features`, §17's
+  period-arithmetic questions.
+
 ## 2026-08-22 — Five domains, and the grid reaches 112 cells
 
 Phase B: the five queued domain packs, so the slate stops being one measured
@@ -122,55 +173,3 @@ and the full grid runs offline against a stub subject with no API calls.
   says *building*, which is what is true.
 - Still open: the JSON encoding, `--no-default-features` failing two temporal
   tests, and §17's period-arithmetic questions.
-
-## 2026-08-21 — The surface that asks, and provenance stops being free of charge
-
-The three-way session `ROADMAP.md` had been sequencing — asking form, derivation
-store, row provenance — held as one and then built. **S5 is met**, and S1 is now
-the only unmet v1 criterion. 578 tests green, clippy and rustfmt clean.
-
-**Done**
-- **`?why` / `?whynot`** as §5 statements, in a file or inside a `-q` (one more
-  arm in the classifier, no new flag). Lexer sigils, a fifth `StatementKind`, a
-  groundness check in lowering, `RunResult.explanations`, `§16.6` and a new
-  `§16.15`, both pinned byte-for-byte by system tests.
-- **The failure trace** — `FailureTrace`/`NearMiss`/`Repair`, one entry per rule
-  whose head unifies, re-solved through `schedule.rs` via a probe threaded into
-  the *same* join the fixpoint runs. Five repair arms, four of which name no fact.
-- **Demand-provisioned recording** (`engine::Provenance`). Measured, `sparse_400`:
-  no goals **0.23 s / 44 MB**, `?why` **0.55 s / 202 MB** — 78% of peak RSS and
-  58% of wall clock, matching the profile's projection. A `?whynot` over an absent
-  fact pays nothing; over one that holds it re-runs the fixpoint and says so.
-- **Four properties**: **E9** (provisioning changes no answer, and an unrecorded
-  model says `Unrecorded`), **E10** (a near-miss holds against the model),
-  **E5** unblocked at last (comment-stripping), **E6** closed (E3 through
-  builtins, replaying in schedule order). All mutation-verified.
-
-**Decided**
-- **The sigil's real job is provisioning, not the cost hint.** Post-fixpoint the
-  engine knows whether the fact holds and needs no hint; *before* it, the sigil is
-  the only thing that says whether to record. That is the first argument for two
-  forms this project generated rather than adopted — and it makes the asking form
-  and "does the store earn its cost" **one decision**, not two.
-- **A query cannot stand in for `?whynot`.** The commonest why-not is about a
-  query that *succeeded*; the expectation is nowhere in the program, so only a
-  goal naming the missing fact carries it. §16.13 forecloses the implicit version
-  besides.
-- **Explanations are exit-code-neutral** — the exit-code twin of E5.
-- **Backwards extraction demoted to post-v1**: gating answers the store's cost by
-  proportioning it, at a fraction of the risk.
-
-**Removed**
-- ROADMAP's provenance section shrank from ~90 lines to ~55: the query-syntax and
-  derivation-store items collapsed into shipped entries, the row-anchor item's
-  stale "decide with the two items above" (both now ruled), and E3-over-builtins.
-- `api::expr_casts`, folded into `Program::reports_through_provenance` so the scan
-  and the provisioning test cannot drift.
-- §2's engine/surface scoping sentence and §16's "except §16.6's `?why` form".
-
-**Next up**
-- **S1** — `EXPERIMENTS.md` rebuilt as a harness, now the only unmet criterion.
-  Task 7 was added for the goals themselves; the predicted failure is not sigil
-  confusion but never asking.
-- Still open: the **JSON encoding** (parked, low value), `--no-default-features`
-  failing two temporal tests, and §17's period-arithmetic questions.
