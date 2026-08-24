@@ -1,0 +1,27 @@
+{
+  "run_id": "run-20260824T104501Z",
+  "started_at": "2026-08-24T10:45:01.754798+00:00",
+  "dry_run": false,
+  "domains": [
+    "access_control",
+    "controls",
+    "eligibility",
+    "imports",
+    "ontology",
+    "scheduling",
+    "static_analysis"
+  ],
+  "tasks": 28,
+  "cells": 112,
+  "strengths": [
+    "opus-5",
+    "haiku-4.5"
+  ],
+  "arms": [
+    "engine",
+    "prose"
+  ],
+  "ablate": null,
+  "max_turns": 30,
+  "max_budget_usd": 2.0
+}
