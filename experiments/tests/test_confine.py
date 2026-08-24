@@ -8,7 +8,12 @@ three directories up respectively.
 
 from pathlib import Path
 
+import pytest
+
+from harness import arms
+from harness.cell import OPUS_5, Cell
 from harness.confine import violation
+from harness.domains.controls import tasks as controls_tasks
 
 
 def _workspace(tmp_path: Path) -> Path:
@@ -85,3 +90,53 @@ def test_a_path_that_does_not_exist_is_not_flagged(tmp_path):
     # The subject writing a new file it has not created yet is ordinary.
     workspace = _workspace(tmp_path)
     assert violation("Write", {"file_path": str(workspace / "q.dl")}, workspace) is None
+
+
+# ---- A cell starts from an empty directory -----------------------------------
+#
+# Found on the first pilot (2026-08-23), and it is a grading failure rather than
+# an untidiness: `--dry-run` and a paid run derive the same directory from the
+# same cell id, so the stub's `answer.txt` was still there when the real subject
+# arrived. Two engine cells were graded on it.
+
+
+def test_a_rebuilt_workspace_has_no_trace_of_the_last_occupant(tmp_path):
+    if not (arms.DATALOG_BIN_DIR / "datalog").exists():
+        pytest.skip("datalog binary not built")
+    task = controls_tasks.tasks()[0]
+    cell = Cell(task, "engine", OPUS_5)
+
+    first = arms.build(cell, tmp_path)
+    (first.path / "answer.txt").write_text("wrong|answer\n")
+    (first.path / "q.dl").write_text("stale(1).\n")
+
+    second = arms.build(cell, tmp_path)
+    assert second.path == first.path, "the same cell should reuse the same name"
+    assert not (second.path / "answer.txt").exists(), (
+        "a stale answer file is what the next subject gets graded on"
+    )
+    assert not (second.path / "q.dl").exists()
+    # And the workspace is still whole.
+    assert (second.path / "employee.csv").exists()
+    assert (second.path / "bin" / "datalog").exists()
+    assert (second.path / ".claude" / "skills" / "datalog" / "SKILL.md").exists()
+
+
+def test_the_dry_run_and_a_paid_run_cannot_hand_each_other_an_answer(tmp_path):
+    # The exact shape of the pilot's contamination: the same cell id, built
+    # twice, with a stub answer left in between.
+    task = controls_tasks.tasks()[0]
+    cell = Cell(task, "prose", OPUS_5)
+    stub = arms.build(cell, tmp_path)
+    (stub.path / "answer.txt").write_text("engineering\n")  # what the stub writes
+    live = arms.build(cell, tmp_path)
+    assert not (live.path / "answer.txt").exists()
+
+
+def test_clearing_refuses_a_path_that_is_not_a_cell_workspace(tmp_path):
+    # The guard on an rmtree whose only safety is that the name came from a hash.
+    (tmp_path / "not-a-hash").mkdir()
+    with pytest.raises(ValueError, match="not a cell workspace name"):
+        arms._clear(tmp_path / "not-a-hash", tmp_path)
+    with pytest.raises(ValueError, match="not inside"):
+        arms._clear(tmp_path, tmp_path)

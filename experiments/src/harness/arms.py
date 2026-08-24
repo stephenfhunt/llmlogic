@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,6 +36,11 @@ DATALOG_SKILL_DIR = REPO_ROOT / "datalog" / "skill"
 WORKSPACE_ROOT = Path(
     os.environ.get("HARNESS_WORKSPACE_ROOT", Path.home() / ".cache" / "llmlogic-experiments")
 )
+
+
+#: A cell directory is the first 16 hex characters of a sha256. Nothing else in
+#: the workspace root is one, and `_clear` deletes nothing that is not.
+_WORKSPACE_NAME = re.compile(r"[0-9a-f]{16}")
 
 
 class EngineMissing(Exception):
@@ -109,6 +115,23 @@ def _copy_skill(destination: Path, ablate: str | None = None) -> None:
     apply_ablation(skill_root, ablate)
 
 
+def _clear(path: Path, root: Path) -> None:
+    """Delete a cell's directory, refusing anything that is not one.
+
+    The guard is not ceremony: this deletes a tree, and the only thing standing
+    between it and someone's home directory is that ``path`` was derived from a
+    hash a moment ago. Both conditions are cheap and neither can hold by accident.
+    """
+    if not path.exists():
+        return
+    resolved, base = path.resolve(), root.resolve()
+    if not resolved.is_relative_to(base) or resolved == base:
+        raise ValueError(f"refusing to clear {resolved}, which is not inside {base}")
+    if not _WORKSPACE_NAME.fullmatch(path.name):
+        raise ValueError(f"refusing to clear {resolved}: not a cell workspace name")
+    shutil.rmtree(resolved)
+
+
 def build(cell: Cell, root: Path) -> Workspace:
     """Materialize a cell's workspace. Raises if the engine arm has no engine."""
     verify(cell.task.fixture)
@@ -118,7 +141,18 @@ def build(cell: Cell, root: Path) -> Workspace:
     # `pwd` learns it is the engine arm of an experiment — and the whole design
     # rests on it not knowing that (control 3).
     path = root / hashlib.sha256(cell.id.encode()).hexdigest()[:16]
-    path.mkdir(parents=True, exist_ok=True)
+
+    # **A cell starts from an empty directory.** Reusing one is not a tidiness
+    # problem, it is a validity one: the previous occupant's `answer.txt` is
+    # still there, and a subject that fails to write its own is graded on it.
+    # Measured on the first pilot (2026-08-23) — `--dry-run` and a paid run
+    # derive the same directory from the same cell id, so two engine-arm cells
+    # were graded on the *stub's* answer: one scored wrong on its deliberately
+    # truncated one, one scored correct without doing the work. Contamination
+    # shows up exactly when the subject did not do the work, which is when the
+    # verdict matters most.
+    _clear(path, root)
+    path.mkdir(parents=True)
     for filename, contents in cell.task.fixture.files.items():
         # Nested keys are how a fixture carries a source tree, and `bytes` is how
         # it carries a Parquet copy; both arms get the same files either way.

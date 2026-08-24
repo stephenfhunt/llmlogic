@@ -15,6 +15,26 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-08-23** — **A cell starts from an empty directory.** Found by the first
+  paid pilot, which is what a pilot is for. A workspace is named by a hash of the
+  cell id, and `build` created it with `exist_ok=True` — so `--dry-run` and a paid
+  run derive the *same* directory, and the stub's `answer.txt` was still sitting
+  in it when the real subject arrived.
+  - **Two of sixteen cells were graded on the stub's answer.** One scored `wrong`
+    on the stub's deliberately-truncated truth; one scored `correct` without
+    doing the work. Both were engine-arm cells, so the contamination moved the
+    S1 delta in both directions at once.
+  - **The shape of it is the dangerous part**: a stale answer only survives when
+    the subject *fails to write its own*. So contamination appears exactly in the
+    cells where the subject did not do the work — the ones the verdict is about.
+    A run could look entirely healthy and be reporting the stub's numbers.
+  - `build` now clears the directory first, guarded on the path being inside the
+    workspace root and named like a cell (a 16-hex hash), because the only thing
+    between that `rmtree` and a home directory is a name derived a moment ago.
+  - **Not fixed by separating dry from paid roots**, which was the tempting
+    smaller change: re-running the same paid cell twice inherits just as badly,
+    and the failure would have come back the first time a run was repeated.
+
 - **2026-08-23** — **The reference corpus pins the engine's output *and* re-checks
   it against the oracle.** A pin alone records what the engine did; it cannot say
   whether that was right, and a pin over a wrong program actively defends the

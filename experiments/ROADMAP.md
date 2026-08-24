@@ -66,6 +66,9 @@ what makes the result readable, and a grid of one domain measures one domain.
 - **Cell containment** — workspaces outside the checkout, OS bash sandbox with the
   network denied, and a PreToolUse gate against paths that leave the workspace.
   _shipped_, verified on a real cell. — `confine.py`, `decisions.md` 2026-08-21.
+  A cell also starts from an **empty** directory: the first pilot found the
+  dry-run stub's `answer.txt` still in place for a paid cell, and graded two of
+  them on it. — `decisions.md` 2026-08-23.
 
 - **Reference corpus** — _shipped 2026-08-23._ Seven correct programs, one per
   domain, each answering that domain's four questions and pinned byte-exact; five
