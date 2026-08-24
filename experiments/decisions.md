@@ -258,6 +258,16 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Open questions
 
+- **"Reached for it" now has its first real transcript, and it splits the
+  question.** A haiku engine cell invoked the **`Skill` tool** with its whole
+  Datalog program in `args` — and nothing ran. `engine_use.uses_engine` counts
+  that as engine use, deliberately ("the strongest possible form of reaching"),
+  but the cell produced no answer of its own and was then graded on a file left
+  behind by an earlier run. So *reached for it*, *ran a program*, and *got an
+  answer out of it* are three signals, and the first one on its own is the least
+  informative of the three. Decide the enum on more than this one cell — but the
+  Skill-without-execution arm is now known to exist, and it is not a mis-parse.
+
 - **What counts as "reached for it"?** Writing a `.dl` file is clear; asking the
   engine one question and then answering from `grep` is the case the signal exists
   for, and a boolean will not carry it. `signals.py` therefore records counts and

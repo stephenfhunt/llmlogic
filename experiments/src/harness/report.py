@@ -109,7 +109,12 @@ def render(run_dir: Path) -> str:
         "Rows dropped, and nothing in the output says so.",
         f"- **Tool calls denied for leaving the workspace:** {denials}, across "
         f"{cells_with_denials} cells. A spike here is friction, not an attack — "
-        "it usually means the prompt or the fixture made leaving look necessary.",
+        "it usually means the prompt or the fixture made leaving look necessary. "
+        "**A floor, not a count**: only the PreToolUse gate records a denial, and "
+        "it flags an absolute path that already *exists*, so a write to a new path "
+        "outside the workspace is stopped by the OS sandbox and never counted "
+        "(seen on the first pilot). A low number is not evidence the subject "
+        "stayed put.",
         "",
     ]
     return "\n".join(lines)
