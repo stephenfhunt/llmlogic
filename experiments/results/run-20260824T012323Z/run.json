@@ -1,0 +1,21 @@
+{
+  "run_id": "run-20260824T012323Z",
+  "started_at": "2026-08-24T01:23:23.529622+00:00",
+  "dry_run": false,
+  "domains": [
+    "controls"
+  ],
+  "tasks": 1,
+  "cells": 4,
+  "strengths": [
+    "opus-5",
+    "haiku-4.5"
+  ],
+  "arms": [
+    "engine",
+    "prose"
+  ],
+  "ablate": null,
+  "max_turns": 30,
+  "max_budget_usd": 2.0
+}
