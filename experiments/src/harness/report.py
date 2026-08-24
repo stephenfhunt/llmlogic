@@ -12,6 +12,7 @@ from pathlib import Path
 
 from harness.cell import STRENGTHS
 from harness.record import RecordStore
+from harness.resume import failed
 
 _ARMS = ("engine", "prose")
 
@@ -50,20 +51,46 @@ def _table(records: list[dict], title: str) -> list[str]:
     return lines
 
 
-def render(run_dir: Path) -> str:
-    records = RecordStore.load(run_dir)
-    if not records:
-        return f"# {run_dir.name}\n\nNo records.\n"
+def latest(records: list[dict]) -> list[dict]:
+    """One record per cell, the last attempt winning, in first-seen order.
 
-    graded = [r for r in records if r["verdict"] != "error"]
+    A resumed run holds every attempt at a cell — the errored one that stopped
+    the grid and the one that finished it. Both stay in ``records.jsonl``, which
+    is the record of what happened; the report is the reading of it, and a cell
+    counted twice would weight one question against the rest.
+    """
+    seen: dict[str, dict] = {}
+    for record in records:
+        seen[record["cell_id"]] = record
+    return list(seen.values())
+
+
+def render(run_dir: Path) -> str:
+    attempts = RecordStore.load(run_dir)
+    if not attempts:
+        return f"# {run_dir.name}\n\nNo records.\n"
+    records = latest(attempts)
+
+    graded = [r for r in records if not failed(r)]
     controls = [r for r in graded if not r["engine_expected_to_help"]]
     measured = [r for r in graded if r["engine_expected_to_help"]]
 
     lines = [f"# {run_dir.name}", ""]
     lines.append(
-        f"{len(records)} cells · {sum(r['cost_usd'] for r in records):.2f} USD · "
-        f"{sum(1 for r in records if r['verdict'] == 'error')} errored"
+        f"{len(records)} cells · {sum(r['cost_usd'] for r in attempts):.2f} USD · "
+        f"{sum(1 for r in records if failed(r))} errored"
     )
+    resumed = len(attempts) - len(records)
+    if resumed:
+        lines.append("")
+        lines.append(
+            f"**Resumed**: {resumed} cell{'s' if resumed != 1 else ''} were run a "
+            "second time after the first attempt was cut short, and are counted "
+            "once, at their later attempt. The cost above is everything the run "
+            "spent, including the attempts that produced nothing. A grid measured "
+            "across more than one session window is still one grid, but it was not "
+            "one sitting."
+        )
     lines.append("")
 
     lines += _table(measured, "S1 — the measured slate")

@@ -11,7 +11,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from harness import ablate, arms, corpus, domains, reference, report
+from harness import ablate, arms, corpus, domains, reference, report, resume
 from harness.agent import (
     DEFAULT_MAX_BUDGET_USD,
     DEFAULT_MAX_TURNS,
@@ -31,6 +31,8 @@ def _progress(index: int, total: int, record) -> None:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
+    if args.resume:
+        return cmd_resume(args)
     names = args.domain or None
     tasks = domains.load_all(names)
     if not tasks:
@@ -63,6 +65,8 @@ def cmd_run(args: argparse.Namespace) -> int:
             return 1
 
     cells = grid(tasks, strengths, cell_arms, args.ablate)
+    if args.limit:
+        cells = cells[: args.limit]
 
     # A real run spends money on someone's account, so it says how much it could
     # cost and refuses to start without being told to. The store is built after
@@ -101,7 +105,89 @@ def cmd_run(args: argparse.Namespace) -> int:
     simulated = " (simulated)" if args.dry_run else ""
     print(f"\n{len(result.records)} cells · {result.cost_usd:.2f} USD{simulated}")
     print(f"report: {path}")
-    return 0
+    return _halted(result, store.dir, len(cells))
+
+
+def _halted(result, run_dir: Path, planned: int) -> int:
+    """Say what stopped the grid and how to pick it up. Exit 3, not 0: a run that
+    stopped early is not a run that finished, and a caller scripting a session
+    should be able to tell without parsing the report."""
+    if not result.halted:
+        return 0
+    print(
+        f"\nHALTED after {len(result.records)} of {planned} cells — {result.halted}\n"
+        f"The remaining cells were not run and not recorded. Resume with:\n"
+        f"  harness run --resume {run_dir} --yes",
+        file=sys.stderr,
+    )
+    return 3
+
+
+def cmd_resume(args: argparse.Namespace) -> int:
+    """Finish a run that stopped, appending into its own directory.
+
+    The grid is rebuilt from the run's own ``run.json`` rather than from the
+    flags given now — resuming with a different slate would silently make the two
+    halves different experiments.
+    """
+    run_dir = Path(args.resume)
+    if not run_dir.is_absolute():
+        run_dir = Path.cwd() / run_dir
+    try:
+        meta = resume.metadata(run_dir)
+    except resume.NotResumable as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    tasks = domains.load_all(meta["domains"])
+    strengths = tuple(s for s in STRENGTHS if s.name in set(meta["strengths"]))
+    cell_arms = tuple(meta["arms"])
+    cells = grid(tasks, strengths, cell_arms, meta.get("ablate"))
+    if len(cells) != meta["cells"]:
+        print(
+            f"the grid rebuilt to {len(cells)} cells but the run recorded "
+            f"{meta['cells']} — the slate has changed under it, so resuming would "
+            "join two different experiments. Start a new run.",
+            file=sys.stderr,
+        )
+        return 1
+
+    unknown = resume.strangers(cells, run_dir)
+    if unknown:
+        print(
+            f"{len(unknown)} recorded cell(s) are not in the rebuilt grid — e.g. "
+            f"{sorted(unknown)[0]}. The slate has changed under this run, so "
+            "resuming would join two different experiments. Start a new run.",
+            file=sys.stderr,
+        )
+        return 1
+
+    owed = resume.outstanding(cells, run_dir)
+    if not owed:
+        print(f"{run_dir.name} is complete — {len(cells)} cells, nothing outstanding.")
+        print(f"report: {report.write(run_dir)}")
+        return 0
+    if args.limit:
+        owed = owed[: args.limit]
+
+    budget = meta.get("max_budget_usd", args.budget)
+    max_turns = meta.get("max_turns", args.max_turns)
+    print(
+        f"{len(owed)} of {len(cells)} cells outstanding in {run_dir.name} — "
+        f"ceiling {len(owed) * budget:.2f} USD.",
+        file=sys.stderr,
+    )
+    if not args.yes:
+        print("re-run with --yes to spend it.", file=sys.stderr)
+        return 2
+
+    store = RecordStore(RESULTS_ROOT, run_dir.name)
+    subject = AgentSubject(max_turns=max_turns, max_budget_usd=budget)
+    result = run_grid(owed, subject, store, WORKSPACE_ROOT, on_cell=_progress)
+    path = report.write(store.dir)
+    print(f"\n{len(result.records)} cells resumed · {result.cost_usd:.2f} USD")
+    print(f"report: {path}")
+    return _halted(result, store.dir, len(owed))
 
 
 def cmd_report(args: argparse.Namespace) -> int:
@@ -225,6 +311,18 @@ def main(argv: list[str] | None = None) -> int:
         metavar="BLOCK",
         help="cut a named documentation block from the engine arm's skill "
         "(`harness blocks` lists them); implies engine arm only",
+    )
+    run.add_argument(
+        "--resume",
+        metavar="RUN_DIR",
+        help="finish a run that stopped: re-run the cells it is missing or "
+        "recorded as ERROR, appending into the same run directory",
+    )
+    run.add_argument(
+        "--limit",
+        type=int,
+        help="stop cleanly after N cells, so a run can be sized to the session "
+        "window instead of discovering its edge",
     )
     run.add_argument("--yes", action="store_true", help="required to start a paid run")
     run.set_defaults(func=cmd_run)
