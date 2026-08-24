@@ -109,12 +109,28 @@ criterion rather than an assumption.
 
 | | criterion | instrument | today |
 |---|---|---|---|
-| **S1** | An agent answering multi-hop, recursive or constraint questions is measurably more accurate **with** the engine than reasoning in prose — at two model strengths, first program recorded before any feedback. | `EXPERIMENTS.md`, rebuilt as a harness (ROADMAP) | **unmeasured** |
+| **S1** | An agent answering multi-hop, recursive or constraint questions is measurably more accurate **with** the engine than reasoning in prose — at two model strengths, first program recorded before any feedback. | the `experiments/` harness | **measured 2026-08-24 — null**; read the note below before citing it |
 | **S2** | The engine's stdout is valid input to the engine, byte-for-byte. | property **D2**, `print::tests::corpus_round_trips` | met |
 | **S3** | A rejected program can be repaired from the diagnostic alone, without reading the spec. | §12's fields; the near-miss corpus (§3) | met for lex/parse; **scoped** (§2) |
 | **S4** | A question over a real external table is answerable end-to-end with no preprocessing step. | §13 + the USDA dogfood | met (dates included, 2026-08-19) |
 | **S5** | Every fact in an answer can be explained **through the surface the caller used**. | §11's goal form (§16.6, §16.15), its system tests, **E5** | met (2026-08-21) |
 | **S6** | No *exponent* worse than a comparable engine on the shared corpus. | `notes/cross-engine-benchmark.md`, re-measured in `notes/profile-2026-08-20.md` | met |
+
+**S1's first measurement, and what it does not say.** A 112-cell grid on
+2026-08-24 (`../experiments/results/run-20260824T104501Z/`) put both arms at
+**41/48**, a delta of **+0 points**; striking out one domain whose questions the
+run itself proved ambiguous, **38/40 against 38/40**. The negative controls came
+back 8/8 in both arms, so the null is not a broken instrument.
+
+It is a null about **supplying** the engine, not about **using** it. The engine
+arm reached for the engine in **9 of 56 cells** — opus in 1, haiku in 8 — so the
+independent variable was barely manipulated, and every incorrect answer on the
+live slate came from a cell that wrote no program. The live slate is also at a
+ceiling both arms reach without help. Two consequences: *"does the agent pick the
+engine up at all?"* is upstream of anything this criterion asks, and a slate that
+separates the arms has to be harder than one opus answers 20/20 in prose. Neither
+is a reason to call S1 unmeasured — the criterion asks that the experiment was
+run — but citing the null without them overstates it.
 
 ### What v1 means
 
@@ -2733,6 +2749,15 @@ never say.
     the *machine-readable edge* (no JSON for a proof or a trace, no stable
     diagnostic code). S1 remains the only unmet criterion, which is what v1 now
     turns on.
+  - ***Consequences 2026-08-24*** — **S1 has been measured, and the criterion
+    held up exactly as written.** The result is null (§1), and the deliberate
+    choice above — that the experiment was *run*, not that it came out favourably
+    — is what let it be recorded as a finding instead of a reason to keep the
+    grid running until it said something. What the criterion did **not**
+    anticipate: the engine arm reached for the engine in 9 of 56 cells, so a null
+    on *supplying* the engine is most of what a first measurement can buy. That
+    is a gap in the instrument's slate, not in the criterion, and it is where the
+    next measurement goes. — `../experiments/decisions.md` 2026-08-24.
 
 - **2026-08-18** — **§6 accounts for the whole language, and a run that errors has
   no model** (§4/§6/§8/§9; long form in
