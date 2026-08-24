@@ -102,11 +102,40 @@ what makes the result readable, and a grid of one domain measures one domain.
   narrows to the engine arm, so a pilot need not be the whole crossing.
   _shipped 2026-08-23._ — `cli.py`, `cell.grid`.
 
+- **A failed cell is not a wrong answer** — a subject that reported an error
+  grades `ERROR` and leaves every denominator, and the rule is applied when
+  reading a record as well as when writing one, so runs recorded before it are
+  read correctly without `results/` being rewritten. _shipped 2026-08-24._
+  — `runner.run_cell`, `resume.failed`, `decisions.md` 2026-08-24.
+
+- **Sessions, not sittings** — a full grid does not fit in one five-hour window
+  alongside the session driving it, so `run_grid` halts on a session or rate
+  limit rather than recording phantom cells, `--resume <run-dir>` finishes a run
+  into its own directory, and `--limit N` sizes a sitting to the window. The
+  report counts each cell once and says how many were resumed.
+  _shipped 2026-08-24._ — `resume.py`, `cli.cmd_resume`, `report.latest`.
+
+- **`Record` should carry `cache_creation_tokens`** — `Usage` captures it and the
+  record drops it, so a run cannot explain its own cost and the pilot's
+  `$0.07/cell` took three fields and half an hour to re-derive as a warmed
+  number. _queued — **post-v1** (legibility, not validity)._
+  — `decisions.md` 2026-08-24.
+
 ### Later
 
 - **The game arm** — an `Environment` (`reset`/`observe`/`step`/`score`) of which
   a single-shot task is an episode of length 1. Minesweeper first: deduction is
   provably the bottleneck, scoring is objective, no opponent to model. The core
   must not foreclose it; nothing more is built now. _parked — **post-v1**._
+- **A local-model subject** — `Subject` is a protocol with two implementations
+  already (`StubSubject`, `AgentSubject`); a locally-hosted model is a third, and
+  costs a window of nothing to run. The reason to want it is what the grid keeps
+  showing: **the signal lives at the weak end.** Opus answers correctly without
+  reaching for the engine, so a strength below haiku is where "does the engine
+  help?" has room to be answered at all — and small distilled models are the
+  cheapest check that the instrument discriminates rather than measuring a
+  ceiling. Hardware is limited; a run that takes all night costs nothing but the
+  night. _parked — **post-v1**._
+
 - **Second engine** — the harness measures one engine against its own absence. A
   second engine as a third arm is a different question. _parked — **post-v1**._

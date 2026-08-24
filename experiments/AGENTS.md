@@ -60,12 +60,21 @@ client picks up an active profile. Do not ask for a key that is already there.
 pytest                          # harness units + property tests
 harness run --dry-run --all     # the full grid, stub subject, zero API calls
 harness run --domain access_control --smoke   # one real cell, both arms
+harness run --resume results/<run-id>  # finish a run the session window cut off
 harness report results/<run-id> # render a run to markdown
 harness domains                 # the slate, and why a pack is unavailable
 harness reference               # the pinned reference corpus; `--repin` to adopt a diff
 harness blocks                  # the doc blocks `run --ablate` can cut
 ruff check . && ruff format .   # lints + formatting — keep clean
 ```
+
+**A full grid is run over several sessions, not one sitting.** The subject
+authenticates through the Claude Code subscription, so the binding budget is the
+account's five-hour window — shared with the session driving the run — and not
+money. `run_grid` halts on a session or rate limit instead of recording phantom
+cells; `--resume` re-runs what a run is missing or failed, appending to the same
+directory; `--limit N` sizes a sitting to the window. See `decisions.md`
+2026-08-24.
 
 **`--dry-run` is the CI gate.** The whole grid must execute offline against the
 stub subject and render a report without one API call; a change that can only be

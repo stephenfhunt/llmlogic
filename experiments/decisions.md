@@ -15,6 +15,62 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-08-24** — **A cell whose subject reported an error is `ERROR`, and is
+  excluded — even when an `answer.txt` on disk would parse.** The first full grid
+  ran out of the account's five-hour session window at cell 67. `AgentSubject.run`
+  catches the SDK failure into `transcript.error` and returns normally, so the
+  runner graded the empty workspaces it left behind: **46 cells recorded as
+  `no-answer`**, which counts against the arm in every denominator.
+  - **The report said "0 errored" while 46 had.** `controls` and
+    `static_analysis` read `0/8` in both arms — a whole domain of the negative
+    controls reading as total failure — and the headline delta was computed over
+    denominators padded with cells that never ran. Same species as the two pilot
+    defects: **the run went on producing plausible numbers after it stopped
+    measuring anything.**
+  - **Excluded rather than salvaged**, because grading an answer left by a cell
+    that then failed makes the verdict depend on where in the turn sequence the
+    failure landed. One cell today would have been salvageable. The raw text is
+    kept on the record so a discarded cell can still be read.
+  - **The rule is applied when reading, not only when writing** (`resume.failed`):
+    a record carrying an `error` is failed whatever its verdict says. That is what
+    lets the 46 be read correctly without rewriting one line of `results/`.
+
+- **2026-08-24** — **The pilot's `$0.07/cell` was a *warmed* number, and a record
+  cannot explain its own cost.** Identical `access_control` cells cost 2–4× more
+  in the full grid than in the 2026-08-23 pilot at the *same* turn counts and
+  *lower* cache-read tokens — `who-can-read-r03.engine.opus-5` went `$0.051` to
+  `$0.182`, turns 2 both times. The pilot ran ~14 minutes after the void run over
+  the same grid, so its prefixes were already written and it paid reads where a
+  cold run pays writes.
+  - The residual has to be cache **creation**, and nothing in `results/` can show
+    that: `Usage` captures `cache_creation_tokens` and `Record` drops it. Half an
+    hour went into re-deriving from three fields what one recorded field would
+    have stated. Queued on the ROADMAP.
+  - **Consequences** for the parked *prompt caching* item: asserting
+    `cache_read_input_tokens` is non-zero is the wrong assertion. The reads were
+    never the cost.
+
+- **2026-08-24** — **A session limit ends the run, not the cell — and the budget
+  is a window, not dollars.** There is no `ANTHROPIC_API_KEY` here; the subject
+  authenticates through the Claude Code subscription, so a run's `USD` figure is
+  notional accounting and the real constraint is the five-hour window it shares
+  with the session driving it. 66 cells consumed one window in **35 minutes** of
+  wall time. Wall time was never the limit.
+  - `run_grid` halts on a fatal error (`session limit`, `rate limit`, `429`) and
+    records nothing after it, so those cells stay *owed* rather than being filed
+    as phantom verdicts. Anything unmatched stays per-cell: guessing an unknown
+    error is fatal would stop a run that could have finished.
+  - **`--resume` is therefore the ordinary shape of a run, not a recovery path.**
+    A 112-cell grid does not fit in one window alongside a working session. It
+    re-runs the cells a run is missing or failed, appending to the same run
+    directory — one run id stays one grid — and rebuilds the slate from that
+    run's own `run.json`, because resuming with today's flags could silently join
+    two different experiments. `--limit N` sizes a sitting to the window.
+  - **Append-only survives it**: every attempt stays in `records.jsonl` in the
+    order it happened, and the report reads the last record per cell and says how
+    many were resumed. A grid measured across two windows is still one grid, but
+    it was not one sitting.
+
 - **2026-08-23** — **A cell starts from an empty directory.** Found by the first
   paid pilot, which is what a pilot is for. A workspace is named by a hash of the
   cell id, and `build` created it with `exist_ok=True` — so `--dry-run` and a paid
