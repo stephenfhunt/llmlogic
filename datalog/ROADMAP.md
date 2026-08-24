@@ -45,7 +45,10 @@ each; detail in §17 and `docs/worklog.md`.
 
 ## Open backlog
 
-> **Open defects live in [`bugs/`](bugs/)** — **none open as of 2026-08-20**.
+> **Open defects live in [`bugs/`](bugs/)** — **one open as of 2026-08-23**:
+> `008`, a rule-level type clash that manufactures a second, *false* diagnostic
+> about the fact table. Found while pinning `experiments/`'s malformed reference
+> corpus, which is what that corpus is for.
 > **No design session blocks anything** either: §6's extension, the last one,
 > shipped 2026-08-18.
 >
