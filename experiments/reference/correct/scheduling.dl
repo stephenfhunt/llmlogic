@@ -1,0 +1,32 @@
+import "shift.csv" as shift.
+import "qualified.csv" as qualified.
+import "unavailable.csv" as unavailable.
+import "assignment.csv" as assignment.
+
+overlap(A, B) :- shift(id: A, start: S1, end: E1), shift(id: B, start: S2, end: E2),
+                 A != B, S1 < E2, S2 < E1.
+
+% 1 — double booked
+double_booked(P, A) :- assignment(person: P, shift: A), assignment(person: P, shift: B),
+                       overlap(A, B).
+
+% 2 — nobody can work it
+can_work(P, S) :- shift(id: S, role: R), qualified(person: P, role: R),
+                  not unavailable(person: P, shift: S).
+unstaffable(S) :- shift(id: S), not covered(S).
+covered(S) :- can_work(_, S).
+
+% 3 — exactly one candidate
+candidates(S, N) :- shift(id: S), N = count { P | can_work(P, S) }.
+forced(S, P) :- candidates(S, 1), can_work(P, S).
+
+% 4 — less than ten hours between shifts
+rest_violation(P, L) :- assignment(person: P, shift: L), assignment(person: P, shift: E),
+                        L != E, shift(id: L, start: LS), shift(id: E, end: EE),
+                        not overlap(L, E), LS >= EE, LS < EE + @10h.
+
+% The four answers, in task order.
+?- double_booked(P, S).
+?- unstaffable(S).
+?- forced(S, P).
+?- rest_violation(P, S).

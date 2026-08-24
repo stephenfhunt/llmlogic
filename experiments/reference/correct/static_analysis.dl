@@ -1,0 +1,27 @@
+import "module.jsonl" as module.
+import "fn_def.jsonl" as fn_def.
+import "call.jsonl" as call.
+import "import_edge.jsonl" as import_edge.
+import "class_base.jsonl" as class_base.
+
+% 1 — defined at module level, never called
+called(F) :- call(name: F).
+never_called(F) :- fn_def(name: F), not called(F).
+
+% 2 — modules in no cycle
+reaches(A, B) :- import_edge(module: A, target: B).
+reaches(A, C) :- import_edge(module: A, target: B), reaches(B, C).
+outside(M) :- module(module: M), not reaches(M, M).
+
+% 3 — subclasses of Token, transitively
+sub_token(C) :- class_base(class: C, base: "Token").
+sub_token(C) :- class_base(class: C, base: B), sub_token(B).
+
+% 4 — called from two or more modules
+widely_used(F) :- fn_def(name: F), N = count { M | call(name: F, module: M) }, N >= 2.
+
+% The four answers, in task order.
+?- never_called(F).
+?- outside(M).
+?- sub_token(C).
+?- widely_used(F).

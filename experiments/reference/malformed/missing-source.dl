@@ -1,0 +1,5 @@
+% An import naming a file that is not in the workspace. The commonest way a
+% first program fails: the subject guessed the filename.
+import "nowhere.csv" as thing.
+big(X) :- thing(id: X).
+?- big(X).

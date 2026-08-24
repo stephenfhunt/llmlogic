@@ -1,0 +1,34 @@
+import "applicant.csv" as applicant.
+import "dependant.csv" as dependant.
+import "sanction.csv" as sanction.
+
+sanctioned(A) :- sanction(applicant: A).
+
+fail(A, "age")       :- applicant(id: A, age: Ag), Ag < 21.
+fail(A, "income")    :- applicant(id: A, income: I), I is not absent, I >= 32000.
+fail(A, "residency") :- applicant(id: A, residency_years: R), R < 3.
+fail(A, "sanction")  :- applicant(id: A), sanctioned(A).
+
+known(A) :- applicant(id: A, income: I), I is not absent.
+
+% 1 — qualifies
+eligible(A) :- applicant(id: A), known(A), not blocked(A).
+blocked(A) :- fail(A, _).
+
+% 2 — fails exactly one, and which
+fail_count(A, N) :- applicant(id: A), N = count { C | fail(A, C) }.
+blocked_by_one(A, C) :- fail_count(A, 1), fail(A, C), known(A).
+
+% 3 — no income, everything else met
+undetermined(A) :- applicant(id: A, income: I), I is absent, not blocked(A).
+
+% 4 — households over four dependants
+household_count(H, N) :- applicant(household: H),
+    N = count { D | dependant(id: D, applicant: A), applicant(id: A, household: H) }.
+big_household(H) :- household_count(H, N), N > 4.
+
+% The four answers, in task order.
+?- eligible(A).
+?- blocked_by_one(A, C).
+?- undetermined(A).
+?- big_household(H).

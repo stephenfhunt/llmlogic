@@ -63,11 +63,21 @@ harness corpus fetch                           # the pinned source corpus, once
 harness run --dry-run --all                    # full grid, stub subject, no API calls
 harness run --domain access_control --smoke    # one real cell, both arms, both strengths
 harness report results/<run-id>                # render to markdown
+
+harness reference                              # the pinned corpus still answers the same
 ```
 
 A full grid is 112 cells and **$35–40** — cheap enough to re-run whenever
 the skill's documentation changes, which is the point of building it rather than
 eyeballing it.
+
+## The reference corpus
+
+[`reference/`](reference/) pins what the engine prints for a known-correct
+program in each domain, and what it prints for a malformed one. The harness
+measures an agent against an engine that moves under it, so two runs are the same
+measurement only if the engine answered the same way in between; nothing else
+here checks that.
 
 ## What this is not
 

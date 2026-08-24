@@ -1,0 +1,4 @@
+% An argument list left open. The diagnostic has to carry a position, or a
+% subject cannot find it in a program it just wrote.
+edge(a, b).
+path(X, Y) :- edge(X, Y

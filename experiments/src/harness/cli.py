@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import argparse
 import sys
+import tempfile
 from pathlib import Path
 
-from harness import arms, corpus, domains, report
+from harness import arms, corpus, domains, reference, report
 from harness.agent import (
     DEFAULT_MAX_BUDGET_USD,
     DEFAULT_MAX_TURNS,
@@ -111,6 +112,55 @@ def cmd_corpus(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_reference(args: argparse.Namespace) -> int:
+    """Run the pinned corpus; with ``--repin``, adopt what it printed.
+
+    Reading the diff is the whole job. A pin that moved is a change in the
+    instrument, and the run before it and the run after it are no longer the same
+    measurement — so `--repin` is a separate, deliberate act, never something a
+    red test does on its own.
+    """
+
+    entries = reference.correct() + reference.malformed()
+    moved = 0
+    for entry in entries:
+        fixture = None
+        if entry.domain:
+            tasks = domains.load_all([entry.domain])
+            if not tasks:
+                print(f"{entry.name:24} skipped (no corpus)", file=sys.stderr)
+                continue
+            fixture = tasks[0].fixture
+        with tempfile.TemporaryDirectory() as scratch:
+            workdir = Path(scratch)
+            reference.materialize(entry, fixture, workdir)
+            result = reference.run(entry, workdir)
+        drift = [
+            name
+            for name, got, want in (
+                ("stdout", result.stdout, entry.stdout if entry.domain else ""),
+                ("stderr", result.stderr, entry.stderr),
+            )
+            if got != want
+        ]
+        if args.repin:
+            reference.repin(entry, result)
+        state = (
+            "repinned"
+            if (drift and args.repin)
+            else ("MOVED: " + ", ".join(drift) if drift else "ok")
+        )
+        moved += bool(drift)
+        print(f"{entry.name:24} exit={result.exit_code} {state}")
+    if moved and not args.repin:
+        print(
+            f"\n{moved} entr{'y' if moved == 1 else 'ies'} moved — look before `--repin`.",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="harness", description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -137,6 +187,12 @@ def main(argv: list[str] | None = None) -> int:
     rep.set_defaults(func=cmd_report)
 
     sub.add_parser("domains", help="list the slate and what exists").set_defaults(func=cmd_domains)
+
+    ref = sub.add_parser("reference", help="run the pinned reference corpus")
+    ref.add_argument(
+        "--repin", action="store_true", help="adopt what it printed — read the diff first"
+    )
+    ref.set_defaults(func=cmd_reference)
 
     cor = sub.add_parser("corpus", help="fetch the pinned source corpora")
     cor.add_argument(

@@ -15,6 +15,24 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-08-23** — **The reference corpus pins the engine's output *and* re-checks
+  it against the oracle.** A pin alone records what the engine did; it cannot say
+  whether that was right, and a pin over a wrong program actively defends the
+  error. So `tests/test_reference_corpus.py` runs each program once and asserts
+  twice: every relation against the domain's plain-Python truth, then stdout and
+  stderr byte-for-byte.
+  - **What it is a tripwire for**: the harness measures an agent against an
+    engine that moves under it, and two grid runs are the same measurement only
+    if the engine answered the same way in between. Nothing else here checked
+    that. A pin that moves is therefore *not* a regression by default — it is a
+    change in the instrument, to be read and then re-pinned deliberately
+    (`harness reference --repin`), never by a red test regenerating itself.
+  - **The malformed half is the half that earned it.** Correct programs cannot
+    pin what the tool does when a run goes wrong, which is most of what a subject
+    reads while getting its program right — and pinning five of them on the first
+    day turned up `../datalog/bugs/008`, a diagnostic that makes a false claim
+    about the fact table.
+
 - **2026-08-22** — **The `static_analysis` corpus is fetched and pinned, not
   vendored, and it is Python.** A cell is sealed, so the tree has to be on disk
   before the run starts; `harness corpus fetch` downloads a pinned sdist

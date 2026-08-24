@@ -1,0 +1,6 @@
+carol_department("engineering").
+o3_customer("acme").
+large_order("o2").
+large_order("o4").
+large_order("o5").
+engineering_headcount(3).

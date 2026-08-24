@@ -67,9 +67,13 @@ what makes the result readable, and a grid of one domain measures one domain.
   network denied, and a PreToolUse gate against paths that leave the workspace.
   _shipped_, verified on a real cell. — `confine.py`, `decisions.md` 2026-08-21.
 
-- **Reference corpus** — correct programs pinned byte-exact **and** a malformed
-  corpus with expected diagnostics. A corpus of correct programs cannot pin what a
-  tool does when a run goes wrong. _queued — **v1**._
+- **Reference corpus** — _shipped 2026-08-23._ Seven correct programs, one per
+  domain, each answering that domain's four questions and pinned byte-exact; five
+  malformed ones pinned to their diagnostic. The test checks both the pins *and*
+  every relation against the domain's plain-Python oracle, because a pin over a
+  wrong program defends the error. `harness reference [--repin]`.
+  — `reference/README.md`, `src/harness/reference.py`. It earned itself on the
+  first day: pinning the malformed half found `../datalog/bugs/008`.
 - **Doc-line ablation** — cut one named block from one cell's assembled workspace
   and re-run. _queued — **v1**: this is how a doc line is shown to carry weight
   rather than asserted to._ — `ablate.py`.

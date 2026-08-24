@@ -1,0 +1,10 @@
+% Two declared columns of different numeric types added together.
+%
+% NOTE: this entry currently pins **two** diagnostics, and the second one is
+% false — `item.weight` is declared float and its one value is 1.5. That is
+% `datalog/bugs/008`. The pin is deliberate: when 008 is fixed this file's
+% `.err` changes, and the test that compares them is what says so.
+declare item(name: string, qty: int, weight: float).
+item("bolt", 4, 1.5).
+total(N) :- item(qty: Q, weight: W), N = Q + W.
+?- total(N).

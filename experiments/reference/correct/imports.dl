@@ -1,0 +1,30 @@
+import "std/time".
+import "customer.csv" as customer.
+import "order.parquet" as order.
+import "shipment.jsonl" as shipment(id: string, order: string, shipped_on: date).
+
+% 1 — shipped more than 10 days after ordering
+late(O) :- order(id: O, ordered_on: D), shipment(order: O, shipped_on: S),
+           S is not absent, N = (S - D) / @1d, N > 10.0.
+
+% 2 — regions whose total order amount clears 5000
+region_total(R, T) :- customer(region: R),
+                      T = sum { A | order(customer: C, amount: A), customer(id: C, region: R) }.
+big_region(R) :- region_total(R, T), T > 5000.
+
+% 3 — customers with no order between 2026-03-01 and 2026-04-30
+ordered_recently(C) :- order(customer: C, ordered_on: D), D >= @2026-03-01, D <= @2026-04-30.
+quiet(C) :- customer(id: C), not ordered_recently(C).
+
+% 4 — the busiest month per region
+order_month(O, R, M) :- order(id: O, customer: C, ordered_on: D),
+                        customer(id: C, region: R), truncate(D, month, M).
+month_count(R, M, N) :- order_month(_, R, M), N = count { O | order_month(O, R, M) }.
+beaten(R, N) :- month_count(R, _, N2), month_count(R, _, N), N2 > N.
+busiest(R, M) :- month_count(R, M, N), not beaten(R, N).
+
+% The four answers, in task order.
+?- late(O).
+?- big_region(R).
+?- quiet(C).
+?- busiest(R, M).

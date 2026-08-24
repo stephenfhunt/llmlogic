@@ -1,0 +1,25 @@
+reader_r03("u03").
+reader_r03("u06").
+reader_r03("u07").
+reader_r03("u08").
+reader_r03("u09").
+reader_r03("u10").
+reader_r03("u11").
+resource_u04("r01").
+resource_u04("r02").
+resource_u04("r03").
+resource_u04("r06").
+resource_u04("r07").
+resource_u04("r08").
+resource_u04("r09").
+resource_u04("r10").
+no_access("u12").
+delete_not_read("u02", "r02").
+delete_not_read("u02", "r03").
+delete_not_read("u03", "r09").
+delete_not_read("u04", "r02").
+delete_not_read("u04", "r03").
+delete_not_read("u07", "r09").
+delete_not_read("u08", "r09").
+delete_not_read("u10", "r09").
+delete_not_read("u11", "r09").

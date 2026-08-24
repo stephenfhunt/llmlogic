@@ -1,0 +1,1 @@
+semantic error: unsafe rule for `reachable`: head variable `Y` is not bound by the body — it must occur in a positive body atom, or be bound by an `=`-assignment or an aggregate result

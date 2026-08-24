@@ -1,0 +1,32 @@
+import "class.csv" as class.
+import "subclass.csv" as subclass.
+import "instance.csv" as instance.
+import "declares.csv" as declares.
+import "disjoint.csv" as disjoint.
+
+% every class an instance belongs to, transitively
+kind(I, C) :- instance(instance: I, class: C).
+kind(I, S) :- kind(I, C), subclass(class: C, superclass: S).
+
+% 1 — instances of sensor
+sensors(I) :- kind(I, "sensor").
+
+% 2 — power_profile, most specific declaration wins
+above(C, S) :- subclass(class: C, superclass: S).
+above(C, S) :- subclass(class: C, superclass: M), above(M, S).
+candidate(I, C, V) :- kind(I, C), declares(class: C, property: "power_profile", value: V).
+overridden(I, C) :- candidate(I, C, _), candidate(I, B, _), above(B, C).
+profile(I, V) :- candidate(I, C, V), not overridden(I, C).
+
+% 3 — instances in two disjoint classes
+inconsistent(I) :- kind(I, A), kind(I, B), disjoint(class: A, other_class: B).
+
+% 4 — classes with nothing beneath them
+populated(C) :- kind(_, C).
+empty_class(C) :- class(class: C), not populated(C).
+
+% The four answers, in task order.
+?- sensors(I).
+?- profile(I, V).
+?- inconsistent(I).
+?- empty_class(C).

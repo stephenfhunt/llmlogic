@@ -1,0 +1,6 @@
+% Unsafe rule: `Y` appears in the head and nowhere in the body, so the rule
+% ranges over every value there is. §10's range restriction rejects it.
+edge(a, b).
+edge(b, c).
+reachable(X, Y) :- edge(X, Z).
+?- reachable(X, Y).

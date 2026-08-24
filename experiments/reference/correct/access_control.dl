@@ -1,0 +1,35 @@
+import "member.csv" as member.
+import "grant.csv" as grant.
+import "includes.csv" as includes.
+import "permit.csv" as permit.
+import "revoked.csv" as revoked.
+
+% Roles come from group membership, then close transitively through inclusion.
+has_role(U, R) :- member(user: U, group: G), grant(group: G, role: R).
+has_role(U, S) :- has_role(U, R), includes(role: R, included_role: S).
+
+% One permission, with the revocation applied. A revocation is per resource, so
+% it removes every action on that resource rather than one of them.
+can(U, Res, A) :- has_role(U, R),
+                  permit(role: R, resource: Res, action: A),
+                  not revoked(user: U, resource: Res).
+
+% 1 — who can read r03
+reader_r03(U) :- can(U, "r03", "read").
+
+% 2 — resources u04 can reach, by any action
+resource_u04(Res) :- can("u04", Res, _).
+
+% 3 — users with no access to anything. Over `member`, not over the users named
+% in `can`: the answer is about the ones that are missing.
+has_any(U) :- can(U, _, _).
+no_access(U) :- member(user: U), not has_any(U).
+
+% 4 — delete without read, on the same resource
+delete_not_read(U, Res) :- can(U, Res, "delete"), not can(U, Res, "read").
+
+% The four answers, in task order.
+?- reader_r03(U).
+?- resource_u04(Res).
+?- no_access(U).
+?- delete_not_read(U, Res).

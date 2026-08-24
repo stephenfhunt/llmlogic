@@ -1,0 +1,14 @@
+eligible("a03").
+eligible("a06").
+eligible("a10").
+eligible("a11").
+eligible("a14").
+eligible("a15").
+blocked_by_one("a01", "residency").
+blocked_by_one("a02", "age").
+blocked_by_one("a08", "sanction").
+blocked_by_one("a16", "income").
+undetermined("a04").
+undetermined("a09").
+big_household("h02").
+big_household("h03").

@@ -1,0 +1,32 @@
+sensors("i04").
+sensors("i05").
+sensors("i07").
+sensors("i09").
+sensors("i10").
+sensors("i17").
+profile("i01", "medium").
+profile("i02", "medium").
+profile("i03", "medium").
+profile("i04", "low").
+profile("i05", "low").
+profile("i06", "medium").
+profile("i07", "low").
+profile("i08", "unknown").
+profile("i09", "low").
+profile("i10", "low").
+profile("i11", "medium").
+profile("i12", "medium").
+profile("i13", "unknown").
+profile("i14", "medium").
+profile("i15", "medium").
+profile("i16", "high").
+profile("i17", "low").
+profile("i18", "medium").
+inconsistent("i03").
+inconsistent("i07").
+inconsistent("i11").
+inconsistent("i14").
+empty_class("blade_server").
+empty_class("building").
+empty_class("pressure_sensor").
+empty_class("rack_server").

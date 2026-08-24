@@ -1,0 +1,6 @@
+% Recursion through negation: `q` depends on `not r` and `r` on `not q`, so no
+% stratification exists and the program has no least model to compute.
+p(1).
+q(X) :- p(X), not r(X).
+r(X) :- p(X), not q(X).
+?- q(X).

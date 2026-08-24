@@ -1,0 +1,23 @@
+% The negative controls. These are single lookups and one-step arithmetic, and
+% the engine is not expected to help — the program exists so the corpus covers
+% the whole slate, not because the questions need it.
+import "employee.csv" as employee.
+import "order.csv" as order.
+
+% 1 — carol's department
+carol_department(D) :- employee(name: "carol", department: D).
+
+% 2 — who placed o3
+o3_customer(C) :- order(id: "o3", customer: C).
+
+% 3 — orders over 100
+large_order(O) :- order(id: O, amount: A), A > 100.
+
+% 4 — how many engineers
+engineering_headcount(N) :- N = count { E | employee(name: E, department: "engineering") }.
+
+% The four answers, in task order.
+?- carol_department(D).
+?- o3_customer(C).
+?- large_order(O).
+?- engineering_headcount(N).
