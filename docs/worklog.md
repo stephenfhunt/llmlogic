@@ -66,14 +66,32 @@ grid still renders.
   oracles duplicated `test_truth_independence.py`, which already does it over the
   AST and does it properly. Nothing else — the session was almost all new.
 
+**Then the pilot ran, and found two instrument defects**
+- **A cell was not starting from an empty directory.** A workspace is a hash of
+  the cell id built with `exist_ok=True`, so `--dry-run` and a paid run share it:
+  **two of sixteen cells were graded on the stub's `answer.txt`** — one *wrong* on
+  its truncated truth, one *correct* without doing the work, both engine-arm.
+  Fixed, guarded, tested; the clean re-run is **16/16, $1.08**.
+- **The denials count is a floor.** The gate flags only an absolute path that
+  already exists and defers to the OS sandbox for the rest, so a write to a *new*
+  outside path is blocked and never counted. The report says so now.
+- **`access_control` does not discriminate**: 16/16 at both strengths, both arms.
+  Opus never reached for the engine on any cell — it wrote Python in ~2 turns,
+  in *both* arms. Haiku reached on 4/4 and wrote a real program each time.
+  `max_turns=30` never bound (max 20). Cost is **$0.07/cell**, so a full grid is
+  nearer **$8** than the $35–40 the README estimates.
+
 **Next up**
-- **The pilot**: `harness run --domain controls --smoke --yes` (4 cells), then
-  `--domain access_control --yes` (16). Then read the transcripts and close the
-  two questions `decisions.md` says to settle against real ones — what *"reached
-  for it"* means, and whether `max_turns=30` ever binds.
-- Then the full grid, then rule on count-distinct from what it shows.
-- Still open: `008`, the JSON encoding, `--no-default-features`, §17's
-  period-arithmetic questions.
+- **The full grid.** The pilot's job is done: the instrument has been corrected
+  twice and the cost is known. `access_control` having no ceiling headroom is a
+  reason to run the harder domains, not to keep piloting the easy one.
+- Then the ablation on `count-wildcard` / `source-analysis-count-trap`, and rule
+  on count-distinct from what it shows.
+- **Opus writing Python in both arms is the S1 result taking shape** — if it
+  holds across the slate, "does the engine help?" has a different answer per
+  strength, which is what §1 predicted.
+- Still open: `008`, what *"reached for it"* should mean (the pilot showed a
+  third case: reached, ran nothing), the JSON encoding, `--no-default-features`.
 
 ## 2026-08-22 — Five domains, and the grid reaches 112 cells
 
