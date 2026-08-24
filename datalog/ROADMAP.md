@@ -492,11 +492,30 @@ workaround and §16's preamble-vs-§16.4 contradiction fixed alongside.
 - **Machine-readable error taxonomy** — §12 is now Draft: `Error` is a struct
   (category, message, span, line/column position, suggestion) with `Display`
   composed from the fields, and lexer/parser diagnostics carry real positions
-  (2026-07-25). Two pieces remain: a stable **code** vocabulary so an agent can
-  branch on `unsafe-aggregate` without matching prose, and **spans on semantic
-  errors** — lowering reports many from points where the responsible span is not
-  threaded, so choosing one per diagnostic is a design pass. _queued (partially
-  shipped) — **v1** (S3, and the reason §2 ratified scoped)._ — §12.
+  (2026-07-25). **This is the last thing between the criteria and v1**, now that
+  S1 has been measured (§1, 2026-08-24): S3 is the only criterion still reading
+  *scoped*, and these are what scope it. Three pieces remain.
+  - **Spans on semantic and source errors.** Not "many" — re-measured 2026-08-24,
+    *all* 77 `Error::semantic` and 36 `Error::source` sites carry none, against
+    3 of 3 for each of `Error::lex` and `Error::parse`. The count grew from 79
+    sites on 2026-08-18 while staying at 0%, so this widens on its own as the
+    engine grows. Lowering reports from points where the responsible span is not
+    threaded, so choosing one per diagnostic is a design pass, not a mechanical
+    one — and threading spans into `lower.rs` (26 sites) and `engine/mod.rs` (35)
+    is where the work actually is.
+  - **A stable code vocabulary**, so an agent branches on `unsafe-aggregate`
+    rather than on prose. Today there are four: the `ErrorKind` variants.
+  - **Suggestion coverage at the semantic stage** — 13 of 77 sites carry one, and
+    none of the 36 source sites do. Guard-railed by §12's own hazard note: a
+    suggestion that cannot be acted on costs a round, and one that is wrong on
+    correct code is worse than none.
+
+  *Done* means the malformed half of the harness's reference corpus is the test:
+  three of its five pinned programs are `Semantic` and therefore spanless today
+  (`type-clash`, `unbound-head`, `unstratified-negation`), so their pinned
+  diagnostics moving to carry a position is the observable that closes this.
+  _queued (partially shipped) — **v1** (S3, and the reason §2 ratified scoped)._
+  — §12, `../experiments/reference/malformed/`.
 - **`--format json` scope** — a documented future *edge* feature (structured
   errors, provenance); the data path stays Datalog-native. _parked (low value) — **post-v1**._ — §14.
 - **`serde` for the API** — decide as §14 stabilizes. _queued — **post-v1**._ — §14.

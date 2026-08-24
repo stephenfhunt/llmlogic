@@ -111,7 +111,7 @@ criterion rather than an assumption.
 |---|---|---|---|
 | **S1** | An agent answering multi-hop, recursive or constraint questions is measurably more accurate **with** the engine than reasoning in prose — at two model strengths, first program recorded before any feedback. | the `experiments/` harness | **measured 2026-08-24 — null**; read the note below before citing it |
 | **S2** | The engine's stdout is valid input to the engine, byte-for-byte. | property **D2**, `print::tests::corpus_round_trips` | met |
-| **S3** | A rejected program can be repaired from the diagnostic alone, without reading the spec. | §12's fields; the near-miss corpus (§3) | met for lex/parse; **scoped** (§2) |
+| **S3** | A rejected program can be repaired from the diagnostic alone, without reading the spec. | §12's fields; the near-miss corpus (§3) | met for lex/parse; **scoped** (§2) — the only criterion not met, and what v1 now turns on |
 | **S4** | A question over a real external table is answerable end-to-end with no preprocessing step. | §13 + the USDA dogfood | met (dates included, 2026-08-19) |
 | **S5** | Every fact in an answer can be explained **through the surface the caller used**. | §11's goal form (§16.6, §16.15), its system tests, **E5** | met (2026-08-21) |
 | **S6** | No *exponent* worse than a comparable engine on the shared corpus. | `notes/cross-engine-benchmark.md`, re-measured in `notes/profile-2026-08-20.md` | met |
@@ -139,6 +139,12 @@ criterion is that the measurement was *made*, not that it came out favourably: t
 repo exists to test a hypothesis, so a negative result is a finding and not a
 failure to ship — whereas shipping v1 having never run the experiment would leave
 §1's own pillars resting on an unmeasured premise.
+
+**S1's half is done as of 2026-08-24, so v1 turns on S3** — the one criterion
+still reading *scoped*. What scopes it is spans: they are attached in the lexer
+and the parser only, so a semantic or source diagnostic points at a name rather
+than a place. The work and its finish line are one `ROADMAP.md` item
+(*Machine-readable error taxonomy*); the reasoning is §17, 2026-08-24.
 
 Which open backlog items that ruling makes v1 work, and which it puts after v1, is
 recorded per item in [`ROADMAP.md`](ROADMAP.md) with the argument in
@@ -176,11 +182,13 @@ how it is built.
   and to lexical/syntactic location.* A diagnostic is data with a rendering
   (§12): category, message, suggestion and position are separate fields, so a
   consumer never parses English to recover them. **Location is the scoped half.**
-  Spans are attached in the lexer and the parser only — measured 2026-08-18, *all*
-  46 `Error::semantic` and 33 `Error::source` construction sites carry none, which
-  is broader than §12's "many" reads. Suggestions, by contrast, do reach every
-  stage. A stable per-diagnostic **code** is still missing, so a consumer branches
-  on one of four `ErrorKind` categories or on prose (§12, ROADMAP).
+  Spans are attached in the lexer and the parser only — re-measured 2026-08-24,
+  *all* 77 `Error::semantic` and 36 `Error::source` construction sites carry none,
+  against 3 of 3 for each of `Error::lex` and `Error::parse`. Suggestions reach
+  every *stage* but not every diagnostic: 13 of the 77 semantic sites carry one
+  and none of the source sites do. A stable per-diagnostic **code** is still
+  missing, so a consumer branches on one of four `ErrorKind` categories or on
+  prose (§12, ROADMAP).
 - **Explainability and the agent API are first-class** — *ratified, scoped to the
   engine and the goal form.* Provenance is designed in from the start and is not
   an add-on: the fixpoint records **all** derivations of every derived fact,
@@ -1473,10 +1481,14 @@ same data with no message re-parsing.
 
 *Not covered:* a stable machine-readable **code** per diagnostic (an agent should
 be able to branch on `unsafe-aggregate` without matching prose), and spans on
-semantic errors — spans are attached in the lexer and the parser only, and *every*
-one of the 46 `Error::semantic` and 33 `Error::source` construction sites carries
-none (measured 2026-08-18). Choosing the right span per diagnostic is a design pass
-rather than a mechanical change. Both tracked in `ROADMAP.md`. Nor does this section say
+semantic and source errors — spans are attached in the lexer and the parser only,
+and *every* one of the 77 `Error::semantic` and 36 `Error::source` construction
+sites carries none (re-measured 2026-08-24). What stands in for a location is
+*naming*: a relation, a variable, or a rule index — `variable Q in rule 0`, which
+is found by counting rules. That repairs a short program and degrades with
+length. Choosing the right span per diagnostic is a design pass rather than a
+mechanical change. Both tracked in `ROADMAP.md`, and together they are what makes
+S3 (§1) *scoped* rather than met. Nor does this section say
 anything about a `suggestion`'s *content*, which is the field with the sharpest
 known hazard: a model acts on a suggestion literally, so one that cannot be acted
 on costs a round and one that is wrong on correct code is worse than none
@@ -2507,6 +2519,28 @@ marker that records a decision working out *well*, which the log would otherwise
 never say.
 
 ### Decisions
+
+- **2026-08-24** — **S3 is the last criterion, and what scopes it is spans on
+  113 error sites** (§1/§2/§12; the item is `ROADMAP.md`, *Machine-readable error
+  taxonomy*). S1 was measured the same day, so v1 no longer turns on running an
+  experiment; it turns on whether *"repairable from the diagnostic alone"* holds
+  for the stage where an agent actually gets stuck.
+  - **Re-measured, not re-read.** §2 and §12 both carried a 2026-08-18 count of
+    46 `Error::semantic` and 33 `Error::source` sites with no span. It is now
+    **77 and 36** — still 0%, against 3 of 3 for each of `Error::lex` and
+    `Error::parse`. The proportion held while the absolute number grew by 43%,
+    which is the useful part: **this gap widens on its own**, because every new
+    semantic check is written at a site that has no span threaded to it.
+  - **What stands in for a location is naming** — a relation, a variable, a rule
+    index. `variable Q in rule 0` is findable by counting rules. That repairs a
+    short program and degrades with length, so S3 reads *met for lex/parse* not
+    because the semantic diagnostics are bad but because they point at a name
+    instead of a place.
+  - **The test already exists**, in the other project: three of the five
+    malformed programs pinned by the harness's reference corpus are `Semantic`
+    and therefore spanless, so their pinned diagnostics gaining a position is the
+    observable that closes this — a criterion checked by a corpus rather than by
+    reading the source again. — `../experiments/reference/malformed/`.
 
 - **2026-08-21** — **The asking form, and the sigil's real job** (§5/§11/§14; the
   flows, the rejected alternatives and the two-run argument are in
