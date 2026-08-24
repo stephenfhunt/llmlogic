@@ -36,6 +36,14 @@ from harness.transcript import Transcript
 #: fatal would stop a run that could have finished.
 FATAL = re.compile(r"session limit|rate limit|usage limit|\b429\b", re.IGNORECASE)
 
+#: The harness's *own* stopping rule biting, which the SDK reports as an error
+#: result like any other. It is not an instrument failure: a cell that ran out of
+#: turns answered badly or not at all, which is evidence. Dropping it would
+#: reward a model that flails by removing its failures from the denominator —
+#: bias in the opposite direction from the one ``ERROR`` exists to prevent, and
+#: the reason this is matched apart. See ``decisions.md`` 2026-08-24.
+STOPPING_RULE = re.compile(r"maximum number of turns|max_turns", re.IGNORECASE)
+
 
 class RunHalted(Exception):
     """The run stopped before the grid was finished. Carries the reason."""
@@ -75,12 +83,14 @@ def run_cell(
     try:
         workspace = arms.build(cell, workspace_root)
         transcript = subject.run(cell, workspace)
+        result = grade(cell.task, workspace.path)
         # A cell whose subject failed is not clean evidence, even if an answer
         # file happens to parse: the verdict would then depend on where in the
         # turn sequence the failure landed. Excluding it is the direction of bias
-        # this project can afford — see ``decisions.md`` 2026-08-24.
-        result = grade(cell.task, workspace.path)
-        if transcript.error:
+        # this project can afford — see ``decisions.md`` 2026-08-24. The turn cap
+        # is the exception, because it is the harness's own rule and not a
+        # failure of the instrument: that cell is graded on what it left behind.
+        if transcript.error and not STOPPING_RULE.search(transcript.error):
             # The raw text survives so a discarded cell can still be read; the
             # parsed answer does not, because this cell contributed none.
             result = Grade(Verdict.ERROR, None, result.raw)

@@ -19,6 +19,7 @@ from pathlib import Path
 
 from harness.cell import Cell
 from harness.record import RecordStore
+from harness.runner import FATAL
 
 
 class NotResumable(Exception):
@@ -38,13 +39,24 @@ def metadata(run_dir: Path) -> dict:
 def failed(record: dict) -> bool:
     """Did this record come from a cell whose subject failed?
 
-    Both halves are load-bearing. The verdict is the rule the runner applies now;
-    the ``error`` field catches records written *before* it did — the 46 cells of
-    2026-08-24 that a session limit killed and the old runner filed as
-    ``no-answer``. Reading the field means those records are read correctly
-    without anything in ``results/`` being rewritten.
+    Both halves are load-bearing.
+
+    The **verdict** is the rule the runner applies now, and for a record it wrote
+    it is the whole answer: an infrastructure failure is ``ERROR``, while a cell
+    stopped by the harness's own turn cap keeps the verdict it earned and carries
+    its error text alongside.
+
+    The **error text** catches records written *before* that rule existed — the
+    46 cells of 2026-08-24 that a session limit killed and the old runner filed
+    as ``no-answer``. Matching `FATAL` rather than any error is what keeps a
+    turn-cap cell out of this: it did measure something.
+
+    Reading it this way means both are read correctly with nothing in
+    ``results/`` rewritten.
     """
-    return record["verdict"] == "error" or bool(record.get("error"))
+    return record["verdict"] == "error" or bool(
+        record.get("error") and FATAL.search(record["error"])
+    )
 
 
 def settled(run_dir: Path) -> set[str]:

@@ -139,3 +139,56 @@ def test_errored_cells_stay_out_of_the_report_denominators(tmp_path):
     assert sum(1 for r in records if r["verdict"] == "error") == 1
     rendered = report.render(Path(store.dir))
     assert "1 errored" in rendered
+
+
+TURN_CAP = (
+    "ResultError: Claude Code returned an error result: "
+    "Reached maximum number of turns (30) (exit code: 1)"
+)
+
+
+def test_the_turn_cap_is_graded_not_discarded(tmp_path):
+    """Running out of turns is the harness's own stopping rule, not a failure of
+    the instrument. Dropping those cells would reward a model that flails by
+    removing its failures from the denominator."""
+    cells = _grid()
+    store = RecordStore(tmp_path / "results", "test")
+    subject = FailingSubject(error=TURN_CAP, answer=True)
+
+    record = run_cell("test", cells[0], subject, store, tmp_path / "ws")
+
+    assert record.verdict == "correct"
+    assert record.error == TURN_CAP
+
+
+def test_a_turn_cap_cell_that_answered_nothing_is_still_not_an_error(tmp_path):
+    cells = _grid()
+    store = RecordStore(tmp_path / "results", "test")
+    subject = FailingSubject(error=TURN_CAP, answer=False)
+
+    record = run_cell("test", cells[0], subject, store, tmp_path / "ws")
+
+    assert record.verdict == "no-answer"
+
+
+def test_the_turn_cap_does_not_halt_the_grid(tmp_path):
+    cells = _grid()
+    store = RecordStore(tmp_path / "results", "test")
+
+    result = run_grid(cells, FailingSubject(error=TURN_CAP), store, tmp_path / "ws")
+
+    assert result.halted is None
+    assert len(result.records) == len(cells)
+
+
+def test_a_turn_cap_cell_counts_and_is_not_owed_again(tmp_path):
+    """It is settled evidence: a resume must not re-run it."""
+    from harness import resume
+
+    cells = _grid()
+    store = RecordStore(tmp_path / "results", "test")
+    run_cell("test", cells[0], FailingSubject(error=TURN_CAP, answer=True), store, tmp_path / "ws")
+
+    recorded = RecordStore.load(store.dir)[0]
+    assert not resume.failed(recorded)
+    assert cells[0].id in resume.settled(store.dir)

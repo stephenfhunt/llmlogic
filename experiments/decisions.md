@@ -15,6 +15,20 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-08-24** — **Running out of turns is not an instrument failure: that cell
+  is graded on what it left behind.** The SDK reports the harness's own
+  `max_turns` cap as an error result like any other, so the `ERROR` rule above
+  swallowed it — and discarding those cells would have **rewarded a model that
+  flails**, by removing its failures from the denominator. That is bias in the
+  opposite direction from the one `ERROR` exists to prevent, so the two are
+  matched apart: `FATAL` (session/rate limit, `429`) is the instrument failing,
+  `STOPPING_RULE` (`maximum number of turns`) is the experiment working. A
+  turn-capped cell keeps the verdict it earned, carries its error text alongside,
+  does not halt the grid, and is not owed again by a resume.
+  - The distinction is only visible because the error text says which happened.
+    A subject that reported failure without saying why would collapse the two,
+    and the safe reading would then be `ERROR` — losing the flailing signal.
+
 - **2026-08-24** — **A cell whose subject reported an error is `ERROR`, and is
   excluded — even when an `answer.txt` on disk would parse.** The first full grid
   ran out of the account's five-hour session window at cell 67. `AgentSubject.run`
@@ -34,6 +48,8 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
   - **The rule is applied when reading, not only when writing** (`resume.failed`):
     a record carrying an `error` is failed whatever its verdict says. That is what
     lets the 46 be read correctly without rewriting one line of `results/`.
+  - ***Amended*** 2026-08-24 by the entry above: *whatever its verdict says* was
+    too wide. Only a `FATAL` error condemns a record; the turn cap does not.
 
 - **2026-08-24** — **The pilot's `$0.07/cell` was a *warmed* number, and a record
   cannot explain its own cost.** Identical `access_control` cells cost 2–4× more
