@@ -90,6 +90,14 @@ what makes the result readable, and a grid of one domain measures one domain.
   The one it was wanted for: `count-wildcard` and `source-analysis-count-trap`
   are what turn *"is documenting the trap enough?"* into a measurement rather
   than a position. — `../datalog/ROADMAP.md`, *Count-distinct*.
+- **A resume should refuse a fixture that moved under it** — `resume` guards the
+  slate by cell id and count, which catches a renamed or added task and is blind
+  to the thing that actually changed on 2026-08-24: `scheduling`'s roster, under
+  the same four task ids. Nothing owed by the open run was a `scheduling` cell,
+  so it did not bite — but a resume that had owed one would have joined two
+  different experiments with no signal. Fingerprint each task's fixture files
+  into `run.json` and refuse on a mismatch, the way the count check already
+  refuses. _queued_ — `resume.py`, `decisions.md` 2026-08-24.
 - **TypeScript extraction** — a `tsc`-API fact extractor as a second
   `static_analysis` corpus. The better demo; blocked as a *control* by control 1,
   which wants a plain-Python oracle. _parked — **post-v1**._ — `decisions.md`
