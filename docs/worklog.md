@@ -24,6 +24,58 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-24 — S1 is measured, and the answer is null
+
+The first full 112-cell grid finished, across three session windows. **S1 flips
+to measured** (`datalog/spec.md` §1) — the criterion asks that the experiment was
+*run*, and it was. 230 tests green (+7), ruff clean.
+
+**Done**
+- **The grid ran to completion**: 112 cells, 0 errored. Both arms **41/48**;
+  **38/40** with the void `scheduling` domain struck out. Negative controls 8/8
+  in both arms, so the null is not a broken instrument.
+  — `experiments/results/run-20260824T104501Z/`.
+- **Two instrument defects, both found by running it.** A session limit was
+  recorded as 46 ordinary `no-answer` cells and the report said "0 errored" —
+  fixed by an `ERROR` verdict, halt-on-fatal, `--resume` and `--limit`. That fix
+  then over-reached, swallowing the harness's own `max_turns` cap, which would
+  have **rewarded a model that flails**; `FATAL` and `STOPPING_RULE` now differ.
+- **`scheduling` was repaired.** 21 of its 29 assignments were ones the person
+  could not work, while every question's preamble stated that rule — so applying
+  the rule first deleted every clash, and three of four `double-booked` cells
+  answered with an empty file, correctly. Roster now draws from eligible pairs;
+  `ROSTER` split into `OVERLAP` and `ELIGIBILITY`, each attached where it bears;
+  `forced-assignments` says outright that an existing assignment does not
+  disqualify. The pinned reference program derives the new answers unchanged.
+
+**Decided**
+- **A cell whose subject failed is `ERROR` and is excluded**, even if an
+  `answer.txt` parses — but the turn cap is not a failure, and is graded on what
+  it left behind. — `experiments/decisions.md` 2026-08-24.
+- **The binding budget is the account's five-hour window, not dollars.** A full
+  grid is run over sessions; USD figures are notional under subscription auth.
+- **The null is about *supplying* the engine, not using it.** The engine arm
+  reached in **9 of 56 cells** — opus 1, haiku 8 — and every incorrect answer on
+  the live slate came from a cell that wrote no program. §1 carries this next to
+  the flip, because citing the null bare overstates it.
+- **Hand-verifying 28 tasks against their oracles proved the oracle matched the
+  *author's* reading.** It could not prove there was only one reading; the
+  subjects were the first readers who did not already know the answer.
+
+**Removed**
+- `ROSTER` — the glued-on preamble that caused the `scheduling` defect, replaced
+  by two narrower constants. README's "$35–40 per grid", a bill that does not
+  exist. The oldest worklog entry rotated to the archive.
+
+**Next up**
+- **Re-run `scheduling` under a new run id** — its four tasks are repaired and its
+  2026-08-24 numbers are void. Cannot be resumed into the finished grid.
+- **The slate is at a ceiling**: opus is 20/20 in prose on the live domains, so
+  no delta is detectable downstream of reach. Harder questions, or the parked
+  **local-model subject** — the signal lives at the weak end.
+- **Fingerprint fixtures into `run.json`** so a resume refuses one that moved
+  (queued, `experiments/ROADMAP.md`).
+
 ## 2026-08-23 — The corpus that pins, the paragraph that can be cut, and a diagnostic that lies
 
 Both remaining **v1** items for the first grid run, plus the bug the first one
@@ -143,51 +195,3 @@ domain plus its controls. **164 tests green** (+85), ruff clean, and the full
 - Then the **doc-line ablation**, and the first paid run.
 - Still open: what *"reached for it"* should mean, the per-cell stopping rule,
   and whether a full run's transcripts get committed.
-
-## 2026-08-21 — The instrument gets built, and the first real cell falsifies it twice
-
-S1's harness, as a new top-level project. `experiments/` runs each task twice —
-once by an agent that has the engine, once by the same agent without it — and
-grades both against truth computed in plain Python. 79 tests green, ruff clean,
-and the full grid runs offline against a stub subject with no API calls.
-
-**Done**
-- **The project**: `AGENTS.md`, `ROADMAP.md`, `decisions.md`, and a package —
-  core types, record store, grading, process signals, report, CLI. The offline
-  `--dry-run` grid is the CI gate, so a change that can only be tested by
-  spending money is a change that stops being tested.
-- **Both arms are the same Claude Agent SDK agent**, same tools, same
-  byte-identical prompt; the engine arm additionally has the binary and skill.
-  The prose arm keeps `bash` and may write a script — the honest counterfactual.
-- **Two domain packs**: `access_control` (four tasks over a generated policy
-  graph, truth a BFS property-checked against a fixpoint formulation) and
-  `controls`, the negative controls that make a null result readable.
-- **Containment** — workspaces outside the checkout, OS bash sandbox with the
-  network denied, a PreToolUse gate against paths that leave the workspace.
-
-**Decided**
-- **Ground truth never comes from the engine**, enforced by an AST test rather
-  than a convention: if the engine grades itself the engine arm is correct by
-  construction, and the run is void while still producing plausible numbers.
-- **`UNPARSEABLE` is kept apart from `WRONG` because of bias, not tidiness.** The
-  prose arm writes sentences more often, so counting a sentence as a wrong answer
-  inflates the engine's margin — the one direction of bias this cannot afford.
-- **Containment is a validity control before a safety one.** Verified by hand:
-  from a workspace inside the checkout, `truth.py` — the answer key — and the
-  engine binary were both reachable, the latter executable by absolute path.
-  Scrubbing `PATH` does nothing against `/abs/path/to/datalog`.
-
-**Removed**
-- `experiments/.workspaces/` as a location — it was inside the repo, which is how
-  the answer key was two directories up. Nothing else: this session was almost
-  entirely new, and the deletions it did make were of its own first drafts.
-
-**Next up**
-- **Five domain packs**: `ontology`, `imports`, `eligibility`, `scheduling`,
-  `static_analysis`. Then the reference corpus, the doc-line ablation, and the
-  first full run.
-- **`spec.md` §1 is deliberately untouched** — S1's instrument does not move to
-  `experiments/` until the harness can actually measure. `datalog/ROADMAP.md`
-  says *building*, which is what is true.
-- Still open: the JSON encoding, `--no-default-features` failing two temporal
-  tests, and §17's period-arithmetic questions.
