@@ -16,6 +16,7 @@ __pycache__/
 .venv/
 *.egg-info/
 .pytest_cache/
+.pytest-tmp/
 .ruff_cache/
 
 # A run's verdicts and rendered report are the record and are committed; the full

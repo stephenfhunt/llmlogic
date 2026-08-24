@@ -28,6 +28,13 @@ packages = ["src/harness"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Scratch on the same filesystem as the engine binary, so `arms.build` can
+# hardlink it (`arms._link_binary`). Under the default `/tmp` — a tmpfs here —
+# the link falls back to a 51 MB copy per engine-arm workspace, and a few runs
+# of the suite fill the device: every test then fails with `Disk quota
+# exceeded`, which reads like anything but a temp directory being on the wrong
+# mount.
+addopts = "--basetemp=.pytest-tmp"
 
 [tool.ruff]
 line-length = 100
