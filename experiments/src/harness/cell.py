@@ -68,17 +68,34 @@ class Cell:
     task: Task
     arm: Arm
     strength: Strength
+    #: A named documentation block cut from this cell's skill copy, or ``None``
+    #: for the ordinary cell. Part of the identity, not a flag beside it: the
+    #: ablated cell and its control are two cells and have to record as two.
+    #: Meaningless on the prose arm, which has no skill to cut from.
+    ablate: str | None = None
 
     @property
     def id(self) -> str:
-        return f"{self.task.domain}.{self.task.id}.{self.arm}.{self.strength.name}"
+        base = f"{self.task.domain}.{self.task.id}.{self.arm}.{self.strength.name}"
+        return f"{base}.minus-{self.ablate}" if self.ablate else base
 
 
-def grid(tasks: list[Task], strengths: tuple[Strength, ...] = STRENGTHS) -> list[Cell]:
-    """Every task, both arms, every strength — the full crossing."""
+def grid(
+    tasks: list[Task],
+    strengths: tuple[Strength, ...] = STRENGTHS,
+    arms: tuple[Arm, ...] = ARMS,
+    ablate: str | None = None,
+) -> list[Cell]:
+    """Every task, every arm, every strength — the full crossing.
+
+    ``arms`` narrows for an **ablation**, which is engine-arm only: cutting a
+    block of the engine's documentation cannot change what an arm that never had
+    it does, so a prose cell in an ablation grid is money spent re-measuring the
+    control.
+    """
     return [
-        Cell(task=task, arm=arm, strength=strength)
+        Cell(task=task, arm=arm, strength=strength, ablate=ablate)
         for task in tasks
-        for arm in ARMS
+        for arm in arms
         for strength in strengths
     ]

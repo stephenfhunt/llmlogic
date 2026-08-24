@@ -74,9 +74,16 @@ what makes the result readable, and a grid of one domain measures one domain.
   wrong program defends the error. `harness reference [--repin]`.
   — `reference/README.md`, `src/harness/reference.py`. It earned itself on the
   first day: pinning the malformed half found `../datalog/bugs/008`.
-- **Doc-line ablation** — cut one named block from one cell's assembled workspace
-  and re-run. _queued — **v1**: this is how a doc line is shown to carry weight
-  rather than asserted to._ — `ablate.py`.
+- **Doc-line ablation** — _shipped 2026-08-23._ A paragraph of the skill is
+  wrapped in `<!-- block: name -->`; `harness run --ablate <block>` cuts it from
+  the engine arm's copy and runs those cells under a distinct id. Markers are
+  stripped from **every** copy, ablated or not, so the two conditions differ by
+  the cut alone — and `cargo package-skill` strips them too, so none ever ships.
+  Four blocks marked; `harness blocks` lists them. — `ablate.py`,
+  `../datalog/AGENTS.md`.
+  The one it was wanted for: `count-wildcard` and `source-analysis-count-trap`
+  are what turn *"is documenting the trap enough?"* into a measurement rather
+  than a position. — `../datalog/ROADMAP.md`, *Count-distinct*.
 - **TypeScript extraction** — a `tsc`-API fact extractor as a second
   `static_analysis` corpus. The better demo; blocked as a *control* by control 1,
   which wants a plain-Python oracle. _parked — **post-v1**._ — `decisions.md`
@@ -87,6 +94,10 @@ what makes the result readable, and a grid of one domain measures one domain.
 - **Prompt caching** — stable fixture/system prefix behind a breakpoint; assert
   `cache_read_input_tokens` is non-zero across cells. _queued — **post-v1**
   (cost, not validity)._
+
+- **Cheaper slices** — `harness run` takes `--strength` and (via `--ablate`)
+  narrows to the engine arm, so a pilot need not be the whole crossing.
+  _shipped 2026-08-23._ — `cli.py`, `cell.grid`.
 
 ### Later
 

@@ -33,6 +33,25 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
     day turned up `../datalog/bugs/008`, a diagnostic that makes a false claim
     about the fact table.
 
+- **2026-08-23** — **A doc block is addressed by a marker, and no subject ever
+  sees one.** Ablation cuts a named paragraph from the engine arm's skill and
+  re-runs; the paragraph is named by `<!-- block: name -->` in the skill source
+  rather than by line numbers, which rot on the first edit — and a rotted
+  ablation cuts the wrong paragraph and reports a result anyway.
+  - **Markers are stripped from every copy, ablated or not.** Otherwise the two
+    conditions differ by a comment as well as by the cut, and every engine cell
+    in every ordinary run carries a stray token nobody meant to ship.
+    `cargo package-skill` strips them on the way into the distributed bundle for
+    the same reason, so the annotation stays tooling and never becomes content.
+  - **An ablation is engine-arm only, and a distinct cell id.** Cutting the
+    engine's documentation cannot move an arm that never had it, so a prose cell
+    would be paying to re-measure the control; and the workspace directory is a
+    hash of the cell id, so without the ablation in that id the two conditions
+    would share a directory.
+  - **A cut that hits nothing raises.** A missing block would otherwise run the
+    control twice at twice the price and report a null result that reads as *the
+    doc line does not matter* — the exact conclusion the ablation exists to test.
+
 - **2026-08-22** — **The `static_analysis` corpus is fetched and pinned, not
   vendored, and it is Python.** A cell is sealed, so the tree has to be on disk
   before the run starts; `harness corpus fetch` downloads a pinned sdist

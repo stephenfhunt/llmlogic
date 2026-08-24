@@ -211,14 +211,26 @@ that settled the first.
   **imported table the wildcard is not written at all**: named-argument syntax
   leaves every unmentioned column implicitly wildcarded. Measured 2026-07-27 on a
   7-column table — `count { C | calls(caller: C, callee: "bump") }` = 36 call
-  sites where the question wanted 20 callers. Decide whether v1 gets
+  sites where the question wanted 20 callers. **Measured again 2026-08-23, on the
+  shape that decides it**: over `sqlparse`, `widely_used` returns **7 functions
+  with a two-column `call` relation and 13 with a three-column one** — same rule
+  text, same corpus, the extra column a line number the rule never mentions.
+  Exit 0, no warning. A relation is a set, so whether the answer is right turns
+  on a projection choice made in the *extractor*, which is where nothing checks
+  it. Decide whether v1 gets
   `count_distinct` / a `distinct` modifier, or whether the trap is documented
   harder; §13's wide machine-generated tables are the case that makes it urgent
   (§17, 2026-07-24 *Consequences*). A sibling engine spelled `count distinct`
   citing this measurement, then measured the **warning** beside it firing on
   correct programs and leading with a destructive fix — read
   `notes/tsdl-cross-project-review.md` before designing the diagnostic, not after.
-  _queued — **v1** (S1: it returns wrong answers silently)._ — §9/§13.
+  **The evidence to rule on it is being collected, not argued for**: the guidance
+  is marked `count-wildcard` (§9's own wording) and `source-analysis-count-trap`
+  (the recipe's worked fix), and `experiments/` can now cut either from one cell
+  and re-run — so "document it harder" gets a number instead of a defence. Rule
+  after the first grid, not before it.
+  _queued — **v1** (S1: it returns wrong answers silently)._ — §9/§13,
+  `experiments/src/harness/ablate.py`.
 - **Statistical reducers** — `median`/`stddev`/`variance`/`percentile`. The
   aggregate node reserves a parameter slot for `percentile(p)`; each is a reducer
   registration + a typecheck arm, no evaluator restructure. _queued — **post-v1** (additive)._ — §9.

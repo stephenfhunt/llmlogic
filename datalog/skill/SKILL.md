@@ -199,9 +199,13 @@ interrogate one of the rows it returned.**
   `sum`/`avg`/`min`/`max` skip `absent` inputs (an all-absent or empty group →
   `absent`) and say so on stderr when they do; `count` counts bindings, so count
   only present values explicitly with `count { A | m(A), A is not absent }`.
-  `min`/`max` also work on strings/symbols. A `_` inside the `{ … }` is a witness
+  `min`/`max` also work on strings/symbols.
+<!-- block: count-wildcard -->
+  A `_` inside the `{ … }` is a witness
   dimension, not a "don't care": `count { P | parent(P, _) }` counts *edges*, not
-  distinct parents. In a `-q` query, bind the group key outside the aggregate —
+  distinct parents.
+<!-- /block -->
+  In a `-q` query, bind the group key outside the aggregate —
   `-q 'parent(P,_), N = count { C | parent(P,C) }'` groups by `P`, while
   `-q 'N = count { C | parent(P,C) }'` is one global count.
 - **Missing data** is the value `absent` (an empty CSV cell, a JSON/DB null).
@@ -209,10 +213,12 @@ interrogate one of the rows it returned.**
   it explicitly with `A is absent` / `A is not absent`. Writing `A = absent` or
   `A != absent` is an error that says so — both would be always-false. A numeric
   column with gaps still counts as numeric.
+<!-- block: absent-under-negation -->
   **Negation is the one place `absent` does match**: in `p(X), not q(X)`, an `X`
   bound to `absent` is refuted by a stored `q(absent)`. So a "things with no …"
   query does not report rows whose key is missing — if you want those, ask for
   them with `X is absent` rather than expecting the negation to surface them.
+<!-- /block -->
 - **Queries**: `?- ancestor("alice", Who).`
 - **Imports** load external data or split a program across files:
   ```

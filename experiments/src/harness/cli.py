@@ -11,13 +11,13 @@ import sys
 import tempfile
 from pathlib import Path
 
-from harness import arms, corpus, domains, reference, report
+from harness import ablate, arms, corpus, domains, reference, report
 from harness.agent import (
     DEFAULT_MAX_BUDGET_USD,
     DEFAULT_MAX_TURNS,
     AgentSubject,
 )
-from harness.cell import STRENGTHS, grid
+from harness.cell import ARMS, STRENGTHS, grid
 from harness.record import RecordStore
 from harness.runner import new_run_id, run_grid
 from harness.subject import StubSubject
@@ -39,7 +39,30 @@ def cmd_run(args: argparse.Namespace) -> int:
     if args.smoke:
         tasks = tasks[:1]
 
-    cells = grid(tasks, STRENGTHS)
+    strengths = STRENGTHS
+    if args.strength:
+        wanted = set(args.strength)
+        strengths = tuple(s for s in STRENGTHS if s.name in wanted)
+        if not strengths:
+            known = ", ".join(s.name for s in STRENGTHS)
+            print(f"no such strength: {sorted(wanted)} — have {known}", file=sys.stderr)
+            return 1
+
+    # An ablation is engine-arm only: cutting a block of the engine's own
+    # documentation cannot move an arm that never had it, so a prose cell here
+    # would be paying to re-measure the control.
+    cell_arms = ("engine",) if args.ablate else ARMS
+    if args.ablate:
+        available = ablate.catalogue(arms.DATALOG_SKILL_DIR)
+        if args.ablate not in available:
+            print(
+                f"no block named {args.ablate!r} — have "
+                f"{', '.join(sorted(available)) or '(none marked)'}",
+                file=sys.stderr,
+            )
+            return 1
+
+    cells = grid(tasks, strengths, cell_arms, args.ablate)
 
     # A real run spends money on someone's account, so it says how much it could
     # cost and refuses to start without being told to. The store is built after
@@ -61,7 +84,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         domains=sorted({task.domain for task in tasks}),
         tasks=len(tasks),
         cells=len(cells),
-        strengths=[strength.name for strength in STRENGTHS],
+        strengths=[strength.name for strength in strengths],
+        arms=list(cell_arms),
+        ablate=args.ablate,
         max_turns=args.max_turns,
         max_budget_usd=args.budget,
     )
@@ -109,6 +134,17 @@ def cmd_corpus(args: argparse.Namespace) -> int:
             corpus.fetch(item)
         state = "present" if item.present() else "missing"
         print(f" {item.slug:<24} {state:<8} {item.root}")
+    return 0
+
+
+def cmd_blocks(_: argparse.Namespace) -> int:
+    """The named blocks an ablation can cut, and how big each one is."""
+    found = ablate.catalogue(arms.DATALOG_SKILL_DIR)
+    if not found:
+        print("no blocks marked in the skill", file=sys.stderr)
+        return 1
+    for name, block in found.items():
+        print(f" {name:<32} {block.document:<28} {block.lines:>3} lines  {block.words:>4} words")
     return 0
 
 
@@ -179,6 +215,17 @@ def main(argv: list[str] | None = None) -> int:
         default=DEFAULT_MAX_BUDGET_USD,
         help="hard USD ceiling per cell",
     )
+    run.add_argument(
+        "--strength",
+        action="append",
+        help="restrict to a strength (repeatable); default is every strength",
+    )
+    run.add_argument(
+        "--ablate",
+        metavar="BLOCK",
+        help="cut a named documentation block from the engine arm's skill "
+        "(`harness blocks` lists them); implies engine arm only",
+    )
     run.add_argument("--yes", action="store_true", help="required to start a paid run")
     run.set_defaults(func=cmd_run)
 
@@ -187,6 +234,10 @@ def main(argv: list[str] | None = None) -> int:
     rep.set_defaults(func=cmd_report)
 
     sub.add_parser("domains", help="list the slate and what exists").set_defaults(func=cmd_domains)
+
+    sub.add_parser("blocks", help="the documentation blocks an ablation can cut").set_defaults(
+        func=cmd_blocks
+    )
 
     ref = sub.add_parser("reference", help="run the pinned reference corpus")
     ref.add_argument(

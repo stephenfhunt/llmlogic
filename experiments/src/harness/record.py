@@ -29,6 +29,10 @@ class Record:
     arm: str
     strength: str
     model: str
+    #: The documentation block cut from this cell, or ``None``. Recorded rather
+    #: than inferred from the cell id, so a report can group ablated cells
+    #: against their controls without parsing names.
+    ablated: str | None
 
     verdict: str
     missing: int
@@ -67,6 +71,7 @@ class Record:
             arm=cell.arm,
             strength=cell.strength.name,
             model=cell.strength.model,
+            ablated=cell.ablate,
             verdict=str(grade.verdict),
             missing=grade.missing,
             extra=grade.extra,

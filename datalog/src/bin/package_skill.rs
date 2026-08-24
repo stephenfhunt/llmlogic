@@ -88,9 +88,39 @@ fn package() -> Result<String, String> {
 }
 
 fn copy(from: &Path, to: &Path) -> Result<(), String> {
+    // Markdown carries `<!-- block: name -->` annotations naming paragraphs that
+    // an ablation can cut (`experiments/src/harness/ablate.py`). They are
+    // structure for tooling, not content, so no consumer ever ships them: this
+    // strips them on the way into the bundle, exactly as the harness strips them
+    // on the way into a workspace.
+    if from.extension().is_some_and(|ext| ext == "md") {
+        let text =
+            fs::read_to_string(from).map_err(|e| format!("reading {}: {e}", from.display()))?;
+        return fs::write(to, strip_block_markers(&text))
+            .map_err(|e| format!("writing {}: {e}", to.display()));
+    }
     fs::copy(from, to)
         .map(|_| ())
         .map_err(|e| format!("copying {} → {}: {e}", from.display(), to.display()))
+}
+
+/// Drops whole lines that are nothing but a `<!-- block: … -->` / `<!-- /block -->`
+/// marker, keeping everything between them.
+fn strip_block_markers(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for line in text.lines() {
+        let trimmed = line.trim();
+        let is_marker = trimmed.starts_with("<!--")
+            && trimmed.ends_with("-->")
+            && (trimmed["<!--".len()..].trim_start().starts_with("block:")
+                || trimmed["<!--".len()..].trim_start().starts_with("/block"));
+        if is_marker {
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    out
 }
 
 /// Recursively copies a directory's contents (one level of files is enough for
@@ -160,4 +190,29 @@ The binary is built for the platform it was packaged on; rebuild from the
 `datalog` source project to target a different platform. Full docs and the
 example corpus live in that project.
 "
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_block_markers;
+
+    #[test]
+    fn markers_go_and_the_guidance_stays() {
+        let marked =
+            "intro\n<!-- block: count-wildcard -->\n  the guidance\n<!-- /block -->\ntail\n";
+        assert_eq!(strip_block_markers(marked), "intro\n  the guidance\ntail\n");
+    }
+
+    #[test]
+    fn an_ordinary_html_comment_is_left_alone() {
+        // Only the block vocabulary is tooling. A real comment is content.
+        let text = "<!-- a note to a reader -->\nbody\n";
+        assert_eq!(strip_block_markers(text), text);
+    }
+
+    #[test]
+    fn a_marker_indented_inside_a_list_item_still_goes() {
+        let text = "- bullet\n  <!-- block: alpha -->\n  guidance\n  <!-- /block -->\n";
+        assert_eq!(strip_block_markers(text), "- bullet\n  guidance\n");
+    }
 }

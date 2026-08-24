@@ -19,6 +19,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+from harness.ablate import apply as apply_ablation
 from harness.catalogue import assemble, verify
 from harness.cell import Cell
 
@@ -47,6 +48,8 @@ class Workspace:
     #: name, which is a hash so the subject cannot read its own arm off `pwd`.
     cell_id: str
     prompt: str
+    #: The documentation block cut from this workspace, if any.
+    ablated: str | None
     #: The subject's full environment. Both arms get a **scrubbed** `PATH`; only
     #: the engine arm gets the engine prepended to it.
     env: dict[str, str]
@@ -93,7 +96,7 @@ def _link_binary(destination: Path) -> Path:
     return bin_dir
 
 
-def _copy_skill(destination: Path) -> None:
+def _copy_skill(destination: Path, ablate: str | None = None) -> None:
     skill_root = destination / ".claude" / "skills" / "datalog"
     skill_root.mkdir(parents=True, exist_ok=True)
     shutil.copy2(DATALOG_SKILL_DIR / "SKILL.md", skill_root / "SKILL.md")
@@ -101,6 +104,9 @@ def _copy_skill(destination: Path) -> None:
         source = DATALOG_SKILL_DIR / subdir
         if source.is_dir():
             shutil.copytree(source, skill_root / subdir, dirs_exist_ok=True)
+    # Always: the block markers come out of every copy, so an ablated cell and
+    # its control differ by the cut and not by a comment the model can read.
+    apply_ablation(skill_root, ablate)
 
 
 def build(cell: Cell, root: Path) -> Workspace:
@@ -131,7 +137,7 @@ def build(cell: Cell, root: Path) -> Workspace:
                 f"no datalog binary at {DATALOG_BIN_DIR / 'datalog'} — "
                 "build it with `cargo build --release --offline` in datalog/"
             )
-        _copy_skill(path)
+        _copy_skill(path, cell.ablate)
         search_path = os.pathsep.join([str(_link_binary(path)), search_path])
 
     return Workspace(
@@ -140,4 +146,5 @@ def build(cell: Cell, root: Path) -> Workspace:
         prompt=assemble(cell.task),
         env={"PATH": search_path},
         has_engine=has_engine,
+        ablated=cell.ablate if has_engine else None,
     )

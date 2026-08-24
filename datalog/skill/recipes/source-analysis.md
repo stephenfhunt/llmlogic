@@ -124,6 +124,7 @@ every one.
 
 ## 5. Four traps, in the order they will bite
 
+<!-- block: source-analysis-count-trap -->
 1. **`count` counts bindings, not distinct values — and the wildcard can be
    invisible.** Over a wide imported table, named-argument syntax leaves every
    unmentioned column implicitly wildcarded, and each is a witness dimension:
@@ -139,6 +140,7 @@ every one.
    caller_of(C, F) :- calls(caller: C, callee: F).
    N = count { C | caller_of(C, "bump") }               % 20 — callers
    ```
+<!-- /block -->
 
 2. **A join across two id-spaces is silently empty.** `calls.callee` holds bare
    names; `fn_def.id` holds qualified ids. Joining them derives nothing, and
@@ -160,6 +162,7 @@ The engine is exact about what the facts say. Whether the facts say what you
 think is the open question — every wrong answer in two sessions of this came from
 extraction or from encoding, never from evaluation.
 
+<!-- block: verify-before-you-believe -->
 So: **Datalog proposes, source verifies.** Treat a derived claim as a location to
 go read, not a result. In the run above, `dead(F)` returned six functions that
 were plainly used two lines from their definition — which is how the missing
@@ -170,3 +173,4 @@ Read the source before writing anything down. Both sessions' best findings —
 `parser ↔ print` coupled by an invariant, `lower ↔ provenance` coupled by
 `ir::BodyIdx`'s meaning — only became findings after the file confirmed there was
 no `use` edge and the comment explained why.
+<!-- /block -->

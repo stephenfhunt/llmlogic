@@ -62,22 +62,30 @@ harness corpus fetch                           # the pinned source corpus, once
 
 harness run --dry-run --all                    # full grid, stub subject, no API calls
 harness run --domain access_control --smoke    # one real cell, both arms, both strengths
+harness run --domain controls --strength haiku-4.5   # a cheaper slice
 harness report results/<run-id>                # render to markdown
 
 harness reference                              # the pinned corpus still answers the same
+harness blocks                                 # doc blocks an ablation can cut
+harness run --ablate count-wildcard --domain static_analysis   # cut one, engine arm only
 ```
 
 A full grid is 112 cells and **$35–40** — cheap enough to re-run whenever
 the skill's documentation changes, which is the point of building it rather than
 eyeballing it.
 
-## The reference corpus
+## Two things beside the grid
 
-[`reference/`](reference/) pins what the engine prints for a known-correct
-program in each domain, and what it prints for a malformed one. The harness
-measures an agent against an engine that moves under it, so two runs are the same
-measurement only if the engine answered the same way in between; nothing else
-here checks that.
+**The reference corpus** ([`reference/`](reference/)) pins what the engine prints
+for a known-correct program in each domain, and what it prints for a malformed
+one. The harness measures an agent against an engine that moves under it, so two
+runs are the same measurement only if the engine answered the same way in
+between; nothing else here checks that.
+
+**Ablation** cuts one named paragraph out of the engine arm's documentation and
+re-runs those cells. Skill guidance accretes — every trap anyone hit becomes a
+paragraph, and none is ever removed, because nobody can show a line does *not*
+carry weight. This is how a line earns its place with a number.
 
 ## What this is not
 

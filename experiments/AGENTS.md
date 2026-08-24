@@ -63,6 +63,7 @@ harness run --domain access_control --smoke   # one real cell, both arms
 harness report results/<run-id> # render a run to markdown
 harness domains                 # the slate, and why a pack is unavailable
 harness reference               # the pinned reference corpus; `--repin` to adopt a diff
+harness blocks                  # the doc blocks `run --ablate` can cut
 ruff check . && ruff format .   # lints + formatting — keep clean
 ```
 

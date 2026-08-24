@@ -107,3 +107,16 @@ mkdir -p .claude/skills && ln -s ../../datalog/skill .claude/skills/datalog
 The truer test of the skill is `cargo package-skill` installed into an unrelated
 repo, where an agent with no knowledge of this project either reaches for it or
 does not.
+
+**Named blocks.** A paragraph of the skill may be wrapped in
+`<!-- block: some-name -->` … `<!-- /block -->`. The name makes that paragraph
+addressable so `experiments/` can **cut it from one cell's workspace and re-run**
+— which is how a doc line is shown to carry weight rather than asserted to
+(`experiments/src/harness/ablate.py`; `harness blocks` lists them).
+
+The markers are structure for tooling, never content: **every consumer strips
+them**, so no subject and no bundle ever sees one. `cargo package-skill` strips
+them on the way into the bundle and the harness strips them on the way into a
+workspace. Adding or renaming a block is therefore free here and only ever
+changes what an ablation can name — but *deleting* one silently un-measures it,
+so delete the marker only along with the paragraph.
