@@ -7,6 +7,7 @@ computed from, not against a second reading of the same code.
 
 from datetime import datetime, timedelta
 
+import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -165,3 +166,57 @@ def test_a_longer_rest_requirement_never_removes_a_violation(hours):
     fewer = truth.rest_violations(timedelta(hours=hours)).rows
     more = truth.rest_violations(timedelta(hours=hours + 1)).rows
     assert fewer <= more
+
+
+# ---- The roster obeys its own rules -------------------------------------------
+
+
+def test_every_assignment_is_one_the_person_could_actually_work():
+    """The property whose absence made `double-booked` unanswerable.
+
+    The questions state that a person can work a shift only if they are qualified
+    and available. A roster that breaks that rule contradicts its own preamble,
+    and the contradiction is not benign: applying the rule to `assignment.csv`
+    before looking for clashes — a reasonable reading — deleted every clash, so
+    the honest answer became the empty set. 21 of the 29 assignments were
+    ineligible when the 2026-08-24 grid ran, including the planted clash itself.
+    """
+    for person, shift_id in fixture.ASSIGNMENT_ROWS:
+        _, role, _, _ = truth.shift(shift_id)
+        assert truth.is_qualified(person, role), (person, shift_id, role)
+        assert truth.is_available(person, shift_id), (person, shift_id)
+
+
+def test_nobody_is_assigned_to_a_shift_nobody_can_work():
+    # Follows from the above, and is the absurdity that made it visible: the
+    # roster used to put people on the very shifts `unstaffable-shifts` reports.
+    unstaffable = {shift_id for (shift_id,) in truth.unstaffable_shifts().rows}
+    assigned = {shift_id for _, shift_id in fixture.ASSIGNMENT_ROWS}
+    assert not (unstaffable & assigned)
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        truth.double_booked(),
+        truth.unstaffable_shifts(),
+        truth.forced_assignments(),
+        truth.rest_violations(),
+    ],
+    ids=["double-booked", "unstaffable-shifts", "forced-assignments", "rest-violations"],
+)
+def test_no_question_can_be_answered_by_finding_one_thing(answer):
+    """An arm that finds the single planted row and stops must not score the same
+    as one that checked the whole roster. Making the roster coherent works
+    against this — every qualification is another candidate, and a clash now
+    needs one person holding both roles of an overlapping pair — which is why
+    `FORCED` plants two and `ROLES_EACH` is 2."""
+    assert len(answer.rows) > 1
+
+
+def test_a_clash_arises_from_the_draw_and_not_only_from_the_planting():
+    # `DOUBLE_BOOKED` is planted so the question always has an answer. If it were
+    # the *only* answer, the question would measure whether the subject found the
+    # thing we hid rather than whether it checked every pair.
+    planted = set(fixture.DOUBLE_BOOKED)
+    assert truth.double_booked().rows - planted

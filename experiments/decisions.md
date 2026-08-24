@@ -15,6 +15,37 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-08-24** — **A fixture has to obey the rules its questions state, and the
+  subjects are the first readers who do not already know the answer.**
+  `scheduling`'s roster assigned people to shifts at random, ignoring the
+  qualification and availability rule its own preamble stated: **21 of 29
+  assignments were ones the person could not work**, the planted double booking
+  among them. A reader who applied that rule to `assignment.csv` before looking
+  for clashes got the empty set, and three of the four `double-booked` cells
+  answered with an empty file — correctly. `forced-assignments` had the other
+  half of the same fault: all four cells omitted `('s10','p09')`, reading "could
+  work them" as excluding someone already on an overlapping shift.
+  - **Hand-verifying 28 tasks against their oracles proved the oracle matched the
+    *author's* reading. It could not prove there was only one reading.** Nothing
+  in the suite compared the fixture against the question text, because the
+  question text is prose. The tests that now exist are the closest mechanical
+  proxy: every assignment is one the person could work, and nobody is rostered
+  onto a shift `unstaffable-shifts` reports as impossible.
+  - **A rule stated where it does nothing is not neutral** — a careful reader
+    goes looking for the use. `ROSTER` was glued onto all four questions; it is
+    now `OVERLAP` and `ELIGIBILITY`, each on the questions that turn on it, and
+    `forced-assignments` says outright that an existing assignment does not
+    disqualify.
+  - **The cost of coherence is density.** No two overlapping shifts share a role,
+    so an honest clash needs one person holding both roles of an overlapping
+    pair — rare. Coherence alone cut `double-booked` to the planted pair and
+    `forced-assignments` to one row, which is a question that measures whether
+    the subject found the thing we hid. Paid for by `ROLES_EACH = 2` and a second
+    planted `FORCED` shift, with a test that no answer is a single row.
+  - The 2026-08-24 grid's `scheduling` numbers (3/8 both arms) are **not
+    evidence about the models** and cannot be repaired in place: changing a task
+    changes the slate, and `resume.strangers` refuses. Re-run under a new run id.
+
 - **2026-08-24** — **Running out of turns is not an instrument failure: that cell
   is graded on what it left behind.** The SDK reports the harness's own
   `max_turns` cap as an error result like any other, so the `ERROR` rule above

@@ -1,19 +1,14 @@
 double_booked("p01", "s01").
 double_booked("p01", "s02").
-double_booked("p01", "s09").
-double_booked("p01", "s10").
-double_booked("p07", "s13").
-double_booked("p07", "s14").
+double_booked("p05", "s02").
+double_booked("p05", "s03").
 unstaffable("s07").
 unstaffable("s14").
-forced("s04", "p09").
 forced("s05", "p03").
-forced("s10", "p09").
-forced("s13", "p09").
-rest_violation("p01", "s12").
+forced("s11", "p07").
+rest_violation("p01", "s04").
+rest_violation("p03", "s15").
 rest_violation("p05", "s04").
-rest_violation("p05", "s07").
-rest_violation("p05", "s13").
-rest_violation("p08", "s11").
-rest_violation("p10", "s12").
-rest_violation("p10", "s14").
+rest_violation("p07", "s12").
+rest_violation("p08", "s06").
+rest_violation("p09", "s08").

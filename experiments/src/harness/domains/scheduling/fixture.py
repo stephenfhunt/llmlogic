@@ -39,13 +39,33 @@ SLOTS = (
 #: single answer, an arm that finds it and stops scores the same as one that
 #: checked every shift.
 UNSTAFFABLE_SHIFTS = ("s07", "s14")
-#: Exactly one qualified person is left available for this one.
-FORCED_SHIFT = "s05"
-FORCED_PERSON = "p03"
+#: Exactly one qualified person is left available for each of these. Two, for the
+#: same reason as above — and planted rather than drawn, because a coherent
+#: roster works against them: every qualification the draw hands out is another
+#: candidate, so the number of shifts that happen to have exactly one falls as
+#: the fixture gets more realistic. Relying on the draw left this question with a
+#: single answer row.
+FORCED = (("s05", "p03"), ("s11", "p07"))
 #: Assigned to two shifts that overlap.
 DOUBLE_BOOKED = (("p01", "s01"), ("p01", "s02"))
 #: Assigned to a shift that starts before they have had the minimum rest.
 TIGHT_TURNAROUND = (("p05", "s03"), ("p05", "s04"))
+#: Every planted assignment, which the roster has to be able to accommodate:
+#: each person is made qualified and available for the shift they are put on.
+#: None of these shifts may be one of the crafted ones above, or the planting
+#: would undo the guarantee those rest on — `_build` asserts it rather than
+#: leaving it to be re-checked by eye.
+PLANTED = DOUBLE_BOOKED + TIGHT_TURNAROUND
+
+#: Two roles each. One apiece and nobody can be double-booked at all: no two
+#: overlapping shifts share a role (`SLOTS` walks `ROLES` as it walks the day),
+#: so a clash needs a person holding *both* roles of an overlapping pair. That is
+#: the price of a roster that obeys its own eligibility rule, and this is what
+#: pays it.
+ROLES_EACH = 2
+#: Shifts per person. Enough that clashes and short turnarounds arise from the
+#: draw rather than only from `PLANTED`.
+SHIFTS_EACH = (2, 3)
 
 
 def _shifts():
@@ -69,33 +89,50 @@ SHIFT_ROWS = _shifts()
 
 def _build():
     rng = random.Random(SEED)
+    role_of = {name: role for name, role, _, _ in SHIFT_ROWS}
+    reserved = set(UNSTAFFABLE_SHIFTS) | {shift_id for shift_id, _ in FORCED}
+    assert not {shift_id for _, shift_id in PLANTED} & reserved
+
     qualified = set()
     for person in PEOPLE:
-        for role in rng.sample(ROLES, rng.randint(1, 2)):
+        for role in rng.sample(ROLES, ROLES_EACH):
             qualified.add((person, role))
-    # The planted person has to be qualified for the shift they are forced onto.
-    forced_role = next(role for name, role, _, _ in SHIFT_ROWS if name == FORCED_SHIFT)
-    qualified.add((FORCED_PERSON, forced_role))
+    # The forced people have to be qualified for the shift they are the only
+    # candidate for, and everyone planted onto a shift has to be able to work it.
+    qualified.update((person, role_of[shift_id]) for shift_id, person in FORCED)
+    qualified.update((person, role_of[shift_id]) for person, shift_id in PLANTED)
 
-    role_of = {name: role for name, role, _, _ in SHIFT_ROWS}
     unavailable = {(rng.choice(PEOPLE), rng.choice(SHIFT_ROWS)[0]) for _ in range(12)}
     # Nobody qualified is free for the unstaffable shift, and only one person is
-    # for the forced one.
+    # for the forced one. This runs after the qualifications are settled, so a
+    # qualification added just above cannot open one of them back up.
     for person in PEOPLE:
         for shift_id in UNSTAFFABLE_SHIFTS:
             if (person, role_of[shift_id]) in qualified:
                 unavailable.add((person, shift_id))
-        if (person, role_of[FORCED_SHIFT]) in qualified and person != FORCED_PERSON:
-            unavailable.add((person, FORCED_SHIFT))
-    unavailable.discard((FORCED_PERSON, FORCED_SHIFT))
+        for shift_id, only in FORCED:
+            if (person, role_of[shift_id]) in qualified and person != only:
+                unavailable.add((person, shift_id))
+    unavailable.difference_update((person, shift_id) for shift_id, person in FORCED)
+    unavailable.difference_update(PLANTED)
 
-    assignments = set(DOUBLE_BOOKED) | set(TIGHT_TURNAROUND)
+    def eligible(person: str, shift_id: str) -> bool:
+        return (person, role_of[shift_id]) in qualified and (person, shift_id) not in unavailable
+
+    assignments = set(PLANTED)
     # Two or three shifts each: with one apiece the roster is so sparse that the
     # only double booking is the planted one, and a question with one crafted
     # answer measures whether the subject found the thing we hid.
+    #
+    # Drawn only from shifts the person could actually work. A roster that
+    # contradicts its own eligibility rule made "which assignments clash?"
+    # unanswerable — the rule, applied first, deletes the clashes — and three of
+    # the four subjects on 2026-08-24 answered with an empty file, correctly.
+    # See ``decisions.md`` 2026-08-24.
     for person in PEOPLE:
-        for _ in range(rng.randint(2, 3)):
-            assignments.add((person, rng.choice(SHIFT_ROWS)[0]))
+        open_to_them = [name for name, *_ in SHIFT_ROWS if eligible(person, name)]
+        wanted = min(rng.randint(*SHIFTS_EACH), len(open_to_them))
+        assignments.update((person, shift_id) for shift_id in rng.sample(open_to_them, wanted))
 
     return (
         tuple(sorted(qualified)),

@@ -53,7 +53,10 @@ what makes the result readable, and a grid of one domain measures one domain.
 - **`eligibility`** — _shipped._ Four criteria in prose, and the applicants a
   missing income leaves undecided rather than refused.
 - **`scheduling`** — _shipped._ Interval overlap: double bookings, unstaffable
-  shifts, forced assignments, rest violations.
+  shifts, forced assignments, rest violations. Its roster and two of its
+  questions were **repaired 2026-08-24** after the first grid found them
+  ambiguous; the 2026-08-24 numbers for this domain are void. —
+  `decisions.md` 2026-08-24.
 - **`static_analysis`** — _shipped._ The agent extracts its own facts from a
   pinned `sqlparse`; carries the `grep`-escape finding. Its questions define
   their abstractions syntactically. — `../datalog/skill/recipes/source-analysis.md`,
