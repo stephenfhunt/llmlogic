@@ -24,57 +24,56 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
-## 2026-08-24 — S1 is measured, and the answer is null
+## 2026-08-24 — S1 is measured, the answer is null, and v1 moves to S3
 
 The first full 112-cell grid finished, across three session windows. **S1 flips
 to measured** (`datalog/spec.md` §1) — the criterion asks that the experiment was
-*run*, and it was. 230 tests green (+7), ruff clean.
+*run*, and it was. 230 harness tests green (+7), 579 crate tests green, ruff clean.
 
 **Done**
-- **The grid ran to completion**: 112 cells, 0 errored. Both arms **41/48**;
-  **38/40** with the void `scheduling` domain struck out. Negative controls 8/8
-  in both arms, so the null is not a broken instrument.
-  — `experiments/results/run-20260824T104501Z/`.
-- **Two instrument defects, both found by running it.** A session limit was
-  recorded as 46 ordinary `no-answer` cells and the report said "0 errored" —
-  fixed by an `ERROR` verdict, halt-on-fatal, `--resume` and `--limit`. That fix
-  then over-reached, swallowing the harness's own `max_turns` cap, which would
-  have **rewarded a model that flails**; `FATAL` and `STOPPING_RULE` now differ.
+- **The grid ran to completion**: 112 cells, 0 errored. Both arms **41/48**, or
+  **38/40** with the void `scheduling` domain struck out; controls 8/8 in both, so
+  the null is not a broken instrument. — `results/run-20260824T104501Z/`.
+- **Two instrument defects, both found by running it.** A session limit was filed
+  as 46 ordinary `no-answer` cells under a report saying "0 errored" — fixed by an
+  `ERROR` verdict, halt-on-fatal, `--resume` and `--limit`. That fix then
+  over-reached onto the harness's own `max_turns` cap, which would have
+  **rewarded a model that flails**; `FATAL` and `STOPPING_RULE` now differ.
 - **`scheduling` was repaired.** 21 of its 29 assignments were ones the person
-  could not work, while every question's preamble stated that rule — so applying
-  the rule first deleted every clash, and three of four `double-booked` cells
-  answered with an empty file, correctly. Roster now draws from eligible pairs;
-  `ROSTER` split into `OVERLAP` and `ELIGIBILITY`, each attached where it bears;
-  `forced-assignments` says outright that an existing assignment does not
-  disqualify. The pinned reference program derives the new answers unchanged.
+  could not work while every question's preamble stated that rule, so applying the
+  rule first deleted every clash — three of four `double-booked` cells wrote an
+  empty file, correctly.
+- **S3 captured as the v1 gate**, re-measured rather than re-read: §2 and §12
+  carried 46 + 33 spanless error sites from 2026-08-18; it is **77 + 36**, still
+  0% against 3 of 3 for lex and parse.
 
 **Decided**
-- **A cell whose subject failed is `ERROR` and is excluded**, even if an
-  `answer.txt` parses — but the turn cap is not a failure, and is graded on what
-  it left behind. — `experiments/decisions.md` 2026-08-24.
-- **The binding budget is the account's five-hour window, not dollars.** A full
-  grid is run over sessions; USD figures are notional under subscription auth.
+- **A failed cell is `ERROR` and excluded**; the turn cap is not a failure and is
+  graded on what it left behind. **The budget is the five-hour window, not
+  dollars.** — `experiments/decisions.md` 2026-08-24.
 - **The null is about *supplying* the engine, not using it.** The engine arm
   reached in **9 of 56 cells** — opus 1, haiku 8 — and every incorrect answer on
-  the live slate came from a cell that wrote no program. §1 carries this next to
-  the flip, because citing the null bare overstates it.
+  the live slate came from a cell that wrote no program.
 - **Hand-verifying 28 tasks against their oracles proved the oracle matched the
-  *author's* reading.** It could not prove there was only one reading; the
-  subjects were the first readers who did not already know the answer.
+  *author's* reading**, not that there was only one reading. The subjects were the
+  first readers who did not already know the answer.
+- **v1 now turns on S3** (§17 2026-08-24): what scopes it is spans, so a semantic
+  diagnostic points at a name — `variable Q in rule 0` — not a place.
 
 **Removed**
-- `ROSTER` — the glued-on preamble that caused the `scheduling` defect, replaced
-  by two narrower constants. README's "$35–40 per grid", a bill that does not
-  exist. The oldest worklog entry rotated to the archive.
+- `ROSTER`, the glued-on preamble behind the `scheduling` defect, for two narrower
+  constants. README's "$35–40 per grid", a bill that does not exist. The oldest
+  worklog entry rotated to the archive.
 
 **Next up**
-- **Re-run `scheduling` under a new run id** — its four tasks are repaired and its
-  2026-08-24 numbers are void. Cannot be resumed into the finished grid.
-- **The slate is at a ceiling**: opus is 20/20 in prose on the live domains, so
-  no delta is detectable downstream of reach. Harder questions, or the parked
+- **Spans on semantic and source errors** — the v1 item: `lower.rs` (26 sites) and
+  `engine/mod.rs` (35), done when the three `Semantic` programs in
+  `experiments/reference/malformed/` gain a position.
+- **Re-run `scheduling` under a new run id** — repaired, and its 2026-08-24
+  numbers are void. Cannot be resumed into the finished grid.
+- **The slate is at a ceiling**: opus is 20/20 in prose on the live domains, so no
+  delta is detectable downstream of reach. Harder questions, or the parked
   **local-model subject** — the signal lives at the weak end.
-- **Fingerprint fixtures into `run.json`** so a resume refuses one that moved
-  (queued, `experiments/ROADMAP.md`).
 
 ## 2026-08-23 — The corpus that pins, the paragraph that can be cut, and a diagnostic that lies
 
