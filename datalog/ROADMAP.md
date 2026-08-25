@@ -45,9 +45,22 @@ each; detail in §17 and `docs/worklog.md`.
 
 ## Open backlog
 
-> **Open defects live in [`bugs/`](bugs/)** — **none open as of 2026-08-24**.
+> **Open defects live in [`bugs/`](bugs/)** — **none open as of 2026-08-25**.
 > **No design session blocks anything** either: §6's extension, the last one,
 > shipped 2026-08-18.
+>
+> **§1's six criteria all hold as of 2026-08-25** — S3, the last, closed with the
+> error code vocabulary.
+>
+> **Five items below still carry a v1 tag, and that is now a contradiction to
+> resolve, not a backlog.** The *cast inside a comparison* (§8/§12),
+> *`declare` does not define a predicate* (§10/§12) and *a type-clash diagnostic
+> that names the conversion* (§12) are all tagged **v1 (S3)** — but S3 reads *"a
+> **rejected** program can be repaired from the diagnostic alone"*, and all three
+> are about programs the engine **accepts**. Either they are misclassified or S3
+> is broader than its sentence. The other two are *count-distinct* (v1, S1) and
+> the §16/§17 hygiene pair. **A user call**: retag them, or reopen the criterion.
+> Nothing here was retagged to make the flip look clean.
 >
 > **§1 is written and §2 ratified (2026-08-18), so every item below is now ruled
 > v1 or post-v1** against §1's success criteria — the argument per item is in
@@ -490,19 +503,26 @@ workaround and §16's preamble-vs-§16.4 contradiction fixed alongside.
 
 ### Errors & API edges (§12/§14)
 
-- **Machine-readable error taxonomy** — §12 is now Draft: `Error` is a struct
-  (category, message, span, line/column position, suggestion) with `Display`
-  composed from the fields, and lexer/parser diagnostics carry real positions
-  (2026-07-25). **This is the last thing between the criteria and v1**, now that
-  S1 has been measured (§1, 2026-08-24): S3 is the only criterion still reading
-  *scoped*, and these are what scope it. Three pieces remain.
+- **Machine-readable error taxonomy** — **✅ shipped 2026-08-25**, and with it
+  **S3, the last v1 criterion** (§1). `Error` is a struct — code, category,
+  message, span, line/column position, suggestion — with `Display` composed from
+  the fields. Two post-v1 follow-ons survive it, below.
   - **Spans on semantic and source errors — ✅ shipped 2026-08-24.** Every
     diagnostic carries a line and column; measured at 15 of 15 constructed
     families, and all five malformed reference pins moved to carry one. Stages
     after parsing record a span (`Error::at_span`) and `api.rs` resolves it once
     (§17, 2026-08-24). Spans stop at the file edge — see the new item below.
-  - **A stable code vocabulary**, so an agent branches on `unsafe-aggregate`
-    rather than on prose. Today there are four: the `ErrorKind` variants.
+  - **A stable code vocabulary — ✅ shipped 2026-08-25.** 38 codes over 153
+    emission sites, derived by census; the code is a required constructor
+    argument, so the category is derived from it and a site cannot omit one.
+    `Warning::code` too, in one flat namespace. Property **C16** and a pinned
+    code set. — [`notes/error-codes.md`](notes/error-codes.md), §17 2026-08-25.
+  - **`internal-error` renders under the wrong category** — a *malformed IR* is
+    raised through the semantic stage, so it prints as `semantic error
+    [internal-error]` when nothing about the program's semantics is at fault and
+    the reader it addresses is us. Wants a fifth `ErrorKind`, which is normative
+    §12 text and touches §14's exit vocabulary. _queued — **post-v1** (the code
+    already tells a consumer what it needs)._ — §12/§14, `error.rs`.
   - **Per-file error attribution.** Spans are per-file byte offsets
     (`resolve.rs`), so a program that spliced in a module drops its spans rather
     than resolve them against the wrong text — correct, and a real loss for
@@ -515,10 +535,9 @@ workaround and §16's preamble-vs-§16.4 contradiction fixed alongside.
     suggestion that cannot be acted on costs a round, and one that is wrong on
     correct code is worse than none.
 
-  The corpus was the test and it moved: all five malformed pins carry a position
-  as of 2026-08-24. **What still reads S3 as *scoped* is the code vocabulary**,
-  not the spans. _queued (partially shipped) — **v1** (S3)._
-  — §12, `../experiments/reference/malformed/`.
+  The corpus was the test and it moved twice: all five malformed pins carry a
+  position as of 2026-08-24 and a code as of 2026-08-25.
+  _shipped — **v1** (S3, met)._ — §12, `../experiments/reference/malformed/`.
 - **`--format json` scope** — a documented future *edge* feature (structured
   errors, provenance); the data path stays Datalog-native. _parked (low value) — **post-v1**._ — §14.
 - **`serde` for the API** — decide as §14 stabilizes. _queued — **post-v1**._ — §14.

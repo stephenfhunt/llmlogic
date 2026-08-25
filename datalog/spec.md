@@ -111,7 +111,7 @@ criterion rather than an assumption.
 |---|---|---|---|
 | **S1** | An agent answering multi-hop, recursive or constraint questions is measurably more accurate **with** the engine than reasoning in prose — at two model strengths, first program recorded before any feedback. | the `experiments/` harness | **measured 2026-08-24 — null**; read the note below before citing it |
 | **S2** | The engine's stdout is valid input to the engine, byte-for-byte. | property **D2**, `print::tests::corpus_round_trips` | met |
-| **S3** | A rejected program can be repaired from the diagnostic alone, without reading the spec. | §12's fields; the near-miss corpus (§3) | met for lex/parse; **scoped** (§2) — the only criterion not met, and what v1 now turns on |
+| **S3** | A rejected program can be repaired from the diagnostic alone, without reading the spec. | §12's fields; the near-miss corpus (§3) | **met 2026-08-25** — every diagnostic carries a category, a position and a code; what stays open is *suggestion* coverage (13 of 77 semantic sites), which sharpens a repair rather than enabling one |
 | **S4** | A question over a real external table is answerable end-to-end with no preprocessing step. | §13 + the USDA dogfood | met (dates included, 2026-08-19) |
 | **S5** | Every fact in an answer can be explained **through the surface the caller used**. | §11's goal form (§16.6, §16.15), its system tests, **E5** | met (2026-08-21) |
 | **S6** | No *exponent* worse than a comparable engine on the shared corpus. | `notes/cross-engine-benchmark.md`, re-measured in `notes/profile-2026-08-20.md` | met |
@@ -140,11 +140,15 @@ repo exists to test a hypothesis, so a negative result is a finding and not a
 failure to ship — whereas shipping v1 having never run the experiment would leave
 §1's own pillars resting on an unmeasured premise.
 
-**S1's half is done as of 2026-08-24, so v1 turns on S3** — the one criterion
-still reading *scoped*. Every diagnostic now carries a line and column, so what
-remains to scope it is the **code vocabulary**: an agent still branches on prose.
-The work and its finish line are one `ROADMAP.md` item (*Machine-readable error
-taxonomy*); the reasoning is §17, 2026-08-24.
+**All six hold as of 2026-08-25**, so v1's criteria are met. S3 was the last, and
+it closed in two steps a day apart: every diagnostic gained a **position**
+(2026-08-24) and then a **code** (2026-08-25), so a rejected program says where it
+is wrong and what kind of wrong it is without a consumer parsing English. The
+reasoning is §17, 2026-08-24 and 2026-08-25.
+
+Meeting the criteria is not the same as **cutting** a release, which is a separate
+decision; and none of this reopens what S1 measured, since that criterion asks
+only that the experiment was run.
 
 Which open backlog items that ruling makes v1 work, and which it puts after v1, is
 recorded per item in [`ROADMAP.md`](ROADMAP.md) with the argument in
@@ -178,17 +182,17 @@ how it is built.
   usable as ordinary relation and field names. This principle has been paid for
   rather than asserted: `float(A)` was declined because `ident (` cannot be told
   from an atom without scan-ahead (§8, §17).
-- **Every error is structured and actionable** — *ratified, scoped to structure
-  and to lexical/syntactic location.* A diagnostic is data with a rendering
-  (§12): category, message, suggestion and position are separate fields, so a
-  consumer never parses English to recover them. **Location is the scoped half.**
-  Spans are attached in the lexer and the parser only — re-measured 2026-08-24,
-  *all* 77 `Error::semantic` and 36 `Error::source` construction sites carry none,
-  against 3 of 3 for each of `Error::lex` and `Error::parse`. Suggestions reach
-  every *stage* but not every diagnostic: 13 of the 77 semantic sites carry one
-  and none of the source sites do. A stable per-diagnostic **code** is still
-  missing, so a consumer branches on one of four `ErrorKind` categories or on
-  prose (§12, ROADMAP).
+- **Every error is structured and actionable** — *ratified, scoped to
+  suggestions.* A diagnostic is data with a rendering (§12): code, category,
+  message, suggestion and position are separate fields, so a consumer never
+  parses English to recover them. Every diagnostic carries a **position**
+  (2026-08-24) and a **code** from a pinned vocabulary of 38 (2026-08-25), so
+  *where* and *what kind* both reach a consumer as data. **Suggestions are the
+  scoped half**: they reach every *stage* but not every diagnostic — 13 of the 77
+  semantic sites carry one and none of the 36 source sites do — and §12's own
+  hazard note is why that is a coverage question rather than a sweep (a
+  suggestion that cannot be acted on costs a round; one that is wrong on correct
+  code is worse than none).
 - **Explainability and the agent API are first-class** — *ratified, scoped to the
   engine and the goal form.* Provenance is designed in from the start and is not
   an add-on: the fixpoint records **all** derivations of every derived fact,
@@ -2554,7 +2558,7 @@ never say.
   taxonomy*). The last piece of S3: an agent had four things to branch on, and
   all four named the stage that rejected the program rather than what was wrong.
   The census, the folds, and the alternatives are in
-  [`notes/error-codes.md`](notes/error-codes.md); **37 codes over 153 emission
+  [`notes/error-codes.md`](notes/error-codes.md); **38 codes over 153 emission
   sites**.
   - **The unit is the fix, not the message and not the site.** Which field is
     unknown is what a message is for; *the named arguments do not match the
@@ -2566,6 +2570,14 @@ never say.
     sweep that does not miss one, and paying it is what produced the census.
   - **No generic fallback**, which the session planned and then found no tail
     for. A generic code is where the next diagnostic goes without thinking.
+  - ***Consequences 2026-08-25***, within the hour: **one fold was wrong, and the
+    crate's own test found it the moment it stopped reading prose.** The
+    conversion table classifies *no such conversion* and *would lose the value*
+    differently, and the messages had carried that in the `"type error: "` /
+    `"conversion error: "` prefixes the code was replacing — so collapsing them
+    into `unsupported-conversion` lost a distinction a consumer was already
+    making. `lossy-conversion` split back off. The fold rule is not
+    self-applying; checking it against an actual consumer is what applies it.
   - **The category stays.** A code implies its category, so rendering both is
     redundant for a machine — but the category is what a human reads first, and
     an unrecognised code has to fall back to something.
@@ -2605,6 +2617,15 @@ never say.
     `load_imports` covers `sources/`'s 29. Six of the 77 were `naive.rs`, which
     is `#[cfg(test)]` and reaches no user. What *was* a design pass is the
     cross-file question below, which the count did not show at all.
+  - ***Consequences 2026-08-25*** — **the lesson generalised, and paid for
+    itself the next day.** The code vocabulary took the opposite shape from the
+    spans on purpose: a span attaches at a *frame*, so a wrapper covers dozens of
+    sites, but a code is a claim about *this* diagnostic and cannot be stamped in
+    bulk. Making it a required constructor argument meant reading all 153 sites —
+    which is the census the vocabulary was derived from, so the cost bought the
+    design rather than merely paying for it. This entry's other claim also held:
+    S3 was closed by the corpus, not by re-reading the source, and the pins moved
+    twice in two days.
 
 - **2026-08-24** — **Spans resolve at the boundary, and stop at the file edge**
   (§12; `error.rs`, `api.rs`, `resolve.rs`). Lowering, inference and the

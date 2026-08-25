@@ -24,6 +24,60 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-25 — Every diagnostic gets a code, and the last criterion closes
+
+The §12 code vocabulary — designed, built and pinned in one session. **S3 flips
+to met**, and with it **all six of §1's criteria hold**. 590 crate tests green
+(+5), 568 under `--no-default-features`, 237 harness tests green (+7), clippy and
+ruff clean.
+
+**Done**
+- **38 error codes over 153 emission sites**, by census rather than by naming
+  what was convenient (`datalog/notes/error-codes.md`). The code is a **required
+  constructor argument**, so every site had to be read — which is what produced
+  the census — and the category derives from it. `Warning::code` too, one flat
+  namespace across both.
+- **53 messages stopped faking a code** — *"type error: "*, *"malformed IR: "*
+  and two more: prefixes §12 forbade and nothing enforced, because until there
+  was a code they were the only way to tell an overflow from a type clash.
+- **Property C16** — every diagnostic carries a code from the pinned set — over
+  `arb_corrupted_program_text`, the suite's **first generator that makes programs
+  fail**; ten families across four categories. Plus the pinned code-set test.
+- **The harness refuses a stale engine.** Both call sites checked only that
+  `target/release/datalog` existed; `arms.require_engine` refuses one older than
+  `src/`. Done first: the corpus re-pin depended on it.
+
+**Decided**
+- **A code exists where the *fix* differs in kind**, not where a message differs
+  (§17 2026-08-25) — `Semantic` split into fifteen, four field diagnostics folded
+  into one.
+- **One fold was wrong and a test found it within the hour.** The conversion
+  table classifies *no such conversion* and *would lose the value* differently,
+  and went red the moment it read `error.code` instead of prose;
+  `lossy-conversion` split back off. Nine assertions changed the same way — the
+  crate's own tests are the first consumer to stop reading English.
+- **No generic fallback code**, planned and then declined: there was no tail, and
+  a generic code is where the next diagnostic goes without thinking.
+
+**Removed**
+- The four `Error::lex`/`parse`/`semantic`/`source` constructors, for one
+  `Error::new(code, …)`. The 53 message prefixes. §2's stale claim that spans are
+  lexer/parser-only — true until 2026-08-24, and not swept then. §12's *Not
+  covered* clause about the code. `reference.py`'s duplicate `EngineMissing`. The
+  2026-08-23 worklog entry, rotated to the archive.
+
+**Next up**
+- **Five items still carry a v1 tag** while §1 says the criteria are met — and
+  three are about programs the engine **accepts**, while S3 is about *rejected*
+  ones. Retag them or reopen the criterion: a user call, recorded in
+  `datalog/ROADMAP.md`'s preamble. Nothing was retagged to make the flip clean.
+- **Does the skill tell a subject the codes exist?** It does not, and adding it
+  changes the experiment's instrument — a deliberate call, not an edit, and
+  `--ablate` is how it would be measured.
+- Still open: the `scheduling` re-run, count-distinct, `internal-error` under the
+  wrong category, suggestion coverage (13 of 77), per-file attribution, §16/§17
+  hygiene.
+
 ## 2026-08-24 (later) — Every diagnostic has a place, and the engine stops asserting what it never read
 
 Three discovered defects, all fixed. **585 crate tests green** (+6), 230 harness
@@ -133,72 +187,3 @@ to measured** (`datalog/spec.md` §1) — the criterion asks that the experiment
 - **The slate is at a ceiling**: opus is 20/20 in prose on the live domains, so no
   delta is detectable downstream of reach. Harder questions, or the parked
   **local-model subject** — the signal lives at the weak end.
-
-## 2026-08-23 — The corpus that pins, the paragraph that can be cut, and a diagnostic that lies
-
-Both remaining **v1** items for the first grid run, plus the bug the first one
-found on its first day. 195 tests green (+31), ruff clean, the 112-cell offline
-grid still renders.
-
-**Done**
-- **Reference corpus** (`experiments/reference/`) — seven correct programs, one
-  per domain, and five malformed ones pinned to their diagnostics. The five
-  domain programs from 2026-08-22 were **rescued out of a scratch directory**
-  before it was swept; `access_control` and `controls` were written and verified
-  this session. `harness reference [--repin]`, and a test that checks the pins
-  *and* every relation against the domain's plain-Python oracle.
-- **Doc-line ablation** — `<!-- block: name -->` in the skill, `harness run
-  --ablate <block>`, `harness blocks` to list them. Four marked. Markers are
-  stripped from every copy, ablated or not, and `cargo package-skill` strips them
-  too, so none reaches a subject or a bundle.
-- **`datalog/bugs/008`** — a rule-level type clash manufactures a *second*, false
-  diagnostic asserting the fact table holds values it does not. `union()` merges
-  the classes after reporting the conflict, and `finish()`'s declared-vs-inferred
-  sweep then reads the poisoned class. The accusation follows operand order,
-  which is the tell. Found while pinning the malformed half.
-- **Cheaper slices** — `--strength`, and `--ablate` implying the engine arm.
-
-**Decided**
-- **Run the grid before fixing count-distinct**, which was the session's opening
-  question. The trap is already documented in two places, and the ROADMAP's own
-  open question is *"`count distinct`, or document it harder"* — the run and the
-  ablation are the evidence that settles it. Fixing first spends a language-design
-  session on a call the run would inform, then wants a re-run.
-- **A pin is a tripwire, not an assertion of correctness** — so the corpus
-  re-checks every relation against the oracle, and a moved pin is a change in the
-  instrument to be read, never a red test that regenerates itself.
-- **Measured, and it sharpens the item**: over `sqlparse`, `widely_used` returns
-  **7 with a two-column `call` and 13 with a three-column one** — same rule text,
-  the extra column a line number it never mentions, exit 0, no warning.
-
-**Removed**
-- One test of my own writing, before it landed: a text-scan for "datalog" in the
-  oracles duplicated `test_truth_independence.py`, which already does it over the
-  AST and does it properly. Nothing else — the session was almost all new.
-
-**Then the pilot ran, and found two instrument defects**
-- **A cell was not starting from an empty directory.** A workspace is a hash of
-  the cell id built with `exist_ok=True`, so `--dry-run` and a paid run share it:
-  **two of sixteen cells were graded on the stub's `answer.txt`** — one *wrong* on
-  its truncated truth, one *correct* without doing the work, both engine-arm.
-  Fixed, guarded, tested; the clean re-run is **16/16, $1.08**.
-- **The denials count is a floor.** The gate flags only an absolute path that
-  already exists and defers to the OS sandbox for the rest, so a write to a *new*
-  outside path is blocked and never counted. The report says so now.
-- **`access_control` does not discriminate**: 16/16 at both strengths, both arms.
-  Opus never reached for the engine on any cell — it wrote Python in ~2 turns,
-  in *both* arms. Haiku reached on 4/4 and wrote a real program each time.
-  `max_turns=30` never bound (max 20). Cost is **$0.07/cell**, so a full grid is
-  nearer **$8** than the $35–40 the README estimates.
-
-**Next up**
-- **The full grid.** The pilot's job is done: the instrument has been corrected
-  twice and the cost is known. `access_control` having no ceiling headroom is a
-  reason to run the harder domains, not to keep piloting the easy one.
-- Then the ablation on `count-wildcard` / `source-analysis-count-trap`, and rule
-  on count-distinct from what it shows.
-- **Opus writing Python in both arms is the S1 result taking shape** — if it
-  holds across the slate, "does the engine help?" has a different answer per
-  strength, which is what §1 predicted.
-- Still open: `008`, what *"reached for it"* should mean (the pilot showed a
-  third case: reached, ran nothing), the JSON encoding, `--no-default-features`.
