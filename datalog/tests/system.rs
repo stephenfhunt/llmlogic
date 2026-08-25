@@ -285,7 +285,9 @@ fn a_type_error_does_not_answer() {
     let out = run_file("broken_types.dl");
     assert_eq!(out.code, 2);
     assert!(out.stdout.is_empty());
-    assert!(out.stderr.contains("type error"), "{}", out.stderr);
+    // The code, not the prose: this is the surface §12 exists to give a
+    // consumer, and the CLI is a consumer.
+    assert!(out.stderr.contains("[type-clash]"), "{}", out.stderr);
 }
 
 #[test]

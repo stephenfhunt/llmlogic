@@ -29,7 +29,7 @@ pub use table::LoadedTable;
 pub(crate) use table::{RawTable, finalize};
 
 use crate::ast::{FieldDecl, ImportKind, Program, StatementKind};
-use crate::error::Error;
+use crate::error::{Error, ErrorCode};
 
 /// A reader backend: turns a resolved path into a [`RawTable`]. I/O and
 /// syntax only — typing belongs to [`finalize`].
@@ -88,10 +88,13 @@ pub fn load_table(
     schema: Option<&[FieldDecl]>,
 ) -> Result<LoadedTable, Vec<Error>> {
     if table.is_some() || has_database_extension(path) {
-        return Err(vec![Error::source(format!(
-            "`{path}`: database imports are not yet implemented (the `table \"…\"` \
+        return Err(vec![Error::new(
+            ErrorCode::UnsupportedFormat,
+            format!(
+                "`{path}`: database imports are not yet implemented (the `table \"…\"` \
              syntax is reserved; spec §13)"
-        ))]);
+            ),
+        )]);
     }
     let backend = backend_for(path).map_err(|e| vec![e])?;
     let raw = backend.read(path).map_err(|e| vec![e])?;
@@ -113,17 +116,23 @@ fn backend_for(path: &str) -> Result<Box<dyn FactSource>, Error> {
         .and_then(|e| e.to_str())
         .map(str::to_ascii_lowercase);
     match extension.as_deref() {
-        Some("dl") => Err(Error::source(format!(
-            "`{path}`: a `.dl` file is a module import — drop the `as` clause: \
+        Some("dl") => Err(Error::new(
+            ErrorCode::UnsupportedFormat,
+            format!(
+                "`{path}`: a `.dl` file is a module import — drop the `as` clause: \
              `import \"{path}\".`"
-        ))),
+            ),
+        )),
         Some("csv") => backend(duckdb_backend(DataFormat::Csv), path),
         Some("jsonl" | "ndjson") => backend(duckdb_backend(DataFormat::Jsonl), path),
         Some("parquet") => backend(duckdb_backend(DataFormat::Parquet), path),
-        _ => Err(Error::source(format!(
-            "`{path}`: unsupported import format; supported: .csv, .jsonl/.ndjson, \
+        _ => Err(Error::new(
+            ErrorCode::UnsupportedFormat,
+            format!(
+                "`{path}`: unsupported import format; supported: .csv, .jsonl/.ndjson, \
              .parquet (and http(s) URLs)"
-        ))),
+            ),
+        )),
     }
 }
 
@@ -165,10 +174,13 @@ fn duckdb_backend(_format: DataFormat) -> Option<Box<dyn FactSource>> {
 
 fn backend(backend: Option<Box<dyn FactSource>>, path: &str) -> Result<Box<dyn FactSource>, Error> {
     backend.ok_or_else(|| {
-        Error::source(format!(
-            "`{path}`: this build has no import support — imports need the `duckdb` \
+        Error::new(
+            ErrorCode::UnsupportedFormat,
+            format!(
+                "`{path}`: this build has no import support — imports need the `duckdb` \
              feature (on by default; rebuild without `--no-default-features`)"
-        ))
+            ),
+        )
     })
 }
 

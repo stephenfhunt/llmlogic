@@ -31,7 +31,7 @@ use duckdb::types::ValueRef;
 
 use super::table::RawValue;
 use super::{DataFormat, FactSource, RawTable};
-use crate::error::Error;
+use crate::error::{Error, ErrorCode};
 
 pub(crate) struct DuckDbSource {
     format: DataFormat,
@@ -53,8 +53,12 @@ impl FactSource for DuckDbSource {
     }
 
     fn read(&self, path: &str) -> Result<RawTable, Error> {
-        let conn = Connection::open_in_memory()
-            .map_err(|e| Error::source(format!("`{path}`: cannot open DuckDB: {e}")))?;
+        let conn = Connection::open_in_memory().map_err(|e| {
+            Error::new(
+                ErrorCode::UnreadableSource,
+                format!("`{path}`: cannot open DuckDB: {e}"),
+            )
+        })?;
         // URLs are read directly over httpfs — DuckDB's `read_csv`/`read_json`/
         // `read_parquet` all accept a URL, so no local file is ever written
         // (a read-only environment can still import from a URL). CSV needs its
@@ -63,7 +67,10 @@ impl FactSource for DuckDbSource {
         if is_url {
             ensure_httpfs(&conn, path)?;
         } else if std::fs::metadata(path).is_err() {
-            return Err(Error::source(format!("`{path}`: file not found")));
+            return Err(Error::new(
+                ErrorCode::FileNotFound,
+                format!("`{path}`: file not found"),
+            ));
         }
         match self.format {
             DataFormat::Csv => {
@@ -85,10 +92,13 @@ impl FactSource for DuckDbSource {
 fn ensure_httpfs(conn: &Connection, url: &str) -> Result<(), Error> {
     conn.execute_batch("INSTALL httpfs; LOAD httpfs;")
         .map_err(|e| {
-            Error::source(format!(
-                "`{url}`: could not load the httpfs extension for URL imports \
+            Error::new(
+                ErrorCode::UnreadableSource,
+                format!(
+                    "`{url}`: could not load the httpfs extension for URL imports \
              (a network fetch on first use): {e}"
-            ))
+                ),
+            )
         })
 }
 
@@ -101,13 +111,15 @@ fn fetch_bytes(conn: &Connection, url: &str) -> Result<Vec<u8>, Error> {
     match rows.next().map_err(|e| source_error(url, e))? {
         Some(row) => match row.get_ref(0).map_err(|e| source_error(url, e))? {
             ValueRef::Blob(bytes) => Ok(bytes.to_vec()),
-            other => Err(Error::source(format!(
-                "`{url}`: unexpected fetch result {other:?}"
-            ))),
+            other => Err(Error::new(
+                ErrorCode::UnreadableSource,
+                format!("`{url}`: unexpected fetch result {other:?}"),
+            )),
         },
-        None => Err(Error::source(format!(
-            "`{url}`: the URL returned no content"
-        ))),
+        None => Err(Error::new(
+            ErrorCode::UnreadableSource,
+            format!("`{url}`: the URL returned no content"),
+        )),
     }
 }
 
@@ -122,7 +134,7 @@ fn sql_ident(name: &str) -> String {
 }
 
 fn source_error(path: &str, e: impl std::fmt::Display) -> Error {
-    Error::source(format!("`{path}`: {e}"))
+    Error::new(ErrorCode::UnreadableSource, format!("`{path}`: {e}"))
 }
 
 // --- CSV ---
@@ -171,9 +183,12 @@ fn read_csv(conn: &Connection, source: &str, shape_bytes: &[u8]) -> Result<RawTa
                 // distinct.
                 ValueRef::Null => cells.push(RawValue::Absent),
                 other => {
-                    return Err(Error::source(format!(
-                        "`{source}`: unexpected non-text CSV cell {other:?} (all_varchar read)"
-                    )));
+                    return Err(Error::new(
+                        ErrorCode::UnconvertibleCell,
+                        format!(
+                            "`{source}`: unexpected non-text CSV cell {other:?} (all_varchar read)"
+                        ),
+                    ));
                 }
             }
         }
@@ -254,9 +269,10 @@ fn read_jsonl(conn: &Connection, path: &str) -> Result<RawTable, Error> {
                     cells.push(json_scalar(&utf8(bytes, path)?, path, row_number, name)?)
                 }
                 other => {
-                    return Err(Error::source(format!(
-                        "`{path}`: unexpected JSON column value {other:?}"
-                    )));
+                    return Err(Error::new(
+                        ErrorCode::UnconvertibleCell,
+                        format!("`{path}`: unexpected JSON column value {other:?}"),
+                    ));
                 }
             }
         }
@@ -274,14 +290,20 @@ fn read_jsonl(conn: &Connection, path: &str) -> Result<RawTable, Error> {
 /// structured errors.
 fn json_scalar(text: &str, path: &str, row: usize, key: &str) -> Result<RawValue, Error> {
     let scalar_error = |what: &str| {
-        Error::source(format!(
-            "`{path}`: record {row}, key `{key}`: {what} (values must be JSON \
+        Error::new(
+            ErrorCode::UnconvertibleCell,
+            format!(
+                "`{path}`: record {row}, key `{key}`: {what} (values must be JSON \
              scalars: string, number, or boolean)"
-        ))
+            ),
+        )
     };
     match text.as_bytes().first() {
         Some(b'"') => Ok(RawValue::Str(unescape_json_string(text).map_err(|e| {
-            Error::source(format!("`{path}`: record {row}, key `{key}`: {e}"))
+            Error::new(
+                ErrorCode::UnconvertibleCell,
+                format!("`{path}`: record {row}, key `{key}`: {e}"),
+            )
         })?)),
         Some(b't') if text == "true" => Ok(RawValue::Bool(true)),
         Some(b'f') if text == "false" => Ok(RawValue::Bool(false)),
@@ -390,10 +412,13 @@ fn read_parquet(conn: &Connection, path: &str) -> Result<RawTable, Error> {
             "DATE" | "UUID" | "INTERVAL" | "JSON" => format!("CAST({ident} AS VARCHAR)"),
             _ if ty.starts_with("TIME") => format!("CAST({ident} AS VARCHAR)"),
             _ => {
-                return Err(Error::source(format!(
-                    "`{path}`: column `{name}` has type {ty}, which does not map onto \
+                return Err(Error::new(
+                    ErrorCode::UnsupportedColumn,
+                    format!(
+                        "`{path}`: column `{name}` has type {ty}, which does not map onto \
                      the value types (symbol/string/int/float/bool)"
-                )));
+                    ),
+                ));
             }
         };
         selects.push(select);
@@ -430,8 +455,12 @@ fn map_typed_value(
     row: usize,
     column: &str,
 ) -> Result<RawValue, Error> {
-    let cell_error =
-        |what: String| Error::source(format!("`{path}`: row {row}, column `{column}`: {what}"));
+    let cell_error = |what: String| {
+        Error::new(
+            ErrorCode::UnconvertibleCell,
+            format!("`{path}`: row {row}, column `{column}`: {what}"),
+        )
+    };
     let int128 = |n: i128| {
         i64::try_from(n)
             .map(RawValue::Int)
@@ -495,11 +524,14 @@ fn read_temporal_cell(
         }
     };
     parsed.map_err(|error| {
-        Error::source(format!(
-            "`{path}`: row {row}, column `{column}`: `{text}` is not a temporal value \
+        Error::new(
+            ErrorCode::UnconvertibleCell,
+            format!(
+                "`{path}`: row {row}, column `{column}`: `{text}` is not a temporal value \
              this engine can hold ({})",
-            error.message()
-        ))
+                error.message()
+            ),
+        )
     })
 }
 
@@ -507,18 +539,22 @@ fn finite(f: f64, path: &str, row: usize, column: &str) -> Result<RawValue, Erro
     if f.is_finite() {
         Ok(RawValue::Float(f))
     } else {
-        Err(Error::source(format!(
-            "`{path}`: row {row}, column `{column}`: `{f}` is not a finite float"
-        )))
+        Err(Error::new(
+            ErrorCode::UnconvertibleCell,
+            format!("`{path}`: row {row}, column `{column}`: `{f}` is not a finite float"),
+        ))
     }
 }
 
 // --- Shared helpers ---
 
 fn utf8(bytes: &[u8], path: &str) -> Result<String, Error> {
-    std::str::from_utf8(bytes)
-        .map(str::to_string)
-        .map_err(|_| Error::source(format!("`{path}`: the file is not valid UTF-8")))
+    std::str::from_utf8(bytes).map(str::to_string).map_err(|_| {
+        Error::new(
+            ErrorCode::UnreadableSource,
+            format!("`{path}`: the file is not valid UTF-8"),
+        )
+    })
 }
 
 /// Runs a `DESCRIBE` and returns `(column_name, column_type)` pairs.
@@ -536,17 +572,19 @@ fn describe_columns(
         let name = match row.get_ref(0).map_err(|e| source_error(path, e))? {
             ValueRef::Text(bytes) => utf8(bytes, path)?,
             other => {
-                return Err(Error::source(format!(
-                    "`{path}`: unexpected DESCRIBE output {other:?}"
-                )));
+                return Err(Error::new(
+                    ErrorCode::UnreadableSource,
+                    format!("`{path}`: unexpected DESCRIBE output {other:?}"),
+                ));
             }
         };
         let ty = match row.get_ref(1).map_err(|e| source_error(path, e))? {
             ValueRef::Text(bytes) => utf8(bytes, path)?,
             other => {
-                return Err(Error::source(format!(
-                    "`{path}`: unexpected DESCRIBE output {other:?}"
-                )));
+                return Err(Error::new(
+                    ErrorCode::UnreadableSource,
+                    format!("`{path}`: unexpected DESCRIBE output {other:?}"),
+                ));
             }
         };
         out.push((name, ty));

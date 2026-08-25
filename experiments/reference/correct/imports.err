@@ -1,1 +1,1 @@
-warning: `sum` in `region_total/2` skipped 20 absent input(s) across 10 group(s); the result covers only the values that exist
+warning [absent-skipped]: `sum` in `region_total/2` skipped 20 absent input(s) across 10 group(s); the result covers only the values that exist

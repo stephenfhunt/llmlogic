@@ -24,7 +24,7 @@
 //! [`Ident`]: TokenKind::Ident
 
 use crate::ast::Span;
-use crate::error::Error;
+use crate::error::{Error, ErrorCode};
 
 /// A lexical token: its kind plus the source span it covers.
 #[derive(Debug, Clone, PartialEq)]
@@ -238,18 +238,20 @@ impl<'a> Lexer<'a> {
     /// Records a lexical error spanning from `start` to the current position,
     /// with its source position resolved (§12) — the location is structured
     /// data on the error, never text baked into the message.
-    fn error(&mut self, start: usize, message: impl Into<String>) {
+    fn error(&mut self, code: ErrorCode, start: usize, message: impl Into<String>) {
         let span = Span {
             start: start as u32,
             end: self.pos.max(start) as u32,
         };
-        self.errors.push(Error::lex(message).at(span, self.src));
+        self.errors
+            .push(Error::new(code, message).at(span, self.src));
     }
 
     /// [`Self::error`] plus a structured suggested fix (§12) — the near-miss
     /// hints, which used to be sentence fragments inside the message.
     fn error_suggesting(
         &mut self,
+        code: ErrorCode,
         start: usize,
         message: impl Into<String>,
         suggestion: impl Into<String>,
@@ -258,8 +260,11 @@ impl<'a> Lexer<'a> {
             start: start as u32,
             end: self.pos.max(start) as u32,
         };
-        self.errors
-            .push(Error::lex(message).at(span, self.src).suggest(suggestion));
+        self.errors.push(
+            Error::new(code, message)
+                .at(span, self.src)
+                .suggest(suggestion),
+        );
     }
 
     fn scan_one(&mut self) {
@@ -312,6 +317,7 @@ impl<'a> Lexer<'a> {
                 } else {
                     self.pos += 1;
                     self.error(
+                        ErrorCode::UnsupportedToken,
                         start,
                         "stray `?`; a query is written `?- <body>.`, and a proof is                          asked for with `?why <fact>.` or `?whynot <fact>.`",
                     );
@@ -321,7 +327,12 @@ impl<'a> Lexer<'a> {
                 // `=<` is Prolog's `<=`; recognize it, hint, and substitute.
                 if self.peek_at(1) == Some(b'<') {
                     self.pos += 2;
-                    self.error_suggesting(start, "`=<` is not an operator", "did you mean `<=`?");
+                    self.error_suggesting(
+                        ErrorCode::UnsupportedToken,
+                        start,
+                        "`=<` is not an operator",
+                        "did you mean `<=`?",
+                    );
                     self.push(TokenKind::Le, start);
                 } else {
                     self.punct(TokenKind::Eq, 1);
@@ -333,7 +344,11 @@ impl<'a> Lexer<'a> {
                 } else {
                     // Prolog cut / negation; here negation is the `not` keyword.
                     self.pos += 1;
-                    self.error(start, "`!` is not an operator; negation is written `not`");
+                    self.error(
+                        ErrorCode::UnsupportedToken,
+                        start,
+                        "`!` is not an operator; negation is written `not`",
+                    );
                     self.push(TokenKind::Not, start);
                 }
             }
@@ -354,6 +369,7 @@ impl<'a> Lexer<'a> {
             b'/' => match self.peek_at(1) {
                 Some(b'/') => {
                     self.error(
+                        ErrorCode::UnsupportedToken,
                         start,
                         "`//` is not a comment; comments start with `%` or `#`",
                     );
@@ -361,6 +377,7 @@ impl<'a> Lexer<'a> {
                 }
                 Some(b'*') => {
                     self.error(
+                        ErrorCode::UnsupportedToken,
                         start,
                         "`/* */` block comments are not supported; use `%` or `#` to end of line",
                     );
@@ -374,6 +391,7 @@ impl<'a> Lexer<'a> {
                     Some(b'=') => {
                         self.pos += 2;
                         self.error_suggesting(
+                            ErrorCode::UnsupportedToken,
                             start,
                             "`\\=` is not an operator",
                             "did you mean `!=`?",
@@ -382,12 +400,16 @@ impl<'a> Lexer<'a> {
                     }
                     Some(b'+') => {
                         self.pos += 2;
-                        self.error(start, "`\\+` is not an operator; negation is written `not`");
+                        self.error(
+                            ErrorCode::UnsupportedToken,
+                            start,
+                            "`\\+` is not an operator; negation is written `not`",
+                        );
                         self.push(TokenKind::Not, start);
                     }
                     _ => {
                         self.pos += 1;
-                        self.error(start, "unexpected `\\`");
+                        self.error(ErrorCode::UnsupportedToken, start, "unexpected `\\`");
                     }
                 }
             }
@@ -439,7 +461,11 @@ impl<'a> Lexer<'a> {
         let mut value = String::new();
         loop {
             if self.pos >= self.bytes.len() {
-                self.error(start, "unterminated string literal");
+                self.error(
+                    ErrorCode::UnterminatedString,
+                    start,
+                    "unterminated string literal",
+                );
                 break;
             }
             let c = self.peek();
@@ -449,7 +475,11 @@ impl<'a> Lexer<'a> {
                 return;
             }
             if c == b'\n' {
-                self.error(start, "unterminated string literal");
+                self.error(
+                    ErrorCode::UnterminatedString,
+                    start,
+                    "unterminated string literal",
+                );
                 break;
             }
             if c == b'\\' {
@@ -458,7 +488,11 @@ impl<'a> Lexer<'a> {
                 // cursor stays on a char boundary (D4).
                 let esc_start = self.pos + 1;
                 let Some(esc) = self.src[esc_start..].chars().next() else {
-                    self.error(start, "unterminated string literal");
+                    self.error(
+                        ErrorCode::UnterminatedString,
+                        start,
+                        "unterminated string literal",
+                    );
                     self.pos = self.bytes.len();
                     break;
                 };
@@ -470,6 +504,7 @@ impl<'a> Lexer<'a> {
                     't' => value.push('\t'),
                     other => {
                         self.error(
+                            ErrorCode::MalformedLiteral,
                             esc_start,
                             format!(
                                 "unknown escape `\\{other}`; valid escapes are \\\\ \\\" \\' \\n \\t"
@@ -518,6 +553,7 @@ impl<'a> Lexer<'a> {
         let text = &self.src[body_start..self.pos];
         if text.is_empty() {
             self.error_suggesting(
+                ErrorCode::MalformedLiteral,
                 start,
                 "`@` begins a temporal literal but none follows",
                 "a date `@2026-08-19`, a timestamp `@2026-08-19T10:30:00`, or a \
@@ -530,8 +566,13 @@ impl<'a> Lexer<'a> {
             Err(error) => {
                 let message = format!("`@{text}` is not a temporal literal: {}", error.message());
                 match error.suggestion() {
-                    Some(suggestion) => self.error_suggesting(start, message, suggestion),
-                    None => self.error(start, message),
+                    Some(suggestion) => self.error_suggesting(
+                        ErrorCode::MalformedLiteral,
+                        start,
+                        message,
+                        suggestion,
+                    ),
+                    None => self.error(ErrorCode::MalformedLiteral, start, message),
                 }
             }
         }
@@ -571,7 +612,11 @@ impl<'a> Lexer<'a> {
             match text.parse::<f64>() {
                 Ok(f) if f.is_finite() => self.push(TokenKind::Float(f), start),
                 _ => {
-                    self.error(start, format!("invalid float literal `{text}`"));
+                    self.error(
+                        ErrorCode::MalformedLiteral,
+                        start,
+                        format!("invalid float literal `{text}`"),
+                    );
                 }
             }
         } else {
@@ -579,6 +624,7 @@ impl<'a> Lexer<'a> {
                 Ok(n) => self.push(TokenKind::Int(n), start),
                 Err(_) => {
                     self.error(
+                        ErrorCode::MalformedLiteral,
                         start,
                         format!("integer literal `{text}` is out of range for i64"),
                     );
@@ -631,10 +677,18 @@ impl<'a> Lexer<'a> {
         self.pos += len;
         match ch {
             '\u{201C}' | '\u{201D}' | '\u{2018}' | '\u{2019}' => {
-                self.error(start, "curly quote; use a straight quote `\"` or `'`");
+                self.error(
+                    ErrorCode::UnsupportedToken,
+                    start,
+                    "curly quote; use a straight quote `\"` or `'`",
+                );
             }
             _ => {
-                self.error(start, format!("unexpected character `{ch}`"));
+                self.error(
+                    ErrorCode::UnsupportedToken,
+                    start,
+                    format!("unexpected character `{ch}`"),
+                );
             }
         }
     }

@@ -1,1 +1,1 @@
-source error: `./nowhere.csv`: file not found (at 3:8)
+source error [file-not-found]: `./nowhere.csv`: file not found (at 3:8)

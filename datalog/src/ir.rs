@@ -44,7 +44,7 @@
 use std::hash::{Hash, Hasher};
 
 use crate::ast::{AggOp, ArithOp, CmpOp, Span, TypeName};
-use crate::error::Error;
+use crate::error::{Error, ErrorCode};
 
 /// An interned predicate identity: index into [`Program::predicates`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -117,7 +117,8 @@ impl F64 {
     /// Wraps a float, rejecting NaN and normalizing `-0.0` to `+0.0`.
     pub fn new(value: f64) -> crate::Result<F64> {
         if value.is_nan() {
-            return Err(Error::semantic(
+            return Err(Error::new(
+                ErrorCode::ArithmeticError,
                 "NaN is not a representable float value".to_string(),
             ));
         }

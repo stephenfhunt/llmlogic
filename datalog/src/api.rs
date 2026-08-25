@@ -590,6 +590,7 @@ fn answer_lines(query: &ir::Query, rows: &[Vec<ir::Value>], program: &ir::Progra
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::ErrorCode;
     use proptest::prelude::*;
 
     #[test]
@@ -1300,6 +1301,86 @@ banned(\"carol\").
                 ),
             }
         }
+    }
+
+    proptest! {
+        /// **C16** — a rejected program is always **branchable**: every
+        /// diagnostic carries a code from the pinned vocabulary, and the code
+        /// alone decides the category (§12).
+        ///
+        /// What this can actually catch is the one place the compiler cannot
+        /// look. Adding an `ErrorCode` variant is forced through `as_str` and
+        /// `kind` by exhaustive matches, but **`ErrorCode::ALL` is a hand-written
+        /// list**: a variant left out of it is a code that exists, reaches a
+        /// consumer, and is absent from the set §12 says is the whole
+        /// vocabulary. Only a run that observes codes in the wild sees that, and
+        /// this is that run.
+        ///
+        /// The second assertion is the category axis: `Error::new` derives the
+        /// category from the code, so a diagnostic whose two axes disagree means
+        /// something built an `Error` by another route.
+        #[test]
+        fn c16_every_diagnostic_carries_a_pinned_code(
+            src in crate::testgen::arb_corrupted_program_text()
+        ) {
+            let Err(errors) = run(&src) else {
+                return Ok(());  // the corruption left a valid program
+            };
+            for error in &errors {
+                prop_assert!(
+                    ErrorCode::ALL.contains(&error.code),
+                    "`{}` is not in the pinned vocabulary — {error}",
+                    error.code
+                );
+                prop_assert_eq!(
+                    error.kind,
+                    error.code.kind(),
+                    "code and category disagree — {}",
+                    error
+                );
+            }
+        }
+    }
+
+    /// C16's non-vacuity guard: the corruption generator really does reject, and
+    /// really does reach more than one family.
+    ///
+    /// Both halves are load-bearing. A generator that stopped producing invalid
+    /// programs would make C16 pass on nothing; one that produced only
+    /// `unexpected-token` — the parser's catch-all, and the easy answer to any
+    /// corruption — would sweep one arm of the vocabulary and call it the set.
+    #[test]
+    fn c16_generator_rejects_and_reaches_several_families() {
+        use proptest::strategy::{Strategy, ValueTree};
+        use proptest::test_runner::TestRunner;
+
+        let mut runner = TestRunner::deterministic();
+        let strategy = crate::testgen::arb_corrupted_program_text();
+        let mut rejected = 0;
+        let mut codes = std::collections::BTreeSet::new();
+        for _ in 0..256 {
+            let src = strategy.new_tree(&mut runner).expect("tree").current();
+            if let Err(errors) = run(&src) {
+                rejected += 1;
+                codes.extend(errors.iter().map(|error| error.code));
+            }
+        }
+        assert!(
+            rejected > 64,
+            "only {rejected} of 256 corruptions were rejected"
+        );
+        // Ten families were observed when this was written, across four
+        // categories: `unsupported-token`, `malformed-literal`,
+        // `unexpected-token`, `trailing-comma`, `uppercase-relation`,
+        // `compound-term`, `arity-mismatch`, `unsafe-rule`, `not-ground` and
+        // `type-clash`. The floor is set well under that so a generator tweak
+        // does not redden the guard, and well over one so a collapse to the
+        // parser's catch-all does.
+        assert!(
+            codes.len() >= 6,
+            "corruptions produced only {:?}",
+            codes.iter().map(|c| c.as_str()).collect::<Vec<_>>()
+        );
     }
 
     proptest! {

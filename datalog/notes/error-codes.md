@@ -66,9 +66,20 @@ Applied honestly this cuts both ways, and both directions were taken:
   non-ground fact and a non-ground `?why` goal (`not-ground` — a variable stands
   where a constant is required).
 
-The result is **37 codes**, not the ~25–35 the session opened by guessing. The
+The result is **38 codes**, not the ~25–35 the session opened by guessing. The
 number is what the fold rule produced; it was not trimmed to a target, because a
 code deleted to hit a number is one an agent then has to recover from prose.
+
+**One fold was wrong, and a test found it within the hour.** `UnsupportedConversion`
+originally covered both *there is no such conversion* (`30 as symbol`) and *the
+conversion exists and would lose the value* (`@…T10:00 as date`). The engine's own
+conversion-table test classifies those two outcomes differently, and it went red
+the moment it stopped matching prose and started reading the code — because the
+messages had carried the distinction all along, in the *"type error:"* /
+*"conversion error:"* prefixes the code was replacing. They are `LossyConversion`
+and `UnsupportedConversion` now: the lossy one has a fix (`truncate`), and that is
+a fix differing in kind. The fold rule is not self-applying, and this is what
+checking it against a consumer looks like.
 
 ## The vocabulary
 
@@ -101,12 +112,13 @@ goal) · `not-ground` · `absent-misuse` (`absent` as a body argument, or compar
 against) · `builtin-misuse` (a `std` builtin with named arguments, negated, or
 `truncate` with a computed or unknown unit).
 
-**Types (4).** `type-clash` (inference contradicts itself) ·
+**Types (5).** `type-clash` (inference contradicts itself) ·
 `declared-type-mismatch` (a `declare` contradicts what was inferred) ·
 `type-mismatch` (an operation got a value of the wrong type — comparison operands,
 arithmetic operands, a builtin's input, `min`/`max` across types, a non-numeric in
-`sum`/`avg`, an ambiguous temporal operand) · `unsupported-conversion` (an `as`
-with no conversion, a lossy one, a timestamp where `as` will not truncate).
+`sum`/`avg`, an ambiguous temporal operand) · `unsupported-conversion` (an `as` the conversion table does not have) ·
+`lossy-conversion` (one that exists and would lose the value — a timestamp to a
+date, a float with no exact integer; the fix is `truncate`).
 
 **Evaluation (2).** `arithmetic-error` (overflow, division by zero, a date
 arithmetic remainder) · `internal-error` (every *malformed IR*).
@@ -159,6 +171,26 @@ category, and our categories are words rather than numbers), and a trailing
 `[code]` after the position (which puts the machine-readable part behind the
 prose the machine is trying not to read). The blast radius is every pinned
 diagnostic — five in `experiments/reference/malformed/`, plus §16's fences.
+
+## Two things the build changed, and one wart it left
+
+**53 messages carried a pseudo-category prefix** — *"type error: "*,
+*"arithmetic error: "*, *"conversion error: "*, *"malformed IR: "* — which §12
+already forbade (*the diagnostic sentence: no location, no suggestion, no
+category prefix*) and which nothing had enforced, because until there was a code
+those prefixes were the only way to tell a type error from an overflow. They are
+gone; the code says it properly.
+
+**The crate's own tests were the first consumer to stop reading prose.** Nine
+assertions matched on those prefixes, one of them a `match` arm classifying
+conversion outcomes by `contains("conversion error")`. They read `error.code`
+now, which is both a better test and the demonstration the vocabulary is for.
+
+**The wart:** `internal-error` renders as `semantic error [internal-error]`,
+because a *malformed IR* is raised through the semantic stage. The category is
+wrong for it — nothing about the program's semantics is at fault, and the reader
+it addresses is us, not the author. Fixing it means a fifth `ErrorKind`, which is
+normative §12 text and an exit-code question; filed rather than folded in.
 
 ## What this does not do
 

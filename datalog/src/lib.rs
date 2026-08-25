@@ -40,7 +40,7 @@ pub use api::{
     RunResult, program_with_queries, run, run_at, run_at_reporting, run_with_queries,
     run_with_queries_at, run_with_queries_at_reporting,
 };
-pub use error::{Error, Result, Warning};
+pub use error::{Error, ErrorCode, ErrorKind, Result, Warning, WarningCode};
 pub use parser::parse;
 
 // Re-exported for the import integration tests, which write fixtures (e.g.

@@ -40,7 +40,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ast;
-use crate::error::{Error, Warning};
+use crate::error::{Error, ErrorCode, Warning};
 use crate::ir;
 use crate::schedule;
 
@@ -82,10 +82,13 @@ pub fn lower_with_sources(
                 // A `std` import contributes no statements: its relations were
                 // registered by `collect_predicates` before any clause lowered.
                 ast::ImportKind::Std { .. } => {}
-                ast::ImportKind::Module => lowerer.errors.push(lowerer.semantic(format!(
-                    "module import \"{}\" must be resolved before lowering",
-                    import.path
-                ))),
+                ast::ImportKind::Module => lowerer.errors.push(lowerer.semantic(
+                    ErrorCode::InternalError,
+                    format!(
+                        "module import \"{}\" must be resolved before lowering",
+                        import.path
+                    ),
+                )),
                 ast::ImportKind::Data { relation, .. } => {
                     let pred = lowerer.pred_id(&relation.name);
                     out.imports.push(ir::ImportSpec {
@@ -262,10 +265,10 @@ impl VarScope {
 
 impl Lowerer {
     /// A semantic error against the statement being lowered ([`Self::at`]).
-    /// Chainable exactly like [`Error::semantic`], so `.suggest(…)` still
-    /// reads the same at the call sites.
-    fn semantic(&self, message: impl Into<String>) -> Error {
-        let error = Error::semantic(message);
+    /// Chainable exactly like [`Error::new`], so `.suggest(…)` still reads the
+    /// same at the call sites.
+    fn semantic(&self, code: ErrorCode, message: impl Into<String>) -> Error {
+        let error = Error::new(code, message);
         match self.at {
             Some(span) => error.at_span(span),
             None => error,
@@ -395,10 +398,13 @@ impl Lowerer {
                     continue;
                 }
                 self.errors.push(
-                    self.semantic(format!(
-                        "`{}` is defined by this program and provided by `std/{}`",
-                        relation.name, module.name
-                    ))
+                    self.semantic(
+                        ErrorCode::NameCollision,
+                        format!(
+                            "`{}` is defined by this program and provided by `std/{}`",
+                            relation.name, module.name
+                        ),
+                    )
                     .suggest(format!(
                         "rename your relation, or drop `import \"std/{}\".` if you do not \
                          need its relations",
@@ -495,9 +501,10 @@ impl Lowerer {
         let mut by_field = HashMap::with_capacity(positions.len());
         for (position, field_name) in positions.iter().enumerate() {
             if by_field.insert(field_name.clone(), position).is_some() {
-                self.errors.push(self.semantic(format!(
-                    "duplicate field `{field_name}` in the schema for `{name}`"
-                )));
+                self.errors.push(self.semantic(
+                    ErrorCode::FieldMismatch,
+                    format!("duplicate field `{field_name}` in the schema for `{name}`"),
+                ));
             }
         }
 
@@ -510,7 +517,8 @@ impl Lowerer {
                     origin.label(),
                     positions.join(", ")
                 );
-                self.errors.push(self.semantic(conflict));
+                self.errors
+                    .push(self.semantic(ErrorCode::SchemaConflict, conflict));
             } else if existing.field_types != field_types {
                 // Same field names, disagreeing declared types (§17): name both
                 // origins so the mismatch is traceable.
@@ -520,7 +528,8 @@ impl Lowerer {
                     existing.origin.label(),
                     origin.label(),
                 );
-                self.errors.push(self.semantic(conflict));
+                self.errors
+                    .push(self.semantic(ErrorCode::SchemaConflict, conflict));
             }
             return;
         }
@@ -543,7 +552,7 @@ impl Lowerer {
         if let Some(&id) = self.by_name.get(name) {
             let known = self.predicates[id.0 as usize].arity;
             if known != arity {
-                self.errors.push(self.semantic(format!(
+                self.errors.push(self.semantic(ErrorCode::ArityMismatch, format!(
                     "predicate `{name}` used with arity {arity}, but previously with arity {known}"
                 )));
             }
@@ -630,10 +639,13 @@ impl Lowerer {
         // thing that can land in `discard` is an aggregate (§9) — which a ground
         // fact has no body to compute over.
         if !discard.is_empty() {
-            self.errors.push(self.semantic(format!(
-                "an aggregate cannot appear in a fact; `{}` has no body to aggregate over",
-                clause.head.predicate.name
-            )));
+            self.errors.push(self.semantic(
+                ErrorCode::AggregateMisplaced,
+                format!(
+                    "an aggregate cannot appear in a fact; `{}` has no body to aggregate over",
+                    clause.head.predicate.name
+                ),
+            ));
             return;
         }
 
@@ -646,10 +658,13 @@ impl Lowerer {
                     ground = false;
                     let name = scope.names[var.0 as usize].as_deref().unwrap_or("_");
                     let place = self.describe_arg(&clause.head, position);
-                    self.errors.push(self.semantic(format!(
-                        "fact `{}` is not ground: variable `{name}` in {place}",
-                        clause.head.predicate.name,
-                    )));
+                    self.errors.push(self.semantic(
+                        ErrorCode::NotGround,
+                        format!(
+                            "fact `{}` is not ground: variable `{name}` in {place}",
+                            clause.head.predicate.name,
+                        ),
+                    ));
                 }
             }
         }
@@ -686,9 +701,10 @@ impl Lowerer {
             return;
         };
         if !discard.is_empty() {
-            self.errors.push(self.semantic(format!(
-                "an aggregate cannot appear in a `{form}` goal; a goal names one fact"
-            )));
+            self.errors.push(self.semantic(
+                ErrorCode::AggregateMisplaced,
+                format!("an aggregate cannot appear in a `{form}` goal; a goal names one fact"),
+            ));
             return;
         }
 
@@ -703,10 +719,13 @@ impl Lowerer {
                     let var_name = scope.names[var.0 as usize].as_deref().unwrap_or("_");
                     let place = self.describe_arg(&explain.goal, position);
                     self.errors.push(
-                        self.semantic(format!(
-                            "`{form}` goal `{name}` is not ground: variable \
+                        self.semantic(
+                            ErrorCode::NotGround,
+                            format!(
+                                "`{form}` goal `{name}` is not ground: variable \
                              `{var_name}` in {place}"
-                        ))
+                            ),
+                        )
                         .suggest(format!(
                             "a goal names one fact — run `?- {name}(…).` to see which \
                              rows hold, then ask about one of them"
@@ -794,11 +813,14 @@ impl Lowerer {
         // what the equivalent hand-written rule does.
         if !self.defined.insert(name.name.clone()) {
             self.errors.push(
-                self.semantic(format!(
-                    "a query cannot be named `{}`: the program already defines that relation, \
+                self.semantic(
+                    ErrorCode::NameCollision,
+                    format!(
+                        "a query cannot be named `{}`: the program already defines that relation, \
                      and the answer would silently extend it",
-                    name.name
-                ))
+                        name.name
+                    ),
+                )
                 .suggest(format!(
                     "name the query something the program does not define, \
                      or query `{}` directly",
@@ -853,10 +875,13 @@ impl Lowerer {
     ) -> Option<ir::BodyLiteral> {
         let ast::Args::Positional(args) = &atom.args else {
             self.errors.push(
-                self.semantic(format!(
-                    "`{}` is a `std` module builtin and takes positional arguments",
-                    atom.predicate.name
-                ))
+                self.semantic(
+                    ErrorCode::BuiltinMisuse,
+                    format!(
+                        "`{}` is a `std` module builtin and takes positional arguments",
+                        atom.predicate.name
+                    ),
+                )
                 .suggest("a builtin has no field names to select by"),
             );
             return None;
@@ -895,17 +920,21 @@ impl Lowerer {
             }
             Some(ir::Expr::Term(ir::Term::Const(ir::Value::Symbol(name)))) => {
                 self.errors.push(
-                    self.semantic(format!("`{name}` is not a truncation unit"))
-                        .suggest(format!(
-                            "one of: {}",
-                            crate::stdlib::TRUNCATE_UNITS.join(", ")
-                        )),
+                    self.semantic(
+                        ErrorCode::BuiltinMisuse,
+                        format!("`{name}` is not a truncation unit"),
+                    )
+                    .suggest(format!(
+                        "one of: {}",
+                        crate::stdlib::TRUNCATE_UNITS.join(", ")
+                    )),
                 );
                 false
             }
             _ => {
                 self.errors.push(
                     self.semantic(
+                        ErrorCode::BuiltinMisuse,
                         "`truncate`'s unit must be written as a symbol, not computed".to_string(),
                     )
                     .suggest(format!(
@@ -936,11 +965,14 @@ impl Lowerer {
                     if let Some(op) = self.builtin_for(atom) {
                         if *negated {
                             self.errors.push(
-                                self.semantic(format!(
-                                    "`not` applies to relations, and `{}` is a `std` module \
+                                self.semantic(
+                                    ErrorCode::BuiltinMisuse,
+                                    format!(
+                                        "`not` applies to relations, and `{}` is a `std` module \
                                      builtin, which computes a value",
-                                    atom.predicate.name
-                                ))
+                                        atom.predicate.name
+                                    ),
+                                )
                                 .suggest(format!(
                                     "bind it and compare: `{}(D, X), X != …`",
                                     atom.predicate.name
@@ -1058,6 +1090,7 @@ impl Lowerer {
             {
                 self.errors.push(
                     self.semantic(
+                        ErrorCode::AbsentMisuse,
                         "`absent` cannot be matched in a body atom argument (a value never \
                      unifies with absent); test presence with `X is absent` / \
                      `X is not absent` instead"
@@ -1132,10 +1165,13 @@ impl Lowerer {
     ) -> Option<ir::Atom> {
         let predicate = &atom.predicate.name;
         let Some(schema) = self.schemas.get(predicate) else {
-            self.errors.push(self.semantic(format!(
-                "named arguments require known field names for `{predicate}`: add a \
+            self.errors.push(self.semantic(
+                ErrorCode::NoSchema,
+                format!(
+                    "named arguments require known field names for `{predicate}`: add a \
                  `declare {predicate}(...)` or an explicit import schema"
-            )));
+                ),
+            ));
             return None;
         };
 
@@ -1144,18 +1180,24 @@ impl Lowerer {
         let mut reported = Vec::new();
         for (index, arg) in named.iter().enumerate() {
             let Some(&position) = schema.by_field.get(&arg.field.name) else {
-                reported.push(self.semantic(format!(
-                    "unknown field `{}` for predicate `{predicate}`; known fields: {}",
-                    arg.field.name,
-                    schema.fields.join(", ")
-                )));
+                reported.push(self.semantic(
+                    ErrorCode::FieldMismatch,
+                    format!(
+                        "unknown field `{}` for predicate `{predicate}`; known fields: {}",
+                        arg.field.name,
+                        schema.fields.join(", ")
+                    ),
+                ));
                 continue;
             };
             if assigned[position].is_some() {
-                reported.push(self.semantic(format!(
-                    "field `{}` is given twice in one `{predicate}` literal",
-                    arg.field.name
-                )));
+                reported.push(self.semantic(
+                    ErrorCode::FieldMismatch,
+                    format!(
+                        "field `{}` is given twice in one `{predicate}` literal",
+                        arg.field.name
+                    ),
+                ));
                 continue;
             }
             assigned[position] = Some(index);
@@ -1171,11 +1213,14 @@ impl Lowerer {
                 .map(|(position, _)| schema.fields[position].as_str())
                 .collect();
             if !missing.is_empty() {
-                reported.push(self.semantic(format!(
-                    "head `{predicate}` uses named arguments and must supply every field; \
+                reported.push(self.semantic(
+                    ErrorCode::FieldMismatch,
+                    format!(
+                        "head `{predicate}` uses named arguments and must supply every field; \
                      missing: {}",
-                    missing.join(", ")
-                )));
+                        missing.join(", ")
+                    ),
+                ));
             }
         }
 
@@ -1332,11 +1377,14 @@ impl Lowerer {
                     && !bound.contains(&var.0)
                 {
                     let name = rule.var_names[var.0 as usize].as_deref().unwrap_or("_");
-                    self.errors.push(self.semantic(format!(
-                        "unsafe rule for `{head_name}`: head variable `{name}` is not bound \
+                    self.errors.push(self.semantic(
+                        ErrorCode::UnsafeRule,
+                        format!(
+                            "unsafe rule for `{head_name}`: head variable `{name}` is not bound \
                          by the body — it must occur in a positive body atom, or be bound by \
                          an `=`-assignment or an aggregate result"
-                    )));
+                        ),
+                    ));
                 }
             }
         }
@@ -1439,13 +1487,16 @@ impl Lowerer {
                                 if !positive.contains(&var.0))
                         });
                     if !produces && (is_literal_absent(lhs) || is_literal_absent(rhs)) {
-                        self.errors.push(self.semantic(format!(
-                            "`{}` against the literal `absent` in `{context}` is always \
+                        self.errors.push(self.semantic(
+                            ErrorCode::AbsentMisuse,
+                            format!(
+                                "`{}` against the literal `absent` in `{context}` is always \
                              false (every comparison with absent is false, so `=` and `!=` \
                              are both false); test presence with `X is absent` / \
                              `X is not absent` instead",
-                            cmp_symbol(*op),
-                        )));
+                                cmp_symbol(*op),
+                            ),
+                        ));
                     }
                 }
                 ir::BodyLiteralKind::Presence { .. } => {}
@@ -1503,15 +1554,21 @@ fn schedule_error(
         ir::BodyLiteralKind::Atom(_) => "body literal",
     };
     let error = match failure.cause {
-        schedule::ScheduleFailure::Unbound => Error::semantic(format!(
-            "unsafe {place} in `{context}`: variable `{name}` is never bound — it must \
+        schedule::ScheduleFailure::Unbound => Error::new(
+            ErrorCode::UnsafePremise,
+            format!(
+                "unsafe {place} in `{context}`: variable `{name}` is never bound — it must \
              occur in a positive body atom, or be bound by an `=`-assignment or an \
              aggregate result"
-        )),
-        schedule::ScheduleFailure::Cycle => Error::semantic(format!(
-            "circular dependency in `{context}`: the {place} needs `{name}`, which is only \
+            ),
+        ),
+        schedule::ScheduleFailure::Cycle => Error::new(
+            ErrorCode::CircularPremise,
+            format!(
+                "circular dependency in `{context}`: the {place} needs `{name}`, which is only \
              bound by a literal that in turn needs this one; no order of the body can run"
-        )),
+            ),
+        ),
     };
     // The literal that could not be scheduled is the place, for both causes: it
     // is the premise naming the variable nothing binds.
@@ -1655,10 +1712,13 @@ fn negative_cycle_error(
         for (pred, step_dep) in steps {
             parts.push(format!("{}{}", step_dep.prefix(), name(pred)));
         }
-        let error = Error::semantic(format!(
-            "program is not stratifiable: recursion through negation or aggregation: {}",
-            parts.join(" -> ")
-        ));
+        let error = Error::new(
+            ErrorCode::Unstratified,
+            format!(
+                "program is not stratifiable: recursion through negation or aggregation: {}",
+                parts.join(" -> ")
+            ),
+        );
         // The failure is a property of the whole cycle, so there is no single
         // place it lives. The first rule defining the predicate the cycle is
         // rendered from is the entry point a reader would start at, and it is
@@ -1737,10 +1797,13 @@ fn push_unsafe(
 ) {
     let name = var_names[slot as usize].as_deref().unwrap_or("_");
     errors.push(
-        Error::semantic(format!(
-            "unsafe {place} in `{context}`: variable `{name}` is never bound — it must occur \
+        Error::new(
+            ErrorCode::UnsafePremise,
+            format!(
+                "unsafe {place} in `{context}`: variable `{name}` is never bound — it must occur \
              in a positive body atom, or be bound by an `=`-assignment or an aggregate result"
-        ))
+            ),
+        )
         .at_span(at),
     );
 }

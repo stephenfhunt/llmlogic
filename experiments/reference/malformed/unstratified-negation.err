@@ -1,1 +1,1 @@
-semantic error: program is not stratifiable: recursion through negation or aggregation: q -> not r -> not q (at 4:1)
+semantic error [unstratified]: program is not stratifiable: recursion through negation or aggregation: q -> not r -> not q (at 4:1)

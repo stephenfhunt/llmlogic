@@ -32,7 +32,7 @@ use crate::ast::{
     ExprKind, FieldDecl, Ident, Import, ImportKind, Literal, LiteralKind, NamedArg, Program, Query,
     Sigil, Span, Statement, StatementKind, Term, TermKind, TypeName,
 };
-use crate::error::Error;
+use crate::error::{Error, ErrorCode};
 use crate::lexer::{Token, TokenKind, lex};
 
 /// Parses source text to a surface program, or reports every lexical and
@@ -126,20 +126,25 @@ impl Parser<'_> {
 
     /// Records a syntax error at `span`, with its source position resolved
     /// (§12): the location is data on the error, not text in its message.
-    fn error(&mut self, span: Span, message: impl Into<String>) -> Reported {
-        self.errors.push(Error::parse(message).at(span, self.src));
+    fn error(&mut self, code: ErrorCode, span: Span, message: impl Into<String>) -> Reported {
+        self.errors
+            .push(Error::new(code, message).at(span, self.src));
         Reported::new()
     }
 
     /// [`Self::error`] plus a structured suggested fix (§12).
     fn error_suggesting(
         &mut self,
+        code: ErrorCode,
         span: Span,
         message: impl Into<String>,
         suggestion: impl Into<String>,
     ) -> Reported {
-        self.errors
-            .push(Error::parse(message).at(span, self.src).suggest(suggestion));
+        self.errors.push(
+            Error::new(code, message)
+                .at(span, self.src)
+                .suggest(suggestion),
+        );
         Reported::new()
     }
 
@@ -147,7 +152,11 @@ impl Parser<'_> {
     fn error_expected(&mut self, expected: &str) -> Reported {
         let found = self.kind().describe();
         let span = self.span();
-        self.error(span, format!("expected {expected}, found {found}"))
+        self.error(
+            ErrorCode::UnexpectedToken,
+            span,
+            format!("expected {expected}, found {found}"),
+        )
     }
 
     fn expect(&mut self, kind: &TokenKind, expected: &str) -> PResult<Token> {
@@ -289,7 +298,11 @@ impl Parser<'_> {
             if self.eat(&TokenKind::Comma) {
                 if matches!(self.kind(), TokenKind::RParen) {
                     let span = self.span();
-                    return Err(self.error(span, "trailing `,` in the field list"));
+                    return Err(self.error(
+                        ErrorCode::TrailingComma,
+                        span,
+                        "trailing `,` in the field list",
+                    ));
                 }
                 continue;
             }
@@ -366,6 +379,7 @@ impl Parser<'_> {
         if matches!(self.kind(), TokenKind::Semi) {
             let span = self.span();
             return Err(self.error(
+                ErrorCode::UnsupportedConstruct,
                 span,
                 "disjunction `;` is not supported in queries; split into separate queries",
             ));
@@ -398,6 +412,7 @@ impl Parser<'_> {
                 Sigil::WhyNot => "?whynot",
             };
             return Err(self.error_suggesting(
+                ErrorCode::UnsupportedConstruct,
                 span,
                 format!("`{form}` explains one fact, so its goal is a single atom"),
                 "ask `?- <conjunction>.` for the rows a body matches, then explain one of them",
@@ -467,7 +482,7 @@ impl Parser<'_> {
         while self.eat(&TokenKind::Comma) {
             if matches!(self.kind(), TokenKind::Dot | TokenKind::Semi) {
                 let span = self.span();
-                return Err(self.error(span, "trailing `,` in the body"));
+                return Err(self.error(ErrorCode::TrailingComma, span, "trailing `,` in the body"));
             }
             literals.push(self.parse_literal()?);
         }
@@ -552,6 +567,7 @@ impl Parser<'_> {
         if self.comparison_op().is_some() || matches!(self.kind(), TokenKind::Is) {
             let span = self.span();
             return Err(self.error(
+                ErrorCode::ChainedComparison,
                 span,
                 "comparisons do not chain; write `a <= b, b <= c` instead of `a <= b <= c`",
             ));
@@ -655,6 +671,7 @@ impl Parser<'_> {
                 }
                 _ => {
                     return Err(self.error(
+                        ErrorCode::UnsupportedConstruct,
                         start,
                         "prefix `-` applies only to a numeric literal (there is no unary minus on \
                          variables or expressions)",
@@ -683,6 +700,7 @@ impl Parser<'_> {
             }
             let span = self.span();
             return Err(self.error(
+                ErrorCode::UnknownAggregate,
                 span,
                 format!(
                     "`{name}` is not an aggregate operator; expected one of \
@@ -693,6 +711,7 @@ impl Parser<'_> {
         if matches!(self.kind(), TokenKind::LBrace) {
             let span = self.span();
             return Err(self.error(
+                ErrorCode::UnknownAggregate,
                 span,
                 "an aggregate needs an operator: write `count { X | goal(X) }` \
                  (one of count, sum, min, max, avg) before the `{`",
@@ -791,6 +810,7 @@ impl Parser<'_> {
                 // compound term, which v1 forbids (§4, flat terms).
                 if matches!(self.kind_at(1), TokenKind::LParen) {
                     return Err(self.error(
+                        ErrorCode::CompoundTerm,
                         span,
                         "compound terms are not supported; arguments are flat (§4)",
                     ));
@@ -825,6 +845,7 @@ impl Parser<'_> {
         if matches!(self.kind(), TokenKind::RParen) {
             let span = self.span();
             return Err(self.error(
+                ErrorCode::UnsupportedConstruct,
                 span,
                 format!(
                     "predicate `{}` has no arguments; predicates take at least one argument in v1",
@@ -860,6 +881,7 @@ impl Parser<'_> {
             {
                 let span = self.span();
                 return Err(self.error(
+                    ErrorCode::UnsupportedConstruct,
                     span,
                     "cannot mix positional and named arguments in one literal (§4)",
                 ));
@@ -868,7 +890,11 @@ impl Parser<'_> {
             if self.eat(&TokenKind::Comma) {
                 if matches!(self.kind(), TokenKind::RParen) {
                     let span = self.span();
-                    return Err(self.error(span, "trailing `,` in the argument list"));
+                    return Err(self.error(
+                        ErrorCode::TrailingComma,
+                        span,
+                        "trailing `,` in the argument list",
+                    ));
                 }
                 continue;
             }
@@ -895,7 +921,11 @@ impl Parser<'_> {
             if self.eat(&TokenKind::Comma) {
                 if matches!(self.kind(), TokenKind::RParen) {
                     let span = self.span();
-                    return Err(self.error(span, "trailing `,` in the argument list"));
+                    return Err(self.error(
+                        ErrorCode::TrailingComma,
+                        span,
+                        "trailing `,` in the argument list",
+                    ));
                 }
                 continue;
             }
@@ -927,6 +957,7 @@ impl Parser<'_> {
             TokenKind::Variable(name) => {
                 let span = self.span();
                 self.error_suggesting(
+                    ErrorCode::UppercaseRelation,
                     span,
                     format!("relation names must be lowercase; `{name}` looks like a variable"),
                     format!("did you mean `{}`?", lowercase_first(&name)),

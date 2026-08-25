@@ -3,6 +3,7 @@
 //! library surface from outside the crate; the system tests
 //! (`tests/system.rs`) run the compiled binary over the same programs.
 
+use datalog::ErrorCode;
 use std::fs;
 
 fn corpus(name: &str) -> String {
@@ -292,7 +293,9 @@ fn disjunction_end_to_end() {
 fn a_type_error_is_reported() {
     let errors = datalog::run(&corpus("broken_types.dl")).expect_err("heterogeneous column");
     assert!(
-        errors.iter().any(|e| e.to_string().contains("type error")),
+        errors
+            .iter()
+            .any(|e| e.code == ErrorCode::TypeClash || e.code == ErrorCode::TypeMismatch),
         "got {errors:?}"
     );
 }
@@ -334,7 +337,9 @@ fn a_cross_type_ordered_comparison_is_still_a_type_error() {
     let errors =
         datalog::run("s(\"a\").\n?- s(X), X < 1.").expect_err("string compared against int");
     assert!(
-        errors.iter().any(|e| e.to_string().contains("type error")),
+        errors
+            .iter()
+            .any(|e| e.code == ErrorCode::TypeClash || e.code == ErrorCode::TypeMismatch),
         "got {errors:?}"
     );
 }

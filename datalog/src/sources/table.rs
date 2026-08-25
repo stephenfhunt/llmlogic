@@ -13,7 +13,7 @@
 //! defines it, so neither caller owns it and the two cannot drift apart.
 
 use crate::ast::{FieldDecl, TypeName};
-use crate::error::Error;
+use crate::error::{Error, ErrorCode};
 use crate::ir::{F64, Value};
 use crate::lexer::{CellClass, classify_cell, classify_symbol};
 use crate::temporal;
@@ -82,11 +82,14 @@ pub(crate) fn finalize(
     let arity = fields.len();
     for (index, row) in data.iter().enumerate() {
         if row.len() != arity {
-            errors.push(Error::source(format!(
-                "in `{source}`: row {} has {} column(s), expected {arity}",
-                first_data_row + index,
-                row.len(),
-            )));
+            errors.push(Error::new(
+                ErrorCode::SourceSchemaMismatch,
+                format!(
+                    "in `{source}`: row {} has {} column(s), expected {arity}",
+                    first_data_row + index,
+                    row.len(),
+                ),
+            ));
         }
     }
     if !errors.is_empty() {
@@ -153,22 +156,28 @@ fn arrange(
                 .filter_map(|name| {
                     let position = columns.iter().position(|c| c == name);
                     if position.is_none() {
-                        errors.push(Error::source(format!(
-                            "in `{source}`: the explicit schema names `{name}`, which the \
+                        errors.push(Error::new(
+                            ErrorCode::SourceSchemaMismatch,
+                            format!(
+                                "in `{source}`: the explicit schema names `{name}`, which the \
                              source does not have (source fields: {})",
-                            columns.join(", ")
-                        )));
+                                columns.join(", ")
+                            ),
+                        ));
                     }
                     position
                 })
                 .collect();
             for column in &columns {
                 if !fields.contains(column) {
-                    errors.push(Error::source(format!(
-                        "in `{source}`: the source has field `{column}`, which the \
+                    errors.push(Error::new(
+                        ErrorCode::SourceSchemaMismatch,
+                        format!(
+                            "in `{source}`: the source has field `{column}`, which the \
                          explicit schema does not name (schema fields: {})",
-                        fields.join(", ")
-                    )));
+                            fields.join(", ")
+                        ),
+                    ));
                 }
             }
             if !errors.is_empty() {
@@ -185,10 +194,13 @@ fn arrange(
         (None, None) => {
             let mut rows = raw.rows.into_iter();
             let Some(header) = rows.next() else {
-                return Err(vec![Error::source(format!(
-                    "in `{source}`: the file is empty; a header row (or an explicit \
+                return Err(vec![Error::new(
+                    ErrorCode::SourceSchemaMismatch,
+                    format!(
+                        "in `{source}`: the file is empty; a header row (or an explicit \
                      schema) is required"
-                ))]);
+                    ),
+                )]);
             };
             let names: Vec<String> = header.iter().map(raw_text).collect();
             validate_field_names(&names, source)?;
@@ -236,18 +248,24 @@ fn validate_field_names(names: &[String], source: &str) -> Result<(), Vec<Error>
     let mut errors = Vec::new();
     for (index, name) in names.iter().enumerate() {
         if !is_legal_field_name(name) {
-            errors.push(Error::source(format!(
-                "in `{source}`: field {} (`{name}`) is not a legal field name \
+            errors.push(Error::new(
+                ErrorCode::SourceSchemaMismatch,
+                format!(
+                    "in `{source}`: field {} (`{name}`) is not a legal field name \
                  (§3: lowercase-initial identifier); give the import an explicit \
                  schema to rename it",
-                index + 1
-            )));
+                    index + 1
+                ),
+            ));
         }
         if names[..index].contains(name) {
-            errors.push(Error::source(format!(
-                "in `{source}`: duplicate field name `{name}`; give the import an \
+            errors.push(Error::new(
+                ErrorCode::SourceSchemaMismatch,
+                format!(
+                    "in `{source}`: duplicate field name `{name}`; give the import an \
                  explicit schema to rename it"
-            )));
+                ),
+            ));
         }
     }
     if errors.is_empty() {
@@ -276,10 +294,13 @@ fn type_column(
     for (index, row) in data.iter().enumerate() {
         match coerce(&row[col], ty) {
             Ok(value) => values.push(value),
-            Err(reason) => errors.push(Error::source(format!(
-                "in `{source}`: row {}, column `{field}`: {reason}",
-                first_data_row + index,
-            ))),
+            Err(reason) => errors.push(Error::new(
+                ErrorCode::UnconvertibleCell,
+                format!(
+                    "in `{source}`: row {}, column `{field}`: {reason}",
+                    first_data_row + index,
+                ),
+            )),
         }
     }
     if errors.is_empty() {
@@ -337,13 +358,16 @@ fn infer_column(
                 if matches!(row[col], RawValue::Text(_)) {
                     return Ok(TypeName::String);
                 }
-                return Err(vec![Error::source(format!(
-                    "in `{source}`: column `{field}` mixes {} and {} (row {}); the \
+                return Err(vec![Error::new(
+                    ErrorCode::UnsupportedColumn,
+                    format!(
+                        "in `{source}`: column `{field}` mixes {} and {} (row {}); the \
                      value space has no mixed columns — declare an explicit type",
-                    type_label(a),
-                    type_label(b),
-                    index + 1,
-                ))]);
+                        type_label(a),
+                        type_label(b),
+                        index + 1,
+                    ),
+                )]);
             }
         });
     }

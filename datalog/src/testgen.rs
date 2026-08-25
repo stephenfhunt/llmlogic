@@ -295,6 +295,65 @@ pub(crate) fn arb_safe_program() -> impl Strategy<Value = Program> {
     arb_program_spec(lowering_bounds()).prop_map(build_program)
 }
 
+/// One **corruption** of a correct program's text, for the claim that a
+/// rejected program is always branchable (property **C16**).
+///
+/// The engine's own generators all produce programs that *work*; nothing
+/// generated a program that fails, so nothing swept what the diagnostics for a
+/// failure look like. This makes failures the cheap way: print a correct
+/// program and break one thing in the text.
+///
+/// The mutations are the ones a model actually commits — a Prolog operator, an
+/// uppercase relation name, a doubled comma, a truncation part-way through —
+/// plus a blind byte deletion, which is the one that reaches families the
+/// hand-written list would not have thought of. Some corruptions leave a
+/// *valid* program (deleting a byte from a comment, doubling a comma the
+/// grammar allows nowhere it appears); the property skips those, and the
+/// non-vacuity guard is what keeps that from quietly becoming all of them.
+pub(crate) fn arb_corrupted_program_text() -> impl Strategy<Value = String> {
+    (arb_safe_program(), any::<usize>(), 0u8..6).prop_map(|(program, pick, mutation)| {
+        let text = crate::print::print_program(&program);
+        if text.is_empty() {
+            return text;
+        }
+        let at = pick % text.len();
+        // Byte offsets have to land on a character boundary; the printer emits
+        // non-ASCII wherever a generated string constant does.
+        let at = (0..=at)
+            .rev()
+            .find(|i| text.is_char_boundary(*i))
+            .unwrap_or(0);
+        let (head, tail) = text.split_at(at);
+        match mutation {
+            0 => format!("{head}{}", &tail[first_char_width(tail)..]),
+            1 => format!("{head}=<{tail}"),
+            2 => format!("{head},{tail}"),
+            3 => head.to_string(),
+            4 => format!("{head}\\+{tail}"),
+            _ => uppercase_a_relation(&text, at),
+        }
+    })
+}
+
+/// The width of `text`'s first character, or 0 when it is empty.
+fn first_char_width(text: &str) -> usize {
+    text.chars().next().map(char::len_utf8).unwrap_or(0)
+}
+
+/// Upper-cases the first lowercase ASCII letter at or after `at` — which in
+/// printed output is a relation or field name, the mistake a Prolog prior makes.
+fn uppercase_a_relation(text: &str, at: usize) -> String {
+    let mut out = text.to_string();
+    let bytes = out.clone().into_bytes();
+    if let Some(i) = (at..bytes.len()).find(|&i| bytes[i].is_ascii_lowercase()) {
+        out.replace_range(
+            i..i + 1,
+            &(bytes[i] as char).to_ascii_uppercase().to_string(),
+        );
+    }
+    out
+}
+
 /// One program and a **permutation of its statements** — for the claim that
 /// source order carries no meaning (§5/§7).
 ///

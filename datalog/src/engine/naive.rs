@@ -30,7 +30,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use crate::Result;
 use crate::ast::{ArithOp, CmpOp};
-use crate::error::Error;
+use crate::error::{Error, ErrorCode};
 use crate::ir::{
     Atom, BodyLiteral, BodyLiteralKind, Expr, F64, Fact, Program, Term, Tuple, Value, Var,
 };
@@ -113,10 +113,10 @@ fn apply_builtins(
     mut env: HashMap<Var, Value>,
 ) -> Result<Option<HashMap<Var, Value>>> {
     let order = crate::schedule::schedule_body(body).map_err(|failure| {
-        Error::semantic(format!(
-            "malformed IR: body literal {} can never run",
-            failure.literal
-        ))
+        Error::new(
+            ErrorCode::InternalError,
+            format!("body literal {} can never run", failure.literal),
+        )
     })?;
     for &index in &order {
         match &body[index].kind {
@@ -219,8 +219,9 @@ fn compare(op: CmpOp, lhs: &Value, rhs: &Value) -> Result<bool> {
         return Ok(false);
     }
     if std::mem::discriminant(lhs) != std::mem::discriminant(rhs) {
-        return Err(Error::semantic(
-            "type error: comparison requires operands of the same type".to_string(),
+        return Err(Error::new(
+            ErrorCode::TypeMismatch,
+            "comparison requires operands of the same type".to_string(),
         ));
     }
     Ok(match op {
@@ -238,7 +239,10 @@ fn eval_expr(expr: &Expr, env: &HashMap<Var, Value>) -> Result<Value> {
     match expr {
         Expr::Term(Term::Const(value)) => Ok(value.clone()),
         Expr::Term(Term::Var(var)) => env.get(var).cloned().ok_or_else(|| {
-            Error::semantic("malformed IR: arithmetic operand variable is unbound".to_string())
+            Error::new(
+                ErrorCode::InternalError,
+                "arithmetic operand variable is unbound".to_string(),
+            )
         }),
         Expr::Binary { op, lhs, rhs } => {
             let a = eval_expr(lhs, env)?;
@@ -285,16 +289,17 @@ fn arith(op: ArithOp, lhs: Value, rhs: Value) -> Result<Value> {
                 ArithOp::Mul => a.checked_mul(b),
                 ArithOp::Div => {
                     if b == 0 {
-                        return Err(Error::semantic(
-                            "arithmetic error: division by zero".to_string(),
+                        return Err(Error::new(
+                            ErrorCode::ArithmeticError,
+                            "division by zero".to_string(),
                         ));
                     }
                     a.checked_div(b)
                 }
             };
-            checked
-                .map(Value::Int)
-                .ok_or_else(|| Error::semantic("arithmetic error: integer overflow".to_string()))
+            checked.map(Value::Int).ok_or_else(|| {
+                Error::new(ErrorCode::ArithmeticError, "integer overflow".to_string())
+            })
         }
         (Value::Float(a), Value::Float(b)) => {
             let result = match op {
@@ -305,8 +310,9 @@ fn arith(op: ArithOp, lhs: Value, rhs: Value) -> Result<Value> {
             };
             F64::new(result).map(Value::Float)
         }
-        _ => Err(Error::semantic(
-            "type error: arithmetic requires two ints or two floats".to_string(),
+        _ => Err(Error::new(
+            ErrorCode::TypeMismatch,
+            "arithmetic requires two ints or two floats".to_string(),
         )),
     }
 }

@@ -212,6 +212,7 @@ it. A future audit starts here.
 | Demand-provisioned provenance (§11/§15) | `arb_program_with_edb`, evaluated both ways | **E9** — identical model and answers, and an unrecorded model says `Unrecorded` rather than `DoesNotHold` |
 | The failure trace (§11) | `arb_program_with_edb`, goals built from the model's own value pool that do **not** hold | **E10** — five claims about a near-miss, including *a repair must repair*, which found `Repair::AbsentKey` |
 | §10's std-builtin exemption | `ArithShape::StdBuiltin` | **C10**'s guard — the mutation lands on the classification, not the fixpoint |
+| Diagnostics as a branchable surface (§12) | `arb_corrupted_program_text` — the first generator that makes programs **fail** | **C16**, with `c16_generator_rejects_and_reaches_several_families`; the pinned set itself is `every_code_is_pinned_and_belongs_to_its_category` |
 | The physical access path (§15, evaluator-internal) | small collision-rich tuple pools with `absent`; prefixes drawn from the generated relation | **B12a/b/c**, with their three guards — the differential is blind to an over-yield, so these are what pin the seek |
 
 **The 2026-08-20 audit's lesson, for whoever reads this map next.** Every row
@@ -1313,3 +1314,34 @@ implementation.
   emitted one would be testing the lexer rather than the reader.
   *Mutation:* made CSV inference produce `string` for an ISO cell — T6 went red
   on the first case.
+
+- [x] **C16** **A rejected program is always branchable** (2026-08-25, §12's code
+  vocabulary) — every diagnostic a corrupted program produces carries a code from
+  `ErrorCode::ALL`, and the code alone decides the category
+  (`c16_every_diagnostic_carries_a_pinned_code`, over
+  `arb_corrupted_program_text`).
+
+  What it catches is the **one place the compiler cannot look**. Adding an
+  `ErrorCode` variant is forced through two exhaustive matches, but `ALL` is a
+  hand-written list, and a variant missing from it is a code that reaches a
+  consumer while §12 says the set is complete. Only a run that observes codes in
+  the wild sees that.
+
+  The generator is the first one in the suite that makes programs **fail**:
+  everything before it generates programs that work, so nothing swept what a
+  failure looks like. It prints a correct program and breaks one thing —
+  a Prolog operator, an uppercase relation, a doubled comma, a truncation, a
+  blind byte deletion.
+
+  *Guard* — `c16_generator_rejects_and_reaches_several_families` asserts both
+  halves: that corruptions are actually rejected (>64 of 256), and that they
+  reach **six or more** families. Ten were observed across four categories when
+  it was written. Without the second half a generator that collapsed to the
+  parser's catch-all would sweep one arm of the vocabulary and call it the set.
+
+  *Mutation:* removing `TrailingComma` from `ErrorCode::ALL` while a site still
+  raises it reddens C16 on the first corrupted program that trips a trailing
+  comma — which is mechanically the case the property exists for, a code emitted
+  in the wild that the pinned set does not list. The guard stays **green** under
+  it, which is the contrast: the guard counts families and the property checks
+  membership, and neither substitutes for the other.

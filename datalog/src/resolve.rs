@@ -28,7 +28,7 @@ use crate::ast::{ImportKind, Program, Statement, StatementKind};
 /// The reserved virtual path prefix for builtin modules (§13).
 const STD_PREFIX: &str = "std/";
 
-use crate::error::Error;
+use crate::error::{Error, ErrorCode};
 use crate::parser::parse;
 
 /// The root program with module imports spliced away: only data imports,
@@ -121,11 +121,14 @@ impl Resolver {
                     self.push(statement, file);
                 }
                 StatementKind::Query(_) if !is_root => {
-                    self.errors.push(Error::source(format!(
-                        "in `{}`: query statements are not allowed in imported modules \
+                    self.errors.push(Error::new(
+                        ErrorCode::ModuleMisuse,
+                        format!(
+                            "in `{}`: query statements are not allowed in imported modules \
                          (libraries define relations; the importing program asks)",
-                        self.files[file]
-                    )));
+                            self.files[file]
+                        ),
+                    ));
                 }
                 _ => self.push(statement, file),
             }
@@ -146,24 +149,30 @@ impl Resolver {
     ) -> Option<String> {
         let context = format!("in `{}`", self.files[file]);
         if crate::stdlib::module(module).is_none() {
-            self.errors.push(Error::source(format!(
-                "{context}: there is no `{path}` module; `std/` provides: {}",
-                crate::stdlib::module_names()
-                    .iter()
-                    .map(|name| format!("std/{name}"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )));
+            self.errors.push(Error::new(
+                ErrorCode::ModuleNotFound,
+                format!(
+                    "{context}: there is no `{path}` module; `std/` provides: {}",
+                    crate::stdlib::module_names()
+                        .iter()
+                        .map(|name| format!("std/{name}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ),
+            ));
             return None;
         }
         let shadow = PathBuf::from(resolve_path(path, dir));
         if shadow.exists() {
-            self.errors.push(Error::source(format!(
-                "{context}: `{path}` names the reserved `std/` module prefix, but \
+            self.errors.push(Error::new(
+                ErrorCode::ModuleMisuse,
+                format!(
+                    "{context}: `{path}` names the reserved `std/` module prefix, but \
                  `{}` also exists on disk; `std/` always wins, so rename the file \
                  to make the program mean one thing",
-                shadow.display()
-            )));
+                    shadow.display()
+                ),
+            ));
             return None;
         }
         Some(module.to_string())
@@ -174,18 +183,24 @@ impl Resolver {
         let context = in_file(&self.files[file]);
 
         if is_url(path) {
-            self.errors.push(Error::source(format!(
-                "{context}: module imports are local files only (`{path}` is a URL); \
+            self.errors.push(Error::new(
+                ErrorCode::ModuleMisuse,
+                format!(
+                    "{context}: module imports are local files only (`{path}` is a URL); \
                  URLs import data, with `as`"
-            )));
+                ),
+            ));
             return;
         }
         if Path::new(path).extension().and_then(|e| e.to_str()) != Some("dl") {
-            self.errors.push(Error::source(format!(
-                "{context}: `import \"{path}\".` without `as` is a module import, which \
+            self.errors.push(Error::new(
+                ErrorCode::ModuleMisuse,
+                format!(
+                    "{context}: `import \"{path}\".` without `as` is a module import, which \
                  takes a `.dl` file; importing data requires `as`: \
                  `import \"{path}\" as <relation>.`"
-            )));
+                ),
+            ));
             return;
         }
 
@@ -193,10 +208,13 @@ impl Resolver {
         let canonical = match resolved.canonicalize() {
             Ok(canonical) => canonical,
             Err(e) => {
-                self.errors.push(Error::source(format!(
-                    "{context}: cannot read module `{}`: {e}",
-                    resolved.display()
-                )));
+                self.errors.push(Error::new(
+                    ErrorCode::ModuleNotFound,
+                    format!(
+                        "{context}: cannot read module `{}`: {e}",
+                        resolved.display()
+                    ),
+                ));
                 return;
             }
         };
@@ -209,10 +227,13 @@ impl Resolver {
         let source = match std::fs::read_to_string(&resolved) {
             Ok(source) => source,
             Err(e) => {
-                self.errors.push(Error::source(format!(
-                    "{context}: cannot read module `{}`: {e}",
-                    resolved.display()
-                )));
+                self.errors.push(Error::new(
+                    ErrorCode::ModuleNotFound,
+                    format!(
+                        "{context}: cannot read module `{}`: {e}",
+                        resolved.display()
+                    ),
+                ));
                 return;
             }
         };

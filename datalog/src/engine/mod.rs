@@ -47,7 +47,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use crate::Result;
 use crate::ast::{AggOp, ArithOp, BuiltinOp, CmpOp, TypeName};
-use crate::error::Error;
+use crate::error::{Error, ErrorCode};
 use crate::ir::{
     Atom, BodyLiteral, BodyLiteralKind, Expr, F64, Fact, PredId, Program, Query, Rule, RuleId,
     Term, Tuple, Value, f64_as_exact_i64, i64_as_exact_f64,
@@ -229,9 +229,10 @@ impl Model {
                 .get(slot as usize)
                 .and_then(|name| name.as_deref())
                 .unwrap_or("_");
-            return Err(Error::semantic(format!(
-                "malformed IR: query answer variable `{name}` is not bound by the query body"
-            )));
+            return Err(Error::new(
+                ErrorCode::InternalError,
+                format!("query answer variable `{name}` is not bound by the query body"),
+            ));
         }
         Ok(rows.into_iter().collect())
     }
@@ -352,16 +353,20 @@ fn validate(program: &Program) -> Result<()> {
             .filter(|covered| !**covered)
             .map(|covered| *covered = true);
         if covered.is_none() {
-            return Err(Error::semantic(format!(
-                "malformed IR: strata repeat rule {} or reference one out of range",
-                rule_id.0
-            )));
+            return Err(Error::new(
+                ErrorCode::InternalError,
+                format!(
+                    "strata repeat rule {} or reference one out of range",
+                    rule_id.0
+                ),
+            ));
         }
     }
     if let Some(missing) = seen.iter().position(|covered| !covered) {
-        return Err(Error::semantic(format!(
-            "malformed IR: strata do not cover rule {missing}"
-        )));
+        return Err(Error::new(
+            ErrorCode::InternalError,
+            format!("strata do not cover rule {missing}"),
+        ));
     }
 
     // The negation contract (§7): every rule defining a negated predicate
@@ -409,20 +414,26 @@ fn check_stratum_contract(
     for literal in body {
         match &literal.kind {
             BodyLiteralKind::Atom(atom) if under_aggregate && too_high(atom.pred) => {
-                return Err(Error::semantic(format!(
-                    "malformed IR: rule {} aggregates over `{}`, which is not defined in a \
+                return Err(Error::new(
+                    ErrorCode::InternalError,
+                    format!(
+                        "rule {} aggregates over `{}`, which is not defined in a \
                      strictly lower stratum",
-                    rule_id.0,
-                    program.pred_info(atom.pred).name
-                )));
+                        rule_id.0,
+                        program.pred_info(atom.pred).name
+                    ),
+                ));
             }
             BodyLiteralKind::NegAtom(atom) if too_high(atom.pred) => {
-                return Err(Error::semantic(format!(
-                    "malformed IR: rule {} negates `{}`, which is not defined in a \
+                return Err(Error::new(
+                    ErrorCode::InternalError,
+                    format!(
+                        "rule {} negates `{}`, which is not defined in a \
                      strictly lower stratum",
-                    rule_id.0,
-                    program.pred_info(atom.pred).name
-                )));
+                        rule_id.0,
+                        program.pred_info(atom.pred).name
+                    ),
+                ));
             }
             BodyLiteralKind::Aggregate { goal, .. } => {
                 check_stratum_contract(goal, level, defining_stratum, program, rule_id, true)?;
@@ -493,10 +504,13 @@ fn validate_body_seeded(
                         && let Some(Some(name)) = var_names.get(var.0 as usize)
                         && !bound.contains(&var.0)
                     {
-                        return Err(Error::semantic(format!(
-                            "malformed IR: named variable `{name}` in negated atom is never \
+                        return Err(Error::new(
+                            ErrorCode::InternalError,
+                            format!(
+                                "named variable `{name}` in negated atom is never \
                              bound by the body"
-                        )));
+                            ),
+                        ));
                     }
                 }
             }
@@ -718,15 +732,18 @@ fn enumerate_matches(cx: &JoinCx<'_>, num_vars: usize, on_match: &mut OnMatch<'_
 /// is. Used for the top-level join and for each aggregate's sub-join.
 fn literal_order(body: &[BodyLiteral]) -> Result<Vec<usize>> {
     crate::schedule::schedule_body(body).map_err(|failure| {
-        Error::semantic(format!(
-            "malformed IR: body literal {} can never run — variable slot {} is {}",
-            failure.literal,
-            failure.variable.0,
-            match failure.cause {
-                crate::schedule::ScheduleFailure::Unbound => "never bound",
-                crate::schedule::ScheduleFailure::Cycle => "part of a circular dependency",
-            }
-        ))
+        Error::new(
+            ErrorCode::InternalError,
+            format!(
+                "body literal {} can never run — variable slot {} is {}",
+                failure.literal,
+                failure.variable.0,
+                match failure.cause {
+                    crate::schedule::ScheduleFailure::Unbound => "never bound",
+                    crate::schedule::ScheduleFailure::Cycle => "part of a circular dependency",
+                }
+            ),
+        )
     })
 }
 
@@ -1274,11 +1291,14 @@ fn sum_values(present: &[&Value]) -> Result<Value> {
             })
             .sum();
         return i64::try_from(total).map(Value::Int).map_err(|_| {
-            Error::semantic(format!(
-                "arithmetic error: integer overflow — the sum of {} values is {total}, \
+            Error::new(
+                ErrorCode::ArithmeticError,
+                format!(
+                    "integer overflow — the sum of {} values is {total}, \
                  outside the int range",
-                present.len(),
-            ))
+                    present.len(),
+                ),
+            )
         });
     }
     if present.iter().all(|v| matches!(v, Value::Duration(_))) {
@@ -1292,11 +1312,14 @@ fn sum_values(present: &[&Value]) -> Result<Value> {
         return i64::try_from(total)
             .map(|micros| Value::Duration(temporal::Duration::from_micros(micros)))
             .map_err(|_| {
-                Error::semantic(format!(
-                    "arithmetic error: the sum of {} durations is outside the \
+                Error::new(
+                    ErrorCode::ArithmeticError,
+                    format!(
+                        "the sum of {} durations is outside the \
                      representable range",
-                    present.len(),
-                ))
+                        present.len(),
+                    ),
+                )
             });
     }
     let mut acc = (*first).clone();
@@ -1329,11 +1352,14 @@ fn avg_values(present: &[&Value]) -> Result<Value> {
             Value::Int(i) => *i as f64,
             Value::Float(f) => f.get(),
             other => {
-                return Err(Error::semantic(format!(
-                    "type error: avg requires values it can fold and divide — int, \
+                return Err(Error::new(
+                    ErrorCode::TypeMismatch,
+                    format!(
+                        "avg requires values it can fold and divide — int, \
                      float, or duration — got {}",
-                    value_type_name(other)
-                )));
+                        value_type_name(other)
+                    ),
+                ));
             }
         });
     }
@@ -1352,11 +1378,14 @@ fn extreme_value(present: &[&Value], want_max: bool) -> Result<Value> {
     for value in rest {
         let value: &Value = value;
         if std::mem::discriminant(acc) != std::mem::discriminant(value) {
-            return Err(Error::semantic(format!(
-                "type error: min/max requires values of the same type, got {} and {}",
-                value_type_name(acc),
-                value_type_name(value),
-            )));
+            return Err(Error::new(
+                ErrorCode::TypeMismatch,
+                format!(
+                    "min/max requires values of the same type, got {} and {}",
+                    value_type_name(acc),
+                    value_type_name(value),
+                ),
+            ));
         }
         // Same-type non-absent values order by `Value`'s within-type `Ord` — the
         // natural order §8 comparisons use (floats via `F64`'s total order).
@@ -1476,12 +1505,15 @@ fn apply_compare(op: CmpOp, lhs: &Value, rhs: &Value) -> Result<bool> {
         return Ok(false);
     }
     if std::mem::discriminant(lhs) != std::mem::discriminant(rhs) {
-        return Err(Error::semantic(format!(
-            "type error: comparison `{}` requires operands of the same type, got {} and {}",
-            cmp_symbol(op),
-            value_type_name(lhs),
-            value_type_name(rhs),
-        )));
+        return Err(Error::new(
+            ErrorCode::TypeMismatch,
+            format!(
+                "comparison `{}` requires operands of the same type, got {} and {}",
+                cmp_symbol(op),
+                value_type_name(lhs),
+                value_type_name(rhs),
+            ),
+        ));
     }
     Ok(match op {
         CmpOp::Eq => lhs == rhs,
@@ -1504,8 +1536,9 @@ pub(crate) fn eval_expr(expr: &Expr, bindings: &[Option<Value>]) -> Result<Value
     match expr {
         Expr::Term(Term::Const(value)) => Ok(value.clone()),
         Expr::Term(Term::Var(var)) => bindings[var.0 as usize].clone().ok_or_else(|| {
-            Error::semantic(
-                "malformed IR: arithmetic operand variable is not bound by the body".to_string(),
+            Error::new(
+                ErrorCode::InternalError,
+                "arithmetic operand variable is not bound by the body".to_string(),
             )
         }),
         Expr::Binary { op, lhs, rhs } => {
@@ -1598,8 +1631,9 @@ fn apply_builtin(op: BuiltinOp, args: &[Value]) -> Result<Value> {
 /// point in time, as an `int`.
 fn extract_component(op: BuiltinOp, args: &[Value]) -> Result<Value> {
     let [value] = args else {
-        return Err(Error::semantic(
-            "malformed IR: an extraction takes exactly one input".to_string(),
+        return Err(Error::new(
+            ErrorCode::InternalError,
+            "an extraction takes exactly one input".to_string(),
         ));
     };
     let (year, month, day, hour, minute, second, _) = match value {
@@ -1609,11 +1643,14 @@ fn extract_component(op: BuiltinOp, args: &[Value]) -> Result<Value> {
         }
         Value::Timestamp(timestamp) => timestamp.parts(),
         other => {
-            return Err(Error::semantic(format!(
-                "type error: `{}` reads a date or a timestamp, got {}",
-                builtin_name(op),
-                value_type_name(other),
-            )));
+            return Err(Error::new(
+                ErrorCode::TypeMismatch,
+                format!(
+                    "`{}` reads a date or a timestamp, got {}",
+                    builtin_name(op),
+                    value_type_name(other),
+                ),
+            ));
         }
     };
     // A date has no time of day, and §4 gives it none — so asking for one is a
@@ -1621,10 +1658,13 @@ fn extract_component(op: BuiltinOp, args: &[Value]) -> Result<Value> {
     if matches!(value, Value::Date(_))
         && matches!(op, BuiltinOp::Hour | BuiltinOp::Minute | BuiltinOp::Second)
     {
-        return Err(Error::semantic(format!(
-            "type error: `{}` reads a timestamp; a date has no time of day",
-            builtin_name(op),
-        ))
+        return Err(Error::new(
+            ErrorCode::TypeMismatch,
+            format!(
+                "`{}` reads a timestamp; a date has no time of day",
+                builtin_name(op),
+            ),
+        )
         .suggest("widen with `as timestamp` if midnight is the reading you want"));
     }
     Ok(Value::Int(match op {
@@ -1643,15 +1683,19 @@ fn extract_component(op: BuiltinOp, args: &[Value]) -> Result<Value> {
 /// the only spelling that reaches a week or a quarter.
 fn truncate_value(args: &[Value]) -> Result<Value> {
     let [value, unit] = args else {
-        return Err(Error::semantic(
-            "malformed IR: `truncate` takes a value and a unit".to_string(),
+        return Err(Error::new(
+            ErrorCode::InternalError,
+            "`truncate` takes a value and a unit".to_string(),
         ));
     };
     let Value::Symbol(unit) = unit else {
-        return Err(Error::semantic(format!(
-            "type error: `truncate`'s unit is a symbol, got {}",
-            value_type_name(unit),
-        )));
+        return Err(Error::new(
+            ErrorCode::TypeMismatch,
+            format!(
+                "`truncate`'s unit is a symbol, got {}",
+                value_type_name(unit),
+            ),
+        ));
     };
     match value {
         Value::Date(date) => truncate_date(*date, unit).map(Value::Date),
@@ -1669,9 +1713,9 @@ fn truncate_value(args: &[Value]) -> Result<Value> {
                         .shifted(kept)
                         .map(Value::Timestamp)
                         .ok_or_else(|| {
-                            Error::semantic(
-                                "arithmetic error: truncation left the representable range"
-                                    .to_string(),
+                            Error::new(
+                                ErrorCode::ArithmeticError,
+                                "truncation left the representable range".to_string(),
                             )
                         })
                 }
@@ -1683,10 +1727,13 @@ fn truncate_value(args: &[Value]) -> Result<Value> {
                 }),
             }
         }
-        other => Err(Error::semantic(format!(
-            "type error: `truncate` reads a date or a timestamp, got {}",
-            value_type_name(other),
-        ))),
+        other => Err(Error::new(
+            ErrorCode::TypeMismatch,
+            format!(
+                "`truncate` reads a date or a timestamp, got {}",
+                value_type_name(other),
+            ),
+        )),
     }
 }
 
@@ -1703,19 +1750,22 @@ fn truncate_date(date: temporal::Date, unit: &str) -> Result<temporal::Date> {
         "week" => {
             let weekday = (date.days() as i64 + 3).rem_euclid(7);
             return temporal::Date::from_days(date.days() as i64 - weekday).map_err(|error| {
-                Error::semantic(format!("arithmetic error: {}", error.message()))
+                Error::new(ErrorCode::ArithmeticError, error.message().to_string())
             });
         }
         "day" => temporal::Date::from_ymd(year, month, day),
         other => {
-            return Err(
-                Error::semantic(format!("type error: `{other}` is not a truncation unit")).suggest(
-                    format!("one of: {}", crate::stdlib::TRUNCATE_UNITS.join(", ")),
-                ),
-            );
+            return Err(Error::new(
+                ErrorCode::BuiltinMisuse,
+                format!("`{other}` is not a truncation unit"),
+            )
+            .suggest(format!(
+                "one of: {}",
+                crate::stdlib::TRUNCATE_UNITS.join(", ")
+            )));
         }
     };
-    start.map_err(|error| Error::semantic(format!("arithmetic error: {}", error.message())))
+    start.map_err(|error| Error::new(ErrorCode::ArithmeticError, error.message().to_string()))
 }
 
 /// The source spelling of a `std` relation, for messages.
@@ -1766,19 +1816,25 @@ pub(super) fn apply_cast(value: Value, ty: TypeName) -> Result<Value> {
         let unit_hazard = matches!(value, Value::Duration(_)) && is_numeric_type(ty)
             || matches!(value, Value::Int(_) | Value::Float(_)) && ty == TypeName::Duration;
         if unit_hazard {
-            return Err(Error::semantic(format!(
-                "type error: there is no conversion between duration and {}; divide by \
+            return Err(Error::new(
+                ErrorCode::UnsupportedConversion,
+                format!(
+                    "there is no conversion between duration and {}; divide by \
                  a duration to name the unit (`(C - O) / @1d` is a number of days)",
-                ty.keyword(),
-            )));
+                    ty.keyword(),
+                ),
+            ));
         }
-        Err(Error::semantic(format!(
-            "type error: there is no conversion from {} to {}; `as` converts \
+        Err(Error::new(
+            ErrorCode::UnsupportedConversion,
+            format!(
+                "there is no conversion from {} to {}; `as` converts \
              between numbers, between text and any other type, and from a date to \
              a timestamp",
-            value_type_name(&value),
-            ty.keyword(),
-        )))
+                value_type_name(&value),
+                ty.keyword(),
+            ),
+        ))
     };
     match ty {
         TypeName::Int => match &value {
@@ -1833,11 +1889,14 @@ pub(super) fn apply_cast(value: Value, ty: TypeName) -> Result<Value> {
             // Truncation is lossy, and `as` never truncates (§8) — so this is
             // the one refusal that names another construct as its fix, because
             // the thing the program wants does exist.
-            Value::Timestamp(_) => Err(Error::semantic(format!(
-                "conversion error: `{}` has a time of day, and `as` does not truncate; \
+            Value::Timestamp(_) => Err(Error::new(
+                ErrorCode::LossyConversion,
+                format!(
+                    "`{}` has a time of day, and `as` does not truncate; \
                  use `truncate(T, day, D)` from `import \"std/time\".`",
-                crate::print::print_value(&value),
-            ))),
+                    crate::print::print_value(&value),
+                ),
+            )),
             _ => undefined(),
         },
         TypeName::Timestamp => match &value {
@@ -1903,12 +1962,15 @@ fn widen(n: i64, original: &Value) -> Result<Value> {
 /// from `absent` on purpose: a value *is* here, and the engine refuses to
 /// corrupt it rather than quietly reporting it missing.
 fn lossy(value: &Value, ty: TypeName) -> Error {
-    Error::semantic(format!(
-        "conversion error: `{}` has no exact {} representation, and `as` does not \
+    Error::new(
+        ErrorCode::LossyConversion,
+        format!(
+            "`{}` has no exact {} representation, and `as` does not \
          round (a rounded value silently breaks every join on it)",
-        crate::print::print_value(value),
-        ty.keyword(),
-    ))
+            crate::print::print_value(value),
+            ty.keyword(),
+        ),
+    )
 }
 
 /// Applies an arithmetic operator. Strict (§4, spec §17 2026-07-21): `int op
@@ -1929,13 +1991,16 @@ fn apply_arith(op: ArithOp, lhs: Value, rhs: Value) -> Result<Value> {
         // through to the same type error every other mismatch gets.
         _ => match arith_temporal(op, &lhs, &rhs) {
             Some(result) => result,
-            None => Err(Error::semantic(format!(
-                "type error: arithmetic `{}` requires two ints, two floats, or one of \
+            None => Err(Error::new(
+                ErrorCode::TypeMismatch,
+                format!(
+                    "arithmetic `{}` requires two ints, two floats, or one of \
                  §8's temporal operations, got {} and {}",
-                arith_symbol(op),
-                value_type_name(&lhs),
-                value_type_name(&rhs),
-            ))),
+                    arith_symbol(op),
+                    value_type_name(&lhs),
+                    value_type_name(&rhs),
+                ),
+            )),
         },
     }
 }
@@ -1949,12 +2014,15 @@ fn arith_temporal(op: ArithOp, lhs: &Value, rhs: &Value) -> Option<Result<Value>
     use ArithOp::{Add, Div, Mul, Sub};
     use Value::{Date, Duration, Float, Int, Timestamp};
     let overflow = || {
-        Err(Error::semantic(format!(
-            "arithmetic error: `{} {} {}` is outside the representable range",
-            crate::print::print_value(lhs),
-            arith_symbol(op),
-            crate::print::print_value(rhs),
-        )))
+        Err(Error::new(
+            ErrorCode::ArithmeticError,
+            format!(
+                "`{} {} {}` is outside the representable range",
+                crate::print::print_value(lhs),
+                arith_symbol(op),
+                crate::print::print_value(rhs),
+            ),
+        ))
     };
     Some(match (op, lhs, rhs) {
         // Point − point is the displacement between them.
@@ -1972,11 +2040,14 @@ fn arith_temporal(op: ArithOp, lhs: &Value, rhs: &Value) -> Option<Result<Value>
             let delta = if op == Sub { -d.micros() } else { d.micros() };
             match a.shifted(delta) {
                 Some(date) => Ok(Date(date)),
-                None if delta % temporal::Date::DAY != 0 => Err(Error::semantic(format!(
-                    "arithmetic error: `{}` is not a whole number of days, and a date has \
+                None if delta % temporal::Date::DAY != 0 => Err(Error::new(
+                    ErrorCode::ArithmeticError,
+                    format!(
+                        "`{}` is not a whole number of days, and a date has \
                      no time of day to carry the remainder",
-                    crate::print::print_value(rhs),
-                ))
+                        crate::print::print_value(rhs),
+                    ),
+                )
                 .suggest("widen the date first: `(D as timestamp) + @36h`")),
                 None => overflow(),
             }
@@ -2004,8 +2075,9 @@ fn arith_temporal(op: ArithOp, lhs: &Value, rhs: &Value) -> Option<Result<Value>
         // the reason there is no `duration as float` (§8).
         (Div, Duration(a), Duration(b)) => {
             if b.micros() == 0 {
-                return Some(Err(Error::semantic(
-                    "arithmetic error: division by a zero duration".to_string(),
+                return Some(Err(Error::new(
+                    ErrorCode::ArithmeticError,
+                    "division by a zero duration".to_string(),
                 )));
             }
             Some(F64::new(a.micros() as f64 / b.micros() as f64).map(Value::Float))?
@@ -2020,8 +2092,9 @@ fn arith_temporal(op: ArithOp, lhs: &Value, rhs: &Value) -> Option<Result<Value>
         }
         (Div, Duration(a), Int(n)) => {
             if *n == 0 {
-                return Some(Err(Error::semantic(
-                    "arithmetic error: division by zero".to_string(),
+                return Some(Err(Error::new(
+                    ErrorCode::ArithmeticError,
+                    "division by zero".to_string(),
                 )));
             }
             Ok(Duration(temporal::Duration::from_micros(a.micros() / n)))
@@ -2029,8 +2102,9 @@ fn arith_temporal(op: ArithOp, lhs: &Value, rhs: &Value) -> Option<Result<Value>
         (Mul, Duration(a), Float(f)) | (Mul, Float(f), Duration(a)) => scale(*a, f.get(), overflow),
         (Div, Duration(a), Float(f)) => {
             if f.get() == 0.0 {
-                return Some(Err(Error::semantic(
-                    "arithmetic error: division by zero".to_string(),
+                return Some(Err(Error::new(
+                    ErrorCode::ArithmeticError,
+                    "division by zero".to_string(),
                 )));
             }
             scale(*a, 1.0 / f.get(), overflow)
@@ -2065,18 +2139,19 @@ fn arith_int(op: ArithOp, a: i64, b: i64) -> Result<Value> {
         ArithOp::Mul => a.checked_mul(b),
         ArithOp::Div => {
             if b == 0 {
-                return Err(Error::semantic(format!(
-                    "arithmetic error: division by zero in `{a} / {b}`"
-                )));
+                return Err(Error::new(
+                    ErrorCode::ArithmeticError,
+                    format!("division by zero in `{a} / {b}`"),
+                ));
             }
             a.checked_div(b)
         }
     };
     checked.map(Value::Int).ok_or_else(|| {
-        Error::semantic(format!(
-            "arithmetic error: integer overflow in `{a} {} {b}`",
-            arith_symbol(op)
-        ))
+        Error::new(
+            ErrorCode::ArithmeticError,
+            format!("integer overflow in `{a} {} {b}`", arith_symbol(op)),
+        )
     })
 }
 
@@ -2977,8 +3052,8 @@ mod tests {
                 let got = match apply_cast(value.clone(), ty) {
                     Ok(Value::Absent) => Missing,
                     Ok(v) => Is(v),
-                    Err(e) if e.to_string().contains("conversion error") => Lossy,
-                    Err(e) if e.to_string().contains("type error") => Undefined,
+                    Err(e) if e.code == ErrorCode::LossyConversion => Lossy,
+                    Err(e) if e.code == ErrorCode::UnsupportedConversion => Undefined,
                     Err(e) => panic!("unclassified error for {value:?} as {ty:?}: {e}"),
                 };
                 assert_eq!(
@@ -3025,7 +3100,7 @@ mod tests {
             Value::Float(F64::new(2.0).unwrap()),
         );
         assert!(
-            err.to_string().contains("type error"),
+            err.code == ErrorCode::TypeMismatch,
             "unexpected error: {err}"
         );
     }
@@ -3068,7 +3143,7 @@ mod tests {
         program.strata = vec![vec![RuleId(0)]];
         let err = eval(&program).unwrap_err();
         assert!(
-            err.to_string().contains("type error"),
+            err.code == ErrorCode::TypeMismatch,
             "unexpected error: {err}"
         );
     }
@@ -3421,7 +3496,7 @@ mod tests {
         let err = eval(&program).unwrap_err();
         assert!(
             err.to_string()
-                .contains("malformed IR: named variable `Y` in negated atom"),
+                .contains("named variable `Y` in negated atom"),
             "unexpected error: {err}"
         );
     }
@@ -3646,7 +3721,7 @@ mod tests {
         let values = vec![string_value("a"), string_value("b")];
         let err = fold_aggregate(AggOp::Sum, &values).unwrap_err();
         assert!(
-            err.to_string().contains("type error"),
+            err.code == ErrorCode::TypeMismatch,
             "unexpected error: {err}"
         );
     }
@@ -3752,7 +3827,7 @@ mod tests {
         let values = vec![int(1), string_value("a")];
         let err = fold_aggregate(AggOp::Min, &values).unwrap_err();
         assert!(
-            err.to_string().contains("type error"),
+            err.code == ErrorCode::TypeMismatch,
             "unexpected error: {err}"
         );
     }
@@ -6220,7 +6295,7 @@ mod tests {
                 }
                 let err = fold_aggregate(AggOp::Sum, &vs).unwrap_err();
                 prop_assert!(
-                    err.to_string().contains("type error"),
+                    err.code == ErrorCode::TypeMismatch,
                     "summing points should be a type error, got: {}", err
                 );
             }

@@ -1,1 +1,1 @@
-semantic error: type error: variable `Q` in rule 0 has type int but variable `W` in rule 0 has type float (at 6:38)
+semantic error [type-clash]: variable `Q` in rule 0 has type int but variable `W` in rule 0 has type float (at 6:38)

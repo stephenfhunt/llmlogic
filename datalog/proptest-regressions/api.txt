@@ -7,3 +7,4 @@
 cc 41dcb8fae17903ebdad1a72f41a501fdae4e7c336722d79aee635204b8fc0339 # shrinks to (base, rule, head) = ("", "d(K) :- n(K, V), V = 0 ; n(K, V), V = 0", "d(K)")
 cc 85a0443d8e106ad8d5e514865cb66714987b5ada0ec9d3d01f6b2731415567d7 # shrinks to (computed, folded) = ("n(\"b\", 2).\n?- n(K, 0 + 2).\n", "n(\"b\", 2).\n?- n(K, 2).\n")
 cc 5ed4371a32ab6591466fe484a843904c01ff321b9e3ecdae2c5c3056fbb25648 # shrinks to case = AnswerShapeCase { program: "n(\"a\", 0).\n?- n(K, V), S = V + 1.\n", expected: ["answer(\"a\", 0, 1)."], shape: 3 }
+cc f7d4337ebfcaa3b733f919eee5cb8db52f59800db5376f5ad64e34dd503924be # shrinks to src = "declare p0(f0, f1, f2).\ndeclare p1(f0, f1, f2,).\np0(a, -1, 0).\np0(@1d, -2.0, a).\np0(0, \"x\", @0s).\np2(-1, -1).\np2(@2026-01-31, -2.0).\np0(V0, V0, \"x\") :- p0(V0, V0, V0), p0(f0: -2.0, f1: -1, f2: V0).\np0(f0: false, f1: V0, f2: V0) :- p2(V0, @2026-01-31), p0(f0: @2026-01-31T00:00:00, f1: a).\n?- p0(V0, \"x\", V0).\n"

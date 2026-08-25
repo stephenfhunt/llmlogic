@@ -23,7 +23,7 @@
 //! once imports and IR-level declared types exist.
 
 use crate::ast::{AggOp, ArithOp, Span, TypeName};
-use crate::error::Error;
+use crate::error::{Error, ErrorCode};
 use crate::ir;
 
 /// The inferred type of every column, once a program type-checks.
@@ -124,14 +124,14 @@ fn temporal_arith_error(op: ArithOp, lhs: TypeName, rhs: TypeName) -> (String, S
         if lhs != rhs {
             return (
                 format!(
-                    "type error: {operation} mixes a date and a timestamp, which are \
+                    "{operation} mixes a date and a timestamp, which are \
                      different types"
                 ),
                 "widen the date with `as timestamp`".to_string(),
             );
         }
         return (
-            format!("type error: {operation} has no meaning — two points in time do not add"),
+            format!("{operation} has no meaning — two points in time do not add"),
             "subtract them for the duration between, or add a duration to move one".to_string(),
         );
     }
@@ -140,14 +140,14 @@ fn temporal_arith_error(op: ArithOp, lhs: TypeName, rhs: TypeName) -> (String, S
     {
         return (
             format!(
-                "type error: {operation} — a duration and a number do not add or subtract, \
+                "{operation} — a duration and a number do not add or subtract, \
                  because the number has no unit"
             ),
             "scale with `*`, or divide by a duration to get a number: `(C - O) / @1d`".to_string(),
         );
     }
     (
-        format!("type error: {operation} is not one of §8's temporal operations"),
+        format!("{operation} is not one of §8's temporal operations"),
         "point - point is a duration; point ± duration is a point; duration / duration \
          is a number"
             .to_string(),
@@ -278,8 +278,8 @@ impl<'a> TypeChecker<'a> {
 
     /// Raises a semantic error against whatever is being walked
     /// ([`Self::at`]).
-    fn raise(&mut self, message: String) -> &mut Error {
-        let mut error = Error::semantic(message);
+    fn raise(&mut self, code: ErrorCode, message: String) -> &mut Error {
+        let mut error = Error::new(code, message);
         if let Some(span) = self.at {
             error = error.at_span(span);
         }
@@ -314,12 +314,12 @@ impl<'a> TypeChecker<'a> {
             Some(existing) if existing == t => {}
             Some(existing) => {
                 let message = format!(
-                    "type error: {} is used as both {} and {}",
+                    "{} is used as both {} and {}",
                     self.label[root],
                     type_label(existing),
                     type_label(t),
                 );
-                self.raise(message);
+                self.raise(ErrorCode::TypeClash, message);
             }
         }
     }
@@ -334,13 +334,13 @@ impl<'a> TypeChecker<'a> {
         let merged = match (self.ty[ra], self.ty[rb]) {
             (Some(x), Some(y)) if x != y => {
                 let message = format!(
-                    "type error: {} has type {} but {} has type {}",
+                    "{} has type {} but {} has type {}",
                     self.label[ra],
                     type_label(x),
                     self.label[rb],
                     type_label(y),
                 );
-                self.raise(message);
+                self.raise(ErrorCode::TypeClash, message);
                 Some(x)
             }
             (x, y) => x.or(y),
@@ -659,7 +659,8 @@ impl<'a> TypeChecker<'a> {
             None => {
                 let (message, suggestion) = temporal_arith_error(constraint.op, lhs, rhs);
                 self.at = constraint.at;
-                self.raise(message).suggestion = Some(suggestion.to_string());
+                self.raise(ErrorCode::TypeMismatch, message).suggestion =
+                    Some(suggestion.to_string());
             }
         }
     }
@@ -675,14 +676,14 @@ impl<'a> TypeChecker<'a> {
             let label = self.label[root].clone();
             let reason = if value.is_temporal_point() {
                 format!(
-                    "type error: {label} has type {} but is folded by `{}`, and two points \
+                    "{label} has type {} but is folded by `{}`, and two points \
                      in time do not add",
                     type_label(value),
                     agg_symbol(constraint.op),
                 )
             } else {
                 format!(
-                    "type error: {label} has type {} but is folded by `{}`, which requires \
+                    "{label} has type {} but is folded by `{}`, which requires \
                      int, float, or duration",
                     type_label(value),
                     agg_symbol(constraint.op),
@@ -695,7 +696,7 @@ impl<'a> TypeChecker<'a> {
                 "project a numeric column, or convert with `as`"
             };
             self.at = constraint.at;
-            self.raise(reason).suggestion = Some(suggestion.to_string());
+            self.raise(ErrorCode::TypeMismatch, reason).suggestion = Some(suggestion.to_string());
             return;
         }
         if constraint.op == AggOp::Avg {
@@ -723,17 +724,20 @@ impl<'a> TypeChecker<'a> {
             .collect();
         if known.iter().any(|ty| ty.is_temporal()) {
             self.errors.push(
-                Error::semantic(format!(
-                    "type error: cannot tell what `{}` means here — {} is temporal, and \
+                Error::new(
+                    ErrorCode::TypeMismatch,
+                    format!(
+                        "cannot tell what `{}` means here — {} is temporal, and \
                      the other operand's type is never fixed, so the result could be a \
                      point or a duration (§8)",
-                    arith_symbol(constraint.op),
-                    known
-                        .iter()
-                        .find(|ty| ty.is_temporal())
-                        .map(|ty| type_label(*ty))
-                        .expect("just found one"),
-                ))
+                        arith_symbol(constraint.op),
+                        known
+                            .iter()
+                            .find(|ty| ty.is_temporal())
+                            .map(|ty| type_label(*ty))
+                            .expect("just found one"),
+                    ),
+                )
                 .suggest(
                     "give the other operand a type — a temporal literal, a column, or an `as` cast",
                 ),
@@ -771,13 +775,13 @@ impl<'a> TypeChecker<'a> {
                 && !is_numeric(ty)
             {
                 let message = format!(
-                    "type error: {} has type {} but is used in arithmetic or a numeric \
+                    "{} has type {} but is used in arithmetic or a numeric \
                      aggregate (`sum`/`avg`), which requires int or float",
                     self.label[root],
                     type_label(ty),
                 );
                 self.at = at;
-                self.raise(message);
+                self.raise(ErrorCode::TypeMismatch, message);
             }
         }
         // Verify asserted declared types (§4) against the inferred ones. A
@@ -804,7 +808,7 @@ impl<'a> TypeChecker<'a> {
                         && inferred != declared_ty
                     {
                         let message = format!(
-                            "type error: {} is declared as {} but {}",
+                            "{} is declared as {} but {}",
                             column_label(info, col),
                             type_label(declared_ty),
                             contradiction(self.program, p, col, inferred),
@@ -812,7 +816,7 @@ impl<'a> TypeChecker<'a> {
                         // The declaration is the place: it is the half of the
                         // contradiction this message asserts is wrong.
                         self.at = info.decl_span;
-                        self.raise(message);
+                        self.raise(ErrorCode::DeclaredTypeMismatch, message);
                     }
                 }
             }
