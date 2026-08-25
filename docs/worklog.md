@@ -71,6 +71,11 @@ tests green, ruff clean, clippy clean — and the crate now passes
   first run this session reported 12/12 ok against yesterday's engine. A tripwire
   that can pass on stale evidence is the instrument defect class of the last
   three sessions — it wants a staleness check, or to build.
+  **Shown twice, in both directions**: checking out an earlier commit and running
+  `pytest` reddened 4 tests until the release binary was rebuilt, because the
+  pins are versioned and the binary they are pinned against is not. So the corpus
+  reports on whatever was last compiled, which at any commit may be neither that
+  commit's engine nor the working tree's.
 - **S3 now turns on the code vocabulary alone** — four `ErrorKind` variants where
   an agent wants to branch on `unsafe-aggregate`. That is the last thing between
   the criteria and v1.
