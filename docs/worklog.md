@@ -24,6 +24,60 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-24 (later) — Every diagnostic has a place, and the engine stops asserting what it never read
+
+Three discovered defects, all fixed. **585 crate tests green** (+6), 230 harness
+tests green, ruff clean, clippy clean — and the crate now passes
+**`--no-default-features`** too, at 557.
+
+**Done**
+- **`bugs/008` closed**, and it was two defects. The suppression is the one the
+  bug file asked for — skip the declared-vs-inferred sweep once inference is
+  poisoned. The second was found while fixing the first and its own acceptance
+  criteria missed it: the sweep says *"its values are T"* wherever inference
+  contradicts a declaration, and inference reaches a column from **rules** as
+  well as facts, so `declare p(x: int). s("a"). r(S) :- p(x: S), s(S).` made that
+  claim about a relation holding **no facts at all**. The message now re-reads
+  the facts before speaking about values. Both mutations recorded on **C15**.
+- **Spans on semantic and source errors — the v1 gate.** All five malformed
+  reference pins moved to carry a position, not the three the item asked for;
+  **15 of 15** constructed diagnostic families carry one, against 0 of 113 sites
+  that morning. Stages after parsing record a span and `api.rs` resolves it once.
+- **`--no-default-features` is green**, and it was two `#[cfg(feature =
+  "duckdb")]` attributes on tests that import date columns. Nothing else failed.
+
+**Decided**
+- **Resolve at the boundary, not by threading `&str`** (§17 2026-08-24). Lowering,
+  inference and the evaluator never hold the program text; they record a span and
+  `run_at_reporting` resolves every stage's errors.
+- **A span stops at the file edge.** Spans are per-file byte offsets, so a program
+  that spliced in a module **drops** them rather than print a confidently wrong
+  line — `bugs/008`'s own class, freshly manufactured, and the reason to decline.
+  Rebasing into one virtual text is the real fix; filed, not built.
+- **The 113 sites were the wrong unit.** An error is raised deep and caught
+  shallow: one wrapper around the evaluator's per-literal recursion covers
+  `engine/`'s 35, one stamp in `load_imports` covers `sources/`'s 29. Six of the
+  77 were `naive.rs`, which is `#[cfg(test)]` and reaches no user.
+
+**Removed**
+- `bugs/008` from the open set (→ `bugs/resolved/`), and `type-clash.dl`'s header
+  note describing the false diagnostic it used to pin. §12's *Not covered* claim
+  that no semantic error carries a span; §1's claim that spans are what scope S3.
+  The oldest worklog entry rotated to the archive.
+
+**Next up**
+- **`harness reference` silently tested a two-day-old binary.** It runs
+  `target/release/datalog` and only errors when that file is *missing*, so the
+  first run this session reported 12/12 ok against yesterday's engine. A tripwire
+  that can pass on stale evidence is the instrument defect class of the last
+  three sessions — it wants a staleness check, or to build.
+- **S3 now turns on the code vocabulary alone** — four `ErrorKind` variants where
+  an agent wants to branch on `unsafe-aggregate`. That is the last thing between
+  the criteria and v1.
+- Still open: per-file error attribution, suggestion coverage (13 of 77), the
+  cast-inside-a-comparison silence, `declare`-defines-a-predicate, and re-running
+  the repaired `scheduling` domain under a new run id.
+
 ## 2026-08-24 — S1 is measured, the answer is null, and v1 moves to S3
 
 The first full 112-cell grid finished, across three session windows. **S1 flips
@@ -143,54 +197,3 @@ grid still renders.
   strength, which is what §1 predicted.
 - Still open: `008`, what *"reached for it"* should mean (the pilot showed a
   third case: reached, ran nothing), the JSON encoding, `--no-default-features`.
-
-## 2026-08-22 — Five domains, and the grid reaches 112 cells
-
-Phase B: the five queued domain packs, so the slate stops being one measured
-domain plus its controls. **164 tests green** (+85), ruff clean, and the full
-112-cell grid runs offline against the stub subject.
-
-**Done**
-- **`ontology`** (multiple inheritance, property overriding, disjointness),
-  **`imports`** (dates, aggregates, missing amounts; CSV + JSONL + a Parquet
-  copy), **`eligibility`** (four criteria in prose, and what a missing value
-  leaves undecided), **`scheduling`** (interval overlap four ways), and
-  **`static_analysis`** (a pinned `sqlparse`, facts the subject extracts itself).
-- **Every one of the 28 tasks answered by hand with the real engine** in a
-  scratch directory, and compared row-for-row against its oracle. All 28 match.
-- **Plumbing**: a `Fixture` can now carry several spellings of one relation,
-  binary contents and nested paths; `catalogue.verify` checks CSV headers, JSONL
-  keys and Parquet schemas alike and requires the copies to agree on row count.
-  `corpus.py` fetches a pinned sdist outside the checkout, and a pack whose
-  corpus is missing says so rather than vanishing from the slate.
-- **`FIXTURE_TOKEN_BUDGET` is enforced**, having only been stated.
-
-**Decided**
-- **Parquet is a redundant copy, never a relation's only spelling.** The sealed
-  workspace has system `python3` and nothing else, so a Parquet-only table is one
-  the *prose arm cannot open* — those cells would be decided by file format.
-- **The `static_analysis` corpus is fetched and pinned, not vendored, and it is
-  Python.** `tsc`'s API is the better extractor and the worse control: control 1
-  wants a plain-Python oracle, and a TS corpus would need one over a hand-rolled
-  parse. `sqlparse` over `requests` because a memorized codebase can be answered
-  from training rather than from the files.
-- **The questions define their abstractions syntactically** — "called" is the
-  callee of a call expression. A semantic oracle would be a guess the answers
-  were then graded against.
-- **A question is tuned in the fixture, never in the grader**, by planting a row
-  or by choosing the seed by search. Four near-misses caught that way, including
-  a roster whose shifts tiled the day so cleanly that nobody could be
-  double-booked.
-
-**Removed**
-- The unsound half of two property tests: overlap-by-distance and
-  overlap-by-extremes disagree on a zero-length interval, and nearest-ancestor
-  read as shortest path is wrong under multiple inheritance. Both replaced with
-  formulations that are independent *and* sound.
-
-**Next up**
-- **The reference corpus** — the 28 verified programs written this session are
-  most of it, and they are sitting in a scratch directory.
-- Then the **doc-line ablation**, and the first paid run.
-- Still open: what *"reached for it"* should mean, the per-cell stopping rule,
-  and whether a full run's transcripts get committed.

@@ -141,10 +141,10 @@ failure to ship — whereas shipping v1 having never run the experiment would le
 §1's own pillars resting on an unmeasured premise.
 
 **S1's half is done as of 2026-08-24, so v1 turns on S3** — the one criterion
-still reading *scoped*. What scopes it is spans: they are attached in the lexer
-and the parser only, so a semantic or source diagnostic points at a name rather
-than a place. The work and its finish line are one `ROADMAP.md` item
-(*Machine-readable error taxonomy*); the reasoning is §17, 2026-08-24.
+still reading *scoped*. Every diagnostic now carries a line and column, so what
+remains to scope it is the **code vocabulary**: an agent still branches on prose.
+The work and its finish line are one `ROADMAP.md` item (*Machine-readable error
+taxonomy*); the reasoning is §17, 2026-08-24.
 
 Which open backlog items that ruling makes v1 work, and which it puts after v1, is
 recorded per item in [`ROADMAP.md`](ROADMAP.md) with the argument in
@@ -1479,16 +1479,22 @@ suggestion is what keeps the gate from costing a round of guessing.
 composed from the fields — so a future `--format json` edge (§14) serializes the
 same data with no message re-parsing.
 
+A span is attached by whichever stage knows one. The lexer and parser hold the
+program text and resolve as they go; every later stage works over the IR, which
+retains the span of each clause, premise, query and import, and records the span
+alone for the position to be resolved once at the API boundary. Naming has not
+gone away — `variable Q in rule 0` still says *which* variable — the position
+says where to look for it, which is what stops the message degrading with
+program length.
+
 *Not covered:* a stable machine-readable **code** per diagnostic (an agent should
-be able to branch on `unsafe-aggregate` without matching prose), and spans on
-semantic and source errors — spans are attached in the lexer and the parser only,
-and *every* one of the 77 `Error::semantic` and 36 `Error::source` construction
-sites carries none (re-measured 2026-08-24). What stands in for a location is
-*naming*: a relation, a variable, or a rule index — `variable Q in rule 0`, which
-is found by counting rules. That repairs a short program and degrades with
-length. Choosing the right span per diagnostic is a design pass rather than a
-mechanical change. Both tracked in `ROADMAP.md`, and together they are what makes
-S3 (§1) *scoped* rather than met. Nor does this section say
+be able to branch on `unsafe-aggregate` without matching prose) — tracked in
+`ROADMAP.md`, and what now makes S3 (§1) *scoped* rather than met. Nor is a span
+kept for a program that **spliced in a module** (§13): spans are per-file byte
+offsets, so once there is more than one file an offset no longer identifies a
+place, and the span is dropped rather than resolved against the wrong text.
+Module-resolution errors name their file in the message instead. Nor does this
+section say
 anything about a `suggestion`'s *content*, which is the field with the sharpest
 known hazard: a model acts on a suggestion literally, so one that cannot be acted
 on costs a round and one that is wrong on correct code is worse than none
@@ -2541,6 +2547,62 @@ never say.
     and therefore spanless, so their pinned diagnostics gaining a position is the
     observable that closes this — a criterion checked by a corpus rather than by
     reading the source again. — `../experiments/reference/malformed/`.
+  - ***Amended 2026-08-24*** — **built, and the design pass this entry warned
+    about turned out to be a smaller thing than the site count implied.** All
+    five malformed pins now carry a position, not the three this asked for. The
+    113 sites were the wrong unit: an error is raised deep and *caught* shallow,
+    so the spans attach at a handful of frames that still know which clause,
+    premise or import is being worked on — one wrapper around the evaluator's
+    per-literal recursion covers `engine/`'s 35 sites, one stamp in
+    `load_imports` covers `sources/`'s 29. Six of the 77 were `naive.rs`, which
+    is `#[cfg(test)]` and reaches no user. What *was* a design pass is the
+    cross-file question below, which the count did not show at all.
+
+- **2026-08-24** — **Spans resolve at the boundary, and stop at the file edge**
+  (§12; `error.rs`, `api.rs`, `resolve.rs`). Lowering, inference and the
+  evaluator never hold the program text, so they record a span
+  (`Error::at_span`) and `run_at_reporting` — which does hold `src` — resolves
+  every stage's errors to a line and column once. Threading `&str` through the
+  three of them was the alternative, and it would have put a source-text
+  parameter on functions that have no other use for one.
+  - **A span is only a place while there is one file.** `resolve.rs` splices
+    modules in and its spans stay per-file byte offsets, so resolving a
+    spliced-in statement's span against the root text yields a confidently wrong
+    line — the same class of defect as `bugs/008`, freshly manufactured. So the
+    boundary **drops** the span when the program had more than one file, and
+    claims nothing. Rejected: rebasing every imported file's spans into one
+    virtual text, which is the real fix and wants the `origins`/`files` side
+    tables `resolve.rs` already carries for it. Filed rather than built —
+    `ROADMAP.md`, *per-file error attribution*.
+  - **`Error::or_span` is why the evaluator needed no per-site edit.** A runtime
+    error unwinds through every enclosing literal, and the innermost frame is the
+    one that knows the place, so each frame offers its span and the first offer
+    wins. Attaching unconditionally would have overwritten the good span with the
+    outermost one, which is the bug this method exists to not have.
+  - **Measured, not asserted:** 15 of 15 constructed diagnostics — one per family
+    across type inference, safety, stratification, imports, syntax and runtime
+    arithmetic — carry a line and column. It was 3 of 3 for lex/parse and 0 of
+    113 elsewhere the same morning.
+
+- **2026-08-24** — **A diagnostic may not assert what nothing read**
+  (§4/§12; `bugs/resolved/008`, property **C15** in `testing.md`). The
+  declared-vs-inferred sweep is skipped once inference is poisoned, and its
+  message re-derives the column's type from the facts before saying *"its values
+  are"*.
+  - **The blanket guard over the poison bit**, as the bug file recommended:
+    `set_type` leaves a class carrying the incumbent type *without* merging, so a
+    bit would need maintaining at two sites, to report more in a program with a
+    rule error and a genuine column error at once — a shape nothing suggests is
+    common.
+  - **The bug's acceptance criteria were incomplete, and fixing it found the
+    rest.** Inference reaches a column from rules as well as from facts, and
+    `declare p(x: int). s("a"). r(S) :- p(x: S), s(S).` claimed *"`p.x` … its
+    values are string"* about a relation holding **no facts at all**. The
+    suppression does not touch that one: there is no other error to suppress.
+    Both halves are the fix, and reverting either reddens something different.
+  - **What it cost §4:** nothing. The declared-type check is right to exist; it
+    was running on input already known bad, and describing a unification result
+    as a property of the fact table.
 
 - **2026-08-21** — **The asking form, and the sigil's real job** (§5/§11/§14; the
   flows, the rejected alternatives and the two-run argument are in
@@ -3628,6 +3690,10 @@ never say.
   not an existential (§9) — `count { P | parent(P, _) }` counts edges. Consistent
   with the witness-set rule and with SQL, but it is the one place `_` does not
   mean "don't care", so it is now stated rather than implied.
+  - ***Amended 2026-08-24*** — the first of the two deferrals is done: semantic
+    and source errors carry spans (Decisions, 2026-08-24). *"Needs decisions, not
+    mechanics"* held — the decision was **where to resolve them**, not which span
+    each site names. The code vocabulary is still deferred.
 
 - **2026-07-24** — **Aggregation (§9): full design ratified** (design session;
   implementation is a follow-on roadmap item). v1 ships the canonical five —

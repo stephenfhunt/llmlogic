@@ -45,10 +45,7 @@ each; detail in §17 and `docs/worklog.md`.
 
 ## Open backlog
 
-> **Open defects live in [`bugs/`](bugs/)** — **one open as of 2026-08-23**:
-> `008`, a rule-level type clash that manufactures a second, *false* diagnostic
-> about the fact table. Found while pinning `experiments/`'s malformed reference
-> corpus, which is what that corpus is for.
+> **Open defects live in [`bugs/`](bugs/)** — **none open as of 2026-08-24**.
 > **No design session blocks anything** either: §6's extension, the last one,
 > shipped 2026-08-18.
 >
@@ -62,7 +59,12 @@ each; detail in §17 and `docs/worklog.md`.
 > **S1's harness (`EXPERIMENTS.md`) now sits alongside them** instead of near the
 > bottom, since §1 names it as the instrument v1 is defined against.
 >
-> Seven are resolved in `bugs/resolved/`: `007` (`sum`/`avg` folded its witnesses
+> Eight are resolved in `bugs/resolved/`: `008` (a rule-level type clash
+> manufactured a second, *false* diagnostic asserting the fact table held values
+> it does not), **fixed 2026-08-24** — the declared-vs-inferred sweep is skipped
+> once inference is poisoned, and its message re-derives the column's type from
+> the facts before claiming them; the second half was found while fixing the
+> first, and neither alone is the fix (§17, property **C15**); `007` (`sum`/`avg` folded its witnesses
 > in enumeration order, so two spellings of one goal gave two answers), **fixed
 > 2026-08-20** — an aggregate is a fold over a **multiset** now, sorted into §14
 > order, compensated over floats and accumulated wide over ints and durations
@@ -379,11 +381,10 @@ deferred until a consumer needs them (§8's *Not covered*). — §13,
 - **Database loading** — SQLite/DuckDB files via the reserved `table "…"`
   grammar; Postgres via DuckDB attach. Grammar ratified, loading deferred until
   a real consumer. _queued — **post-v1** (awaiting a consumer)._ — §13.
-- **`--no-default-features` does not pass its own test suite** — `system.rs`'s
-  `temporal_answers_compose_as_input` and `temporal_program_types_dates_and_groups_by_period`
-  fail there (exit 2), because they import date columns and the reader is gated.
-  A supported configuration (§17 2026-07-23) with no green build; found while
-  profiling, unrelated to it. _queued — **v1** (S3-adjacent: a shipped configuration should build green)._ — §13/§15.
+- **`--no-default-features` builds and tests green — ✅ 2026-08-24.** The two
+  `system.rs` temporal tests import date columns from a file, so they carry
+  `#[cfg(feature = "duckdb")]` like every other import-dependent test. 557 green
+  there against 585 with defaults, and nothing else failed. _shipped._ — §13/§15.
 - **TSV** — an easy format add, deferred with database loading. _queued — **post-v1**._ — §13.
 - **Filter pushdown for large sources** — v1 eagerly materializes every import;
   push selections into SQL when a consumer hits the wall (the path/`table`
@@ -495,26 +496,28 @@ workaround and §16's preamble-vs-§16.4 contradiction fixed alongside.
   (2026-07-25). **This is the last thing between the criteria and v1**, now that
   S1 has been measured (§1, 2026-08-24): S3 is the only criterion still reading
   *scoped*, and these are what scope it. Three pieces remain.
-  - **Spans on semantic and source errors.** Not "many" — re-measured 2026-08-24,
-    *all* 77 `Error::semantic` and 36 `Error::source` sites carry none, against
-    3 of 3 for each of `Error::lex` and `Error::parse`. The count grew from 79
-    sites on 2026-08-18 while staying at 0%, so this widens on its own as the
-    engine grows. Lowering reports from points where the responsible span is not
-    threaded, so choosing one per diagnostic is a design pass, not a mechanical
-    one — and threading spans into `lower.rs` (26 sites) and `engine/mod.rs` (35)
-    is where the work actually is.
+  - **Spans on semantic and source errors — ✅ shipped 2026-08-24.** Every
+    diagnostic carries a line and column; measured at 15 of 15 constructed
+    families, and all five malformed reference pins moved to carry one. Stages
+    after parsing record a span (`Error::at_span`) and `api.rs` resolves it once
+    (§17, 2026-08-24). Spans stop at the file edge — see the new item below.
   - **A stable code vocabulary**, so an agent branches on `unsafe-aggregate`
     rather than on prose. Today there are four: the `ErrorKind` variants.
+  - **Per-file error attribution.** Spans are per-file byte offsets
+    (`resolve.rs`), so a program that spliced in a module drops its spans rather
+    than resolve them against the wrong text — correct, and a real loss for
+    multi-file programs. `resolve.rs`'s `origins`/`files` side tables are the
+    hook it already carries for this; module-resolution errors name their file in
+    the message meanwhile. _queued — **post-v1** (single-file programs keep their
+    positions)._ — §12/§13, `resolve.rs`.
   - **Suggestion coverage at the semantic stage** — 13 of 77 sites carry one, and
     none of the 36 source sites do. Guard-railed by §12's own hazard note: a
     suggestion that cannot be acted on costs a round, and one that is wrong on
     correct code is worse than none.
 
-  *Done* means the malformed half of the harness's reference corpus is the test:
-  three of its five pinned programs are `Semantic` and therefore spanless today
-  (`type-clash`, `unbound-head`, `unstratified-negation`), so their pinned
-  diagnostics moving to carry a position is the observable that closes this.
-  _queued (partially shipped) — **v1** (S3, and the reason §2 ratified scoped)._
+  The corpus was the test and it moved: all five malformed pins carry a position
+  as of 2026-08-24. **What still reads S3 as *scoped* is the code vocabulary**,
+  not the spans. _queued (partially shipped) — **v1** (S3)._
   — §12, `../experiments/reference/malformed/`.
 - **`--format json` scope** — a documented future *edge* feature (structured
   errors, provenance); the data path stays Datalog-native. _parked (low value) — **post-v1**._ — §14.
