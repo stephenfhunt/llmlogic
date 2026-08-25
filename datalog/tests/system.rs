@@ -654,6 +654,7 @@ fn a_consistency_check_answers_through_the_exit_code() {
 /// §16.14 — the temporal corpus program, end to end through the binary: a date
 /// column typed from the file with no schema line, `duration / duration` naming
 /// its unit, a range filter over dates, and a period key from `std/time`.
+#[cfg(feature = "duckdb")]
 #[test]
 fn temporal_program_types_dates_and_groups_by_period() {
     let out = run_file_args(
@@ -694,6 +695,7 @@ fn temporal_program_types_dates_and_groups_by_period() {
 
 /// The closure property over temporal values (§14): the answers above are
 /// valid input, so piping them back in and querying them gives the same rows.
+#[cfg(feature = "duckdb")]
 #[test]
 fn temporal_answers_compose_as_input() {
     let first = run_file_args("16_14_temporal.dl", &["-q", "month_opened(T, M)."]);
