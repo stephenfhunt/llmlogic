@@ -842,3 +842,87 @@ fn negating_a_std_relation_points_at_the_comparison_form() {
     assert!(text.contains("`not` applies to relations"), "{text}");
     assert!(text.contains("X != "), "{text}");
 }
+
+/// `bugs/resolved/008`: a rule-level type clash between two **declared**
+/// columns used to manufacture a *second*, false diagnostic asserting the fact
+/// table held values of a type it does not hold. It named the opposite column
+/// from the one at fault, so an agent following it edited correct data.
+///
+/// Only the rule is wrong here: `item.weight` is declared float and its one
+/// value is `1.5`.
+#[test]
+fn a_rule_type_clash_accuses_only_the_rule() {
+    let src = "declare item(name: string, qty: int, weight: float).\n\
+               item(\"bolt\", 4, 1.5).\n\
+               total(N) :- item(qty: Q, weight: W), N = Q + W.\n";
+    let errors = datalog::run(src).expect_err("int plus float is a clash");
+    let rendered: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
+    assert_eq!(
+        rendered.len(),
+        1,
+        "expected one diagnostic, got {rendered:?}"
+    );
+    assert!(
+        rendered[0].contains("`Q`") && rendered[0].contains("`W`"),
+        "{rendered:?}"
+    );
+    // Neither column is accused: the declarations and the data agree.
+    for message in &rendered {
+        assert!(!message.contains("item.weight"), "{message}");
+        assert!(!message.contains("item.qty"), "{message}");
+    }
+}
+
+/// The same clash written the other way round. The false accusation used to
+/// follow operand order — swapping the addition flipped which column was
+/// blamed, though neither column's values had changed. That tell is what
+/// identified the merged union-find class as the source.
+#[test]
+fn a_rule_type_clash_reads_the_same_in_either_operand_order() {
+    let one = "declare item(name: string, qty: int, weight: float).\n\
+               item(\"bolt\", 4, 1.5).\n\
+               total(N) :- item(qty: Q, weight: W), N = Q + W.\n";
+    let other = "declare item(name: string, qty: int, weight: float).\n\
+                 item(\"bolt\", 4, 1.5).\n\
+                 total(N) :- item(qty: Q, weight: W), N = W + Q.\n";
+    let count = |src| datalog::run(src).expect_err("a clash either way").len();
+    assert_eq!(count(one), 1);
+    assert_eq!(count(other), 1);
+}
+
+/// The genuine case still reports, and still says **values**: `item.weight` is
+/// declared float, the fact table holds an int, and nothing else is wrong. This
+/// is the diagnostic the suppression above must not cost.
+#[test]
+fn a_declared_type_the_facts_contradict_still_names_the_values() {
+    let errors = datalog::run("declare item(name: string, weight: float).\nitem(\"bolt\", 2).\n")
+        .expect_err("a float column holding an int");
+    let rendered: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
+    assert!(
+        rendered
+            .iter()
+            .any(|message| message
+                .contains("`item.weight` is declared as float but its values are int")),
+        "{rendered:?}"
+    );
+}
+
+/// The second half of `bugs/resolved/008`, which its own acceptance criteria
+/// did not cover: inference reaches a column from rules as well as from facts,
+/// and only the latter is a claim about data. `p` holds **no facts at all**, so
+/// "its values are" would be a statement about a table nothing scanned.
+#[test]
+fn a_contradiction_inference_derived_from_a_rule_does_not_claim_values() {
+    let errors = datalog::run("declare p(x: int).\ns(\"a\").\nr(S) :- p(x: S), s(S).\n")
+        .expect_err("a rule using a declared int column as a string");
+    let rendered: Vec<String> = errors.iter().map(|e| e.to_string()).collect();
+    assert!(
+        rendered
+            .iter()
+            .any(|message| message.contains("`p.x` is declared as int but is used as string")),
+        "{rendered:?}"
+    );
+    for message in &rendered {
+        assert!(!message.contains("its values are"), "{message}");
+    }
+}

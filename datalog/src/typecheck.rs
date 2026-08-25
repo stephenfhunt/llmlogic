@@ -733,24 +733,32 @@ impl<'a> TypeChecker<'a> {
         // declared type that contradicts what inference derived is an error
         // naming the column; a declared column inference never constrained is
         // simply unrefuted (no error).
-        for (p, info) in self.program.predicates.iter().enumerate() {
-            let Some(declared) = &info.field_types else {
-                continue;
-            };
-            for (col, declared_ty) in declared.iter().enumerate() {
-                let Some(declared_ty) = *declared_ty else {
+        //
+        // Only once nothing else has failed. A reported conflict still merges:
+        // `union` keeps the first operand's type and `set_type` keeps the
+        // incumbent, so the class carries one of the two and *every* column
+        // conclusion drawn from it afterwards is unreliable — not only the ones
+        // that happen to look wrong (`bugs/resolved/008`, §17 2026-08-24).
+        if self.errors.is_empty() {
+            for (p, info) in self.program.predicates.iter().enumerate() {
+                let Some(declared) = &info.field_types else {
                     continue;
                 };
-                let root = self.find(self.col_base[p] + col);
-                if let Some(inferred) = self.ty[root]
-                    && inferred != declared_ty
-                {
-                    self.errors.push(Error::semantic(format!(
-                        "type error: {} is declared as {} but its values are {}",
-                        column_label(info, col),
-                        type_label(declared_ty),
-                        type_label(inferred),
-                    )));
+                for (col, declared_ty) in declared.iter().enumerate() {
+                    let Some(declared_ty) = *declared_ty else {
+                        continue;
+                    };
+                    let root = self.find(self.col_base[p] + col);
+                    if let Some(inferred) = self.ty[root]
+                        && inferred != declared_ty
+                    {
+                        self.errors.push(Error::semantic(format!(
+                            "type error: {} is declared as {} but {}",
+                            column_label(info, col),
+                            type_label(declared_ty),
+                            contradiction(self.program, p, col, inferred),
+                        )));
+                    }
                 }
             }
         }
@@ -777,6 +785,48 @@ impl<'a> TypeChecker<'a> {
             .collect();
         Ok(TypeEnv { columns })
     }
+}
+
+/// How a column contradicts its declaration, worded from what is actually
+/// known. Inference reaches a column from two directions — the values in the
+/// fact table, and the way rules use it — and only the first is a claim about
+/// data.
+///
+/// So the message says "its values are" **only** when the facts, read on their
+/// own, say so. Otherwise the contradiction came from a rule and the wording is
+/// about use. Saying "its values are" of a relation with no facts at all was
+/// the second half of `bugs/resolved/008`.
+fn contradiction(program: &ir::Program, pred: usize, col: usize, inferred: TypeName) -> String {
+    if column_type_from_facts(program, pred, col) == Some(inferred) {
+        format!("its values are {}", type_label(inferred))
+    } else {
+        format!("is used as {}", type_label(inferred))
+    }
+}
+
+/// The type a column's **facts** give it, read from the fact table and nothing
+/// else — no unification, no rule constraints. `None` when the column holds no
+/// typed value, or when its values disagree.
+///
+/// Imported rows are ordinary facts by this point (§13 materializes them during
+/// lowering), so an imported column's values are read here too.
+fn column_type_from_facts(program: &ir::Program, pred: usize, col: usize) -> Option<TypeName> {
+    let mut found: Option<TypeName> = None;
+    for fact in &program.facts {
+        if fact.pred.0 as usize != pred {
+            continue;
+        }
+        let Some(ty) = fact.tuple.0.get(col).and_then(type_of) else {
+            continue;
+        };
+        match found {
+            None => found = Some(ty),
+            Some(seen) if seen == ty => {}
+            // Values that disagree are not a claim anything can rest on.
+            Some(_) => return None,
+        }
+    }
+    found
 }
 
 /// A description of a predicate column for error messages: `pred.field` when the
