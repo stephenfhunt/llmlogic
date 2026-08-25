@@ -1456,6 +1456,29 @@ per site, only on a run where one actually failed.
 message speaks: `lex`, `parse`, `semantic` (safety, stratification, types),
 `source` (§13 loading).
 
+**Code.** A stable kebab-case name for *what kind of thing is wrong* —
+`unsafe-rule`, `unstratified`, `type-clash`, `file-not-found` — so a consumer
+branches on the code and never on the sentence. The category is the reader's
+axis and the code is the machine's: a code belongs to exactly one category, and
+knowing the code implies the category but not the reverse.
+
+A code exists **where a fix differs in kind**, not where a message differs. Which
+field is unknown is what the message is for; that the named arguments do not
+match the schema is what `field-mismatch` is for. Every diagnostic carries one —
+there is no generic fallback, so a new kind of wrongness gets a new code rather
+than a shrug — and the full list, with the census it was derived from, is
+[`notes/error-codes.md`](notes/error-codes.md).
+
+**The stability contract.** Codes are **stable and additive**. A code is never
+repurposed: it means the same thing in every later version, or it does not exist.
+Adding one is a compatible change, and a consumer that does not recognise a code
+**falls back to the category**, which is why every code has one. Renaming or
+removing a code is a breaking change, and the set is pinned by a test so neither
+can happen quietly.
+
+A **warning** carries a code on the same terms (§12's severity axis), drawn from
+the same vocabulary rules.
+
 **Location.** An error carries the **span** it is about, and that span resolved
 against the source to a 1-based **line and column** — not a byte offset, which
 cannot be turned into a caret or a `file:line` an editor will follow. Columns
@@ -1475,9 +1498,12 @@ is deliberate design cost, not an accident: gating is what lets those relations
 take short names that would otherwise be unusable as reserved words, and the
 suggestion is what keeps the gate from costing a round of guessing.
 
-**Rendering** is `"{category} error: {message} (at {line}:{column}) ({suggestion})"`,
+**Rendering** is
+`"{category} error [{code}]: {message} (at {line}:{column}) ({suggestion})"`,
 composed from the fields — so a future `--format json` edge (§14) serializes the
-same data with no message re-parsing.
+same data with no message re-parsing. The code is rendered ahead of the sentence
+rather than after the position, so the machine-readable part of the line never
+sits behind the prose a machine is trying not to read.
 
 A span is attached by whichever stage knows one. The lexer and parser hold the
 program text and resolve as they go; every later stage works over the IR, which
@@ -1487,10 +1513,7 @@ gone away — `variable Q in rule 0` still says *which* variable — the positio
 says where to look for it, which is what stops the message degrading with
 program length.
 
-*Not covered:* a stable machine-readable **code** per diagnostic (an agent should
-be able to branch on `unsafe-aggregate` without matching prose) — tracked in
-`ROADMAP.md`, and what now makes S3 (§1) *scoped* rather than met. Nor is a span
-kept for a program that **spliced in a module** (§13): spans are per-file byte
+*Not covered:* a span kept for a program that **spliced in a module** (§13): spans are per-file byte
 offsets, so once there is more than one file an offset no longer identifies a
 place, and the span is dropped rather than resolved against the wrong text.
 Module-resolution errors name their file in the message instead. Nor does this
@@ -2525,6 +2548,31 @@ marker that records a decision working out *well*, which the log would otherwise
 never say.
 
 ### Decisions
+
+- **2026-08-25** — **A diagnostic carries a stable code, and the code exists
+  where the *fix* differs in kind** (§12; `ROADMAP.md`, *Machine-readable error
+  taxonomy*). The last piece of S3: an agent had four things to branch on, and
+  all four named the stage that rejected the program rather than what was wrong.
+  The census, the folds, and the alternatives are in
+  [`notes/error-codes.md`](notes/error-codes.md); **37 codes over 153 emission
+  sites**.
+  - **The unit is the fix, not the message and not the site.** Which field is
+    unknown is what a message is for; *the named arguments do not match the
+    schema* is what a code is for. Applied both ways: `Semantic` split into
+    fifteen, and four field diagnostics folded into one.
+  - **The code is a required constructor argument**, which is the span work's
+    lesson taken literally — an optional field is how 113 sites carried no span
+    for a month while §12 called errors structured. The compiler is the only
+    sweep that does not miss one, and paying it is what produced the census.
+  - **No generic fallback**, which the session planned and then found no tail
+    for. A generic code is where the next diagnostic goes without thinking.
+  - **The category stays.** A code implies its category, so rendering both is
+    redundant for a machine — but the category is what a human reads first, and
+    an unrecognised code has to fall back to something.
+  - *Rejected:* numbered codes (`E0499`) — a name an agent can read is worth more
+    than a namespace with no collisions, and nothing here is dense enough to need
+    numbering. *Rejected:* `&'static str` codes — a typo would be a new code,
+    silently, and the contract is that the set is enumerable.
 
 - **2026-08-24** — **S3 is the last criterion, and what scopes it is spans on
   113 error sites** (§1/§2/§12; the item is `ROADMAP.md`, *Machine-readable error
