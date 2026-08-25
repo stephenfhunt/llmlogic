@@ -90,6 +90,13 @@ what makes the result readable, and a grid of one domain measures one domain.
   The one it was wanted for: `count-wildcard` and `source-analysis-count-trap`
   are what turn *"is documenting the trap enough?"* into a measurement rather
   than a position. — `../datalog/ROADMAP.md`, *Count-distinct*.
+- **The engine binary a run measures against is checked for staleness** —
+  _shipped 2026-08-25._ Both call sites checked only that
+  `datalog/target/release/datalog` *existed*, so the corpus could report green
+  against a two-day-old engine and an earlier checkout reddened four pins until
+  someone rebuilt. `arms.require_engine` refuses a binary older than `src/`,
+  `Cargo.toml` or `Cargo.lock`, and ignores everything that changes without
+  changing the binary. — `arms.py`, `decisions.md` 2026-08-25.
 - **A resume should refuse a fixture that moved under it** — `resume` guards the
   slate by cell id and count, which catches a renamed or added task and is blind
   to the thing that actually changed on 2026-08-24: `scheduling`'s roster, under

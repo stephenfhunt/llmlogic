@@ -26,8 +26,13 @@ from harness.cell import Cell
 
 #: Repo-relative, resolved from this file so the harness works from any cwd.
 REPO_ROOT = Path(__file__).resolve().parents[3]
-DATALOG_BIN_DIR = REPO_ROOT / "datalog" / "target" / "release"
-DATALOG_SKILL_DIR = REPO_ROOT / "datalog" / "skill"
+DATALOG_ROOT = REPO_ROOT / "datalog"
+DATALOG_BIN_DIR = DATALOG_ROOT / "target" / "release"
+DATALOG_SKILL_DIR = DATALOG_ROOT / "skill"
+
+#: What the engine is built from. Anything here newer than the binary means the
+#: binary is not this checkout's engine — see `require_engine`.
+ENGINE_SOURCES = ("src", "Cargo.toml", "Cargo.lock")
 
 #: Workspaces live **outside the checkout**, and that is a control rather than
 #: tidiness. Every domain's ``truth.py`` is the answer key, and the engine's
@@ -45,6 +50,63 @@ _WORKSPACE_NAME = re.compile(r"[0-9a-f]{16}")
 
 class EngineMissing(Exception):
     """The engine arm was asked for and the binary is not built."""
+
+
+class EngineStale(EngineMissing):
+    """The binary exists but predates the engine source it is supposed to be.
+
+    A separate class from `EngineMissing` because the two are different
+    situations for a caller to explain, and a subclass of it because every
+    existing handler means *"there is no usable engine"* and both are that.
+    """
+
+
+def require_engine(
+    bin_dir: Path = DATALOG_BIN_DIR,
+    source_root: Path = DATALOG_ROOT,
+) -> Path:
+    """Return the engine binary, refusing one that is not this checkout's.
+
+    Every measurement the harness makes is a measurement of whatever was last
+    compiled. Checking only that the file *exists* is what let the reference
+    corpus report 12/12 green against a two-day-old engine, and — the same
+    coupling seen from the other side — turns a checkout of an earlier commit
+    into four red tests until someone remembers to rebuild. The pins are
+    versioned; the binary they are pinned against is not, so the harness has to
+    be the one that notices.
+
+    Refusing is the whole behaviour: building here would hide the coupling
+    rather than surface it, and a release build is a minute the caller should
+    spend deliberately.
+    """
+    binary = bin_dir / "datalog"
+    if not binary.exists():
+        raise EngineMissing(
+            f"no datalog binary at {binary} — "
+            "build it with `cargo build --release --offline` in datalog/"
+        )
+
+    built = binary.stat().st_mtime
+    newest, newest_at = None, built
+    for entry in ENGINE_SOURCES:
+        path = source_root / entry
+        candidates = [path, *path.rglob("*")] if path.is_dir() else [path]
+        for candidate in candidates:
+            if not candidate.is_file():
+                continue
+            modified = candidate.stat().st_mtime
+            if modified > newest_at:
+                newest, newest_at = candidate, modified
+
+    if newest is not None:
+        raise EngineStale(
+            f"the datalog binary at {binary} is older than "
+            f"{newest.relative_to(source_root)} — it is not this checkout's "
+            "engine, so anything measured against it is measured against "
+            "whatever was last compiled. Rebuild it with "
+            "`cargo build --release --offline` in datalog/"
+        )
+    return binary
 
 
 @dataclass(frozen=True)
@@ -166,11 +228,7 @@ def build(cell: Cell, root: Path) -> Workspace:
     search_path = scrubbed_path()
     has_engine = cell.arm == "engine"
     if has_engine:
-        if not (DATALOG_BIN_DIR / "datalog").exists():
-            raise EngineMissing(
-                f"no datalog binary at {DATALOG_BIN_DIR / 'datalog'} — "
-                "build it with `cargo build --release --offline` in datalog/"
-            )
+        require_engine()
         _copy_skill(path, cell.ablate)
         search_path = os.pathsep.join([str(_link_binary(path)), search_path])
 

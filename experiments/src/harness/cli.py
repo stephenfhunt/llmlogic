@@ -243,6 +243,12 @@ def cmd_reference(args: argparse.Namespace) -> int:
     red test does on its own.
     """
 
+    try:
+        arms.require_engine()
+    except arms.EngineMissing as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
     entries = reference.correct() + reference.malformed()
     moved = 0
     for entry in entries:

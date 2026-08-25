@@ -15,6 +15,27 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-08-25** — **The harness refuses an engine binary older than the source
+  it was built from, and refuses rather than builds.** `datalog/target/release/`
+  is not versioned and everything measured against it is: the corpus pins live in
+  git, so checking out an earlier commit reddens four of them until someone
+  rebuilds, and a corpus run straight after a source edit reports green against
+  yesterday's engine. Both were seen, in that order. Checking only that the file
+  *exists* — which both call sites did — cannot tell the two apart, so
+  `arms.require_engine` compares the binary's mtime against `src/`, `Cargo.toml`
+  and `Cargo.lock`, and raises `EngineStale` naming the newest offender.
+  - **Refusing, not building.** Building on demand would make the coupling
+    invisible again, and this is the third instrument defect in four sessions
+    whose whole cost was that nothing said the measurement had moved. A release
+    build is also a minute the caller should choose to spend.
+  - **The guard's usable half is what it ignores.** `spec.md`, `notes/`, `bugs/`
+    and the crate's own `tests/` change constantly without changing the binary; a
+    tripwire that fired on those would be routed around within a week, so a test
+    pins that they do not trip it.
+  - Prerequisite for re-pinning the corpus under the §12 error-code work, which
+    moves every pinned diagnostic — a re-pin against a stale binary bakes a lie
+    into the tripwire the pins exist to be.
+
 - **2026-08-24** — **A fixture has to obey the rules its questions state, and the
   subjects are the first readers who do not already know the answer.**
   `scheduling`'s roster assigned people to shifts at random, ignoring the

@@ -24,7 +24,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from harness.arms import DATALOG_BIN_DIR
+from harness.arms import require_engine
 from harness.task import Fixture
 
 #: `experiments/reference/`, resolved from this file so cwd does not matter.
@@ -35,10 +35,6 @@ MALFORMED_DIR = REFERENCE_ROOT / "malformed"
 #: The file a program is written to inside the scratch directory. Fixed, so a
 #: diagnostic that names the source file is stable across runs — several do.
 PROGRAM_NAME = "program.dl"
-
-
-class EngineMissing(Exception):
-    """The corpus was asked to run and the binary is not built."""
 
 
 @dataclass(frozen=True)
@@ -138,12 +134,7 @@ def materialize(entry: Entry, fixture: Fixture | None, workdir: Path) -> None:
 
 def run(entry: Entry, workdir: Path) -> Run:
     """Run the extractor if there is one, then the engine. Never grades."""
-    binary = DATALOG_BIN_DIR / "datalog"
-    if not binary.exists():
-        raise EngineMissing(
-            f"no datalog binary at {binary} — "
-            "build it with `cargo build --release --offline` in datalog/"
-        )
+    binary = require_engine()
     if entry.extractor is not None:
         extraction = subprocess.run(
             ["python3", str(entry.extractor)],
