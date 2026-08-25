@@ -133,9 +133,25 @@ pub fn run_at_reporting(
 ) -> Result<RunResult, Vec<Error>> {
     let ast = parse(src)?;
     let resolved = resolve_modules(ast, source_path)?;
-    let tables = load_imports(&resolved.program)?;
-    let program = lower_with_sources(&resolved.program, &tables)?;
-    typecheck(&program)?;
+    // Every stage after this one works over the IR and never holds the program
+    // text, so it records a span and leaves the position to be resolved here
+    // (§17, 2026-08-24). Spans are **per-file** byte offsets (`resolve.rs`), so
+    // that is only sound while there is one file: a spliced-in module's offset
+    // counts from its own text, and resolving it against the root would print a
+    // confidently wrong line. With more than one file the span is dropped.
+    let single_file = resolved.files.len() == 1;
+    let place = |mut errors: Vec<Error>| {
+        if single_file {
+            crate::error::locate_all(&mut errors, src);
+        } else {
+            crate::error::forget_spans(&mut errors);
+        }
+        errors
+    };
+    let one = |error: Error| place(vec![error]);
+    let tables = load_imports(&resolved.program).map_err(&place)?;
+    let program = lower_with_sources(&resolved.program, &tables).map_err(&place)?;
+    typecheck(&program).map_err(&place)?;
     let mut warnings = check_program(&program);
     for warning in &warnings {
         report(warning);
@@ -144,7 +160,7 @@ pub fn run_at_reporting(
     // `?why` needs a derivation store, `?whynot` needs the model and a re-solve,
     // and a run with no goals at all needs neither — which is the case that was
     // paying 70–78% of peak RSS for nothing.
-    let model = eval_with(&program, program.provenance()).map_err(|e| vec![e])?;
+    let model = eval_with(&program, program.provenance()).map_err(&one)?;
     warnings.extend(absent_skip_warnings(&model, &program));
 
     let mut answers = Vec::with_capacity(program.queries.len());
@@ -176,7 +192,7 @@ pub fn run_at_reporting(
                     }
                 }
             })
-            .map_err(|e| vec![e])?;
+            .map_err(&one)?;
         let site = || AggregateSite::Query(position + 1);
         warnings.extend(sites.into_values().map(|(op, skipped, groups)| {
             Warning::AbsentSkippedInAggregate {
@@ -205,7 +221,7 @@ pub fn run_at_reporting(
             .iter()
             .any(|explanation| model.contains(&explanation.goal));
     let recorded = if needs_recorded {
-        Some(eval_with(&program, Provenance::Recorded).map_err(|e| vec![e])?)
+        Some(eval_with(&program, Provenance::Recorded).map_err(&one)?)
     } else {
         None
     };
@@ -228,7 +244,7 @@ pub fn run_at_reporting(
         // makes `?whynot` cheap to provision for (§17, 2026-08-21).
         let trace = match &answer {
             Explained::DoesNotHold => {
-                Some(trace_failure(&program, &model, &explanation.goal).map_err(|e| vec![e])?)
+                Some(trace_failure(&program, &model, &explanation.goal).map_err(&one)?)
             }
             Explained::Proof(_) | Explained::Unrecorded => None,
         };

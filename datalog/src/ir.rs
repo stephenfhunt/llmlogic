@@ -93,6 +93,11 @@ pub struct PredicateInfo {
     /// type inference (§4) verifies against the *inferred* ones; imported
     /// *inferred* column types (§13) are a separate, later channel.
     pub field_types: Option<Vec<Option<TypeName>>>,
+    /// Where the schema was written, when a `declare` or an import schema wrote
+    /// one. Retained for the same reason as the two above: it is what lets a
+    /// diagnostic about a *declared* column point at the declaration rather
+    /// than at whichever rule happened to contradict it (§12).
+    pub decl_span: Option<Span>,
 }
 
 /// A never-NaN `f64` with total `Eq`/`Ord`/`Hash`.
@@ -500,6 +505,7 @@ impl Program {
             // set them afterwards.
             fields: None,
             field_types: None,
+            decl_span: None,
         });
         PredId((self.predicates.len() - 1) as u32)
     }
@@ -550,12 +556,14 @@ pub(crate) mod fixtures {
                     arity: 2,
                     fields: None,
                     field_types: None,
+                    decl_span: None,
                 },
                 PredicateInfo {
                     name: "ancestor".to_string(),
                     arity: 2,
                     fields: None,
                     field_types: None,
+                    decl_span: None,
                 },
             ],
             facts: vec![
@@ -648,18 +656,21 @@ pub(crate) mod fixtures {
                     arity: 1,
                     fields: None,
                     field_types: None,
+                    decl_span: None,
                 },
                 PredicateInfo {
                     name: "parent".to_string(),
                     arity: 2,
                     fields: None,
                     field_types: None,
+                    decl_span: None,
                 },
                 PredicateInfo {
                     name: "root".to_string(),
                     arity: 1,
                     fields: None,
                     field_types: None,
+                    decl_span: None,
                 },
             ],
             facts: vec![
@@ -751,24 +762,28 @@ pub(crate) mod fixtures {
                         Some(TypeName::String),
                         Some(TypeName::String),
                     ]),
+                    decl_span: Some(Span::DUMMY),
                 },
                 PredicateInfo {
                     name: "manager_name".to_string(),
                     arity: 1,
                     fields: None,
                     field_types: None,
+                    decl_span: None,
                 },
                 PredicateInfo {
                     name: "person".to_string(),
                     arity: 2,
                     fields: Some(vec!["name".to_string(), "age".to_string()]),
                     field_types: Some(vec![Some(TypeName::String), Some(TypeName::Int)]),
+                    decl_span: Some(Span::DUMMY),
                 },
                 PredicateInfo {
                     name: "adult".to_string(),
                     arity: 1,
                     fields: None,
                     field_types: None,
+                    decl_span: None,
                 },
             ],
             facts: vec![Fact {

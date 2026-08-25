@@ -59,7 +59,17 @@ pub fn load_imports(program: &Program) -> Result<Vec<LoadedTable>, Vec<Error>> {
             schema.as_deref(),
         ) {
             Ok(loaded) => tables.push(loaded),
-            Err(mut source_errors) => errors.append(&mut source_errors),
+            // The import statement's path is the place, for every way loading
+            // it can fail — a missing file, an unreadable one, a schema that
+            // does not match what arrived. Stamping here rather than at each
+            // raising site is what gives the whole §13 surface a position:
+            // `sources/` reports from deep inside the reader, and this is the
+            // frame that still knows which import is being loaded (§12).
+            Err(source_errors) => errors.extend(
+                source_errors
+                    .into_iter()
+                    .map(|error| error.or_span(import.path_span)),
+            ),
         }
     }
     if errors.is_empty() {

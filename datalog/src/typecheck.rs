@@ -22,7 +22,7 @@
 //! and declared-signature verification (§4) are additional sources that land
 //! once imports and IR-level declared types exist.
 
-use crate::ast::{AggOp, ArithOp, TypeName};
+use crate::ast::{AggOp, ArithOp, Span, TypeName};
 use crate::error::Error;
 use crate::ir;
 
@@ -91,6 +91,10 @@ struct BinaryConstraint {
     lhs: usize,
     rhs: usize,
     result: usize,
+    /// Where the arithmetic is written. Carried because §8's temporal rule
+    /// defers this constraint to [`TypeChecker::finish`], long after the walk
+    /// that knew the place has moved on.
+    at: Option<Span>,
 }
 
 /// The source spelling of an aggregate operator, for messages.
@@ -155,6 +159,9 @@ struct ReducerConstraint {
     op: AggOp,
     result: usize,
     value: usize,
+    /// Where the aggregate is written; deferred for the same reason as
+    /// [`BinaryConstraint::at`].
+    at: Option<Span>,
 }
 
 /// What §8's algebra says an operator does to a pair of **known** operand
@@ -214,8 +221,9 @@ struct TypeChecker<'a> {
     /// A human-readable description of each slot, for error messages.
     label: Vec<String>,
     /// Slots that must resolve to a numeric type (arithmetic / ordered
-    /// comparison operands), checked after all unification.
-    numeric: Vec<usize>,
+    /// comparison operands), checked after all unification — each with where it
+    /// was written, since the check outlives the walk.
+    numeric: Vec<(usize, Option<Span>)>,
     /// Arithmetic whose typing cannot be decided where it is met, because §8's
     /// temporal rule makes an operator's result depend on its **operand types**
     /// — `date - date` is a duration, `date - duration` a date. Resolved to a
@@ -227,6 +235,13 @@ struct TypeChecker<'a> {
     reducers: Vec<ReducerConstraint>,
     /// First slot index of each predicate's columns.
     col_base: Vec<usize>,
+    /// Where the constraint currently being gathered comes from: the clause
+    /// being walked, narrowed to the body literal while inside one. Every
+    /// diagnostic raised during gathering is stamped with it (§12), which is
+    /// what turns "variable `Q` in rule 0" into a place a reader can go to.
+    /// `None` while nothing is being walked, and for facts, whose own span the
+    /// IR does not retain.
+    at: Option<Span>,
     errors: Vec<Error>,
 }
 
@@ -249,6 +264,7 @@ impl<'a> TypeChecker<'a> {
             binaries: Vec::new(),
             reducers: Vec::new(),
             col_base,
+            at: None,
             errors: Vec::new(),
         };
         for info in &program.predicates {
@@ -258,6 +274,17 @@ impl<'a> TypeChecker<'a> {
         }
         debug_assert_eq!(checker.label.len(), total);
         checker
+    }
+
+    /// Raises a semantic error against whatever is being walked
+    /// ([`Self::at`]).
+    fn raise(&mut self, message: String) -> &mut Error {
+        let mut error = Error::semantic(message);
+        if let Some(span) = self.at {
+            error = error.at_span(span);
+        }
+        self.errors.push(error);
+        self.errors.last_mut().expect("just pushed")
     }
 
     /// Allocates a fresh, untyped slot with a description.
@@ -285,12 +312,15 @@ impl<'a> TypeChecker<'a> {
         match self.ty[root] {
             None => self.ty[root] = Some(t),
             Some(existing) if existing == t => {}
-            Some(existing) => self.errors.push(Error::semantic(format!(
-                "type error: {} is used as both {} and {}",
-                self.label[root],
-                type_label(existing),
-                type_label(t),
-            ))),
+            Some(existing) => {
+                let message = format!(
+                    "type error: {} is used as both {} and {}",
+                    self.label[root],
+                    type_label(existing),
+                    type_label(t),
+                );
+                self.raise(message);
+            }
         }
     }
 
@@ -303,13 +333,14 @@ impl<'a> TypeChecker<'a> {
         }
         let merged = match (self.ty[ra], self.ty[rb]) {
             (Some(x), Some(y)) if x != y => {
-                self.errors.push(Error::semantic(format!(
+                let message = format!(
                     "type error: {} has type {} but {} has type {}",
                     self.label[ra],
                     type_label(x),
                     self.label[rb],
                     type_label(y),
-                )));
+                );
+                self.raise(message);
                 Some(x)
             }
             (x, y) => x.or(y),
@@ -340,15 +371,18 @@ impl<'a> TypeChecker<'a> {
         }
         for (rule_id, rule) in self.program.rules.iter().enumerate() {
             let ctx = format!("rule {rule_id}");
+            self.at = Some(rule.span);
             let vars = self.var_slots(&rule.var_names, &ctx);
             self.atom_constraints(&rule.head, &vars);
             self.body_constraints(&rule.body, &vars);
         }
         for (query_id, query) in self.program.queries.iter().enumerate() {
             let ctx = format!("query {query_id}");
+            self.at = Some(query.span);
             let vars = self.var_slots(&query.var_names, &ctx);
             self.body_constraints(&query.body, &vars);
         }
+        self.at = None;
     }
 
     /// Fresh slots for each variable of a clause, described for error messages.
@@ -381,7 +415,12 @@ impl<'a> TypeChecker<'a> {
     }
 
     fn body_constraints(&mut self, body: &[ir::BodyLiteral], vars: &[usize]) {
+        let clause = self.at;
         for literal in body {
+            // The literal is the narrower place, and the one a reader wants:
+            // a clash is between two operands of one premise, not a property of
+            // the whole clause.
+            self.at = Some(literal.span);
             match &literal.kind {
                 ir::BodyLiteralKind::Atom(atom) | ir::BodyLiteralKind::NegAtom(atom) => {
                     self.atom_constraints(atom, vars);
@@ -439,6 +478,7 @@ impl<'a> TypeChecker<'a> {
                         AggOp::Sum => {
                             self.union(result_slot, value);
                             self.reducers.push(ReducerConstraint {
+                                at: self.at,
                                 op: AggOp::Sum,
                                 result: result_slot,
                                 value,
@@ -448,6 +488,7 @@ impl<'a> TypeChecker<'a> {
                         // — the divisor rule, not an exception to it (§9). The
                         // choice needs the value's type, so it is deferred.
                         AggOp::Avg => self.reducers.push(ReducerConstraint {
+                            at: self.at,
                             op: AggOp::Avg,
                             result: result_slot,
                             value,
@@ -460,6 +501,7 @@ impl<'a> TypeChecker<'a> {
                 }
             }
         }
+        self.at = clause;
     }
 
     /// The slot representing an expression's type. Arithmetic unifies both
@@ -483,6 +525,7 @@ impl<'a> TypeChecker<'a> {
                 let r = self.expr_slot(rhs, vars);
                 let result = self.fresh(format!("the result of `{}`", arith_symbol(*op)));
                 self.binaries.push(BinaryConstraint {
+                    at: self.at,
                     op: *op,
                     lhs: l,
                     rhs: r,
@@ -600,26 +643,30 @@ impl<'a> TypeChecker<'a> {
 
     /// Types one arithmetic node from both operand types (§8).
     fn settle_binary(&mut self, constraint: &BinaryConstraint, lhs: TypeName, rhs: TypeName) {
+        // Deferred resolution runs long after the walk, so each constraint
+        // restores the place it was gathered from before it can raise.
+        self.at = constraint.at;
         if !lhs.is_temporal() && !rhs.is_temporal() {
             // The homogeneous rule, unchanged: one numeric class for both
             // operands and the result.
             self.union(constraint.lhs, constraint.rhs);
             self.union(constraint.lhs, constraint.result);
-            self.numeric.push(constraint.lhs);
+            self.numeric.push((constraint.lhs, constraint.at));
             return;
         }
         match temporal_result(constraint.op, lhs, rhs) {
             Some(result) => self.set_type(constraint.result, result),
             None => {
                 let (message, suggestion) = temporal_arith_error(constraint.op, lhs, rhs);
-                self.errors
-                    .push(Error::semantic(message).suggest(suggestion));
+                self.at = constraint.at;
+                self.raise(message).suggestion = Some(suggestion.to_string());
             }
         }
     }
 
     /// Types one `sum`/`avg` from the type it folds over (§9).
     fn settle_reducer(&mut self, constraint: &ReducerConstraint, value: TypeName) {
+        self.at = constraint.at;
         if !is_numeric(value) && value != TypeName::Duration {
             // A point does not fold: `sum` and `avg` both add, and §8 has no
             // addition of two dates — so the message says that rather than
@@ -647,8 +694,8 @@ impl<'a> TypeChecker<'a> {
             } else {
                 "project a numeric column, or convert with `as`"
             };
-            self.errors
-                .push(Error::semantic(reason).suggest(suggestion));
+            self.at = constraint.at;
+            self.raise(reason).suggestion = Some(suggestion.to_string());
             return;
         }
         if constraint.op == AggOp::Avg {
@@ -669,6 +716,7 @@ impl<'a> TypeChecker<'a> {
     /// evidence this is the homogeneous rule as before; with one, the operator
     /// is genuinely ambiguous and says so.
     fn fall_back_binary(&mut self, constraint: &BinaryConstraint) {
+        self.at = constraint.at;
         let known: Vec<TypeName> = [constraint.lhs, constraint.rhs, constraint.result]
             .into_iter()
             .filter_map(|slot| self.slot_type(slot))
@@ -694,12 +742,13 @@ impl<'a> TypeChecker<'a> {
         }
         self.union(constraint.lhs, constraint.rhs);
         self.union(constraint.lhs, constraint.result);
-        self.numeric.push(constraint.lhs);
+        self.numeric.push((constraint.lhs, constraint.at));
     }
 
     /// A `sum`/`avg` whose collected value nothing typed: the pre-temporal
     /// rule, which is still right when no duration is in evidence.
     fn fall_back_reducer(&mut self, constraint: &ReducerConstraint) {
+        self.at = constraint.at;
         if self.slot_type(constraint.result) == Some(TypeName::Duration) {
             // `avg` over an untyped value feeding a duration column: only a
             // duration folds to one.
@@ -709,24 +758,26 @@ impl<'a> TypeChecker<'a> {
         if constraint.op == AggOp::Avg {
             self.set_type(constraint.result, TypeName::Float);
         }
-        self.numeric.push(constraint.value);
+        self.numeric.push((constraint.value, constraint.at));
     }
 
     /// Runs the deferred numeric checks and builds the [`TypeEnv`], or returns
     /// the deduplicated type errors.
     fn finish(mut self) -> std::result::Result<TypeEnv, Vec<Error>> {
         self.resolve_deferred();
-        for node in std::mem::take(&mut self.numeric) {
+        for (node, at) in std::mem::take(&mut self.numeric) {
             let root = self.find(node);
             if let Some(ty) = self.ty[root]
                 && !is_numeric(ty)
             {
-                self.errors.push(Error::semantic(format!(
+                let message = format!(
                     "type error: {} has type {} but is used in arithmetic or a numeric \
                      aggregate (`sum`/`avg`), which requires int or float",
                     self.label[root],
                     type_label(ty),
-                )));
+                );
+                self.at = at;
+                self.raise(message);
             }
         }
         // Verify asserted declared types (§4) against the inferred ones. A
@@ -752,12 +803,16 @@ impl<'a> TypeChecker<'a> {
                     if let Some(inferred) = self.ty[root]
                         && inferred != declared_ty
                     {
-                        self.errors.push(Error::semantic(format!(
+                        let message = format!(
                             "type error: {} is declared as {} but {}",
                             column_label(info, col),
                             type_label(declared_ty),
                             contradiction(self.program, p, col, inferred),
-                        )));
+                        );
+                        // The declaration is the place: it is the half of the
+                        // contradiction this message asserts is wrong.
+                        self.at = info.decl_span;
+                        self.raise(message);
                     }
                 }
             }

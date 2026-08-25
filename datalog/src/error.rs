@@ -11,11 +11,17 @@
 //! recover a position without parsing English, and a byte offset cannot be
 //! turned into a caret or a "file:line" an editor will jump to.
 //!
+//! A span is attached by whichever stage knows one. The lexer and parser hold
+//! the program text and resolve as they go ([`Error::at`]); every later stage
+//! works over the IR and does not, so it records the span alone
+//! ([`Error::at_span`]) and the position is resolved once at the API boundary
+//! ([`locate_all`]). A program that spliced in a module has no single text to
+//! resolve against, and those spans are dropped rather than mis-rendered
+//! ([`forget_spans`]).
+//!
 //! Still to come (§12, tracked in `ROADMAP.md`): a stable machine-readable
-//! **code** vocabulary, and spans on the semantic/source errors — lowering
-//! reports many of its errors from places where the responsible span is not
-//! currently threaded, and picking the right one per error is a design pass, not
-//! a mechanical change.
+//! **code** vocabulary, and per-file attribution, which is what would let a
+//! multi-file program keep its positions.
 
 use std::fmt;
 
@@ -139,11 +145,74 @@ impl Error {
         self
     }
 
+    /// Attaches `span` without resolving it.
+    ///
+    /// The counterpart to [`Error::at`], for the stages that run *after*
+    /// parsing: lowering, type inference and the evaluator all work over the IR
+    /// and never hold the program text, but the IR retains the spans of the
+    /// clause, literal, query and import each of them came from. They record
+    /// the span here and [`locate`](Error::locate) resolves it at the boundary
+    /// that does have the source (§17, 2026-08-24).
+    #[must_use]
+    pub fn at_span(mut self, span: Span) -> Error {
+        self.span = Some(span);
+        self
+    }
+
+    /// Attaches `span` only where none is attached yet.
+    ///
+    /// For the evaluator, whose frames nest: a runtime error raised while
+    /// enumerating one body literal unwinds through every enclosing literal on
+    /// the way out, and the innermost frame is the one that knows the place. So
+    /// each frame offers its span and the first offer wins.
+    #[must_use]
+    pub fn or_span(mut self, span: Span) -> Error {
+        if self.span.is_none() {
+            self.span = Some(span);
+        }
+        self
+    }
+
     /// Attaches a suggested fix.
     #[must_use]
     pub fn suggest(mut self, suggestion: impl Into<String>) -> Error {
         self.suggestion = Some(suggestion.into());
         self
+    }
+
+    /// Resolves an already-attached span against `source`, so `Display` can
+    /// render a line and column. A no-op when there is no span, and when the
+    /// position is already known — [`Error::at`] resolved its own.
+    pub fn locate(&mut self, source: &str) {
+        if let (Some(span), None) = (self.span, self.position) {
+            self.position = Some(Position::locate(source, span.start));
+        }
+    }
+
+    /// Drops the span, and with it any claim to a location.
+    ///
+    /// For the case where a span is real but *unresolvable*: spans are per-file
+    /// byte offsets, so once a program has spliced in a module (§13) an offset
+    /// no longer identifies a place without knowing which file it counts from.
+    /// Resolving it against the root text anyway would print a confidently
+    /// wrong line, which is worse than printing none.
+    pub fn forget_span(&mut self) {
+        self.span = None;
+        self.position = None;
+    }
+}
+
+/// Resolves every error's span against `source` ([`Error::locate`]).
+pub fn locate_all(errors: &mut [Error], source: &str) {
+    for error in errors {
+        error.locate(source);
+    }
+}
+
+/// Drops every error's span ([`Error::forget_span`]).
+pub fn forget_spans(errors: &mut [Error]) {
+    for error in errors {
+        error.forget_span();
     }
 }
 

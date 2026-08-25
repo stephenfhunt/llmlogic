@@ -730,7 +730,33 @@ fn literal_order(body: &[BodyLiteral]) -> Result<Vec<usize>> {
     })
 }
 
+/// Enumerates one literal, and stamps whatever fails with **where that literal
+/// is written** (§12).
+///
+/// Every runtime error the evaluator raises — overflow, division by zero, a type
+/// mismatch surviving into evaluation — comes out of some premise, and the IR
+/// retained that premise's span for exactly this. Attaching here rather than at
+/// each of the raising sites is what makes the whole arithmetic and comparison
+/// surface carry a position at once: the sites are many, the frames they unwind
+/// through are one. [`Error::or_span`] keeps the innermost frame's claim.
 fn enumerate_from(
+    cx: &JoinCx<'_>,
+    order: &[usize],
+    depth: usize,
+    bindings: &mut [Option<Value>],
+    premises: &mut [Option<Premise>],
+    on_match: &mut OnMatch<'_>,
+) -> Result<()> {
+    match (
+        enumerate_literal(cx, order, depth, bindings, premises, on_match),
+        order.get(depth),
+    ) {
+        (Err(error), Some(&idx)) => Err(error.or_span(cx.body[idx].span)),
+        (result, _) => result,
+    }
+}
+
+fn enumerate_literal(
     cx: &JoinCx<'_>,
     order: &[usize],
     depth: usize,
@@ -2276,12 +2302,14 @@ mod tests {
                     arity: 2,
                     fields: None,
                     field_types: None,
+                    decl_span: None,
                 },
                 PredicateInfo {
                     name: "path".to_string(),
                     arity: 2,
                     fields: None,
                     field_types: None,
+                    decl_span: None,
                 },
             ],
             facts: vec![

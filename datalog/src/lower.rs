@@ -73,6 +73,7 @@ pub fn lower_with_sources(
 
     let mut data_import = 0usize;
     for statement in &program.statements {
+        lowerer.at = Some(statement.span);
         match &statement.kind {
             ast::StatementKind::Import(import) => match &import.kind {
                 // Module imports are spliced away by resolution before
@@ -81,7 +82,7 @@ pub fn lower_with_sources(
                 // A `std` import contributes no statements: its relations were
                 // registered by `collect_predicates` before any clause lowered.
                 ast::ImportKind::Std { .. } => {}
-                ast::ImportKind::Module => lowerer.errors.push(Error::semantic(format!(
+                ast::ImportKind::Module => lowerer.errors.push(lowerer.semantic(format!(
                     "module import \"{}\" must be resolved before lowering",
                     import.path
                 ))),
@@ -165,6 +166,10 @@ struct Lowerer {
     /// no `import "std/…".`, which is what keeps `year` an ordinary relation
     /// name everywhere else — the gate is the whole point of the mechanism.
     std_modules: Vec<&'static crate::stdlib::StdModule>,
+    /// The statement being lowered, so a diagnostic raised anywhere beneath
+    /// [`Self::semantic`] carries a place without every helper taking a span
+    /// parameter (§12, §17 2026-08-24). `None` outside the statement walk.
+    at: Option<ast::Span>,
     errors: Vec<Error>,
 }
 
@@ -178,6 +183,9 @@ struct FieldSchema {
     /// Field name → position.
     by_field: HashMap<String, usize>,
     origin: SchemaOrigin,
+    /// Where the schema is written, so a diagnostic about a declared column can
+    /// point at the declaration (§12).
+    at: Option<ast::Span>,
 }
 
 /// Where a schema came from, so conflicts can name both sources.
@@ -253,6 +261,17 @@ impl VarScope {
 }
 
 impl Lowerer {
+    /// A semantic error against the statement being lowered ([`Self::at`]).
+    /// Chainable exactly like [`Error::semantic`], so `.suggest(…)` still
+    /// reads the same at the call sites.
+    fn semantic(&self, message: impl Into<String>) -> Error {
+        let error = Error::semantic(message);
+        match self.at {
+            Some(span) => error.at_span(span),
+            None => error,
+        }
+    }
+
     /// Pass 1: intern every predicate in first-appearance order and check
     /// arity consistency across declares, imports, and use sites. `tables`
     /// (aligned with data-import statements) supplies a schema-less import's
@@ -279,6 +298,7 @@ impl Lowerer {
         // may be written after the rules that use it, and because every later
         // decision — intern or not, collision or not — depends on the answer.
         for statement in &program.statements {
+            self.at = Some(statement.span);
             if let ast::StatementKind::Import(import) = &statement.kind
                 && let ast::ImportKind::Std { module } = &import.kind
                 && let Some(module) = crate::stdlib::module(module)
@@ -292,6 +312,7 @@ impl Lowerer {
         }
         let mut data_import = 0usize;
         for statement in &program.statements {
+            self.at = Some(statement.span);
             match &statement.kind {
                 ast::StatementKind::Import(import) => {
                     // Module imports are spliced away before lowering; only
@@ -305,7 +326,12 @@ impl Lowerer {
                             // An explicit schema fixes arity and field names.
                             Some(schema) => {
                                 self.intern_checked(&relation.name, schema.len() as u32);
-                                self.collect_schema(&relation.name, schema, SchemaOrigin::Import);
+                                self.collect_schema(
+                                    &relation.name,
+                                    schema,
+                                    SchemaOrigin::Import,
+                                    Some(statement.span),
+                                );
                             }
                             // A schema-less import takes both from its loaded
                             // header (§13). Without a table (the no-sources
@@ -331,6 +357,7 @@ impl Lowerer {
                         &declaration.relation.name,
                         &declaration.fields,
                         SchemaOrigin::Declare,
+                        Some(statement.span),
                     );
                 }
                 ast::StatementKind::Clause(clause) => {
@@ -368,7 +395,7 @@ impl Lowerer {
                     continue;
                 }
                 self.errors.push(
-                    Error::semantic(format!(
+                    self.semantic(format!(
                         "`{}` is defined by this program and provided by `std/{}`",
                         relation.name, module.name
                     ))
@@ -424,16 +451,23 @@ impl Lowerer {
             if schema.fields.len() == info.arity as usize {
                 info.fields = Some(schema.fields.clone());
                 info.field_types = Some(schema.field_types.clone());
+                info.decl_span = schema.at;
             }
         }
     }
 
     /// Records the field names of `name`, reporting duplicates within the
     /// schema and conflicts with a schema already recorded for the predicate.
-    fn collect_schema(&mut self, name: &str, fields: &[ast::FieldDecl], origin: SchemaOrigin) {
+    fn collect_schema(
+        &mut self,
+        name: &str,
+        fields: &[ast::FieldDecl],
+        origin: SchemaOrigin,
+        at: Option<ast::Span>,
+    ) {
         let names: Vec<String> = fields.iter().map(|f| f.name.name.clone()).collect();
         let types: Vec<Option<ast::TypeName>> = fields.iter().map(|f| f.ty).collect();
-        self.collect_schema_parts(name, names, types, origin);
+        self.collect_schema_parts(name, names, types, origin, at);
     }
 
     /// Records a source header's field names (§13): a header asserts names, not
@@ -441,7 +475,13 @@ impl Lowerer {
     /// type is `None`.
     fn collect_schema_from_header(&mut self, name: &str, header: &[String]) {
         let types = vec![None; header.len()];
-        self.collect_schema_parts(name, header.to_vec(), types, SchemaOrigin::SourceHeader);
+        self.collect_schema_parts(
+            name,
+            header.to_vec(),
+            types,
+            SchemaOrigin::SourceHeader,
+            None,
+        );
     }
 
     fn collect_schema_parts(
@@ -450,11 +490,12 @@ impl Lowerer {
         positions: Vec<String>,
         field_types: Vec<Option<ast::TypeName>>,
         origin: SchemaOrigin,
+        at: Option<ast::Span>,
     ) {
         let mut by_field = HashMap::with_capacity(positions.len());
         for (position, field_name) in positions.iter().enumerate() {
             if by_field.insert(field_name.clone(), position).is_some() {
-                self.errors.push(Error::semantic(format!(
+                self.errors.push(self.semantic(format!(
                     "duplicate field `{field_name}` in the schema for `{name}`"
                 )));
             }
@@ -469,7 +510,7 @@ impl Lowerer {
                     origin.label(),
                     positions.join(", ")
                 );
-                self.errors.push(Error::semantic(conflict));
+                self.errors.push(self.semantic(conflict));
             } else if existing.field_types != field_types {
                 // Same field names, disagreeing declared types (§17): name both
                 // origins so the mismatch is traceable.
@@ -479,7 +520,7 @@ impl Lowerer {
                     existing.origin.label(),
                     origin.label(),
                 );
-                self.errors.push(Error::semantic(conflict));
+                self.errors.push(self.semantic(conflict));
             }
             return;
         }
@@ -491,6 +532,7 @@ impl Lowerer {
                 field_types,
                 by_field,
                 origin,
+                at,
             },
         );
     }
@@ -501,7 +543,7 @@ impl Lowerer {
         if let Some(&id) = self.by_name.get(name) {
             let known = self.predicates[id.0 as usize].arity;
             if known != arity {
-                self.errors.push(Error::semantic(format!(
+                self.errors.push(self.semantic(format!(
                     "predicate `{name}` used with arity {arity}, but previously with arity {known}"
                 )));
             }
@@ -514,6 +556,7 @@ impl Lowerer {
             // Filled in by `attach_field_names` once pass 1 completes.
             fields: None,
             field_types: None,
+            decl_span: None,
         });
         self.by_name.insert(name.to_string(), id);
         id
@@ -587,7 +630,7 @@ impl Lowerer {
         // thing that can land in `discard` is an aggregate (§9) — which a ground
         // fact has no body to compute over.
         if !discard.is_empty() {
-            self.errors.push(Error::semantic(format!(
+            self.errors.push(self.semantic(format!(
                 "an aggregate cannot appear in a fact; `{}` has no body to aggregate over",
                 clause.head.predicate.name
             )));
@@ -603,7 +646,7 @@ impl Lowerer {
                     ground = false;
                     let name = scope.names[var.0 as usize].as_deref().unwrap_or("_");
                     let place = self.describe_arg(&clause.head, position);
-                    self.errors.push(Error::semantic(format!(
+                    self.errors.push(self.semantic(format!(
                         "fact `{}` is not ground: variable `{name}` in {place}",
                         clause.head.predicate.name,
                     )));
@@ -643,7 +686,7 @@ impl Lowerer {
             return;
         };
         if !discard.is_empty() {
-            self.errors.push(Error::semantic(format!(
+            self.errors.push(self.semantic(format!(
                 "an aggregate cannot appear in a `{form}` goal; a goal names one fact"
             )));
             return;
@@ -660,7 +703,7 @@ impl Lowerer {
                     let var_name = scope.names[var.0 as usize].as_deref().unwrap_or("_");
                     let place = self.describe_arg(&explain.goal, position);
                     self.errors.push(
-                        Error::semantic(format!(
+                        self.semantic(format!(
                             "`{form}` goal `{name}` is not ground: variable \
                              `{var_name}` in {place}"
                         ))
@@ -751,7 +794,7 @@ impl Lowerer {
         // what the equivalent hand-written rule does.
         if !self.defined.insert(name.name.clone()) {
             self.errors.push(
-                Error::semantic(format!(
+                self.semantic(format!(
                     "a query cannot be named `{}`: the program already defines that relation, \
                      and the answer would silently extend it",
                     name.name
@@ -810,7 +853,7 @@ impl Lowerer {
     ) -> Option<ir::BodyLiteral> {
         let ast::Args::Positional(args) = &atom.args else {
             self.errors.push(
-                Error::semantic(format!(
+                self.semantic(format!(
                     "`{}` is a `std` module builtin and takes positional arguments",
                     atom.predicate.name
                 ))
@@ -852,16 +895,17 @@ impl Lowerer {
             }
             Some(ir::Expr::Term(ir::Term::Const(ir::Value::Symbol(name)))) => {
                 self.errors.push(
-                    Error::semantic(format!("`{name}` is not a truncation unit")).suggest(format!(
-                        "one of: {}",
-                        crate::stdlib::TRUNCATE_UNITS.join(", ")
-                    )),
+                    self.semantic(format!("`{name}` is not a truncation unit"))
+                        .suggest(format!(
+                            "one of: {}",
+                            crate::stdlib::TRUNCATE_UNITS.join(", ")
+                        )),
                 );
                 false
             }
             _ => {
                 self.errors.push(
-                    Error::semantic(
+                    self.semantic(
                         "`truncate`'s unit must be written as a symbol, not computed".to_string(),
                     )
                     .suggest(format!(
@@ -892,7 +936,7 @@ impl Lowerer {
                     if let Some(op) = self.builtin_for(atom) {
                         if *negated {
                             self.errors.push(
-                                Error::semantic(format!(
+                                self.semantic(format!(
                                     "`not` applies to relations, and `{}` is a `std` module \
                                      builtin, which computes a value",
                                     atom.predicate.name
@@ -1012,12 +1056,14 @@ impl Lowerer {
             if pos == AtomPos::Body
                 && matches!(term.kind, ast::TermKind::Constant(ast::Constant::Absent))
             {
-                self.errors.push(Error::semantic(
-                    "`absent` cannot be matched in a body atom argument (a value never \
+                self.errors.push(
+                    self.semantic(
+                        "`absent` cannot be matched in a body atom argument (a value never \
                      unifies with absent); test presence with `X is absent` / \
                      `X is not absent` instead"
-                        .to_string(),
-                ));
+                            .to_string(),
+                    ),
+                );
                 // Recover with a fresh slot so the rest of the clause still
                 // lowers (lowering already failed; this is never emitted).
                 return ir::Term::Var(scope.fresh());
@@ -1086,7 +1132,7 @@ impl Lowerer {
     ) -> Option<ir::Atom> {
         let predicate = &atom.predicate.name;
         let Some(schema) = self.schemas.get(predicate) else {
-            self.errors.push(Error::semantic(format!(
+            self.errors.push(self.semantic(format!(
                 "named arguments require known field names for `{predicate}`: add a \
                  `declare {predicate}(...)` or an explicit import schema"
             )));
@@ -1098,7 +1144,7 @@ impl Lowerer {
         let mut reported = Vec::new();
         for (index, arg) in named.iter().enumerate() {
             let Some(&position) = schema.by_field.get(&arg.field.name) else {
-                reported.push(Error::semantic(format!(
+                reported.push(self.semantic(format!(
                     "unknown field `{}` for predicate `{predicate}`; known fields: {}",
                     arg.field.name,
                     schema.fields.join(", ")
@@ -1106,7 +1152,7 @@ impl Lowerer {
                 continue;
             };
             if assigned[position].is_some() {
-                reported.push(Error::semantic(format!(
+                reported.push(self.semantic(format!(
                     "field `{}` is given twice in one `{predicate}` literal",
                     arg.field.name
                 )));
@@ -1125,7 +1171,7 @@ impl Lowerer {
                 .map(|(position, _)| schema.fields[position].as_str())
                 .collect();
             if !missing.is_empty() {
-                reported.push(Error::semantic(format!(
+                reported.push(self.semantic(format!(
                     "head `{predicate}` uses named arguments and must supply every field; \
                      missing: {}",
                     missing.join(", ")
@@ -1286,7 +1332,7 @@ impl Lowerer {
                     && !bound.contains(&var.0)
                 {
                     let name = rule.var_names[var.0 as usize].as_deref().unwrap_or("_");
-                    self.errors.push(Error::semantic(format!(
+                    self.errors.push(self.semantic(format!(
                         "unsafe rule for `{head_name}`: head variable `{name}` is not bound \
                          by the body — it must occur in a positive body atom, or be bound by \
                          an `=`-assignment or an aggregate result"
@@ -1374,6 +1420,7 @@ impl Lowerer {
                                 var_names,
                                 "negated atom",
                                 context,
+                                literal.span,
                             );
                         }
                     }
@@ -1392,7 +1439,7 @@ impl Lowerer {
                                 if !positive.contains(&var.0))
                         });
                     if !produces && (is_literal_absent(lhs) || is_literal_absent(rhs)) {
-                        self.errors.push(Error::semantic(format!(
+                        self.errors.push(self.semantic(format!(
                             "`{}` against the literal `absent` in `{context}` is always \
                              false (every comparison with absent is false, so `=` and `!=` \
                              are both false); test presence with `X is absent` / \
@@ -1423,6 +1470,7 @@ impl Lowerer {
                                 var_names,
                                 "aggregate expression",
                                 context,
+                                literal.span,
                             );
                         }
                     }
@@ -1454,7 +1502,7 @@ fn schedule_error(
         ir::BodyLiteralKind::NegAtom(_) => "negated atom",
         ir::BodyLiteralKind::Atom(_) => "body literal",
     };
-    match failure.cause {
+    let error = match failure.cause {
         schedule::ScheduleFailure::Unbound => Error::semantic(format!(
             "unsafe {place} in `{context}`: variable `{name}` is never bound — it must \
              occur in a positive body atom, or be bound by an `=`-assignment or an \
@@ -1464,7 +1512,10 @@ fn schedule_error(
             "circular dependency in `{context}`: the {place} needs `{name}`, which is only \
              bound by a literal that in turn needs this one; no order of the body can run"
         )),
-    }
+    };
+    // The literal that could not be scheduled is the place, for both causes: it
+    // is the premise naming the variable nothing binds.
+    error.at_span(body[failure.literal].span)
 }
 
 /// Pass 5: stratification (§7). Numbers predicates by Ullman relaxation over
@@ -1499,7 +1550,7 @@ fn stratify(
                 if required as usize >= predicates.len() {
                     // With n predicates a stratifiable program needs at most
                     // n levels (0..n), so reaching n proves divergence.
-                    return Err(negative_cycle_error(&edges, predicates));
+                    return Err(negative_cycle_error(&edges, predicates, rules));
                 }
                 stratum[head.0 as usize] = required;
                 changed = true;
@@ -1582,6 +1633,7 @@ fn collect_stratum_edges(
 fn negative_cycle_error(
     edges: &[(ir::PredId, ir::PredId, Dep)],
     predicates: &[ir::PredicateInfo],
+    rules: &[ir::Rule],
 ) -> Error {
     let name = |pred: ir::PredId| predicates[pred.0 as usize].name.as_str();
     // Adjacency in edge order, so the recovered cycle is deterministic.
@@ -1603,10 +1655,18 @@ fn negative_cycle_error(
         for (pred, step_dep) in steps {
             parts.push(format!("{}{}", step_dep.prefix(), name(pred)));
         }
-        return Error::semantic(format!(
+        let error = Error::semantic(format!(
             "program is not stratifiable: recursion through negation or aggregation: {}",
             parts.join(" -> ")
         ));
+        // The failure is a property of the whole cycle, so there is no single
+        // place it lives. The first rule defining the predicate the cycle is
+        // rendered from is the entry point a reader would start at, and it is
+        // where the rendered path begins — better than no place at all (§12).
+        return match rules.iter().find(|rule| rule.head.pred == head) {
+            Some(rule) => error.at_span(rule.span),
+            None => error,
+        };
     }
     unreachable!("stratification diverged, so a strict cycle must exist")
 }
@@ -1673,12 +1733,16 @@ fn push_unsafe(
     var_names: &[Option<String>],
     place: &str,
     context: &str,
+    at: ast::Span,
 ) {
     let name = var_names[slot as usize].as_deref().unwrap_or("_");
-    errors.push(Error::semantic(format!(
-        "unsafe {place} in `{context}`: variable `{name}` is never bound — it must occur in a \
-         positive body atom, or be bound by an `=`-assignment or an aggregate result"
-    )));
+    errors.push(
+        Error::semantic(format!(
+            "unsafe {place} in `{context}`: variable `{name}` is never bound — it must occur \
+             in a positive body atom, or be bound by an `=`-assignment or an aggregate result"
+        ))
+        .at_span(at),
+    );
 }
 
 /// Every variable the body binds: positively bound (occurring in a positive
