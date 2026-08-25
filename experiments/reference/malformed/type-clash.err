@@ -1,2 +1,1 @@
 semantic error: type error: variable `Q` in rule 0 has type int but variable `W` in rule 0 has type float
-semantic error: type error: `item.weight` is declared as float but its values are int

@@ -915,6 +915,34 @@ compared keyed by predicate *name*, not `PredId`.
   provenance property in the suite. E1/E2/E4 are equally blind, each checking
   derivations against a *single* evaluation.
 
+- [x] **C15** **A diagnostic never asserts something about the data that was not
+  read from the data** (2026-08-24, `bugs/resolved/008`). Inference reaches a
+  column from two directions — the fact table, and the way rules use it — and
+  only the first is a claim about values, so every rendered *"its values are T"*
+  must survive re-deriving that column's type from `program.facts` alone
+  (`c15_a_values_claim_is_backed_by_the_facts`, over `arb_well_typed_program`
+  with a contradicting `declare` signature asserted on every column).
+
+  The oracle is **independent** in the sense the corollary above requires: it
+  re-reads the facts in the test module and never calls the typechecker's own
+  derivation. Truth is not precision — *which* programs are rejected stays
+  example-based per the exclusion list, and this property reads only what a
+  message claims once one is emitted.
+
+  *Guard* — `c15_generator_produces_both_kinds_of_contradiction` counts the
+  *"its values are"* messages a run actually produced, which is the property's
+  own sentence, and separately counts rule-derived (*"is used as"*) ones: the
+  second is the half `bugs/008`'s acceptance criteria missed, and without it the
+  generator could stop producing the shape unnoticed.
+
+  *Mutations, both recorded:* reverting the **wording split** (message always
+  says "its values are") reddens C15 with `p.f1 was said to hold int values,
+  which the facts do not say`, and reddens the guard too, since no "is used as"
+  message survives. Reverting the **suppression guard** in `finish()` instead
+  reddens the two hand units — and the surviving second diagnostic is then
+  `` `item.weight` is declared as float but is used as int ``, which is why both
+  halves are the fix and neither alone is.
+
 ### Phase D — lexer + parser (roadmap step 5) — generalizes all §16 source texts
 
 Implemented 2026-07-22 (`src/lexer.rs`, `src/parser.rs`, `src/print.rs`). The

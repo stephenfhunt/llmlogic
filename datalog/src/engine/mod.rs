@@ -3809,6 +3809,139 @@ mod tests {
         };
         use crate::typecheck::typecheck;
 
+        /// Every primitive type, for reading a type back out of a rendered
+        /// diagnostic (C15).
+        const EVERY_TYPE: [TypeName; 8] = [
+            TypeName::Symbol,
+            TypeName::String,
+            TypeName::Int,
+            TypeName::Float,
+            TypeName::Bool,
+            TypeName::Date,
+            TypeName::Timestamp,
+            TypeName::Duration,
+        ];
+
+        /// A type that is not `ty` — enough to contradict any inferred column
+        /// at once, which is how C15 provokes the sweep it is about.
+        fn a_different_type(ty: TypeName) -> TypeName {
+            if ty == TypeName::Int {
+                TypeName::String
+            } else {
+                TypeName::Int
+            }
+        }
+
+        /// The program with a `declare` signature on every predicate that
+        /// contradicts what inference derived, so the declared-vs-inferred
+        /// sweep (§4) fires on every column the program constrains.
+        fn declared_against_inference(program: &crate::ir::Program) -> crate::ir::Program {
+            let env = typecheck(program).expect("well-typed program");
+            let mut annotated = program.clone();
+            for p in 0..annotated.predicates.len() {
+                let arity = annotated.predicates[p].arity as usize;
+                let pred = crate::ir::PredId(p as u32);
+                annotated.predicates[p].fields =
+                    Some((0..arity).map(|c| format!("f{c}")).collect());
+                annotated.predicates[p].field_types = Some(
+                    (0..arity)
+                        .map(|c| env.column_type(pred, c).map(a_different_type))
+                        .collect(),
+                );
+            }
+            annotated
+        }
+
+        /// A column's type as the **facts alone** give it: C15's oracle. It is
+        /// re-derived here on purpose rather than borrowed from `typecheck` —
+        /// an oracle that calls the engine's own function agrees with a wrong
+        /// engine forever (`testing.md`). `None` when the column holds no
+        /// values, or when they disagree.
+        fn column_type_from_facts(
+            program: &crate::ir::Program,
+            pred: usize,
+            col: usize,
+        ) -> Option<TypeName> {
+            let mut found: Option<TypeName> = None;
+            for fact in &program.facts {
+                if fact.pred.0 as usize != pred {
+                    continue;
+                }
+                let ty = value_type(&fact.tuple.0[col]);
+                match found {
+                    None => found = Some(ty),
+                    Some(seen) if seen == ty => {}
+                    Some(_) => return None,
+                }
+            }
+            found
+        }
+
+        /// Each "… is declared as X but its values are Y" a diagnostic makes,
+        /// resolved back to the column it names and the type it claims (C15).
+        fn values_claims(
+            errors: &[Error],
+            program: &crate::ir::Program,
+        ) -> Vec<(usize, usize, TypeName)> {
+            let mut claims = Vec::new();
+            for error in errors {
+                let text = error.to_string();
+                let Some((head, tail)) = text.split_once(" but its values are ") else {
+                    continue;
+                };
+                let Some(claimed) = EVERY_TYPE.iter().find(|ty| ty.keyword() == tail) else {
+                    continue;
+                };
+                for (pred, info) in program.predicates.iter().enumerate() {
+                    for col in 0..info.arity as usize {
+                        if head.contains(&format!("`{}.f{col}` is declared as", info.name)) {
+                            claims.push((pred, col, *claimed));
+                        }
+                    }
+                }
+            }
+            claims
+        }
+
+        /// C15's non-vacuity guard, read against the property's sentence. What
+        /// the property claims is about *"its values are"* messages, so what
+        /// has to be non-zero is how many of those a run produced — not how
+        /// many programs were generated, and not how many diagnostics. The
+        /// second count guards the half `bugs/008`'s own acceptance criteria
+        /// missed: a contradiction inference reached through a **rule**.
+        #[test]
+        fn c15_generator_produces_both_kinds_of_contradiction() {
+            use proptest::strategy::{Strategy, ValueTree};
+            use proptest::test_runner::TestRunner;
+
+            let mut runner = TestRunner::deterministic();
+            let strategy = arb_well_typed_program();
+            let (mut from_values, mut from_rules) = (0, 0);
+            for _ in 0..200 {
+                let program = strategy
+                    .new_tree(&mut runner)
+                    .expect("strategy produces a value")
+                    .current();
+                let annotated = declared_against_inference(&program);
+                if let Err(errors) = typecheck(&annotated) {
+                    from_values += values_claims(&errors, &annotated).len();
+                    from_rules += errors
+                        .iter()
+                        .filter(|error| error.to_string().contains(" but is used as "))
+                        .count();
+                }
+            }
+            assert!(
+                from_values > 0,
+                "no `its values are` claim was ever produced — C15 is vacuous"
+            );
+            assert!(
+                from_rules > 0,
+                "no rule-derived contradiction was ever produced — C15 never sees \
+                 the shape the second half of bugs/008 was about"
+            );
+        }
+
         /// The primitive type of a ground value (for C4). Generated programs
         /// (`arb_value`) carry no `absent`, so the type-neutral value never
         /// reaches this column-type check.
@@ -4454,6 +4587,34 @@ mod tests {
                     err.contains("c6probe.v"),
                     "type error did not name the column: {err}"
                 );
+            }
+
+            /// C15 — no diagnostic asserts a fact about the program's **data**
+            /// that was not read from the data (`bugs/resolved/008`).
+            ///
+            /// Inference reaches a column from two directions — the values in
+            /// the fact table, and the way rules use it — and only the first is
+            /// a claim about data. So every rendered "its values are T" must
+            /// survive re-deriving that column's type from the facts alone.
+            /// This is about a diagnostic's *truth*, not about which programs
+            /// are rejected, so it does not trespass on the type-inference
+            /// **precision** that `testing.md` keeps example-based.
+            #[test]
+            fn c15_a_values_claim_is_backed_by_the_facts(program in arb_well_typed_program()) {
+                let annotated = declared_against_inference(&program);
+                let Err(errors) = typecheck(&annotated) else {
+                    return Ok(());
+                };
+                for (pred, col, claimed) in values_claims(&errors, &annotated) {
+                    prop_assert_eq!(
+                        Some(claimed),
+                        column_type_from_facts(&annotated, pred, col),
+                        "`{}.f{}` was said to hold {} values, which the facts do not say",
+                        annotated.predicates[pred].name,
+                        col,
+                        claimed.keyword()
+                    );
+                }
             }
 
             /// C4 — inference soundness: a type-checked program evaluates

@@ -5,7 +5,7 @@ severity: usability
 area: typecheck
 spec: ["§4", "§12"]
 found: 2026-08-23
-resolution:
+resolution: fixed 2026-08-24 — the sweep is skipped once inference is poisoned, and its message re-reads the facts before claiming them (§17)
 ---
 
 A type clash between two **declared** columns inside a rule is reported twice:
@@ -116,3 +116,45 @@ facts alone. File it with the fix.
   round-waster, and `signals.py`'s rounds-to-correct is where it would show up.
 - No §17 decision is falsified. §4's declared-type check is right to exist; it is
   running at a point where its input is already known bad.
+
+## Resolution — 2026-08-24
+
+Two changes in `src/typecheck.rs`, and **neither alone is the fix**.
+
+**The suppression.** `finish()`'s declared-vs-inferred sweep now runs only when
+`self.errors` is empty. The recommended blanket form was taken over the poison
+bit: `set_type` leaves a class carrying the incumbent type without merging, so a
+bit would have to be maintained at two sites, for a program shape — a rule error
+*and* a genuine column error at once — that nothing suggests is common.
+
+**The wording, which this file's own acceptance criteria did not cover.** The
+sweep's message is emitted wherever inference contradicts a declaration, and
+inference reaches a column from rules as well as from facts. A second instance
+was found while fixing the first, with no other error to suppress:
+
+```datalog
+declare p(x: int).
+s("a").
+r(S) :- p(x: S), s(S).
+```
+
+`p` holds **no facts at all**, and the engine said `` `p.x` is declared as int
+but its values are string ``. So the message now re-derives the column's type
+from `program.facts` alone and speaks about *values* only when the values say so
+— otherwise `is used as`. The genuine data mismatch is unchanged, which is
+criterion 3.
+
+This is the half that carries the general property. It shipped as **C15** in
+`testing.md`, over `arb_well_typed_program` with a contradicting signature
+asserted on every column, against an oracle that re-reads the facts in the test
+module rather than calling the engine's own derivation. Both mutations are
+recorded on its catalog line.
+
+**What the pin caught.** `experiments/reference/malformed/type-clash.err` pinned
+both diagnostics deliberately, the second annotated as false — so the corpus
+moving is what says the fix landed, exactly as `bugs/README.md` intends a
+tripwire to work.
+
+**Not falsified:** §4's declared-type check was right to exist. It was running
+at a point where its input was already known bad, and saying *"its values are"*
+of a conclusion it had not read from any value.
