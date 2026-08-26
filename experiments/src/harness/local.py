@@ -261,6 +261,17 @@ def tool_schemas(has_engine: bool, skill: tuple[str, str] | None = None) -> list
 
 
 def _schema(name: str, description: str, properties: dict, required: list[str]) -> dict:
+    """One tool, in the shape both protocols are built from.
+
+    ``additionalProperties: False`` is stated here rather than added later by
+    `action_schema`, so the two protocols cannot describe the same tool
+    differently. It is also the only half of this that a *native* call respects
+    at the model's discretion: measured 2026-08-26, given a tool whose sole
+    required parameter was `zebra`, `qwen3:8b` called it with `{"file": ...}` —
+    a parameter absent from the schema — while `llama3.1:8b` complied. The
+    `tools` array is a description the model may follow; `action_schema` is a
+    grammar it cannot leave.
+    """
     return {
         "type": "function",
         "function": {
@@ -268,6 +279,7 @@ def _schema(name: str, description: str, properties: dict, required: list[str]) 
             "description": description,
             "parameters": {
                 "type": "object",
+                "additionalProperties": False,
                 "properties": {
                     key: {"type": kind, "description": text}
                     for key, (kind, text) in properties.items()
@@ -337,7 +349,6 @@ def action_schema(has_engine: bool) -> dict:
     for schema in tool_schemas(has_engine):
         function = schema["function"]
         parameters = dict(function["parameters"])
-        parameters["additionalProperties"] = False
         variants.append(
             {
                 "type": "object",

@@ -188,6 +188,22 @@ class TestTheStructuredLoop:
         transcript = subject.run(cell_for("structured"), workspace_for("prose", tmp_path))
         assert "check the file first" in transcript.reasoning
 
+    def test_both_protocols_describe_a_tool_the_same_way(self):
+        """One definition, so a tool cannot mean different things under the two
+        protocols. What differs is *enforcement*, not description: the `tools`
+        array is a description a model may follow — measured, `qwen3:8b` called
+        a tool whose sole required parameter was `zebra` with `{"file": ...}` —
+        while the union is a grammar it cannot leave."""
+        native = {t["function"]["name"]: t["function"]["parameters"] for t in tool_schemas(True)}
+        for variant in action_schema(has_engine=True)["oneOf"]:
+            name = variant["properties"]["action"]["const"]
+            if name in native:
+                assert variant["properties"]["arguments"] == native[name]
+
+    def test_a_tool_schema_forbids_arguments_it_did_not_declare(self):
+        for schema in tool_schemas(has_engine=True):
+            assert schema["function"]["parameters"]["additionalProperties"] is False
+
     def test_every_action_pins_its_own_argument_names(self):
         """Constrained to *some* JSON, three of three models still invented
         `file` for `file_path`. The union is what makes that unrepresentable."""
