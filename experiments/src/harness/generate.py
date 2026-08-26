@@ -31,7 +31,11 @@ def validate(task: Task) -> None:
     - an **empty** truth is passed by writing an empty file without looking;
     - a truth that is the **whole universe** is passed by copying a column;
     - a truth of **one row** over a large universe is close enough to guessable,
-      and carries almost nothing about whether rows were dropped.
+      and carries almost nothing about whether rows were dropped — **except on a
+      negative control**, where a single-row answer is the entire point. The rule
+      exists so an item carries information about whether the engine helped, and
+      a control is the item that is deliberately trivial; *which department is
+      carol in?* has one row by construction and is not thereby worthless.
 
     Raised rather than filtered, because a generator that silently drops a third
     of its items is a generator whose difficulty setting no longer means what it
@@ -51,7 +55,7 @@ def validate(task: Task) -> None:
         answered = {row[0] for row in rows}
         if universe and answered == universe:
             raise Degenerate(f"{task.id}: the answer is everything — copying a column passes")
-    if len(rows) == 1 and len(task.fixture.files) > 1:
+    if len(rows) == 1 and len(task.fixture.files) > 1 and task.engine_expected_to_help:
         raise Degenerate(f"{task.id}: a single-row answer is close to guessable")
 
 
