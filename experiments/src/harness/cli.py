@@ -7,11 +7,12 @@ calls, no cost. It is what CI runs, and what a change has to keep passing.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import tempfile
 from pathlib import Path
 
-from harness import ablate, arms, corpus, domains, reference, report, resume
+from harness import ablate, arms, calibrate, corpus, domains, generate, reference, report, resume
 from harness.agent import (
     DEFAULT_MAX_BUDGET_USD,
     DEFAULT_MAX_TURNS,
@@ -24,6 +25,7 @@ from harness.score import DEFAULT_TIMEOUT, score
 from harness.subject import StubSubject
 
 RESULTS_ROOT = Path(__file__).resolve().parents[2] / "results"
+SLATES_ROOT = Path(__file__).resolve().parents[2] / "slates"
 WORKSPACE_ROOT = arms.WORKSPACE_ROOT
 
 
@@ -35,7 +37,17 @@ def cmd_run(args: argparse.Namespace) -> int:
     if args.resume:
         return cmd_resume(args)
     names = args.domain or None
-    tasks = domains.load_all(names)
+    if args.slate:
+        # A calibrated slate is named by a manifest, not by a pack list: which
+        # items it holds was decided by the calibration pass, and re-deriving it
+        # from flags here is how the two would drift apart.
+        try:
+            tasks = calibrate.load(Path(args.slate))
+        except calibrate.ManifestError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+    else:
+        tasks = domains.load_all(names)
     if not tasks:
         print("no domain packs available yet", file=sys.stderr)
         return 1
@@ -102,6 +114,11 @@ def cmd_run(args: argparse.Namespace) -> int:
         ablate=args.ablate,
         max_turns=args.max_turns,
         max_budget_usd=args.budget,
+        slate=(
+            {"path": str(Path(args.slate).resolve()), "digest": calibrate.digest(Path(args.slate))}
+            if args.slate
+            else None
+        ),
     )
 
     subject = (
@@ -168,6 +185,191 @@ def cmd_score(args: argparse.Namespace) -> int:
     return 0 if result.correct else 1
 
 
+def cmd_calibrate(args: argparse.Namespace) -> int:
+    """Select the slate a grid will run, instead of designing it.
+
+    One arm at one strength over a generated pool. It is the cheapest possible
+    check for the ceiling that made the 2026-08-24 grid unreadable — and the only
+    one that can find it *before* the money is spent rather than after.
+
+    The selection is deliberately the second half of this command and not a
+    separate tool: a pass whose items were never chosen is a pass nobody can act
+    on. `--from` runs that half alone, against a pass already paid for.
+    """
+    if args.from_run:
+        return _reselect(Path(args.from_run), args)
+
+    packs = args.domain or list(domains.generators())
+    seeds = args.seed or list(calibrate.DEFAULT_SEEDS)
+    difficulties = args.difficulty or list(calibrate.DEFAULT_DIFFICULTIES)
+    tracks = args.track or ["in-context"]
+    try:
+        candidates = calibrate.pool(seeds, packs=packs, difficulties=difficulties, tracks=tracks)
+    except (calibrate.PoolError, generate.Degenerate) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    strength = next((s for s in STRENGTHS if s.name == args.strength), None)
+    if strength is None:
+        known = ", ".join(s.name for s in STRENGTHS)
+        print(f"no such strength: {args.strength} — have {known}", file=sys.stderr)
+        return 1
+
+    tasks = [candidate.task for candidate in candidates]
+    cells = grid(tasks, (strength,), (calibrate.ARM,), None, args.trials)
+    if args.limit:
+        cells = cells[: args.limit]
+
+    print(
+        f"{len(candidates)} items from {len(packs)} pack(s) × {len(seeds)} seed(s) × "
+        f"{len(difficulties)} difficult(ies) × {len(tracks)} track(s) — "
+        f"{len(cells)} cells at {args.trials} trial(s), {calibrate.ARM} / {strength.name}.",
+        file=sys.stderr,
+    )
+    if not args.dry_run:
+        ceiling = len(cells) * args.budget
+        print(f"up to {args.budget:.2f} USD each — ceiling {ceiling:.2f} USD.", file=sys.stderr)
+        if not args.yes:
+            print("re-run with --yes to spend it.", file=sys.stderr)
+            return 2
+
+    store = RecordStore(RESULTS_ROOT, new_run_id("cal-dry" if args.dry_run else "cal"))
+    store.write_metadata(
+        dry_run=args.dry_run,
+        domains=sorted({task.domain for task in tasks}),
+        tasks=len(tasks),
+        cells=len(cells),
+        strengths=[strength.name],
+        arms=[calibrate.ARM],
+        repeats=args.trials,
+        fingerprints=resume.fingerprints(tasks),
+        ablate=None,
+        max_turns=args.max_turns,
+        max_budget_usd=args.budget,
+        calibration=calibrate.spec(seeds, packs, difficulties, tracks, args.trials),
+    )
+
+    subject = (
+        StubSubject()
+        if args.dry_run
+        else AgentSubject(max_turns=args.max_turns, max_budget_usd=args.budget)
+    )
+    result = run_grid(cells, subject, store, WORKSPACE_ROOT, on_cell=_progress)
+    report.write(store.dir)
+    simulated = " (simulated)" if args.dry_run else ""
+    print(f"\n{len(result.records)} cells · {result.cost_usd:.2f} USD{simulated}")
+
+    # A halted pass measured some items and not others, and an unmeasured item
+    # is not a hard one. Selecting now would pin a slate whose shape is the shape
+    # of where the session window closed.
+    if result.halted:
+        print(
+            "\nNo slate written: the pass stopped before every item was measured, "
+            "and an item that never ran is not a hard item.",
+            file=sys.stderr,
+        )
+        return _halted(result, store.dir, len(cells))
+
+    return _write_slate(candidates, store.dir, args)
+
+
+def _reselect(run_dir: Path, args: argparse.Namespace) -> int:
+    """Select from a pass already run, without running anything.
+
+    The band is a reading of the evidence, not part of collecting it. Moving it
+    must not cost another pass — and a re-selection that had to re-run the
+    subject would quietly be a *different* pass, since the subject is stochastic.
+    """
+    if not run_dir.is_absolute():
+        run_dir = Path.cwd() / run_dir
+    try:
+        recorded = calibrate.pass_spec(run_dir)
+        candidates = calibrate.from_spec(recorded)
+    except (calibrate.ManifestError, calibrate.PoolError, generate.Degenerate) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    return _write_slate(candidates, run_dir, args)
+
+
+def _write_slate(candidates: list, run_dir: Path, args: argparse.Namespace) -> int:
+    """Tally, select, report what the band did, and pin the manifest.
+
+    Whether this was a stub's pass is read from the run directory rather than
+    passed in, because `--from` selects out of a pass it did not run and the run
+    is the only thing that knows.
+    """
+    outcomes = calibrate.tally(run_dir)
+    selection = calibrate.select(candidates, outcomes)
+    recorded = calibrate.pass_spec(run_dir)
+    dry_run = bool(json.loads((run_dir / "run.json").read_text()).get("dry_run"))
+
+    out = Path(args.out) if args.out else _slate_path(run_dir, dry_run)
+    if not out.is_absolute():
+        out = Path.cwd() / out
+
+    for line in _selection_lines(selection):
+        print(line)
+
+    if not selection.kept:
+        print(
+            "\nNothing landed in the band. That is the finding — read the rejection "
+            "rates above before widening the pool.",
+            file=sys.stderr,
+        )
+        return 1
+
+    calibrate.write(out, calibrate.manifest(selection, recorded, run_dir.name))
+    print(f"\nslate: {out}")
+    if dry_run:
+        print(
+            "This slate came from the stub subject. It is evidence about the "
+            "plumbing and about nothing else.",
+            file=sys.stderr,
+        )
+    return 0
+
+
+def _slate_path(run_dir: Path, dry_run: bool) -> Path:
+    """Where a manifest lands when nobody said.
+
+    A paid pass writes into `slates/`, which is tracked: a pinned slate is part
+    of the experiment's definition, not an output. A dry run writes inside its own
+    run directory, because a stub's selection is evidence about the plumbing and
+    committing it would put it where the real ones live.
+    """
+    return run_dir / "slate.json" if dry_run else SLATES_ROOT / f"{run_dir.name}.json"
+
+
+def _selection_lines(selection) -> list[str]:
+    """What the band did, by track and by pack.
+
+    A pass that keeps nothing has to be as readable as one that keeps everything:
+    *too easy* means the pool needs harder settings, *too hard* means the opposite,
+    and *never measured* means the pass did not finish and neither reading applies.
+    """
+    lines = ["", f"{len(selection.kept)} kept of {len(selection.judged)}", ""]
+    by_track: dict[str, list] = {}
+    for judged in selection.judged:
+        by_track.setdefault(judged.candidate.track, []).append(judged)
+    for track, judged in sorted(by_track.items()):
+        kept = [j for j in judged if j.kept]
+        lines.append(f"  {track:<12} {len(kept):>3} kept / {len(judged):>3}")
+        buckets: dict[str, int] = {}
+        for one in judged:
+            if not one.kept:
+                buckets[one.reason.split(":")[0]] = buckets.get(one.reason.split(":")[0], 0) + 1
+        for reason, count in sorted(buckets.items(), key=lambda pair: -pair[1]):
+            lines.append(f"      {count:>3}  {reason}")
+    lines.append("")
+    for pack in sorted({j.candidate.pack for j in selection.judged}):
+        judged = [j for j in selection.judged if j.candidate.pack == pack]
+        kept = [j for j in judged if j.kept]
+        rates = sorted(j.outcome.rate for j in judged if j.outcome)
+        median = f"{rates[len(rates) // 2]:.0%}" if rates else "—"
+        lines.append(f"  {pack:<18} {len(kept):>3} / {len(judged):<3}  median prose {median}")
+    return lines
+
+
 def _halted(result, run_dir: Path, planned: int) -> int:
     """Say what stopped the grid and how to pick it up. Exit 3, not 0: a run that
     stopped early is not a run that finished, and a caller scripting a session
@@ -199,10 +401,17 @@ def cmd_resume(args: argparse.Namespace) -> int:
         print(str(exc), file=sys.stderr)
         return 1
 
-    tasks = domains.load_all(meta["domains"])
+    try:
+        tasks = _slate_of(run_dir, meta)
+    except (calibrate.ManifestError, calibrate.PoolError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     strengths = tuple(s for s in STRENGTHS if s.name in set(meta["strengths"]))
     cell_arms = tuple(meta["arms"])
-    cells = grid(tasks, strengths, cell_arms, meta.get("ablate"))
+    # `repeats` is part of the grid's shape: rebuilding without it produces only
+    # the first trial of each cell, and every later trial in the record then
+    # reads as a stranger — a resume that refuses itself.
+    cells = grid(tasks, strengths, cell_arms, meta.get("ablate"), meta.get("repeats", 1))
     if len(cells) != meta["cells"]:
         print(
             f"the grid rebuilt to {len(cells)} cells but the run recorded "
@@ -260,6 +469,27 @@ def cmd_resume(args: argparse.Namespace) -> int:
     print(f"\n{len(result.records)} cells resumed · {result.cost_usd:.2f} USD")
     print(f"report: {path}")
     return _halted(result, store.dir, len(owed))
+
+
+def _slate_of(run_dir: Path, meta: dict) -> list:
+    """The tasks a run was actually run against.
+
+    Three provenances now, and a resume that guesses wrong joins two different
+    experiments: a calibration pass rebuilds its pool from the spec it recorded,
+    a calibrated run reloads its manifest — refusing one whose bytes moved — and
+    everything else is the pinned slate.
+    """
+    if meta.get("calibration"):
+        return [c.task for c in calibrate.from_spec(meta["calibration"])]
+    if meta.get("slate"):
+        path = Path(meta["slate"]["path"])
+        if calibrate.digest(path) != meta["slate"]["digest"]:
+            raise calibrate.ManifestError(
+                f"{path.name} has changed since this run started — the slate it "
+                "names is not the slate that was measured. Start a new run."
+            )
+        return calibrate.load(path)
+    return domains.load_all(meta["domains"])
 
 
 def cmd_report(args: argparse.Namespace) -> int:
@@ -416,6 +646,12 @@ def main(argv: list[str] | None = None) -> int:
         help="stop cleanly after N cells, so a run can be sized to the session "
         "window instead of discovering its edge",
     )
+    run.add_argument(
+        "--slate",
+        metavar="MANIFEST",
+        help="run the calibrated slate a manifest names, instead of the pinned "
+        "one; the items are regenerated from it and refused if they have moved",
+    )
     run.add_argument("--yes", action="store_true", help="required to start a paid run")
     run.set_defaults(func=cmd_run)
 
@@ -424,6 +660,51 @@ def main(argv: list[str] | None = None) -> int:
     pw.add_argument("--baseline", type=float, default=0.85, help="the weaker arm's accuracy")
     pw.add_argument("--power", type=float, default=0.80, help="probability of detecting it")
     pw.set_defaults(func=cmd_power)
+
+    cal = sub.add_parser("calibrate", help="select a slate from a generated pool")
+    cal.add_argument("--dry-run", action="store_true", help="stub subject, no API calls")
+    cal.add_argument("--domain", action="append", help="restrict the pool to a pack (repeatable)")
+    cal.add_argument("--seed", action="append", type=int, help="a seed to draw from (repeatable)")
+    cal.add_argument(
+        "--difficulty", action="append", type=int, help="a difficulty to draw (repeatable)"
+    )
+    cal.add_argument(
+        "--track",
+        action="append",
+        choices=("in-context", "at-scale"),
+        help="which track to draw; default in-context. `at-scale` is calibrated "
+        "too and its band is a floor — prose scoring ~0 is what that track claims",
+    )
+    cal.add_argument(
+        "--trials",
+        type=int,
+        default=calibrate.TRIALS,
+        help="trials per item. One is 0 or 1 and the band is then empty by "
+        "construction; three makes it expressible",
+    )
+    cal.add_argument(
+        "--strength",
+        default=calibrate.STRENGTH.name,
+        help="the one strength the pass runs at; the weak end is where the "
+        "signal is, so the default is the weaker model",
+    )
+    cal.add_argument("--limit", type=int, help="stop cleanly after N cells")
+    cal.add_argument(
+        "--max-turns", type=int, default=DEFAULT_MAX_TURNS, help="stopping rule per cell"
+    )
+    cal.add_argument(
+        "--budget", type=float, default=DEFAULT_MAX_BUDGET_USD, help="hard USD ceiling per cell"
+    )
+    cal.add_argument("--out", metavar="MANIFEST", help="where to write the slate")
+    cal.add_argument(
+        "--from",
+        dest="from_run",
+        metavar="RUN_DIR",
+        help="select from a pass already run, without running anything — moving "
+        "the band is a reading of the evidence, not a reason to re-collect it",
+    )
+    cal.add_argument("--yes", action="store_true", help="required to start a paid pass")
+    cal.set_defaults(func=cmd_calibrate)
 
     sc = sub.add_parser("score", help="grade one Datalog program against one task")
     sc.add_argument("--task", required=True, metavar="DOMAIN/ID")
