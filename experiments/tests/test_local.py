@@ -59,13 +59,13 @@ def _text(content):
     return {"choices": [{"message": {"role": "assistant", "content": content}}], "usage": {}}
 
 
-def _tool_call(name, arguments, call_id="c1"):
+def _tool_call(name, arguments, call_id="c1", content=""):
     return {
         "choices": [
             {
                 "message": {
                     "role": "assistant",
-                    "content": "",
+                    "content": content,
                     "tool_calls": [
                         {
                             "id": call_id,
@@ -305,6 +305,34 @@ def _fake_models(ids):
         return Response()
 
     return urlopen
+
+
+class TestAConversationCannotOutgrowItsWindow:
+    """Measured on the first correct-context sweep: the largest fixture in it was
+    ~275 tokens and the worst cell reached 762,441 input tokens over 30 turns.
+    The fact base is not what fills the window — the conversation is."""
+
+    def test_a_cell_that_fills_its_window_stops(self, tmp_path):
+        """A turn that keeps working — tool calls, not a final answer — while the
+        transcript grows past the window it is being sent into."""
+        wordy = _tool_call("Read", {"file_path": "employee.csv"}, content="x" * 120_000)
+        subject = Scripted([wordy, wordy, wordy, _text("done")])
+        transcript = subject.run(cell_for("native"), workspace_for("prose", tmp_path))
+        assert transcript.error == local._OUT_OF_CONTEXT
+        assert len(transcript.tool_calls) < 3  # it stopped rather than carrying on
+
+    def test_stopping_beats_being_silently_truncated(self):
+        """The server shifts the far end of the window, which is where the
+        question is. A subject answering a question it can no longer see still
+        produces a verdict, and the verdict reads like reasoning."""
+        from harness.runner import STOPPING_RULE
+
+        assert STOPPING_RULE.search(local._OUT_OF_CONTEXT)
+
+    def test_a_short_conversation_is_left_alone(self, tmp_path):
+        subject = Scripted([_tool_call("Read", {"file_path": "employee.csv"}), _text("done")])
+        transcript = subject.run(cell_for("native"), workspace_for("prose", tmp_path))
+        assert transcript.error is None
 
 
 class TestSweepPlumbing:

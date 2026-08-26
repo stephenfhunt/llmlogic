@@ -70,6 +70,23 @@ DEFAULT_TOOL_TIMEOUT = 120
 #: to be bounded in the currency it is spending.
 DEFAULT_MAX_CELL_SECONDS = 900
 
+#: What a cell that filled its context records. Measured on the first 32k sweep:
+#: the largest *fixture* in it was ~275 tokens, and the worst cell reached
+#: 762,441 input tokens across 30 turns — ~25k a turn. The fact base is not what
+#: fills the window; the **conversation** is. Every `Skill` call appends ~3,200
+#: tokens of skill body and a `Grep` can append 6,000, so a model that loops
+#: re-appends them until the server quietly shifts the question out of the
+#: window and the loop feeds itself.
+#:
+#: Ending the cell is the honest outcome. Letting the server shift produces a
+#: subject answering a question it can no longer see, and a verdict that reads
+#: like reasoning.
+_OUT_OF_CONTEXT = "cell filled its context window (wall clock rule)"
+
+#: Of the served window, how much the conversation may occupy before the cell is
+#: ended. The remainder is headroom for the reply itself.
+CONTEXT_BUDGET = 0.75
+
 #: What a cell that ran out of wall clock records. Not fatal — that cell spent
 #: its budget and the next one deserves its own.
 _OUT_OF_TIME = "cell exceeded its wall clock"
@@ -706,6 +723,22 @@ class LocalSubject:
             return base + "\n\n" + protocol_brief(workspace.has_engine)
         return base + " Use the tools provided; when you are finished, stop calling tools."
 
+    def _overflowed(self, transcript: Transcript, messages: list[dict], window: int) -> bool:
+        """Has the conversation outgrown the window it is being sent into?
+
+        Approximate on purpose — four characters to a token is close enough to
+        catch a run away, and an exact tokenizer would be a dependency and a
+        per-model one at that. What matters is that the cell *stops* rather than
+        being silently truncated from the far end.
+        """
+        if not window:
+            return False
+        estimate = sum(len(str(message.get("content") or "")) for message in messages) // 4
+        if estimate < window * CONTEXT_BUDGET:
+            return False
+        transcript.error = _OUT_OF_CONTEXT
+        return True
+
     def _record(self, transcript: Transcript, turn: int, name: str, arguments: dict) -> None:
         """Append the call, and take control 4's capture **before** it runs."""
         transcript.tool_calls.append(ToolCall(turn, name, arguments))
@@ -721,6 +754,7 @@ class LocalSubject:
         endpoint, model, protocol, effort = self._configure(cell)
         started = time.monotonic()
         deadline = started + self.max_cell_seconds
+        window = cell.strength.context_tokens
         served = dict(endpoint=endpoint, model=model, reasoning_effort=effort, deadline=deadline)
         messages = [
             {"role": "system", "content": self._system(workspace, protocol)},
@@ -728,9 +762,9 @@ class LocalSubject:
         ]
         try:
             if protocol == "structured":
-                self._structured(transcript, tools, workspace, messages, served, deadline)
+                self._structured(transcript, tools, workspace, messages, served, deadline, window)
             else:
-                self._native(transcript, tools, workspace, messages, served, deadline)
+                self._native(transcript, tools, workspace, messages, served, deadline, window)
         except LocalError as exc:
             transcript.error = str(exc)
         except Exception as exc:  # noqa: BLE001 — a failed cell is data, not a crash
@@ -738,7 +772,7 @@ class LocalSubject:
         transcript.wall_seconds = round(time.monotonic() - started, 2)
         return transcript
 
-    def _structured(self, transcript, tools, workspace, messages, served, deadline) -> None:
+    def _structured(self, transcript, tools, workspace, messages, served, deadline, window) -> None:
         """One grammar-constrained action per turn.
 
         A malformed call is not *recovered* here, it is unrepresentable: the
@@ -752,6 +786,8 @@ class LocalSubject:
         for _ in range(self.max_turns):
             if time.monotonic() > deadline:
                 transcript.error = _OUT_OF_TIME
+                return
+            if self._overflowed(transcript, messages, window):
                 return
             reply = self.complete(messages, schema=schema, **served)
             message = (reply.get("choices") or [{}])[0].get("message") or {}
@@ -780,12 +816,14 @@ class LocalSubject:
                 transcript.denials.append(f"turn {turn}: {name} — {result.text}")
             messages.append({"role": "user", "content": result.text})
 
-    def _native(self, transcript, tools, workspace, messages, served, deadline) -> None:
+    def _native(self, transcript, tools, workspace, messages, served, deadline, window) -> None:
         schemas = tool_schemas(workspace.has_engine)
         turn = 0
         for _ in range(self.max_turns):
             if time.monotonic() > deadline:
                 transcript.error = _OUT_OF_TIME
+                return
+            if self._overflowed(transcript, messages, window):
                 return
             reply = self.complete(messages, tools=schemas, **served)
             choice = (reply.get("choices") or [{}])[0]
