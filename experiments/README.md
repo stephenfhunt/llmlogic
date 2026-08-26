@@ -80,6 +80,22 @@ always gets right, or never does, cannot show whether the engine helped. What it
 keeps is pinned to a manifest in [`slates/`](slates/README.md), and `harness run
 --slate` regenerates from it and refuses an item that has moved.
 
+## Subjects
+
+Two. The **Agent SDK subject** is Claude Code as a library. The **local subject**
+(`local.py`) is our own tool loop over an OpenAI-compatible endpoint — ollama on
+the GPU here, vLLM by changing a URL — because two of the three claims in scope
+need a model weaker than haiku and there is none. It is bounded in wall clock,
+tokens and context; it refuses to start against a server whose window is smaller
+than the run assumes; and `harness run --local-model M --protocol P` crosses
+models with tool protocols as ordinary strengths. Long form:
+[`notes/a-local-subject.md`](notes/a-local-subject.md).
+
+A local run and an Anthropic run are **not comparable to each other** — different
+models, different drivers, and two deliberate asymmetries recorded in
+`decisions.md`. What stays comparable is prose against engine *within* a subject,
+which is the comparison the experiment is about.
+
 ## Running it
 
 ```sh
@@ -93,6 +109,9 @@ harness run --domain controls --strength haiku-4.5   # a cheaper slice
 harness run --arm prose --arm engine-forced --repeats 3   # named arms, three trials each
 harness run --resume results/<run-id>          # finish a run the window cut off
 harness report results/<run-id>                # render to markdown
+
+harness run --local-model qwen3:8b --protocol native --protocol structured \
+            --reasoning-effort none --repeats 3 --yes   # a local sweep, unattended
 
 harness power --effect 0.10                    # how many paired items would it take?
 harness score --task access_control/who-can-read-r03 --program q.dl   # run and grade one

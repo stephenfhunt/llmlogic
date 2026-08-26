@@ -24,6 +24,58 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-26 (later still) — A second subject, and four silent misconfigurations
+
+`LocalSubject` ships: our own tool loop over an OpenAI-compatible endpoint, so the
+weak end of the scale is reachable at last. **1,391 harness tests green (+19)**,
+ruff clean, the 168-cell offline grid unchanged. A 432-cell local sweep is
+**running as this is written** — `results/run-20260826T204936Z` — and the next session reads
+it. Long form: [`experiments/notes/a-local-subject.md`](../experiments/notes/a-local-subject.md).
+
+**Done**
+- **`local.py`** — the loop, the tools spelled as the SDK spells them, the skill
+  as a `Skill` tool advertised from SKILL.md's own frontmatter, `bash` under
+  `unshare -rn`, stdlib only. `confine.violation` and
+  `engine_use.program_from_call` are imported, so controls 3 and 4 hold by
+  construction. Verified: `/etc/passwd` denied, the `truth.py` answer key denied,
+  no network inside a cell.
+- **Two tool protocols, crossed as strengths.** `harness run --local-model M
+  --protocol P` sweeps them through the existing grid; `Strength` carries the
+  endpoint, protocol and effort, so one subject instance covers the sweep.
+- **The weak end needed three things before it could be measured at all**: the
+  exit condition checked, the answer format *shown* rather than described, and
+  `thought` on every structured action. Two move the instrument and say so.
+- **Bounds that make an overnight run finishable** — wall clock, tokens per
+  completion, conversation size — each a *stopping rule*, never an ERROR.
+- **`Signals.ran_engine` contradicted `engine_use`** on any transcript that
+  invoked the skill without running anything. Narrow now.
+
+**Decided** (`experiments/decisions.md`, five entries)
+- **The tool protocol is a property of the model.** `structured` is a grammar the
+  model cannot leave; `native` is a description it may follow — `qwen3:8b` called
+  a tool whose only required parameter was `zebra` with `{"file": …}`.
+- **The completion reminder and the format example**, both recorded as instrument
+  changes: the first is an asymmetry with the SDK subject, the second changes the
+  shared prompt for everyone.
+- **A misconfigured instrument must refuse, not degrade** — the third instance,
+  so it is a pattern.
+
+**Removed**
+- Nothing deleted. `runner.FATAL` was *replaced* as the only fatal classifier by a
+  per-subject one, and the 2026-08-25 (later) worklog entry rotated to the archive.
+  The plan's `at-scale`-by-construction rule was dropped before it was written.
+
+**Next up**
+- **Read the sweep** in `results/run-20260826T204936Z`, then a local run of the calibrated
+  slate. At 131 of 432 cells it stands at 11% correct against ~5% before this
+  session's fixes, and `structured` leads `native` on all three models.
+- **`hypotheses.md`** before any grid is paid for — and it now has to name the
+  *subject*, since local and Anthropic numbers are not comparable to each other.
+- **Open question:** whether an 8B subject clears the negative controls at all. If
+  it cannot, a null on the measured slate stays unreadable however good the
+  instrument is, and the answer is a larger model at a smaller window — the
+  fixtures are ~275 tokens, so context is not the scarce resource here.
+
 ## 2026-08-26 (later) — The pass that picks the slate
 
 `harness calibrate` — the consumer everything on 2026-08-26 was built for. A
@@ -131,57 +183,3 @@ a pool to select from. **1,301 harness tests green (+884)**, ruff clean, and
 - **Open question:** the generated slate has never met a real subject. The
   answer-size bands say the items are not trivially passable; only a calibration
   pass says whether they are *informative*.
-
-## 2026-08-25 (later) — The instrument learns to discriminate
-
-The 2026-08-24 grid returned +0 with every domain scoring *identically* in both
-arms — not a null, three instrument defects at once. This session built the three
-independent fixes. 417 harness tests green (+180), ruff clean, and
-`harness run --dry-run --all` is now a **168-cell three-arm grid** rendering
-intervals, paired tests and partial credit offline; nothing paid for yet. Long form:
-[`experiments/notes/discriminating-instrument.md`](../experiments/notes/discriminating-instrument.md).
-
-**Done**
-- **A third arm, `engine-forced`.** `engine` keeps a byte-identical prompt to
-  `prose` and so measures adoption *and* capability together; the new arm appends a
-  mandate and measures capability alone. The report renders all three pairwise
-  comparisons, each a different question.
-- **Reach became an outcome, not a footnote** — `none` / `invoked` /
-  `answered-from`, closing the open question an unexecuted-program `Skill` call
-  raised. On `engine-forced` the same number is the compliance check.
-- **`stats.py`, pure stdlib** — Wilson intervals, McNemar's exact test on the
-  pairing the design already had, a bootstrap on the delta, per-item F1, `harness
-  power`. It priced the third defect at once: a 10-point effect wants **155 paired
-  items** against a slate of 56.
-- **Two tracks and the first generator.** `access_control` gained
-  `generate(seed, difficulty, track)`, `validate` rejecting degenerate items, and
-  110 tests over 12 seeds — including the oracle against a second formulation *on
-  generated graphs*, which the by-eye check on the pinned fixture never was. The 28
-  pinned tasks are untouched, fingerprints asserted.
-- **`harness score`**, `--repeats N`, resume refusing a fixture that moved, and
-  `cache_creation_tokens` on the record.
-
-**Decided** (`experiments/decisions.md`, five entries)
-- **A delta with no interval is not a null.** The old report computed a raw
-  percentage-point difference and stopped.
-- **A slate is selected by calibration, not designed** — guessing which knob is
-  hard is how the ceiling got built in the first place.
-- **The token cap is one track's definition, not a global rule**, so `at-scale` can
-  exceed the prose arm's window on purpose and is never averaged with the rest.
-- **Control 3 keeps the arm it was written for**, which is what makes a third arm
-  right rather than a prompt edit.
-
-**Removed**
-- `report.py`'s raw-difference rendering, and `_by_task` pooling, which averaged
-  opus with haiku — the two subjects whose difference is why both are in the grid.
-- `access_control/truth.py` rewritten whole after splicing left duplicate
-  definitions; two ROADMAP items superseded by the `at-scale` track and the queued
-  local subject; the 2026-08-24 S1 entry rotated to the archive.
-
-**Next up**
-- **Generators for the other six packs**, absorbing the owed `scheduling` re-run;
-  then `harness calibrate`, and `hypotheses.md` before any grid is paid for.
-- `LocalSubject` — the weak end is where the signal is, and two of the three
-  in-scope claims are unmeasurable without it.
-- **Open question:** `at-scale` answers run 1,800–6,300 rows, which measures
-  transcription as much as querying. An aggregate variant was considered, not built.

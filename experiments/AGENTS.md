@@ -61,6 +61,7 @@ pytest                          # harness units + property tests
 harness run --dry-run --all     # the full grid, stub subject, zero API calls
 harness run --domain access_control --smoke   # one real cell, both arms
 harness calibrate --dry-run     # the selection pass, offline, against the stub
+harness run --local-model qwen3:8b --protocol structured --yes  # a local sweep
 harness run --slate slates/<run-id>.json      # the grid over a calibrated slate
 harness run --resume results/<run-id>  # finish a run the session window cut off
 harness report results/<run-id> # render a run to markdown
@@ -77,6 +78,12 @@ money. `run_grid` halts on a session or rate limit instead of recording phantom
 cells; `--resume` re-runs what a run is missing or failed, appending to the same
 directory; `--limit N` sizes a sitting to the window. See `decisions.md`
 2026-08-24.
+
+**A local run is bounded by wall clock, not by an account window.** It is the arm
+that can be left running overnight: `--local-model` crossed with `--protocol`,
+`--max-cell-seconds` per cell, and a preflight that refuses a server whose context
+is smaller than the run assumes. Needs a model server — see
+`notes/a-local-subject.md`.
 
 **`--dry-run` is the CI gate.** The whole grid must execute offline against the
 stub subject and render a report without one API call; a change that can only be

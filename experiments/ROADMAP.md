@@ -119,12 +119,34 @@ grid unable to answer S1. The argument and the numbers are in
   `report.py`, `cli.cmd_power`. `power --effect 0.10` wants 155 paired items against
   a slate of 56 — the 2026-08-24 grid's third defect, as a number.
 - **`hypotheses.md`** — the comparisons and the primary endpoint, written before
-  the grid runs. _queued._
+  the grid runs. _queued._ **Now also has to say which subject** — a local arm and
+  an Anthropic arm are not comparable to each other, only within themselves.
 - **A local-model subject** — `LocalSubject`, an OpenAI-compatible tool loop
-  against llama.cpp on the local GPU. Needs its own network isolation and a
-  per-tool-call timeout, since the engine has neither by decision, and moves
-  `runner.FATAL` and `Strength`'s prices behind a per-subject seam. _queued_ —
-  new `local.py`, `decisions.md` 2026-08-25.
+  against ollama on the local GPU. _shipped 2026-08-26._ — `local.py`,
+  `notes/a-local-subject.md`. Two tool protocols (`native`, `structured`), the
+  skill as a `Skill` tool advertised from SKILL.md's own frontmatter, `bash` under
+  `unshare -rn`, and `Strength` carrying the endpoint, protocol and reasoning
+  effort so `harness run --local-model M --protocol P` sweeps them as strengths.
+  `runner.FATAL` is behind a per-subject classifier. **Not yet answered: whether
+  an 8B subject clears the negative controls at all** — the first sweeps found it
+  below the floor, and the fixes for that are the three entries below.
+- **What a weak subject needs before it can be measured** — _shipped
+  2026-08-26_, all in `decisions.md`: the exit condition checked (at most twice,
+  naming only the file), the answer format **shown** rather than only described,
+  and `thought` on every structured action. The first two move the instrument and
+  say so; the third is parity with what `native` already allowed.
+- **Bounds that make an overnight run finishable** — wall clock per cell, tokens
+  per completion, and a conversation that may not outgrow its window; each
+  recorded as a *stopping rule*, because an ERROR cell is one `resume` owes
+  forever. _shipped 2026-08-26._ — `local.py`, `runner.STOPPING_RULE`.
+- **Preflight refuses a misconfigured server** — no server, an unpulled model, or
+  a window smaller than the run assumes. The third instance of this harness
+  reporting plausible numbers from a misconfigured instrument, so the rule is now
+  stated: refuse, do not degrade. _shipped 2026-08-26._ — `local.preflight`,
+  `decisions.md` 2026-08-26.
+- **A local sweep of the calibrated slate** — the run the above exists for:
+  models x protocols x arms over `controls` and `access_control`, three trials.
+  _queued_ — the next session.
 - **`harness score --task <id> --program <file>`** — run a program, grade its
   output. One command; also the natural home for the reference corpus's check.
   _shipped 2026-08-25._ — `score.py`. Exit 0/1/2; the wall-clock timeout is the
@@ -172,6 +194,13 @@ grid unable to answer S1. The argument and the numbers are in
   writes a sha256 of each task's question, fixture files and truth rows into
   `run.json`; `resume.moved` refuses on a mismatch, and stays silent for a run that
   recorded none. — `resume.py`, `decisions.md` 2026-08-24.
+- **`Signals.ran_engine` contradicted `engine_use`** — `measure` counted a
+  `Skill` invocation as the engine having run while `classify` did not, so a cell
+  whose only tool call was `Skill` recorded `invoked` and `ran_engine=True` in the
+  same record. `ran_engine` and `rounds` are narrow now; `engine_calls` keeps the
+  wide count and says so. Past records keep what they were written with.
+  _shipped 2026-08-26._ — `signals.measure`, `tests/test_signals.py`.
+
 - **A resume rebuilds the slate the run actually ran** — there are three
   provenances now, and `cmd_resume` knew one. A calibration pass rebuilds its
   pool from the spec in its own `run.json`; a calibrated run reloads its
