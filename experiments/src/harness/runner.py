@@ -42,7 +42,12 @@ FATAL = re.compile(r"session limit|rate limit|usage limit|\b429\b", re.IGNORECAS
 #: reward a model that flails by removing its failures from the denominator —
 #: bias in the opposite direction from the one ``ERROR`` exists to prevent, and
 #: the reason this is matched apart. See ``decisions.md`` 2026-08-24.
-STOPPING_RULE = re.compile(r"maximum number of turns|max_turns", re.IGNORECASE)
+#:
+#: The local subject's per-cell **wall clock** is the same kind of rule and is
+#: matched here too. Without that it reads as ``ERROR``, and an ERROR cell is one
+#: `resume` owes forever — it would time out again on every sitting and the run
+#: could never finish.
+STOPPING_RULE = re.compile(r"maximum number of turns|max_turns|wall clock", re.IGNORECASE)
 
 
 class RunHalted(Exception):
@@ -106,6 +111,19 @@ def run_cell(
     return record
 
 
+def _fatal(subject: Subject, error: str) -> bool:
+    """Does this error end the run, or only this cell?
+
+    A subject that knows its own fatal errors says so; anything else falls back
+    to `FATAL`, which is Anthropic-shaped by history. The local subject's fatal
+    set is disjoint — a server that is not there, a model never pulled — and
+    misfiling one of those as an ordinary wrong answer is the 2026-08-24 defect
+    that filed 46 phantom cells, in different clothes.
+    """
+    classify = getattr(subject, "fatal", None)
+    return bool(classify(error)) if classify else bool(FATAL.search(error))
+
+
 def run_grid(
     cells: list[Cell],
     subject: Subject,
@@ -119,6 +137,6 @@ def run_grid(
         records.append(record)
         if on_cell:
             on_cell(index, len(cells), record)
-        if record.error and FATAL.search(record.error):
+        if record.error and _fatal(subject, record.error):
             return RunResult(store.run_id, records, halted=record.error)
     return RunResult(run_id=store.run_id, records=records)

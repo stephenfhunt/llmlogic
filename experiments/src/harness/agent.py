@@ -32,6 +32,7 @@ from harness.arms import Workspace
 from harness.cell import Cell
 from harness.confine import violation
 from harness.engine_use import program_from_call
+from harness.runner import FATAL as runner_fatal
 from harness.transcript import ToolCall, Transcript, Usage
 
 #: The subject gets what an agent normally has, minus the web. A subject that can
@@ -83,6 +84,10 @@ class AgentSubject:
         self.max_turns = max_turns
         self.max_budget_usd = max_budget_usd
         self.effort = effort
+
+    def fatal(self, error: str) -> bool:
+        """The account's window closing, and its neighbours. See `runner._fatal`."""
+        return bool(runner_fatal.search(error))
 
     def run(self, cell: Cell, workspace: Workspace) -> Transcript:
         return asyncio.run(self._run(cell, workspace))
