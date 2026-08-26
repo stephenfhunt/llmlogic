@@ -119,8 +119,12 @@ grid unable to answer S1. The argument and the numbers are in
   `report.py`, `cli.cmd_power`. `power --effect 0.10` wants 155 paired items against
   a slate of 56 — the 2026-08-24 grid's third defect, as a number.
 - **`hypotheses.md`** — the comparisons and the primary endpoint, written before
-  the grid runs. _queued._ **Now also has to say which subject** — a local arm and
-  an Anthropic arm are not comparable to each other, only within themselves.
+  the grid runs. _shipped 2026-08-26._ The primary endpoint is the paired
+  `engine-forced` − `prose` delta on the `in-context` slate **at the weaker
+  strength**; everything else is secondary. It also fixes the preconditions under
+  which a run is *unreadable* rather than null, and records two things the
+  arithmetic makes plain: `--repeats` does not buy paired items, and a calibrated
+  slate is calibrated **for one subject**.
 - **A local-model subject** — `LocalSubject`, an OpenAI-compatible tool loop
   against ollama on the local GPU. _shipped 2026-08-26._ — `local.py`,
   `notes/a-local-subject.md`. Two tool protocols (`native`, `structured`), the
@@ -147,6 +151,11 @@ grid unable to answer S1. The argument and the numbers are in
 - **A local sweep of the calibrated slate** — the run the above exists for:
   models x protocols x arms over `controls` and `access_control`, three trials.
   _queued_ — the next session.
+- **A calibration pass that clears power** — the blocker before any grid is worth
+  running. 78 tasks are needed for a 10-point effect and the pinned slate is 28,
+  so the pool wants roughly six `(seed, difficulty)` combinations and the pass
+  must be run **per subject**. `harness calibrate` has still never been run
+  against a real subject. _queued — the next session._
 - **`harness score --task <id> --program <file>`** — run a program, grade its
   output. One command; also the natural home for the reference corpus's check.
   _shipped 2026-08-25._ — `score.py`. Exit 0/1/2; the wall-clock timeout is the

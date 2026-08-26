@@ -103,6 +103,7 @@ kind is in [`../docs/rules/editing-docs.md`](../docs/rules/editing-docs.md).
 | `AGENTS.md` | current-state | how to work in this project (this file) |
 | `ROADMAP.md` | current-state | the item index: one line per item, status, pointer |
 | `decisions.md` | **append-only** | decisions + rationale, and open questions |
+| `hypotheses.md` | **append-only** | the pre-registration: what a grid measures, and the one number that decides it |
 | `notes/` | long-form | this project's overflow, per the length caps |
 | `results/` | **append-only** | what the instrument produced. Never edit a past run |
 | `slates/` | current-state | the calibrated slates a grid runs — one manifest per pass |
