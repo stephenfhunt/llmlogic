@@ -26,6 +26,38 @@ def test_the_grid_crosses_every_task_with_every_arm_and_strength():
     assert len({cell.id for cell in cells}) == len(cells)
 
 
+def test_repeats_multiply_the_grid_and_keep_every_id_distinct():
+    """Two trials are two cells. Sharing an id would make the second overwrite
+    the first in every reading of the run, which is the opposite of a variance
+    estimate."""
+    tasks = controls_tasks.tasks()
+    cells = grid(tasks, repeats=3)
+    assert len(cells) == len(tasks) * len(ARMS) * len(STRENGTHS) * 3
+    assert len({cell.id for cell in cells}) == len(cells)
+
+
+def test_the_first_trial_is_spelled_exactly_as_a_single_trial_run():
+    """So a single-trial run stays byte-comparable with every run already in
+    `results/`, and a resume of one still matches its cells."""
+    tasks = controls_tasks.tasks()
+    once = {cell.id for cell in grid(tasks)}
+    thrice = grid(tasks, repeats=3)
+    assert {cell.id for cell in thrice if cell.trial == 0} == once
+
+
+def test_trials_are_ordered_last_so_a_short_sitting_holds_a_whole_pass():
+    """A sitting cut off mid-grid should have covered every task once, not one
+    task three times."""
+    cells = grid(controls_tasks.tasks(), repeats=2)
+    first_pass = cells[: len(cells) // 2]
+    assert all(cell.trial == 0 for cell in first_pass)
+
+
+def test_a_zero_repeat_grid_is_refused():
+    with pytest.raises(ValueError):
+        grid(controls_tasks.tasks(), repeats=0)
+
+
 def test_a_full_offline_run_produces_records_and_a_report(tmp_path):
     tasks = controls_tasks.tasks()
     cells = grid(tasks)

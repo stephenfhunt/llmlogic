@@ -1,9 +1,14 @@
 """The unit of measurement: one ``(task, arm, strength)`` triple.
 
-The **arm** is the independent variable and the only difference between two runs
-of the same task: both arms are the same agent, with the same tools, in the same
-workspace, over the same files. The engine arm additionally has the ``datalog``
-binary and its skill. See ``decisions.md``, 2026-08-21.
+The **arm** is the independent variable. Every arm is the same agent, with the
+same tools, in the same workspace, over the same files.
+
+There are three, because one arm cannot answer two questions that pull in
+opposite directions (``decisions.md`` 2026-08-25). ``engine`` keeps control 3 —
+the subject is never told the engine is there — which is what makes *"did it
+reach for it?"* a measurement. ``engine-forced`` mandates a program, which is
+what makes *"does using it help?"* answerable at all. The first grid had only the
+former, reached in 9 of 56 cells, and could not be read.
 """
 
 from __future__ import annotations
@@ -13,8 +18,13 @@ from typing import Literal
 
 from harness.task import Task
 
-Arm = Literal["engine", "prose"]
-ARMS: tuple[Arm, ...] = ("engine", "prose")
+Arm = Literal["prose", "engine", "engine-forced"]
+ARMS: tuple[Arm, ...] = ("prose", "engine", "engine-forced")
+
+#: The arms that get the binary and the skill. Membership here, not a string
+#: comparison at each site: the engine arms have to grow together or the
+#: independent variable stops meaning one thing.
+ENGINE_ARMS: frozenset[str] = frozenset({"engine", "engine-forced"})
 
 
 @dataclass(frozen=True)
@@ -73,11 +83,19 @@ class Cell:
     #: ablated cell and its control are two cells and have to record as two.
     #: Meaningless on the prose arm, which has no skill to cut from.
     ablate: str | None = None
+    #: Which repeat of this cell. Part of the identity for the same reason
+    #: ``ablate`` is: two trials are two cells, recorded twice and resumed
+    #: independently. **Trial 0 spells its id exactly as before**, so a
+    #: single-trial run is byte-comparable with every run already in
+    #: ``results/`` and a resume of one still matches.
+    trial: int = 0
 
     @property
     def id(self) -> str:
         base = f"{self.task.domain}.{self.task.id}.{self.arm}.{self.strength.name}"
-        return f"{base}.minus-{self.ablate}" if self.ablate else base
+        if self.ablate:
+            base = f"{base}.minus-{self.ablate}"
+        return f"{base}#{self.trial}" if self.trial else base
 
 
 def grid(
@@ -85,6 +103,7 @@ def grid(
     strengths: tuple[Strength, ...] = STRENGTHS,
     arms: tuple[Arm, ...] = ARMS,
     ablate: str | None = None,
+    repeats: int = 1,
 ) -> list[Cell]:
     """Every task, every arm, every strength — the full crossing.
 
@@ -92,9 +111,19 @@ def grid(
     block of the engine's documentation cannot change what an arm that never had
     it does, so a prose cell in an ablation grid is money spent re-measuring the
     control.
+
+    ``repeats`` runs each cell more than once. The subject is stochastic and
+    every cell in every run so far has been run exactly once, so there is no
+    variance estimate anywhere in the record — a single trial cannot tell a
+    reliable answer from a lucky one. Trials are ordered last so a truncated
+    sitting holds a complete first pass over the grid rather than a complete
+    first task.
     """
+    if repeats < 1:
+        raise ValueError("repeats must be at least 1")
     return [
-        Cell(task=task, arm=arm, strength=strength, ablate=ablate)
+        Cell(task=task, arm=arm, strength=strength, ablate=ablate, trial=trial)
+        for trial in range(repeats)
         for task in tasks
         for arm in arms
         for strength in strengths

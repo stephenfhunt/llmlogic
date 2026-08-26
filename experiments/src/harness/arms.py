@@ -22,7 +22,7 @@ from pathlib import Path
 
 from harness.ablate import apply as apply_ablation
 from harness.catalogue import assemble, verify
-from harness.cell import Cell
+from harness.cell import ENGINE_ARMS, Cell
 
 #: Repo-relative, resolved from this file so the harness works from any cwd.
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -226,7 +226,7 @@ def build(cell: Cell, root: Path) -> Workspace:
             destination.write_text(contents, encoding="utf-8")
 
     search_path = scrubbed_path()
-    has_engine = cell.arm == "engine"
+    has_engine = cell.arm in ENGINE_ARMS
     if has_engine:
         require_engine()
         _copy_skill(path, cell.ablate)
@@ -235,7 +235,7 @@ def build(cell: Cell, root: Path) -> Workspace:
     return Workspace(
         path=path,
         cell_id=cell.id,
-        prompt=assemble(cell.task),
+        prompt=assemble(cell.task, cell.arm),
         env={"PATH": search_path},
         has_engine=has_engine,
         ablated=cell.ablate if has_engine else None,

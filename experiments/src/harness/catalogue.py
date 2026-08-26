@@ -135,8 +135,36 @@ def _asset_summary(fixture: Fixture, assets: list[str]) -> str:
     return f"- {where} — a source tree: {len(assets)} files, {total_lines} lines"
 
 
-def assemble(task: Task) -> str:
-    """The prompt put in front of the subject. Identical for both arms."""
+#: What `engine-forced` adds, and the whole of what it adds.
+#:
+#: Appended verbatim to the base prompt, so the two texts differ by this block
+#: and nothing else — a test pins it as a strict suffix. Naming the binary and
+#: the file extension is deliberate: the arm exists to measure whether *using*
+#: the engine helps, so leaving the subject to discover how to invoke it would
+#: put the adoption question back inside the arm that was built to exclude it.
+MANDATE = """
+You must answer using the `datalog` logic engine, which is on your PATH.
+
+- Write your reasoning as a Datalog program in a `.dl` file.
+- Run it with `datalog` and read the facts it prints.
+- Your answer must be what the engine derived, not what you worked out yourself.
+
+If the engine rejects your program, repair it from the diagnostic and run it
+again.
+"""
+
+
+def assemble(task: Task, arm: str = "prose") -> str:
+    """The prompt put in front of the subject.
+
+    Byte-identical on ``prose`` and ``engine`` — that identity *is* control 3, and
+    it is asserted in ``tests/test_controls_hold.py``. ``engine-forced`` is that
+    same text plus ``MANDATE``, appended and nothing else.
+    """
+    return _base(task) + (MANDATE if arm == "engine-forced" else "")
+
+
+def _base(task: Task) -> str:
     shape = FIELD_SEPARATOR.join(task.answer_shape)
     return f"""\
 The files in your current working directory describe a situation. Answer the

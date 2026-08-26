@@ -7,8 +7,8 @@ nobody asked. They are cheap; the failure they prevent is silent.
 import pytest
 
 from harness import arms, domains
-from harness.catalogue import SchemaDrift, assemble, verify
-from harness.cell import FIXTURE_TOKEN_BUDGET, HAIKU_4_5, OPUS_5, Cell
+from harness.catalogue import MANDATE, SchemaDrift, assemble, verify
+from harness.cell import ENGINE_ARMS, FIXTURE_TOKEN_BUDGET, HAIKU_4_5, OPUS_5, Cell
 from harness.domains.controls import fixture as controls_fixture
 from harness.domains.controls import tasks as controls_tasks
 from harness.task import Fixture
@@ -57,22 +57,52 @@ def test_catalogue_lists_every_relation_with_its_real_columns():
 
 
 def test_the_prompt_never_mentions_the_engine():
+    """On the two arms control 3 governs. `engine-forced` is the deliberate
+    exception and is checked separately, below."""
     for task in domains.load_all():
-        prompt = assemble(task).lower()
-        for word in ("datalog", "logic engine", "prolog", "skill", "solver"):
-            assert word not in prompt, (
-                f"{task.key} names {word!r}. The engine arm has to reach for the "
-                "engine unprompted, or 'did it reach for it?' is not a measurement."
-            )
+        for arm in ("prose", "engine"):
+            prompt = assemble(task, arm).lower()
+            for word in ("datalog", "logic engine", "prolog", "skill", "solver"):
+                assert word not in prompt, (
+                    f"{task.key} names {word!r} on the {arm} arm. That arm has to "
+                    "reach for the engine unprompted, or 'did it reach for it?' is "
+                    "not a measurement."
+                )
 
 
-def test_both_arms_get_a_byte_identical_prompt(tmp_path):
+def test_the_two_unprompted_arms_get_a_byte_identical_prompt(tmp_path):
     if not (arms.DATALOG_BIN_DIR / "datalog").exists():
         pytest.skip("datalog binary not built")
     task = controls_tasks.tasks()[0]
     engine = arms.build(Cell(task, "engine", OPUS_5), tmp_path)
     prose = arms.build(Cell(task, "prose", OPUS_5), tmp_path)
     assert engine.prompt == prose.prompt
+
+
+def test_engine_forced_differs_from_the_base_prompt_by_the_mandate_alone():
+    """The arm is only interpretable if the mandate is the *whole* difference.
+    Any other drift between the texts confounds the comparison it exists for."""
+    for task in domains.load_all():
+        base = assemble(task, "prose")
+        forced = assemble(task, "engine-forced")
+        assert forced == base + MANDATE
+        assert forced.startswith(base)
+
+
+def test_engine_forced_actually_names_the_engine():
+    """The mirror of control 3, and worth pinning: an arm that mandates the
+    engine without naming it is just the `engine` arm with extra words."""
+    prompt = assemble(controls_tasks.tasks()[0], "engine-forced").lower()
+    assert "datalog" in prompt
+
+
+def test_every_engine_arm_gets_the_engine(tmp_path):
+    if not (arms.DATALOG_BIN_DIR / "datalog").exists():
+        pytest.skip("datalog binary not built")
+    task = controls_tasks.tasks()[0]
+    for arm in ENGINE_ARMS:
+        assert arms.build(Cell(task, arm, OPUS_5), tmp_path).has_engine, arm
+    assert not arms.build(Cell(task, "prose", OPUS_5), tmp_path).has_engine
 
 
 def test_only_the_engine_arm_gets_the_engine(tmp_path):
@@ -126,12 +156,18 @@ def test_no_task_ships_with_an_empty_truth():
         )
 
 
-def test_no_fixture_defeats_the_prose_arm_on_size_alone():
+def test_no_in_context_fixture_defeats_the_prose_arm_on_size_alone():
     # The engine arm keeps the fact base on disk; the prose arm has to hold it in
     # context. A fixture over the budget therefore measures the context window,
     # and the delta it produces is not a reasoning delta. Binary copies are not
     # counted: nothing reads a Parquet file into a prompt.
+    #
+    # The budget is the **definition of the `in-context` track**, not a global
+    # rule (`decisions.md` 2026-08-25). An `at-scale` task exceeds it on purpose,
+    # answers a different question, and is reported in its own table.
     for task in domains.load_all():
+        if task.track != "in-context":
+            continue
         chars = sum(
             len(contents) for contents in task.fixture.files.values() if isinstance(contents, str)
         )

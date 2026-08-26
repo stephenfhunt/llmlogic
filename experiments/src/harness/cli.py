@@ -55,6 +55,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     # documentation cannot move an arm that never had it, so a prose cell here
     # would be paying to re-measure the control.
     cell_arms = ("engine",) if args.ablate else ARMS
+    if args.arm and not args.ablate:
+        wanted = set(args.arm)
+        cell_arms = tuple(arm for arm in ARMS if arm in wanted)
+        if not cell_arms:
+            print(f"no such arm: {sorted(wanted)} — have {', '.join(ARMS)}", file=sys.stderr)
+            return 1
     if args.ablate:
         available = ablate.catalogue(arms.DATALOG_SKILL_DIR)
         if args.ablate not in available:
@@ -65,7 +71,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             )
             return 1
 
-    cells = grid(tasks, strengths, cell_arms, args.ablate)
+    cells = grid(tasks, strengths, cell_arms, args.ablate, args.repeats)
     if args.limit:
         cells = cells[: args.limit]
 
@@ -91,6 +97,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         cells=len(cells),
         strengths=[strength.name for strength in strengths],
         arms=list(cell_arms),
+        repeats=args.repeats,
+        fingerprints=resume.fingerprints(tasks),
         ablate=args.ablate,
         max_turns=args.max_turns,
         max_budget_usd=args.budget,
@@ -200,6 +208,18 @@ def cmd_resume(args: argparse.Namespace) -> int:
             f"the grid rebuilt to {len(cells)} cells but the run recorded "
             f"{meta['cells']} — the slate has changed under it, so resuming would "
             "join two different experiments. Start a new run.",
+            file=sys.stderr,
+        )
+        return 1
+
+    shifted = resume.moved(tasks, meta)
+    if shifted:
+        key, (was, now) = next(iter(shifted.items()))
+        print(
+            f"{len(shifted)} task(s) have changed since this run started — e.g. "
+            f"{key} ({was} → {now}). The fixture, question or truth moved under "
+            "the same id, so the two halves would not be one experiment. "
+            "Start a new run.",
             file=sys.stderr,
         )
         return 1
@@ -363,6 +383,20 @@ def main(argv: list[str] | None = None) -> int:
         "--strength",
         action="append",
         help="restrict to a strength (repeatable); default is every strength",
+    )
+    run.add_argument(
+        "--arm",
+        action="append",
+        help="restrict to an arm (repeatable); default is every arm. A slice, "
+        "not a design change — the comparisons a run can support are the ones "
+        "whose arms it holds",
+    )
+    run.add_argument(
+        "--repeats",
+        type=int,
+        default=1,
+        help="run each cell N times. The subject is stochastic and one trial "
+        "cannot separate a reliable answer from a lucky one",
     )
     run.add_argument(
         "--ablate",

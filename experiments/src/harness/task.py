@@ -16,6 +16,15 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
+#: Which question a task is evidence for (``decisions.md`` 2026-08-25).
+#:
+#: ``in-context`` holds ``cell.FIXTURE_TOKEN_BUDGET``: every arm can see the whole
+#: fact base, so a delta is a claim about **reasoning**. ``at-scale`` exceeds the
+#: prose arm's window on purpose, so a delta there is a claim about **scale**.
+#: They are reported in separate tables and never averaged — saying which claim
+#: is being made is what keeps the second from reading as rigged.
+Track = Literal["in-context", "at-scale"]
+
 #: The question classes S1 names, plus the two the negative controls need.
 QuestionClass = Literal[
     "recursion",
@@ -171,6 +180,12 @@ class Task:
     #: Set on the negative controls. Documents the expectation that the engine
     #: does *not* help here, so a null result reads as designed rather than broken.
     engine_expected_to_help: bool = True
+    #: Which of the two tracks this task belongs to. Defaults to the one the
+    #: existing slate is in, so the 28 pinned tasks keep their meaning untouched.
+    track: Track = "in-context"
+    #: The generator setting that produced it, or 0 for a hand-authored task.
+    #: Recorded so a calibrated slate can say *what* it selected, not just which.
+    difficulty: int = 0
     notes: str = field(default="")
 
     @property

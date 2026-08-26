@@ -5,6 +5,7 @@ it, so resume is the ordinary shape of a run and not only a recovery path.
 """
 
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -14,6 +15,7 @@ from harness.domains.controls import tasks as controls_tasks
 from harness.record import RecordStore
 from harness.runner import run_cell, run_grid
 from harness.subject import StubSubject
+from harness.task import Answer
 from harness.transcript import Transcript
 
 pytestmark = pytest.mark.skipif(
@@ -187,3 +189,50 @@ def test_a_renamed_task_is_caught_even_though_the_count_still_matches(tmp_path):
         handle.write(json.dumps(stale) + "\n")
 
     assert resume.strangers(cells, store.dir) == {stale["cell_id"]}
+
+
+class TestFingerprints:
+    """The guard the 2026-08-24 `scheduling` repair walked past.
+
+    The cell-id and count checks catch a task that was renamed or added. Both are
+    blind to a fixture that changed under the same id — which is what actually
+    happened, and what generators make routine.
+    """
+
+    def test_a_fixture_that_changed_under_the_same_id_is_caught(self):
+        tasks = controls_tasks.tasks()
+        meta = {"fingerprints": resume.fingerprints(tasks)}
+        moved = replace(
+            tasks[0],
+            fixture=replace(
+                tasks[0].fixture,
+                files={**tasks[0].fixture.files, "employee.csv": "name,department\nzed,eng\n"},
+            ),
+        )
+        shifted = resume.moved([moved, *tasks[1:]], meta)
+        assert list(shifted) == [tasks[0].key]
+
+    def test_the_same_slate_fingerprints_the_same(self):
+        tasks = controls_tasks.tasks()
+        meta = {"fingerprints": resume.fingerprints(tasks)}
+        assert resume.moved(controls_tasks.tasks(), meta) == {}
+
+    def test_a_question_rewritten_over_the_same_fixture_is_caught(self):
+        """The same defect wearing different clothes: the bytes are identical and
+        the experiment is not."""
+        tasks = controls_tasks.tasks()
+        meta = {"fingerprints": resume.fingerprints(tasks)}
+        reworded = replace(tasks[0], question=tasks[0].question + " Exclude contractors.")
+        assert list(resume.moved([reworded, *tasks[1:]], meta)) == [tasks[0].key]
+
+    def test_a_repaired_oracle_over_the_same_fixture_is_caught(self):
+        tasks = controls_tasks.tasks()
+        meta = {"fingerprints": resume.fingerprints(tasks)}
+        regraded = replace(tasks[0], truth=Answer.of(("something-else",)))
+        assert list(resume.moved([regraded, *tasks[1:]], meta)) == [tasks[0].key]
+
+    def test_a_run_from_before_fingerprints_existed_is_not_accused(self):
+        """It has no evidence either way, and inventing a verdict there would be
+        the defect this guard exists to prevent."""
+        assert resume.moved(controls_tasks.tasks(), {}) == {}
+        assert resume.moved(controls_tasks.tasks(), {"fingerprints": {}}) == {}

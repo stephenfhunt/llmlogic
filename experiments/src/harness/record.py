@@ -26,6 +26,10 @@ class Record:
     task_id: str
     question_class: str
     engine_expected_to_help: bool
+    #: Which track this cell's task belongs to. Recorded rather than looked up,
+    #: because the slate moves and `results/` does not: a report reading a past
+    #: run must not have to reconstruct what the task was that day.
+    track: str
     arm: str
     strength: str
     model: str
@@ -37,6 +41,10 @@ class Record:
     verdict: str
     missing: int
     extra: int
+    #: Rows in the truth. With `missing` and `extra` this is everything per-item
+    #: F1 needs, and F1 is what separates an answer that dropped one row of forty
+    #: from one that returned nothing — both of which grade `wrong`.
+    truth_size: int
     answer_raw: str | None
 
     first_program: str | None
@@ -46,6 +54,10 @@ class Record:
     input_tokens: int
     output_tokens: int
     cache_read_tokens: int
+    #: `Usage` has always carried this and the record dropped it, so a run could
+    #: not explain its own cost — the pilot's $0.07/cell took three fields and
+    #: half an hour to re-derive as a warmed number (`decisions.md` 2026-08-24).
+    cache_creation_tokens: int
     cost_usd: float
     wall_seconds: float
     turns: int
@@ -68,6 +80,7 @@ class Record:
             task_id=cell.task.id,
             question_class=cell.task.question_class,
             engine_expected_to_help=cell.task.engine_expected_to_help,
+            track=cell.task.track,
             arm=cell.arm,
             strength=cell.strength.name,
             model=cell.strength.model,
@@ -75,6 +88,7 @@ class Record:
             verdict=str(grade.verdict),
             missing=grade.missing,
             extra=grade.extra,
+            truth_size=len(cell.task.truth.rows),
             answer_raw=grade.raw,
             first_program=transcript.first_program,
             first_program_turn=transcript.first_program_turn,
@@ -82,6 +96,7 @@ class Record:
             input_tokens=transcript.usage.input_tokens,
             output_tokens=transcript.usage.output_tokens,
             cache_read_tokens=transcript.usage.cache_read_tokens,
+            cache_creation_tokens=transcript.usage.cache_creation_tokens,
             cost_usd=(
                 transcript.cost_usd
                 if transcript.cost_usd is not None

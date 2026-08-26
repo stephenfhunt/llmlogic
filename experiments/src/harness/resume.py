@@ -14,12 +14,14 @@ letting a grid be finished.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
 from harness.cell import Cell
 from harness.record import RecordStore
 from harness.runner import FATAL
+from harness.task import Task
 
 
 class NotResumable(Exception):
@@ -83,3 +85,60 @@ def strangers(cells: list[Cell], run_dir: Path) -> set[str]:
     """
     known = {cell.id for cell in cells}
     return {r["cell_id"] for r in RecordStore.load(run_dir)} - known
+
+
+def fingerprint(task: Task) -> str:
+    """A hash of the bytes a task's fixture actually puts in a workspace.
+
+    The cell-id and count checks catch a task that was **renamed or added**. They
+    are blind to the thing that actually moved on 2026-08-24: `scheduling`'s
+    roster changed under the same four task ids, and 21 of its 29 assignments had
+    been illegal all along. Nothing owed by the open run was a `scheduling` cell,
+    so it did not bite — a resume that had owed one would have joined two
+    different experiments with no signal at all.
+
+    Generators make that the ordinary case rather than the unlucky one: a fixture
+    now moves whenever a seed or a difficulty setting does.
+
+    The question text and the truth are hashed too. A fixture can stay
+    byte-identical while the question asked of it changes, and that is the same
+    defect wearing different clothes.
+    """
+    digest = hashlib.sha256()
+    digest.update(task.key.encode())
+    digest.update(b"\0")
+    digest.update(task.question.encode())
+    digest.update(b"\0")
+    for filename in sorted(task.fixture.files):
+        contents = task.fixture.files[filename]
+        digest.update(filename.encode())
+        digest.update(b"\0")
+        digest.update(contents if isinstance(contents, bytes) else contents.encode())
+        digest.update(b"\0")
+    for row in sorted(task.truth.rows):
+        digest.update("\x1f".join(row).encode())
+        digest.update(b"\0")
+    return digest.hexdigest()[:16]
+
+
+def fingerprints(tasks: list[Task]) -> dict[str, str]:
+    return {task.key: fingerprint(task) for task in tasks}
+
+
+def moved(tasks: list[Task], meta: dict) -> dict[str, tuple[str, str]]:
+    """Tasks whose fixture, question or truth differs from what the run recorded.
+
+    Returns ``key -> (recorded, now)``. A run made before fingerprints existed
+    records none, and gets none back: the guard cannot speak about evidence it
+    does not have, and inventing an answer there would be the defect it exists to
+    prevent.
+    """
+    recorded = meta.get("fingerprints") or {}
+    if not recorded:
+        return {}
+    current = fingerprints(tasks)
+    return {
+        key: (recorded[key], current[key])
+        for key in sorted(set(recorded) & set(current))
+        if recorded[key] != current[key]
+    }
