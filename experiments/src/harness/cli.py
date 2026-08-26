@@ -20,6 +20,7 @@ from harness.agent import (
 from harness.cell import ARMS, STRENGTHS, grid
 from harness.record import RecordStore
 from harness.runner import new_run_id, run_grid
+from harness.score import DEFAULT_TIMEOUT, score
 from harness.subject import StubSubject
 
 RESULTS_ROOT = Path(__file__).resolve().parents[2] / "results"
@@ -106,6 +107,57 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(f"\n{len(result.records)} cells · {result.cost_usd:.2f} USD{simulated}")
     print(f"report: {path}")
     return _halted(result, store.dir, len(cells))
+
+
+def cmd_power(args: argparse.Namespace) -> int:
+    """How many paired items a grid needs before it is worth paying for.
+
+    The most expensive kind of null is a run that could not have detected the
+    effect it went looking for. The 2026-08-24 grid was one, and nothing said so
+    until afterwards.
+    """
+    from harness.stats import required_items
+
+    print(f"baseline {args.baseline:.0%} · effect {args.effect:+.0%} · power {args.power:.0%}\n")
+    needed = required_items(args.baseline, args.effect, power=args.power)
+    per_arm = len(STRENGTHS)
+    print(f"  paired items needed: {needed}")
+    print(f"  = {needed // per_arm} tasks across {per_arm} strengths, or {needed} at one")
+    print(f"  = {needed * len(ARMS)} cells at {len(ARMS)} arms\n")
+
+    slate = len(domains.load_all()) * per_arm
+    verdict = "enough" if slate >= needed else f"SHORT by {needed - slate}"
+    print(f"The slate today is {slate} paired items — {verdict}.")
+    return 0
+
+
+def cmd_score(args: argparse.Namespace) -> int:
+    """Run one program against one task's fixture and grade what it derived."""
+    domain, _, task_id = args.task.partition("/")
+    matches = [t for t in domains.load_all([domain]) if t.id == task_id]
+    if not matches:
+        known = ", ".join(sorted(t.key for t in domains.load_all([domain]))) or "(none)"
+        print(f"no such task: {args.task} — have {known}", file=sys.stderr)
+        return 1
+    task = matches[0]
+
+    program = Path(args.program).read_text(encoding="utf-8")
+    with tempfile.TemporaryDirectory() as tmp:
+        result = score(task, program, Path(tmp), relation=args.relation, timeout=args.timeout)
+
+    if not result.accepted:
+        print(f"rejected (exit {result.exit_code})", file=sys.stderr)
+        print(result.stderr.rstrip(), file=sys.stderr)
+        return 2
+    if result.derived is None:
+        print(result.stderr.rstrip(), file=sys.stderr)
+        return 2
+    print(
+        f"{'correct' if result.correct else 'wrong'} · "
+        f"{len(result.derived)} derived, {len(task.truth.rows)} expected · "
+        f"missing {result.missing}, extra {result.extra}"
+    )
+    return 0 if result.correct else 1
 
 
 def _halted(result, run_dir: Path, planned: int) -> int:
@@ -332,6 +384,28 @@ def main(argv: list[str] | None = None) -> int:
     )
     run.add_argument("--yes", action="store_true", help="required to start a paid run")
     run.set_defaults(func=cmd_run)
+
+    pw = sub.add_parser("power", help="items needed to detect an effect")
+    pw.add_argument("--effect", type=float, default=0.10, help="effect to detect, as a rate")
+    pw.add_argument("--baseline", type=float, default=0.85, help="the weaker arm's accuracy")
+    pw.add_argument("--power", type=float, default=0.80, help="probability of detecting it")
+    pw.set_defaults(func=cmd_power)
+
+    sc = sub.add_parser("score", help="grade one Datalog program against one task")
+    sc.add_argument("--task", required=True, metavar="DOMAIN/ID")
+    sc.add_argument("--program", required=True, metavar="FILE")
+    sc.add_argument(
+        "--relation",
+        help="which derived relation is the answer; default is the engine's "
+        "synthesized `answer`, or the sole relation printed",
+    )
+    sc.add_argument(
+        "--timeout",
+        type=int,
+        default=DEFAULT_TIMEOUT,
+        help="seconds. The engine has no budget of its own, by decision",
+    )
+    sc.set_defaults(func=cmd_score)
 
     rep = sub.add_parser("report", help="render a run to markdown")
     rep.add_argument("run_dir")
