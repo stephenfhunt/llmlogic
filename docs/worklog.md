@@ -24,6 +24,61 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-26 — Five generators, and what only running them showed
+
+The owed generators landed: **six of seven packs** now have
+`generate(seed, difficulty, track)` beside `build()`, so `harness calibrate` has
+a pool to select from. **1,301 harness tests green (+884)**, ruff clean, and
+`harness run --dry-run --all` still renders the 168-cell grid offline. Long form:
+[`experiments/notes/generating-the-slate.md`](../experiments/notes/generating-the-slate.md).
+
+**Done**
+- **The slate was pinned before anything moved.** All 28 fingerprints asserted in
+  `tests/test_pinned_slate.py`: a fixture refactor changes what the comparable
+  slate measures without changing a task id.
+- **One home for the degeneracy rules** (`harness/generate.py`), a pack's
+  `check` for what only it knows, and `domains.generate(name, …)` /
+  `domains.validate(name, …)` as the entry points a calibration pass consumes.
+- **`eligibility`, `ontology`, `scheduling`, `imports`, `controls`**, one commit
+  each. Every fixture became a hashable value the oracle can be *handed* — which
+  is what lets it be checked against a second formulation on generated data,
+  rather than only on the fixture it was written for.
+- **A fifth question per pack**, because every wrong answer to the pinned four is
+  a **subset** of the right one and their shape cannot say which mistake was
+  made. Each fifth is false in both directions.
+- **`scheduling`'s `check` mechanises the 2026-08-24 defect**: every assignment
+  is one its person could work. Hand-verification passed that fixture — proving
+  the oracle matched the author's reading, not that there was one reading.
+
+**Decided** (`experiments/decisions.md`, four entries)
+- **`static_analysis` gets no generator**, and says so at the call. Its fixture
+  is a fetched real package; a synthetic one trades away what the pack is for.
+- **A control that gets hard stops being a control** — no `at-scale`, a row
+  ceiling, four questions not five, and `validate` no longer calls a one-row
+  truth guessable on a negative control.
+- **A generator's defects are in its output distribution, not its control
+  flow.** Nine degeneracies passed a reading of the code and were found by
+  running the generators over 60 fixtures: `eligibility` d1 with one eligible
+  applicant, `ontology` conflicts falling into classes reserved as empty,
+  `imports`' universal quantifier satisfied by 864 of 864 customers,
+  `scheduling` answering 3,534 rows at scale.
+- **A big frozen value memoizes its hash** — an `at-scale` `Roster` rehashed
+  60,000 rows per cached lookup; one test took eleven seconds, the file now 1.8s.
+
+**Removed**
+- `access_control`'s private `Degenerate`, `validate`, `_median_by` and its
+  fingerprint test, folded into the shared homes. `imports`' seed-search comment,
+  replaced by `_break_ties`. `scheduling`'s role-scoped `at-scale` helpers,
+  unneeded once the background population worked one shift each. The 2026-08-24
+  worklog entry, rotated to the archive.
+
+**Next up**
+- **`harness calibrate`** — the consumer. Everything it needs now exists.
+- Then **`hypotheses.md`** before a grid is paid for, and `LocalSubject`.
+- **Open question:** the generated slate has never met a real subject. The
+  answer-size bands say the items are not trivially passable; only a calibration
+  pass says whether they are *informative*.
+
 ## 2026-08-25 (later) — The instrument learns to discriminate
 
 The 2026-08-24 grid returned +0 with every domain scoring *identically* in both
@@ -131,62 +186,3 @@ ruff clean.
 - Still open: the `scheduling` re-run, count-distinct, `internal-error` under the
   wrong category, suggestion coverage (13 of 77), per-file attribution, §16/§17
   hygiene.
-
-## 2026-08-24 (later) — Every diagnostic has a place, and the engine stops asserting what it never read
-
-Three discovered defects, all fixed. **585 crate tests green** (+6), 230 harness
-tests green, ruff clean, clippy clean — and the crate now passes
-**`--no-default-features`** too, at 557.
-
-**Done**
-- **`bugs/008` closed**, and it was two defects. The suppression is the one the
-  bug file asked for — skip the declared-vs-inferred sweep once inference is
-  poisoned. The second was found while fixing the first and its own acceptance
-  criteria missed it: the sweep says *"its values are T"* wherever inference
-  contradicts a declaration, and inference reaches a column from **rules** as
-  well as facts, so `declare p(x: int). s("a"). r(S) :- p(x: S), s(S).` made that
-  claim about a relation holding **no facts at all**. The message now re-reads
-  the facts before speaking about values. Both mutations recorded on **C15**.
-- **Spans on semantic and source errors — the v1 gate.** All five malformed
-  reference pins moved to carry a position, not the three the item asked for;
-  **15 of 15** constructed diagnostic families carry one, against 0 of 113 sites
-  that morning. Stages after parsing record a span and `api.rs` resolves it once.
-- **`--no-default-features` is green**, and it was two `#[cfg(feature =
-  "duckdb")]` attributes on tests that import date columns. Nothing else failed.
-
-**Decided**
-- **Resolve at the boundary, not by threading `&str`** (§17 2026-08-24). Lowering,
-  inference and the evaluator never hold the program text; they record a span and
-  `run_at_reporting` resolves every stage's errors.
-- **A span stops at the file edge.** Spans are per-file byte offsets, so a program
-  that spliced in a module **drops** them rather than print a confidently wrong
-  line — `bugs/008`'s own class, freshly manufactured, and the reason to decline.
-  Rebasing into one virtual text is the real fix; filed, not built.
-- **The 113 sites were the wrong unit.** An error is raised deep and caught
-  shallow: one wrapper around the evaluator's per-literal recursion covers
-  `engine/`'s 35, one stamp in `load_imports` covers `sources/`'s 29. Six of the
-  77 were `naive.rs`, which is `#[cfg(test)]` and reaches no user.
-
-**Removed**
-- `bugs/008` from the open set (→ `bugs/resolved/`), and `type-clash.dl`'s header
-  note describing the false diagnostic it used to pin. §12's *Not covered* claim
-  that no semantic error carries a span; §1's claim that spans are what scope S3.
-  The oldest worklog entry rotated to the archive.
-
-**Next up**
-- **`harness reference` silently tested a two-day-old binary.** It runs
-  `target/release/datalog` and only errors when that file is *missing*, so the
-  first run this session reported 12/12 ok against yesterday's engine. A tripwire
-  that can pass on stale evidence is the instrument defect class of the last
-  three sessions — it wants a staleness check, or to build.
-  **Shown twice, in both directions**: checking out an earlier commit and running
-  `pytest` reddened 4 tests until the release binary was rebuilt, because the
-  pins are versioned and the binary they are pinned against is not. So the corpus
-  reports on whatever was last compiled, which at any commit may be neither that
-  commit's engine nor the working tree's.
-- **S3 now turns on the code vocabulary alone** — four `ErrorKind` variants where
-  an agent wants to branch on `unsafe-aggregate`. That is the last thing between
-  the criteria and v1.
-- Still open: per-file error attribution, suggestion coverage (13 of 77), the
-  cast-inside-a-comparison silence, `declare`-defines-a-predicate, and re-running
-  the repaired `scheduling` domain under a new run id.
