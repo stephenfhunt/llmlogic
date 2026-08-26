@@ -50,6 +50,10 @@ it. Long form: [`experiments/notes/a-local-subject.md`](../experiments/notes/a-l
 - **`Signals.ran_engine` contradicted `engine_use`** on any transcript that
   invoked the skill without running anything. Narrow now.
 
+**Also written:** `experiments/hypotheses.md`, the pre-registration — one primary
+endpoint (paired `engine-forced` − `prose`, `in-context`, weaker strength) and the
+preconditions under which a run is *unreadable* rather than null.
+
 **Decided** (`experiments/decisions.md`, five entries)
 - **The tool protocol is a property of the model.** `structured` is a grammar the
   model cannot leave; `native` is a description it may follow — `qwen3:8b` called
@@ -69,8 +73,10 @@ it. Long form: [`experiments/notes/a-local-subject.md`](../experiments/notes/a-l
 - **Read the sweep** in `results/run-20260826T204936Z`, then a local run of the calibrated
   slate. At 131 of 432 cells it stands at 11% correct against ~5% before this
   session's fixes, and `structured` leads `native` on all three models.
-- **`hypotheses.md`** before any grid is paid for — and it now has to name the
-  *subject*, since local and Anthropic numbers are not comparable to each other.
+- **A calibration pass that clears power**, which is the real blocker: 78 tasks
+  are needed for a 10-point effect and the pinned slate is 28, `--repeats` does
+  not buy paired items, and the pass has to be run **per subject** — a slate
+  calibrated on haiku is not calibrated for an 8B model.
 - **Open question:** whether an 8B subject clears the negative controls at all. If
   it cannot, a null on the measured slate stays unreadable however good the
   instrument is, and the answer is a larger model at a smaller window — the
