@@ -98,20 +98,33 @@ def _arms_present(records: list[dict]) -> tuple[str, ...]:
     return tuple(arm for arm in ARMS if arm in seen)
 
 
+def _strengths_present(records: list[dict]) -> list[str]:
+    """The strengths this run actually holds, in a stable order.
+
+    Derived from the records rather than from `STRENGTHS`, for the reason
+    `_arms_present` already is: the constant names the *Anthropic* pair, and a
+    local sweep's strengths — one per model × protocol — are not in it. Reading
+    the constant here rendered a local run as two empty columns with its own
+    numbers nowhere. The known pair keeps its order; anything else follows,
+    sorted, so a report is stable across runs.
+    """
+    seen = {record["strength"] for record in records}
+    known = [s.name for s in STRENGTHS if s.name in seen]
+    return known + sorted(seen - set(known))
+
+
 def _table(records: list[dict], title: str) -> list[str]:
     arms = _arms_present(records)
     lines = [f"### {title}", ""]
     if not records:
         return lines + ["No cells.", ""]
 
-    lines.append("| | " + " | ".join(s.name for s in STRENGTHS) + " | all | mean F1 |")
-    lines.append("|---|" + "---|" * (len(STRENGTHS) + 2))
+    strengths = _strengths_present(records)
+    lines.append("| | " + " | ".join(strengths) + " | all | mean F1 |")
+    lines.append("|---|" + "---|" * (len(strengths) + 2))
     for arm in arms:
         arm_records = [r for r in records if r["arm"] == arm]
-        cells = [
-            _rate([r for r in arm_records if r["strength"] == strength.name])
-            for strength in STRENGTHS
-        ]
+        cells = [_rate([r for r in arm_records if r["strength"] == name]) for name in strengths]
         lines.append(
             f"| **{arm}** | "
             + " | ".join(cells)
@@ -169,8 +182,8 @@ def _reach(records: list[dict]) -> list[str]:
     lines.append("| arm | strength | answered-from | invoked | none |")
     lines.append("|---|---|---|---|---|")
     for arm in _arms_present(engine_records):
-        for strength in STRENGTHS:
-            rows = [r for r in engine_records if r["arm"] == arm and r["strength"] == strength.name]
+        for name in _strengths_present(engine_records):
+            rows = [r for r in engine_records if r["arm"] == arm and r["strength"] == name]
             if not rows:
                 continue
             counts = defaultdict(int)
@@ -181,14 +194,12 @@ def _reach(records: list[dict]) -> list[str]:
                 # `answered-from` as 0 would be a fabricated number, not a
                 # missing one, so the row says what it actually knows.
                 ran = sum(1 for r in rows if r["signals"].get("ran_engine"))
-                lines.append(
-                    f"| {arm} | {strength.name} | — (ran the engine: {ran}/{len(rows)}) | — | — |"
-                )
+                lines.append(f"| {arm} | {name} | — (ran the engine: {ran}/{len(rows)}) | — | — |")
                 continue
             answered = counts["answered-from"]
             interval = wilson(answered, len(rows))
             lines.append(
-                f"| {arm} | {strength.name} | {answered}/{len(rows)} {interval} "
+                f"| {arm} | {name} | {answered}/{len(rows)} {interval} "
                 f"| {counts['invoked']} | {counts['none']} |"
             )
     lines += [
