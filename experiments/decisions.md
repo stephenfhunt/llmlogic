@@ -15,6 +15,77 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-08-26** — **A local subject, built; and the tool protocol is a property
+  of the model, not a design choice.** `LocalSubject` is our own loop over an
+  OpenAI-compatible endpoint, stdlib only. `confine.violation` and
+  `engine_use.program_from_call` are imported rather than reimplemented, so
+  controls 3 and 4 hold by construction, and the tools are spelled as the SDK
+  spells them so `signals.py` transfers untouched.
+  - **Two protocols, both kept.** `structured` constrains the decoder to a
+    discriminated union and is a **grammar the model cannot leave**; `native`
+    sends a `tools` array, which is a **description it may follow** — given a
+    tool whose sole required parameter was `zebra`, `qwen3:8b` called it with
+    `{"file": …}`. `qwen2.5-coder:7b` cannot emit a parseable native call at all.
+  - **The skill is a `Skill` tool advertised with SKILL.md's own frontmatter,
+    verbatim.** Writing a fresh description would tell the local subject
+    something the SDK subject was never told — control 3, lost where nobody would
+    look. — `notes/a-local-subject.md`
+
+- **2026-08-26** — **The harness checks the exit condition, and that is a
+  deliberate asymmetry with the SDK subject.** Read the transcripts and the weak
+  models mostly are not failing to reason: on `qwen3:8b` the thought is *"Carol
+  is listed under the 'engineering' department"* and then it finishes without a
+  `Write`, because in conversation saying the answer **is** delivering it. 55% of
+  a sweep graded `no-answer`, much of it right and filed nowhere.
+  - **At most twice, naming only the file.** A subject that ignores two reminders
+    will not write it on the third, and the turn cap should not be spent finding
+    out. The text says nothing about the answer.
+  - *Consequence, accepted:* the SDK subject gets no such nudge, so local and
+    Anthropic numbers are not comparable **to each other**. They were not anyway —
+    different models, different drivers. What must stay comparable is prose
+    against engine *within* a subject, and the reminder is identical on every arm.
+
+- **2026-08-26** — **The answer format is shown, not only described, and that
+  changes the prompt for everyone.** *"Each line has the fields `order_id`,
+  separated by `|`"* names one field and implies several; a frontier model papers
+  over it and a weak one cannot. `qwen3:8b` found the right three orders and wrote
+  `o2|150`; `llama3.1:8b` wrote the field name as the value six times.
+  - **The example is derived from each task's `answer_shape`**, not fixed: a
+    two-field example shown to a one-field question is an invitation to add a
+    field, which is the mistake being fixed.
+  - *Consequence, accepted:* runs before this are not comparable with runs after.
+    There is no valid measured grid to lose — 2026-08-24 is void for three other
+    reasons — and control 3 is untouched, since the example names no engine and no
+    value from any fixture.
+
+- **2026-08-26** — **Every bound on a local cell is a stopping rule, never an
+  error.** A cell is bounded in wall clock, in tokens per completion, and in how
+  much of the window its conversation may fill. All three record like the turn
+  cap: the cell is graded on what it left behind.
+  - **Because an ERROR cell is one `resume` owes forever.** It would hit the same
+    bound on the next sitting, and the run could never finish. That is the trap
+    the wall clock fell into first and the request timeout fell into second, in a
+    place the first fix had not looked.
+  - **The conversation is what fills the window, not the fact base.** Largest
+    fixture in the sweep, ~275 tokens; worst cell, 762,441 input tokens over 30
+    turns. A `Skill` call appends ~3,200 tokens and a `Grep` up to 6,000, so a
+    loop re-appends them until the server shifts the question out of the far end —
+    and the subject then answers a question it can no longer see, which reads
+    like reasoning. — `notes/a-local-subject.md`
+
+- **2026-08-26** — **A misconfigured instrument must refuse, not degrade.**
+  Models declaring 32,768 tokens were served at ollama's default 4,096, applied at
+  load time and invisible from the request side. Every cell of a sweep, and the
+  whole model survey before it, ran in a quarter of the assumed window and
+  produced plausible, worthless numbers. `preflight` now reads what a model is
+  **actually loaded with** and refuses below what the run assumes.
+  - **Best-effort, and it says so.** vLLM has no `/api/ps`; a check that cannot be
+    answered returns nothing rather than inventing a refusal.
+  - **This is the third instance, so it is a pattern and not luck** — the stale
+    engine binary (2026-08-25) and the fixture that moved under a resume
+    (2026-08-24) are the others. This harness's expensive failures are silent, and
+    a preflight check pays for itself the first time it fires.
+
 - **2026-08-26** — **A band needs three trials before it can be expressed at
   all.** `harness calibrate` keeps items whose prose accuracy lands in
   [0.2, 0.8], and at one trial per item the reachable accuracies are 0 and 1 —
