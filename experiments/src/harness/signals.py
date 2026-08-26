@@ -101,13 +101,24 @@ class Signals:
     #: run's records stay readable.
     engine_use: str
     wrote_program: bool
+    #: A `datalog` **process** ran. Narrow on purpose, and it has to agree with
+    #: `engine_use`: `invoked` is *defined* as having reached for the engine
+    #: without one ever running, so a transcript cannot be `invoked` and have
+    #: this true. It could, until 2026-08-26 — `measure` used the same wide
+    #: predicate as `engine_calls`, which counts a `Skill` invocation, while
+    #: `classify` used the narrow one. A cell whose only tool call was `Skill`
+    #: reported `engine_use=invoked` and `ran_engine=True` in the same record.
+    #: `decisions.md` 2026-08-25 records that a haiku cell did exactly that.
     ran_engine: bool
+    #: Calls that **reached for** the engine, a `Skill` invocation included. The
+    #: wide count, and deliberately not the same number as `rounds`.
     engine_calls: int
     #: Searches issued **after** the engine was first used. This is the silent
     #: switch: the subject had the engine, tried it, and went back to text.
     searches_after_engine: int
     searches_total: int
-    #: Engine invocations before the answer was written — a rough round count.
+    #: Times the engine actually **ran** — a rough count of feedback rounds.
+    #: Reaching for the skill is not a round: nothing came back to repair from.
     rounds: int
 
     def to_dict(self) -> dict:
@@ -139,12 +150,19 @@ def measure(transcript: Transcript) -> Signals:
         [c for c in searches if c.turn > first_engine_turn] if first_engine_turn is not None else []
     )
 
+    # Two counts, two predicates. `engine_turns` is *reaching for* the engine and
+    # is what a search after it is measured against; `ran` is the engine having
+    # actually run. Collapsing them is what made `ran_engine` contradict
+    # `engine_use` on any transcript that invoked the skill without running
+    # anything.
+    ran = [c.turn for c in calls if _ran_engine(c)]
+
     return Signals(
         engine_use=str(classify(transcript)),
         wrote_program=any(_is_program_write(c) for c in calls),
-        ran_engine=bool(engine_turns),
+        ran_engine=bool(ran),
         engine_calls=len(engine_turns),
         searches_after_engine=len(after),
         searches_total=len(searches),
-        rounds=len(engine_turns),
+        rounds=len(ran),
     )

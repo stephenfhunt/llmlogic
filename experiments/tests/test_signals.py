@@ -186,3 +186,63 @@ class TestEngineUse:
             ],
         )
         assert measure(transcript).to_dict()["engine_use"] == "answered-from"
+
+
+class TestReachAndRunningAgree:
+    """`engine_use` and `ran_engine` are two readings of one transcript, and they
+    have to be consistent. They were not: `measure` counted a `Skill` invocation
+    as the engine having run, while `classify` did not, so a cell whose only tool
+    call was `Skill` recorded `engine_use=invoked` *and* `ran_engine=True` —
+    where `invoked` means, among other things, that no engine process ever ran.
+    `decisions.md` 2026-08-25 records a haiku cell that did exactly that.
+    """
+
+    def test_invoking_the_skill_is_not_the_engine_running(self):
+        transcript = Transcript(cell_id="skill-only")
+        transcript.tool_calls.append(ToolCall(1, "Skill", {"name": "datalog"}))
+
+        measured = measure(transcript)
+
+        assert measured.engine_use == "invoked"
+        assert measured.ran_engine is False
+        assert measured.rounds == 0
+        # Still counted as having *reached* for it — that is the wide number, and
+        # it is deliberately not the same one.
+        assert measured.engine_calls == 1
+
+    def test_running_it_is(self):
+        transcript = Transcript(cell_id="ran")
+        transcript.tool_calls.append(ToolCall(1, "Bash", {"command": "datalog q.dl"}))
+
+        measured = measure(transcript)
+
+        assert measured.ran_engine is True
+        assert measured.rounds == 1
+
+    def test_the_two_readings_agree_on_every_shape(self):
+        shapes = [
+            [],
+            [ToolCall(1, "Grep", {"pattern": "x"})],
+            [ToolCall(1, "Skill", {"name": "datalog"})],
+            [ToolCall(1, "Write", {"file_path": "q.dl", "content": "a(X) :- b(X)."})],
+            [ToolCall(1, "Bash", {"command": "datalog q.dl"})],
+            [
+                ToolCall(1, "Skill", {"name": "datalog"}),
+                ToolCall(2, "Bash", {"command": "datalog q.dl"}),
+                ToolCall(3, "Write", {"file_path": "answer.txt", "content": "x"}),
+            ],
+        ]
+        for calls in shapes:
+            transcript = Transcript(cell_id="t")
+            transcript.tool_calls.extend(calls)
+            measured = measure(transcript)
+
+            if measured.engine_use == "none":
+                assert measured.ran_engine is False
+                assert measured.engine_calls == 0
+            if measured.engine_use == "answered-from":
+                assert measured.ran_engine is True
+            # Running it is one way of reaching for it, so the narrow count can
+            # never exceed the wide one.
+            assert measured.rounds <= measured.engine_calls
+            assert measured.ran_engine == (measured.rounds > 0)
