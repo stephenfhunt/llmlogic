@@ -60,6 +60,8 @@ client picks up an active profile. Do not ask for a key that is already there.
 pytest                          # harness units + property tests
 harness run --dry-run --all     # the full grid, stub subject, zero API calls
 harness run --domain access_control --smoke   # one real cell, both arms
+harness calibrate --dry-run     # the selection pass, offline, against the stub
+harness run --slate slates/<run-id>.json      # the grid over a calibrated slate
 harness run --resume results/<run-id>  # finish a run the session window cut off
 harness report results/<run-id> # render a run to markdown
 harness domains                 # the slate, and why a pack is unavailable
@@ -96,6 +98,7 @@ kind is in [`../docs/rules/editing-docs.md`](../docs/rules/editing-docs.md).
 | `decisions.md` | **append-only** | decisions + rationale, and open questions |
 | `notes/` | long-form | this project's overflow, per the length caps |
 | `results/` | **append-only** | what the instrument produced. Never edit a past run |
+| `slates/` | current-state | the calibrated slates a grid runs — one manifest per pass |
 
 `results/` is a record, not a workspace: a run that was made is a run that was
 made, and re-rendering a report is fine while rewriting a verdict is not.

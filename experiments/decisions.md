@@ -15,6 +15,54 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-08-26** — **A band needs three trials before it can be expressed at
+  all.** `harness calibrate` keeps items whose prose accuracy lands in
+  [0.2, 0.8], and at one trial per item the reachable accuracies are 0 and 1 —
+  both outside it, so the pass would have selected nothing and said the pool was
+  degenerate. Three trials make the band reachable at ⅓ and ⅔, which is the
+  cheapest arithmetic that expresses *not unanimous*.
+  - **Coarse on purpose.** This is a screen run before the money, not the
+    measurement: the grid is where `--repeats` and `stats.mcnemar` live, and
+    spending five trials to sharpen a decision that only has to sort items into
+    two piles buys precision the next step does not use.
+  - **A failed cell is not a trial**, and this is where that rule bites hardest.
+    An API error counted as a miss makes an item look hard, and *hard* is a keep
+    on one of the two bands — an item selected because the instrument broke.
+    `Outcome.rate` raises on zero trials rather than returning 0.0 for the same
+    reason.
+
+- **2026-08-26** — **`at-scale` is calibrated too, and its band is a floor.**
+  That track exceeds the prose arm's window by construction, so the middle band
+  would reject the whole of it. The rule there is `rate ≤ ⅓`: prose scoring ~0 is
+  what the track *claims*, and the pass is what turns the claim into evidence.
+  - **The rejection is the interesting direction.** An at-scale item the prose
+    arm answers well is a defective at-scale item — its fixture did not defeat
+    the arm it was built to defeat — and nothing but running the pass can say
+    which items those are. Selecting the track by construction was the
+    alternative, and it would have kept exactly those items.
+  - *Consequence, accepted:* the two tracks are selected by different rules and
+    reported in separate tables, which is the same split `decisions.md`
+    2026-08-25 made for the grid. A single pooled number across both would mean
+    nothing in either direction.
+
+- **2026-08-26** — **A slate is a manifest of provenance, not a copy of the
+  fixtures.** What `calibrate` pins is `(pack, seed, difficulty, track, id)` plus
+  a `resume.fingerprint`; `harness run --slate` regenerates each item and refuses
+  one that no longer hashes to what the pass measured. Storing the fixtures would
+  make a slate reproducible without making it *checkable* — the copy would still
+  be there after a generator's threshold moved, and the grid would measure a slate
+  nobody calibrated.
+  - **The rejected items are recorded too, with the rate that rejected them.** A
+    pass that keeps nothing is a finding about the pool, and a manifest that says
+    only what it kept cannot distinguish *too easy* from *never ran*.
+  - **Selection is separable from collection.** `calibrate --from <run-dir>`
+    re-reads a pass with a different band. Re-running the subject to move a band
+    would quietly be a different pass, since the subject is stochastic.
+  - *Consequence:* `cmd_resume` had one way to rebuild a grid and now needs three
+    (`cli._slate_of`). Finding that turned up a second defect it had all along —
+    the rebuild dropped `repeats`, so a repeated run resumed into trial 0 and
+    then refused its own later trials as strangers.
+
 - **2026-08-26** — **`static_analysis` is the one pack with no generator, and
   says so.** Its fixture is a fetched, pinned copy of `sqlparse`; there is
   nothing to seed. A synthetic package would have given real difficulty knobs and
@@ -120,6 +168,10 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
     agree. Divergent items are quarantined, not shipped — hand-verification proved
     the oracle matched the author's reading and could not prove there was only
     one. — `notes/discriminating-instrument.md`
+  - ***Consequences*** 2026-08-26: built as `harness calibrate`, and the band
+    turned out to need two things this entry did not say. It is not expressible
+    below three trials per item, and it does not apply to `at-scale` at all —
+    both above, dated today. The 0.2–0.8 figure survived contact unchanged.
 
 - **2026-08-25** — **Two difficulty tracks, and the token cap is one track's
   definition rather than a global rule.** `FIXTURE_TOKEN_BUDGET` exists because a

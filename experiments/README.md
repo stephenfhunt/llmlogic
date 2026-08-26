@@ -73,6 +73,13 @@ purpose. `static_analysis` has no generator: its fixture is a fetched real
 package, so there is nothing to seed. Long form:
 [`notes/generating-the-slate.md`](notes/generating-the-slate.md).
 
+Which of the pool becomes the slate is **selected, not designed**. `harness
+calibrate` runs one cheap pass — the prose arm at the weaker model, three trials
+an item — and keeps what lands in the informative band: an item the subject
+always gets right, or never does, cannot show whether the engine helped. What it
+keeps is pinned to a manifest in [`slates/`](slates/README.md), and `harness run
+--slate` regenerates from it and refuses an item that has moved.
+
 ## Running it
 
 ```sh

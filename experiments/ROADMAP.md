@@ -105,7 +105,14 @@ grid unable to answer S1. The argument and the numbers are in
   holds what only it can know. 994 tests over 12 seeds.
 - **`harness calibrate`** — generate a large pool, run the prose arm at one weak
   strength, keep the items whose accuracy lands in the informative band, pin the
-  slate to a manifest. The cheapest possible check for a ceiling. _queued._
+  slate to a manifest. The cheapest possible check for a ceiling.
+  _shipped 2026-08-26._ — `calibrate.py`, `cli.cmd_calibrate`. Three trials per
+  item, because one is 0 or 1 and the band is then empty by construction;
+  `at-scale` is calibrated too and its band is a **floor**, since prose scoring
+  ~0 is what that track claims. `harness run --slate <manifest>` runs what it
+  selected, regenerating each item and refusing one whose fingerprint moved;
+  `calibrate --from <run-dir>` moves the band without re-running the subject.
+  **No paid pass has run**: the slate has still never met a real subject.
 - **Statistics** — `--repeats N`, McNemar on the pairing the design already has,
   Wilson intervals, per-item F1 beside the binary verdict, and `harness power`
   before a grid is paid for. Pure stdlib. _shipped 2026-08-25._ — `stats.py`,
@@ -165,6 +172,15 @@ grid unable to answer S1. The argument and the numbers are in
   writes a sha256 of each task's question, fixture files and truth rows into
   `run.json`; `resume.moved` refuses on a mismatch, and stays silent for a run that
   recorded none. — `resume.py`, `decisions.md` 2026-08-24.
+- **A resume rebuilds the slate the run actually ran** — there are three
+  provenances now, and `cmd_resume` knew one. A calibration pass rebuilds its
+  pool from the spec in its own `run.json`; a calibrated run reloads its
+  manifest and refuses one whose bytes moved since; everything else is the
+  pinned slate. The same rebuild had also **dropped `repeats`**, so resuming a
+  repeated run produced trial 0 only and then refused every later trial as a
+  stranger — a resume that refused itself. Nothing had owed one, because nothing
+  had run one. _shipped 2026-08-26._ — `cli._slate_of`.
+
 - **TypeScript extraction** — a `tsc`-API fact extractor as a second
   `static_analysis` corpus. The better demo; blocked as a *control* by control 1,
   which wants a plain-Python oracle. _parked — **post-v1**._ — `decisions.md`

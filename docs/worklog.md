@@ -24,6 +24,59 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-26 (later) — The pass that picks the slate
+
+`harness calibrate` — the consumer everything on 2026-08-26 was built for. A
+generated pool runs once on the prose arm at the weak strength, the band keeps
+what is not unanimous, and what it keeps is pinned to a manifest a grid runs
+from. **1,353 harness tests green (+52)**, ruff clean, `harness run --dry-run
+--all` still renders the 168-cell grid offline. **No paid pass has run**: the
+slate has still never met a real subject.
+
+**Done**
+- **`calibrate.py`** — pool, tally, band, manifest. `harness calibrate` runs the
+  pass and selects from it; `--from <run-dir>` selects again from a pass already
+  paid for; `harness run --slate <manifest>` runs what it kept. The whole of it
+  is exercised by `--dry-run` against the stub, which is what keeps a step this
+  expensive tested.
+- **Three trials per item**, because the band is empty at one: 0 and 1 are the
+  only reachable accuracies, and both are outside [0.2, 0.8].
+- **A pool that fails loudly**: building it is offline, so a degenerate item
+  aborts rather than shrinking it, and two seeds agreeing in the four hex digits
+  an id carries are refused by name before a cell runs.
+- **A manifest holds provenance and a fingerprint, not fixtures**, and `load`
+  refuses an item that no longer hashes to what the pass measured.
+- **A resume knew one way to rebuild a grid and needed three** — pool, manifest,
+  pinned slate (`cli._slate_of`). Writing it found that the rebuild had been
+  **dropping `repeats`** all along: a repeated run resumed into trial 0 and then
+  refused its own later trials as strangers. Nothing had owed one.
+
+**Decided** (`experiments/decisions.md`, three entries)
+- **A band needs three trials before it can be expressed at all**, and a failed
+  cell is not a trial — *hard* is a keep on one of the two bands, so an ERROR
+  counted as a miss selects an item because the instrument broke.
+- **`at-scale` is calibrated too, and its band is a floor.** ~0 is what that
+  track claims; the interesting direction is the rejection, since an at-scale
+  item prose answers well did not defeat the arm it was built to defeat.
+- **Selection is separable from collection**, so moving the band costs nothing.
+  Re-running a stochastic subject to move it would be a different pass.
+- The 2026-08-25 calibration entry is annotated with what building it taught:
+  0.2–0.8 survived contact, the trial count and the second track did not.
+
+**Removed**
+- Nothing deleted: `cmd_resume`'s single rebuild path was *replaced* by
+  `_slate_of`. The planned rule selecting `at-scale` by construction was dropped
+  before it was written, in favour of calibrating that track too.
+
+**Next up**
+- **A paid calibration pass** — the default pool is 87 items in 261 cells at
+  haiku. That is the first time the generated slate meets a real subject, and the
+  first evidence about whether the items are informative rather than merely hard.
+- Then **`hypotheses.md`** before a grid is paid for, and `LocalSubject`.
+- **Open question:** if the pool comes back mostly *too hard* at difficulty 2–4,
+  the knobs are mis-scaled rather than the band being wrong — and only the
+  rejection histogram says which.
+
 ## 2026-08-26 — Five generators, and what only running them showed
 
 The owed generators landed: **six of seven packs** now have
@@ -132,57 +185,3 @@ intervals, paired tests and partial credit offline; nothing paid for yet. Long f
   in-scope claims are unmeasurable without it.
 - **Open question:** `at-scale` answers run 1,800–6,300 rows, which measures
   transcription as much as querying. An aggregate variant was considered, not built.
-
-## 2026-08-25 — Every diagnostic gets a code, and the last criterion closes
-
-The §12 code vocabulary — designed, built and pinned in one session. **S3 flips
-to met**, and with it **all six of §1's criteria hold**. 590 crate tests green
-(+5), 568 under `--no-default-features`, 237 harness tests green (+7), clippy and
-ruff clean.
-
-**Done**
-- **38 error codes over 153 emission sites**, by census rather than by naming
-  what was convenient (`datalog/notes/error-codes.md`). The code is a **required
-  constructor argument**, so every site had to be read — which is what produced
-  the census — and the category derives from it. `Warning::code` too, one flat
-  namespace across both.
-- **53 messages stopped faking a code** — *"type error: "*, *"malformed IR: "*
-  and two more: prefixes §12 forbade and nothing enforced, because until there
-  was a code they were the only way to tell an overflow from a type clash.
-- **Property C16** — every diagnostic carries a code from the pinned set — over
-  `arb_corrupted_program_text`, the suite's **first generator that makes programs
-  fail**; ten families across four categories. Plus the pinned code-set test.
-- **The harness refuses a stale engine.** Both call sites checked only that
-  `target/release/datalog` existed; `arms.require_engine` refuses one older than
-  `src/`. Done first: the corpus re-pin depended on it.
-
-**Decided**
-- **A code exists where the *fix* differs in kind**, not where a message differs
-  (§17 2026-08-25) — `Semantic` split into fifteen, four field diagnostics folded
-  into one.
-- **One fold was wrong and a test found it within the hour.** The conversion
-  table classifies *no such conversion* and *would lose the value* differently,
-  and went red the moment it read `error.code` instead of prose;
-  `lossy-conversion` split back off. Nine assertions changed the same way — the
-  crate's own tests are the first consumer to stop reading English.
-- **No generic fallback code**, planned and then declined: there was no tail, and
-  a generic code is where the next diagnostic goes without thinking.
-
-**Removed**
-- The four `Error::lex`/`parse`/`semantic`/`source` constructors, for one
-  `Error::new(code, …)`. The 53 message prefixes. §2's stale claim that spans are
-  lexer/parser-only — true until 2026-08-24, and not swept then. §12's *Not
-  covered* clause about the code. `reference.py`'s duplicate `EngineMissing`. The
-  2026-08-23 worklog entry, rotated to the archive.
-
-**Next up**
-- **Five items still carry a v1 tag** while §1 says the criteria are met — and
-  three are about programs the engine **accepts**, while S3 is about *rejected*
-  ones. Retag them or reopen the criterion: a user call, recorded in
-  `datalog/ROADMAP.md`'s preamble. Nothing was retagged to make the flip clean.
-- **Does the skill tell a subject the codes exist?** It does not, and adding it
-  changes the experiment's instrument — a deliberate call, not an edit, and
-  `--ablate` is how it would be measured.
-- Still open: the `scheduling` re-run, count-distinct, `internal-error` under the
-  wrong category, suggestion coverage (13 of 77), per-file attribution, §16/§17
-  hygiene.
