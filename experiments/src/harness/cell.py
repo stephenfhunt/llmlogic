@@ -44,6 +44,29 @@ class Strength:
     #: measures context rather than reasoning. Fixtures are capped against this.
     context_tokens: int
 
+    # --- the local seam ---------------------------------------------------
+    # A locally-served subject varies along axes an Anthropic model does not,
+    # and they belong on the strength because that is what a cell is crossed by:
+    # `qwen3-8b/structured` and `qwen3-8b/native` are two subjects to compare,
+    # so they must be two strengths, recorded separately and tabled separately.
+    # `None` throughout means "an Anthropic model", and `STRENGTHS` is untouched.
+
+    #: OpenAI-compatible base URL. Set means *this strength is served locally*,
+    #: which is also how the runner knows which subject to hand the cell to.
+    endpoint: str | None = None
+    #: ``native`` (a ``tools`` array) or ``structured`` (a constrained decoder).
+    #: Which one wins is a property of the model, not of the harness: measured
+    #: 2026-08-26, `qwen2.5-coder` cannot emit a parseable call natively at all,
+    #: `llama3.1` goes 0/4 → 2/4 under a grammar, and `qwen3` goes 2/4 → 0/4.
+    tool_protocol: str = "native"
+    #: Passed through when set. ``none`` turns a thinking model's thinking off —
+    #: 12.4s and 699 output tokens against 2.0s and 21, on `qwen3:8b`.
+    reasoning_effort: str | None = None
+
+    @property
+    def is_local(self) -> bool:
+        return self.endpoint is not None
+
     def cost(self, input_tokens: int, output_tokens: int) -> float:
         return (
             input_tokens * self.input_per_mtok + output_tokens * self.output_per_mtok
