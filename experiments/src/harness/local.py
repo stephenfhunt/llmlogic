@@ -76,7 +76,17 @@ _OUT_OF_TIME = "cell exceeded its wall clock"
 
 #: Wall clock for one completion. A 7B on a 3060 answers in seconds; minutes
 #: means the server is thrashing, and a cell that hangs is a sitting that ends.
+#: Also clamped by whatever is left of the cell's own budget — otherwise a single
+#: runaway completion outlives the cell that owns it.
 DEFAULT_REQUEST_TIMEOUT = 600
+
+#: Tokens one completion may generate. **Measured, not guessed:** `llama3.1:8b`
+#: on `access_control` ran a single completion to 11,963 tokens and was still
+#: going at 56 t/s when it was killed — a decode loop, not an answer. The largest
+#: legitimate turn in the whole sweep was 421 tokens. Without this, `max_turns`
+#: and the cell's wall clock both bound the *loop* while one turn inside it runs
+#: unbounded.
+DEFAULT_MAX_OUTPUT_TOKENS = 2048
 
 #: How much of a tool's output goes back to the model. A weak model with a 32k
 #: window that reads a whole fixture into context has no room left to think, and
@@ -505,6 +515,7 @@ class LocalSubject:
         reasoning_effort: str | None = None,
         tool_protocol: str = "native",
         max_cell_seconds: int = DEFAULT_MAX_CELL_SECONDS,
+        max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
@@ -534,6 +545,7 @@ class LocalSubject:
         #: open for an hour inside the cap. An overnight run needs a bound that
         #: is measured in time, because time is what it is being given.
         self.max_cell_seconds = max_cell_seconds
+        self.max_output_tokens = max_output_tokens
 
     def complete(
         self,
@@ -544,11 +556,13 @@ class LocalSubject:
         endpoint: str | None = None,
         model: str | None = None,
         reasoning_effort: str | None = None,
+        deadline: float | None = None,
     ) -> dict:
         payload: dict = {
             "model": model or self.model,
             "messages": messages,
             "temperature": self.temperature,
+            "max_tokens": self.max_output_tokens,
             "stream": False,
         }
         if tools:
@@ -568,12 +582,25 @@ class LocalSubject:
             data=json.dumps(payload).encode(),
             headers={"Content-Type": "application/json"},
         )
+        # The cell's remaining budget bounds the call. `max_cell_seconds` is
+        # checked between turns, so without this one completion can outlive the
+        # cell that owns it — which is how a 432-cell sweep spent ten minutes
+        # inside a single decode loop.
+        timeout = self.request_timeout
+        if deadline is not None:
+            timeout = max(5.0, min(float(timeout), deadline - time.monotonic()))
         try:
-            with urllib.request.urlopen(request, timeout=self.request_timeout) as response:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
                 return json.loads(response.read().decode())
         except urllib.error.HTTPError as exc:
             raise LocalError(f"HTTP {exc.code}: {exc.read().decode()[:400]}") from exc
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            # A request that ran out of clock is the harness's own rule biting,
+            # not an instrument failure: that cell is graded on what it left
+            # behind. Recorded as ERROR it would be a cell `resume` owes forever,
+            # timing out again on every sitting.
+            if isinstance(exc, TimeoutError) or "timed out" in str(exc).lower():
+                raise LocalError(_OUT_OF_TIME) from exc
             raise LocalError(f"{type(exc).__name__}: {exc}") from exc
 
     def fatal(self, error: str) -> bool:
@@ -629,7 +656,7 @@ class LocalSubject:
         endpoint, model, protocol, effort = self._configure(cell)
         started = time.monotonic()
         deadline = started + self.max_cell_seconds
-        served = dict(endpoint=endpoint, model=model, reasoning_effort=effort)
+        served = dict(endpoint=endpoint, model=model, reasoning_effort=effort, deadline=deadline)
         messages = [
             {"role": "system", "content": self._system(workspace, protocol)},
             {"role": "user", "content": workspace.prompt},

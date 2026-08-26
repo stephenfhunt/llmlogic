@@ -235,6 +235,59 @@ class TestControlsThatRideOnTheLoop:
         assert len(transcript.denials) == 1
 
 
+class TestOneTurnCannotOutliveItsCell:
+    """Measured on a real sweep: `llama3.1:8b` ran one completion to 11,963
+    tokens at 56 t/s and was still going when it was killed. `max_turns` and the
+    cell's wall clock both bound the *loop*; nothing bounded the turn."""
+
+    def _fake_urlopen(self, monkeypatch, raises=None):
+        seen = {}
+
+        class Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return json.dumps(_text("ok")).encode()
+
+        def urlopen(request, timeout=None):
+            seen["timeout"] = timeout
+            seen["payload"] = json.loads(request.data.decode())
+            if raises:
+                raise raises
+            return Response()
+
+        monkeypatch.setattr(local.urllib.request, "urlopen", urlopen)
+        return seen
+
+    def test_a_completion_is_capped_in_tokens(self, monkeypatch):
+        seen = self._fake_urlopen(monkeypatch)
+        LocalSubject().complete([{"role": "user", "content": "hi"}])
+        assert seen["payload"]["max_tokens"] == local.DEFAULT_MAX_OUTPUT_TOKENS
+
+    def test_the_call_is_clamped_by_what_is_left_of_the_cell(self, monkeypatch):
+        import time as clock
+
+        seen = self._fake_urlopen(monkeypatch)
+        LocalSubject(request_timeout=600).complete(
+            [{"role": "user", "content": "hi"}], deadline=clock.monotonic() + 3
+        )
+        assert seen["timeout"] < 600
+
+    def test_a_timed_out_request_is_a_stopping_rule_not_an_error(self, monkeypatch, tmp_path):
+        """As an ERROR it is a cell `resume` owes forever — it would time out
+        again on every sitting and the run could never finish."""
+        from harness.runner import STOPPING_RULE
+
+        self._fake_urlopen(monkeypatch, raises=TimeoutError("timed out"))
+        transcript = LocalSubject().run(cell_for("native"), workspace_for("prose", tmp_path))
+        assert transcript.error == local._OUT_OF_TIME
+        assert STOPPING_RULE.search(transcript.error)
+
+
 class TestSweepPlumbing:
     def test_a_strength_name_is_an_identifier_not_a_path(self):
         """It lands in `Cell.id`, which names a transcript file."""
