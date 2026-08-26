@@ -164,6 +164,19 @@ def assemble(task: Task, arm: str = "prose") -> str:
     return _base(task) + (MANDATE if arm == "engine-forced" else "")
 
 
+def _example(shape: tuple[str, ...]) -> str:
+    """Two lines of placeholders, with this task's own arity.
+
+    Derived rather than fixed, and that is the point. A fixed two-field example
+    shown to a one-field question is an invitation to add a field, which is
+    exactly the mistake being fixed: `qwen3:8b` returned the three correct order
+    ids as `o2|150`, right answer with the amount appended. The placeholders are
+    obviously not values and obviously not field names.
+    """
+    letters = "abcdefgh"[: len(shape)]
+    return "\n".join(FIELD_SEPARATOR.join(f"{letter}{row}" for letter in letters) for row in (1, 2))
+
+
 def _base(task: Task) -> str:
     shape = FIELD_SEPARATOR.join(task.answer_shape)
     return f"""\
@@ -183,6 +196,11 @@ Write your final answer to `{ANSWER_FILE}` in that same directory:
 - each line has the fields `{shape}`, separated by `{FIELD_SEPARATOR}`
 - order does not matter; duplicates are ignored
 - if the answer is empty, write an empty file
+
+An answer with two results would be exactly these two lines, where each
+placeholder stands for one value you worked out:
+
+{_example(task.answer_shape)}
 
 Use whatever approach you think is best.
 """
