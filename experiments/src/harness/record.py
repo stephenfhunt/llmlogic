@@ -139,6 +139,7 @@ class RecordStore:
                     "cell_id": transcript.cell_id,
                     "final_text": transcript.final_text,
                     "first_program": transcript.first_program,
+                    "reasoning": transcript.reasoning,
                     "tool_calls": [
                         {"turn": c.turn, "name": c.name, "input": c.input}
                         for c in transcript.tool_calls

@@ -53,6 +53,22 @@ class Transcript:
     #: mid-run model fallback, and the price table here can go stale.
     cost_usd: float | None = None
 
+    #: What the model thought, per completion, when it thinks out loud. Kept
+    #: because it is the *thing under test*: S1's claim is that a model's own
+    #: chain of thought is error-prone where an engine is reliable, and a harness
+    #: that discards the chain of thought cannot show the failure it is named
+    #: for. Empty for a model that does not reason separately, and for every SDK
+    #: cell — the Agent SDK does not hand it back.
+    reasoning: list[str] = field(default_factory=list)
+
+    #: Tool calls the model emitted with arguments that would not parse. A weak
+    #: model fails at tool *syntax* as well as at reasoning, and folding the two
+    #: together puts a tool-calling failure into a reasoning number — the engine
+    #: arm losing because the subject could not spell a `Bash` call is an
+    #: instrument result, not a finding about logic. Always 0 for the SDK
+    #: subject, which never hands over a malformed call.
+    malformed_calls: int = 0
+
     #: The first Datalog program the subject wrote, captured **before any tool
     #: result came back** — that one read the skill; every later one read the
     #: diagnostics. Control 4, and the half of S1 that a final-answer-only
