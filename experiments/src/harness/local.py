@@ -49,6 +49,7 @@ from harness.arms import Workspace
 from harness.cell import Cell
 from harness.confine import violation
 from harness.engine_use import program_from_call
+from harness.grade import ANSWER_FILE
 from harness.transcript import ToolCall, Transcript, Usage
 
 #: Where the model is served. An OpenAI-compatible base URL and nothing else is
@@ -277,6 +278,46 @@ def _schema(name: str, description: str, properties: dict, required: list[str]) 
     }
 
 
+#: Somewhere to think before acting. **Not a courtesy — parity.** The `native`
+#: protocol lets a model put reasoning in the assistant message *alongside* its
+#: tool call, and the first `structured` schema gave it nowhere at all: one JSON
+#: action per turn, no scratchpad. Measured on the 2026-08-26 sweep, structured
+#: failed by **looping to the turn cap without ever writing an answer** in 58
+#: cells, which is what a subject that cannot plan between actions looks like.
+#: Required rather than optional, because a field a model may skip is one a weak
+#: model does skip.
+#:
+#: It lands in `Transcript.reasoning`, beside a thinking model's own chain of
+#: thought — the two are the same evidence about the same claim.
+THOUGHT = {
+    "type": "string",
+    "description": "Briefly: what you have worked out so far, and why this action next.",
+}
+
+#: How many times a subject that stops without writing its answer is told so.
+#:
+#: A real agent harness checks the exit condition and says something; ours let
+#: the subject walk away. Measured on `qwen3:8b`, the thoughts are *correct* —
+#: "Carol is listed under the 'engineering' department. The answer is
+#: 'engineering'" — and then it finishes without a `Write`, because in ordinary
+#: conversation saying the answer **is** delivering it. 55% of the sweep's cells
+#: graded `no-answer`, many of them like this: right, and filed nowhere.
+#:
+#: This is a **deliberate asymmetry with the SDK subject**, which gets no such
+#: reminder, and it is recorded rather than hidden (`decisions.md` 2026-08-26).
+#: It applies identically to every arm, so the comparison the experiment is
+#: actually about — prose against engine, within one subject — is untouched.
+#: Bounded, because a subject that ignores two reminders is not going to write
+#: the file on the third and the turn cap should not be spent finding out.
+COMPLETION_REMINDERS = 2
+
+#: What the subject is told. Deliberately says nothing about the *answer* — only
+#: that the file it was already asked for is not there.
+REMINDER = (
+    f"`{ANSWER_FILE}` does not exist yet. Write your answer to it in the format "
+    "the question specified, then finish."
+)
+
 #: The action a `structured` turn must produce. Not a tool name — a subject that
 #: is finished has to be able to *say* so inside the same grammar, or the only
 #: way out of the loop is the turn cap.
@@ -302,10 +343,11 @@ def action_schema(has_engine: bool) -> dict:
                 "type": "object",
                 "additionalProperties": False,
                 "properties": {
+                    "thought": THOUGHT,
                     "action": {"const": function["name"]},
                     "arguments": parameters,
                 },
-                "required": ["action", "arguments"],
+                "required": ["thought", "action", "arguments"],
             }
         )
     variants.append(
@@ -313,6 +355,7 @@ def action_schema(has_engine: bool) -> dict:
             "type": "object",
             "additionalProperties": False,
             "properties": {
+                "thought": THOUGHT,
                 "action": {"const": FINAL_ACTION},
                 # **No text field.** Somewhere to put an answer is an invitation
                 # to answer *there*, and qwen3 took it: it read the fixture,
@@ -326,7 +369,7 @@ def action_schema(has_engine: bool) -> dict:
                     "properties": {},
                 },
             },
-            "required": ["action", "arguments"],
+            "required": ["thought", "action", "arguments"],
         }
     )
     return {"oneOf": variants}
@@ -339,7 +382,10 @@ def protocol_brief(has_engine: bool) -> str:
     them in the system message. Same text either way — a subject told *more* here
     than the tool schemas say would be a different instrument.
     """
-    lines = ["You have these actions. Reply with exactly one JSON object per turn."]
+    lines = [
+        "You have these actions. Reply with exactly one JSON object per turn, "
+        "carrying your reasoning in `thought` and the action in `action`.",
+    ]
     for schema in tool_schemas(has_engine):
         function = schema["function"]
         fields = ", ".join(function["parameters"]["properties"])
@@ -783,6 +829,7 @@ class LocalSubject:
         """
         schema = action_schema(workspace.has_engine)
         turn = 0
+        reminders = 0
         for _ in range(self.max_turns):
             if time.monotonic() > deadline:
                 transcript.error = _OUT_OF_TIME
@@ -800,12 +847,18 @@ class LocalSubject:
                 action = json.loads(content)
                 name = str(action["action"])
                 arguments = dict(action.get("arguments") or {})
+                if thought := str(action.get("thought") or ""):
+                    transcript.reasoning.append(thought)
             except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
                 transcript.malformed_calls += 1
                 messages.append({"role": "user", "content": f"Malformed action: {exc}"})
                 continue
 
             if name == FINAL_ACTION:
+                if reminders < COMPLETION_REMINDERS and not _answered(workspace):
+                    reminders += 1
+                    messages.append({"role": "user", "content": REMINDER})
+                    continue
                 transcript.final_text = "(finished)"
                 return
 
@@ -819,6 +872,7 @@ class LocalSubject:
     def _native(self, transcript, tools, workspace, messages, served, deadline, window) -> None:
         schemas = tool_schemas(workspace.has_engine)
         turn = 0
+        reminders = 0
         for _ in range(self.max_turns):
             if time.monotonic() > deadline:
                 transcript.error = _OUT_OF_TIME
@@ -840,6 +894,10 @@ class LocalSubject:
                 }
             )
             if not calls:
+                if reminders < COMPLETION_REMINDERS and not _answered(workspace):
+                    reminders += 1
+                    messages.append({"role": "user", "content": REMINDER})
+                    continue
                 transcript.final_text = str(message.get("content") or "")
                 return
 
@@ -860,6 +918,10 @@ class LocalSubject:
                 if result.denied:
                     transcript.denials.append(f"turn {turn}: {name} — {result.text}")
                 messages.append(_tool_reply(call, result.text))
+
+
+def _answered(workspace: Workspace) -> bool:
+    return (workspace.path / ANSWER_FILE).exists()
 
 
 def _keep_reasoning(transcript: Transcript, message: dict) -> None:

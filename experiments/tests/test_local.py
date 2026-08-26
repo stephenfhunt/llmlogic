@@ -80,8 +80,8 @@ def _tool_call(name, arguments, call_id="c1", content=""):
     }
 
 
-def _action(name, arguments):
-    return _text(json.dumps({"action": name, "arguments": arguments}))
+def _action(name, arguments, thought="because"):
+    return _text(json.dumps({"thought": thought, "action": name, "arguments": arguments}))
 
 
 class TestTheNativeLoop:
@@ -93,12 +93,17 @@ class TestTheNativeLoop:
             [
                 _tool_call("Read", {"file_path": "employee.csv"}),
                 _tool_call("Grep", {"pattern": "carol"}, call_id="c2"),
+                _tool_call(
+                    "Write",
+                    {"file_path": "answer.txt", "content": "engineering"},
+                    call_id="c3",
+                ),
                 _text("done"),
             ]
         )
         transcript = subject.run(cell_for("native"), workspace_for("prose", tmp_path))
         assert transcript.error is None
-        assert [c.name for c in transcript.tool_calls] == ["Read", "Grep"]
+        assert [c.name for c in transcript.tool_calls] == ["Read", "Grep", "Write"]
         assert transcript.final_text == "done"
 
     def test_a_malformed_call_is_counted_and_not_recorded_as_a_tool_call(self, tmp_path):
@@ -162,6 +167,27 @@ class TestTheStructuredLoop:
         variants = {v["properties"]["action"]["const"]: v for v in action_schema(True)["oneOf"]}
         assert variants[FINAL_ACTION]["properties"]["arguments"]["properties"] == {}
 
+    def test_every_action_carries_somewhere_to_think(self):
+        """Parity, not courtesy: `native` lets a model reason in the assistant
+        message alongside its call, and the first structured schema gave it
+        nowhere at all. 58 cells of the 2026-08-26 sweep looped to the turn cap
+        without writing an answer — what a subject that cannot plan looks like."""
+        for variant in action_schema(has_engine=True)["oneOf"]:
+            assert "thought" in variant["properties"]
+            assert "thought" in variant["required"]
+
+    def test_the_thought_is_kept_as_reasoning(self, tmp_path):
+        """Beside a thinking model's own chain of thought — the two are the same
+        evidence about the same claim."""
+        subject = Scripted(
+            [
+                _action("Read", {"file_path": "employee.csv"}, thought="check the file first"),
+                _action(FINAL_ACTION, {}, thought="done"),
+            ]
+        )
+        transcript = subject.run(cell_for("structured"), workspace_for("prose", tmp_path))
+        assert "check the file first" in transcript.reasoning
+
     def test_every_action_pins_its_own_argument_names(self):
         """Constrained to *some* JSON, three of three models still invented
         `file` for `file_path`. The union is what makes that unrepresentable."""
@@ -186,6 +212,50 @@ class TestPerCellConfiguration:
     def test_an_unknown_protocol_is_refused(self):
         with pytest.raises(ValueError, match="no such tool protocol"):
             LocalSubject(tool_protocol="interpretive-dance")
+
+
+class TestTheCompletionReminder:
+    """A real agent harness checks the exit condition and says something; ours
+    let the subject walk away. Measured on `qwen3:8b`, the thoughts are correct
+    — "Carol is listed under the 'engineering' department" — and then it finishes
+    without a `Write`, because in conversation saying the answer *is* delivering
+    it. This is a deliberate asymmetry with the SDK subject, recorded in
+    `decisions.md`, applied identically to every arm."""
+
+    def test_finishing_without_an_answer_is_questioned_once(self, tmp_path):
+        subject = Scripted(
+            [
+                _action(FINAL_ACTION, {}),
+                _action("Write", {"file_path": "answer.txt", "content": "engineering"}),
+                _action(FINAL_ACTION, {}),
+            ]
+        )
+        workspace = workspace_for("prose", tmp_path)
+        transcript = subject.run(cell_for("structured"), workspace)
+        assert (workspace.path / "answer.txt").read_text() == "engineering"
+        assert transcript.error is None
+
+    def test_the_reminder_says_nothing_about_the_answer(self):
+        """Only that the file already asked for is not there. Anything more
+        would be coaching the subject on the task."""
+        assert "answer.txt" in local.REMINDER
+        for leak in ("engineering", "correct", "hint", "try"):
+            assert leak not in local.REMINDER.lower()
+
+    def test_a_subject_that_ignores_it_is_let_go(self, tmp_path):
+        """Bounded: one that ignores two reminders will not write the file on the
+        third, and the turn cap should not be spent finding out."""
+        subject = Scripted([_action(FINAL_ACTION, {})] * 6)
+        transcript = subject.run(cell_for("structured"), workspace_for("prose", tmp_path))
+        assert transcript.final_text == "(finished)"
+        assert len(subject.seen) == local.COMPLETION_REMINDERS + 1
+
+    def test_a_subject_that_already_answered_is_not_nagged(self, tmp_path):
+        workspace = workspace_for("prose", tmp_path)
+        (workspace.path / "answer.txt").write_text("engineering")
+        subject = Scripted([_action(FINAL_ACTION, {})])
+        subject.run(cell_for("structured"), workspace)
+        assert len(subject.seen) == 1
 
 
 class TestControlsThatRideOnTheLoop:
