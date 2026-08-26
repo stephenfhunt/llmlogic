@@ -69,7 +69,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         # A local run is not billed and not rate-limited, so it is bounded by
         # wall clock rather than by the account's window — which is what makes it
         # the arm of this project that can be left running overnight.
-        problems = local.preflight(args.endpoint, args.local_model)
+        problems = local.preflight(args.endpoint, args.local_model, args.min_context)
         if problems:
             for problem in problems:
                 print(problem, file=sys.stderr)
@@ -747,6 +747,14 @@ def main(argv: list[str] | None = None) -> int:
         "--endpoint",
         default=local.DEFAULT_BASE_URL,
         help="OpenAI-compatible base URL for --local-model",
+    )
+    run.add_argument(
+        "--min-context",
+        type=int,
+        default=local.DEFAULT_CONTEXT_TOKENS,
+        help="refuse to start if a model is served with a smaller window. A "
+        "context below what the run assumes is a different experiment, not a "
+        "degraded one; 0 skips the check",
     )
     run.add_argument(
         "--reasoning-effort",

@@ -80,6 +80,12 @@ _OUT_OF_TIME = "cell exceeded its wall clock"
 #: runaway completion outlives the cell that owns it.
 DEFAULT_REQUEST_TIMEOUT = 600
 
+#: The window a local strength is built with, and what `preflight` holds the
+#: server to. 32,768 is what these models declare and what a 12 GiB card can
+#: serve them at — measured: 8.4 GiB for `llama3.1:8b`, 9.2 for `qwen3:8b`, 6.1
+#: for `qwen2.5-coder:7b`, one resident at a time.
+DEFAULT_CONTEXT_TOKENS = 32_768
+
 #: Tokens one completion may generate. **Measured, not guessed:** `llama3.1:8b`
 #: on `access_control` ran a single completion to 11,963 tokens and was still
 #: going at 56 t/s when it was killed — a decode loop, not an answer. The largest
@@ -465,7 +471,7 @@ def strengths(
                     model=model,
                     input_per_mtok=0.0,
                     output_per_mtok=0.0,
-                    context_tokens=32_768,
+                    context_tokens=DEFAULT_CONTEXT_TOKENS,
                     endpoint=endpoint,
                     tool_protocol=protocol,
                     reasoning_effort=reasoning_effort,
@@ -474,12 +480,21 @@ def strengths(
     return tuple(built)
 
 
-def preflight(endpoint: str, models: list[str]) -> list[str]:
+def preflight(endpoint: str, models: list[str], min_context: int = 0) -> list[str]:
     """What would stop this run, checked before a single cell is built.
 
     An overnight run that dies on cell 3 because a model was never pulled has
     wasted the night, and the evidence that it did is a log nobody is awake to
-    read. Everything here is knowable in one request.
+    read.
+
+    ``min_context`` is here because of a defect that cost a whole sweep and
+    announced nothing. A model declaring 32,768 tokens was **served at 4,096**:
+    ollama's own default, applied at load time and invisible from the request
+    side. Every cell ran in a window a quarter the size of the one the strength
+    claimed, long conversations were silently shifted out from under the
+    question, and the run produced plausible, worthless numbers. A context that
+    is smaller than the harness thinks is not a degraded run, it is a different
+    experiment — so this refuses rather than warns.
     """
     url = f"{endpoint.rstrip('/')}/models"
     try:
@@ -494,7 +509,57 @@ def preflight(endpoint: str, models: list[str]) -> list[str]:
             near = sorted(name for name in served if name.split(":")[0] == model.split(":")[0])
             hint = f" — served: {', '.join(sorted(served)) or '(none)'}" if not near else ""
             problems.append(f"{model} is not served{hint}")
+    if problems or not min_context:
+        return problems
+
+    for model in models:
+        window = served_context(endpoint, model)
+        if window is None:
+            # A server that cannot say is not a server that is wrong. vLLM has no
+            # `/api/ps`; the check is best-effort and says so rather than
+            # inventing a refusal.
+            continue
+        if window < min_context:
+            problems.append(
+                f"{model} is served with a {window}-token context, below the "
+                f"{min_context} this run assumes — set OLLAMA_CONTEXT_LENGTH "
+                f"(or the server's equivalent) and restart it"
+            )
     return problems
+
+
+def served_context(endpoint: str, model: str) -> int | None:
+    """The context window a model is **actually loaded with**, or ``None``.
+
+    Not the window the model declares: the one the server chose. Reading it
+    requires loading the model, so this warms it with a one-token request first —
+    which a run is about to do anyway. ollama-specific by necessity (`/api/ps`),
+    and `None` wherever that is not available.
+    """
+    base = endpoint.rstrip("/")
+    base = base[: -len("/v1")] if base.endswith("/v1") else base
+    try:
+        warm = urllib.request.Request(
+            f"{endpoint.rstrip('/')}/chat/completions",
+            data=json.dumps(
+                {
+                    "model": model,
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "max_tokens": 1,
+                    "reasoning_effort": "none",
+                }
+            ).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(warm, timeout=600):
+            pass
+        with urllib.request.urlopen(f"{base}/api/ps", timeout=20) as response:
+            for entry in json.load(response).get("models", []):
+                if entry.get("model") == model or entry.get("name") == model:
+                    return int(entry.get("context_length") or 0) or None
+    except Exception:  # noqa: BLE001 — an unanswerable check is not a failure
+        return None
+    return None
 
 
 class LocalSubject:

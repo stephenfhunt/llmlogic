@@ -288,6 +288,25 @@ class TestOneTurnCannotOutliveItsCell:
         assert STOPPING_RULE.search(transcript.error)
 
 
+def _fake_models(ids):
+    """Stand in for the endpoint's `/models` listing."""
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return json.dumps({"data": [{"id": name} for name in ids]}).encode()
+
+    def urlopen(url, timeout=None):
+        return Response()
+
+    return urlopen
+
+
 class TestSweepPlumbing:
     def test_a_strength_name_is_an_identifier_not_a_path(self):
         """It lands in `Cell.id`, which names a transcript file."""
@@ -299,6 +318,23 @@ class TestSweepPlumbing:
         built = local.strengths(["a", "b"], ["native", "structured"])
         assert len(built) == 4
         assert len({s.name for s in built}) == 4
+
+    def test_preflight_refuses_a_window_smaller_than_the_run_assumes(self, monkeypatch):
+        """The defect this check exists for cost a whole sweep and announced
+        nothing: models declaring 32,768 tokens were served at ollama's default
+        4,096, so every cell ran in a quarter of the window its strength claimed
+        and the run produced plausible, worthless numbers."""
+        monkeypatch.setattr(local, "served_context", lambda endpoint, model: 4096)
+        monkeypatch.setattr(local.urllib.request, "urlopen", _fake_models({"qwen3:8b"}))
+        problems = local.preflight("http://x/v1", ["qwen3:8b"], min_context=32768)
+        assert problems and "4096-token context" in problems[0]
+
+    def test_preflight_does_not_invent_a_refusal_it_cannot_justify(self, monkeypatch):
+        """A server with no `/api/ps` — vLLM — cannot answer, and an unanswerable
+        check is not a failure."""
+        monkeypatch.setattr(local, "served_context", lambda endpoint, model: None)
+        monkeypatch.setattr(local.urllib.request, "urlopen", _fake_models({"qwen3:8b"}))
+        assert local.preflight("http://x/v1", ["qwen3:8b"], min_context=32768) == []
 
     def test_preflight_reports_a_server_that_is_not_there(self):
         problems = local.preflight("http://127.0.0.1:9/v1", ["whatever"])
