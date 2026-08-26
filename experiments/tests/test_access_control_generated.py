@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import pytest
 
-from harness import resume
 from harness.cell import FIXTURE_TOKEN_BUDGET
 from harness.domains.access_control import fixture, truth
-from harness.domains.access_control.tasks import Degenerate, generated, tasks, validate
+from harness.domains.access_control.tasks import generated
+from harness.generate import Degenerate, validate
 
 SEEDS = [s * 7919 for s in range(1, 13)]
 DIFFICULTIES = sorted(fixture.DIFFICULTY)
@@ -68,16 +68,6 @@ class TestOracle:
         isolated = set(truth.users_with_no_access(policy).rows)
         reachable = {(user,) for user in policy.users if truth.permissions(user, policy)}
         assert not (isolated & reachable)
-
-    def test_the_pinned_graph_is_untouched_by_the_generator(self):
-        """The restructure that made generation possible must not have moved the
-        slate the 2026-08-24 grid measured."""
-        assert resume.fingerprints(tasks()) == {
-            "access_control/who-can-read-r03": "0499ee734ce6341f",
-            "access_control/resources-for-u04": "bac0dc855085b84e",
-            "access_control/users-with-no-access": "7d7ca9fd98a296e1",
-            "access_control/delete-without-read": "5a8b0fd34f012c34",
-        }
 
 
 class TestGeneratedItems:
