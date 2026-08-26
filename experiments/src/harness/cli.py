@@ -12,7 +12,18 @@ import sys
 import tempfile
 from pathlib import Path
 
-from harness import ablate, arms, calibrate, corpus, domains, generate, reference, report, resume
+from harness import (
+    ablate,
+    arms,
+    calibrate,
+    corpus,
+    domains,
+    generate,
+    local,
+    reference,
+    report,
+    resume,
+)
 from harness.agent import (
     DEFAULT_MAX_BUDGET_USD,
     DEFAULT_MAX_TURNS,
@@ -54,6 +65,20 @@ def cmd_run(args: argparse.Namespace) -> int:
     if args.smoke:
         tasks = tasks[:1]
 
+    if args.local_model:
+        # A local run is not billed and not rate-limited, so it is bounded by
+        # wall clock rather than by the account's window — which is what makes it
+        # the arm of this project that can be left running overnight.
+        problems = local.preflight(args.endpoint, args.local_model)
+        if problems:
+            for problem in problems:
+                print(problem, file=sys.stderr)
+            return 1
+        strengths = local.strengths(
+            args.local_model, args.protocol or ["native"], args.endpoint, args.reasoning_effort
+        )
+        return _run_grid(args, tasks, strengths, local=True)
+
     strengths = STRENGTHS
     if args.strength:
         wanted = set(args.strength)
@@ -63,6 +88,17 @@ def cmd_run(args: argparse.Namespace) -> int:
             print(f"no such strength: {sorted(wanted)} — have {known}", file=sys.stderr)
             return 1
 
+    return _run_grid(args, tasks, strengths, local=False)
+
+
+def _run_grid(args: argparse.Namespace, tasks: list, strengths: tuple, local: bool) -> int:
+    """Cross, confirm, record, run — shared by the billed and the local paths.
+
+    The only differences a local run makes are where the confirmation comes from
+    (wall clock, not money) and which subject answers the cells. Everything that
+    carries the run's validity — the crossing, the fingerprints, the metadata a
+    resume rebuilds from — is the same code, because a local run is a run.
+    """
     # An ablation is engine-arm only: cutting a block of the engine's own
     # documentation cannot move an arm that never had it, so a prose cell here
     # would be paying to re-measure the control.
@@ -84,21 +120,40 @@ def cmd_run(args: argparse.Namespace) -> int:
             return 1
 
     cells = grid(tasks, strengths, cell_arms, args.ablate, args.repeats)
+    if local:
+        # Group a local sitting by model. `grid` varies strength fastest, which
+        # is right when a strength is an API parameter and wrong when it is five
+        # gigabytes of weights: measured, a model switch costs ~4s against ~0.2s
+        # warm, so the default order spends about half an hour of a 432-cell
+        # sweep doing nothing but moving models in and out of VRAM. A stable sort
+        # keeps trials outermost — a truncated sitting still holds whole passes,
+        # now of one model at a time — and leaves every cell id untouched, so
+        # `resume` is unaffected.
+        cells.sort(key=lambda cell: (cell.trial, cell.strength.name))
     if args.limit:
         cells = cells[: args.limit]
 
-    # A real run spends money on someone's account, so it says how much it could
-    # cost and refuses to start without being told to. The store is built after
-    # this, not before: a refused run should leave no trace in `results/`, which
-    # is a record of runs that happened.
+    # A run says what it could cost and refuses to start without being told to.
+    # The currency differs: an Anthropic run spends someone's account, a local one
+    # spends the night. The store is built after this, not before — a refused run
+    # should leave no trace in `results/`, which records runs that happened.
     if not args.dry_run:
-        ceiling = len(cells) * args.budget
-        print(
-            f"{len(cells)} cells at up to {args.budget:.2f} USD each — ceiling {ceiling:.2f} USD.",
-            file=sys.stderr,
-        )
+        if local:
+            hours = len(cells) * args.max_cell_seconds / 3600
+            print(
+                f"{len(cells)} cells at up to {args.max_cell_seconds}s each — "
+                f"worst case {hours:.1f}h. No API cost.",
+                file=sys.stderr,
+            )
+        else:
+            ceiling = len(cells) * args.budget
+            print(
+                f"{len(cells)} cells at up to {args.budget:.2f} USD each — "
+                f"ceiling {ceiling:.2f} USD.",
+                file=sys.stderr,
+            )
         if not args.yes:
-            print("re-run with --yes to spend it.", file=sys.stderr)
+            print("re-run with --yes to start it.", file=sys.stderr)
             return 2
 
     store = RecordStore(RESULTS_ROOT, new_run_id("dry" if args.dry_run else "run"))
@@ -114,6 +169,17 @@ def cmd_run(args: argparse.Namespace) -> int:
         ablate=args.ablate,
         max_turns=args.max_turns,
         max_budget_usd=args.budget,
+        local=(
+            {
+                "endpoint": args.endpoint,
+                "models": list(args.local_model),
+                "protocols": list(args.protocol or ["native"]),
+                "reasoning_effort": args.reasoning_effort,
+                "max_cell_seconds": args.max_cell_seconds,
+            }
+            if local
+            else None
+        ),
         slate=(
             {"path": str(Path(args.slate).resolve()), "digest": calibrate.digest(Path(args.slate))}
             if args.slate
@@ -121,17 +187,33 @@ def cmd_run(args: argparse.Namespace) -> int:
         ),
     )
 
-    subject = (
-        StubSubject()
-        if args.dry_run
-        else AgentSubject(max_turns=args.max_turns, max_budget_usd=args.budget)
-    )
+    subject = _subject(args, local)
     result = run_grid(cells, subject, store, WORKSPACE_ROOT, on_cell=_progress)
     path = report.write(store.dir)
     simulated = " (simulated)" if args.dry_run else ""
     print(f"\n{len(result.records)} cells · {result.cost_usd:.2f} USD{simulated}")
     print(f"report: {path}")
     return _halted(result, store.dir, len(cells))
+
+
+def _subject(args: argparse.Namespace, local_run: bool):
+    """Which subject answers the cells.
+
+    Three now, and the choice is the run's, not the cell's: a grid mixing an
+    Anthropic strength with a local one would be comparing two models *and* two
+    drivers, and nothing in the record would say which difference moved the
+    number. `LocalSubject` reads its model and protocol off each cell's strength,
+    so one instance still covers a whole sweep.
+    """
+    if args.dry_run:
+        return StubSubject()
+    if local_run:
+        return local.LocalSubject(
+            base_url=args.endpoint,
+            max_turns=args.max_turns,
+            max_cell_seconds=args.max_cell_seconds,
+        )
+    return AgentSubject(max_turns=args.max_turns, max_budget_usd=args.budget)
 
 
 def cmd_power(args: argparse.Namespace) -> int:
@@ -645,6 +727,36 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         help="stop cleanly after N cells, so a run can be sized to the session "
         "window instead of discovering its edge",
+    )
+    run.add_argument(
+        "--local-model",
+        action="append",
+        metavar="MODEL",
+        help="run against a locally-served model instead of the API (repeatable). "
+        "Crossed with --protocol, so each combination is its own strength",
+    )
+    run.add_argument(
+        "--protocol",
+        action="append",
+        choices=("native", "structured"),
+        help="how the local subject calls tools: a `tools` array, or a "
+        "constrained decoder. Repeatable; which one wins is a property of the "
+        "model, so both is a legitimate sweep",
+    )
+    run.add_argument(
+        "--endpoint",
+        default=local.DEFAULT_BASE_URL,
+        help="OpenAI-compatible base URL for --local-model",
+    )
+    run.add_argument(
+        "--reasoning-effort",
+        help="passed through to a thinking model; `none` turns thinking off",
+    )
+    run.add_argument(
+        "--max-cell-seconds",
+        type=int,
+        default=local.DEFAULT_MAX_CELL_SECONDS,
+        help="wall clock per cell. A local run is bounded by time, not money",
     )
     run.add_argument(
         "--slate",
