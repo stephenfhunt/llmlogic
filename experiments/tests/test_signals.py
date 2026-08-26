@@ -6,7 +6,7 @@ questions answered with `grep` because the engine could not express them, with
 nothing in the transcript announcing the switch.
 """
 
-from harness.signals import measure
+from harness.signals import EngineUse, classify, measure
 from harness.transcript import ToolCall, Transcript
 
 
@@ -78,3 +78,111 @@ def test_writing_a_non_program_file_is_not_writing_a_program():
         tool_calls=[ToolCall(1, "Write", {"file_path": "answer.txt"})],
     )
     assert measure(transcript).wrote_program is False
+
+
+class TestEngineUse:
+    """The three-valued reach (`decisions.md` 2026-08-25).
+
+    A boolean could not carry the transcript that forced this: a `Skill` call
+    holding an entire Datalog program, with nothing executed. That cell produced
+    no answer of its own and was still counted as having used the engine.
+    """
+
+    def test_no_engine_and_no_program_is_none(self):
+        transcript = Transcript(
+            cell_id="t",
+            tool_calls=[
+                ToolCall(1, "Read", {"file_path": "member.csv"}),
+                ToolCall(2, "Grep", {"pattern": "u01"}),
+                ToolCall(3, "Write", {"file_path": "answer.txt"}),
+            ],
+        )
+        assert classify(transcript) is EngineUse.NONE
+
+    def test_the_skill_call_that_never_ran_is_invoked(self):
+        """The case this enum exists for."""
+        transcript = Transcript(
+            cell_id="t",
+            tool_calls=[
+                ToolCall(
+                    1, "Skill", {"command": "datalog", "args": "ancestor(X,Y) :- parent(X,Y)."}
+                ),
+                ToolCall(2, "Write", {"file_path": "answer.txt"}),
+            ],
+        )
+        assert classify(transcript) is EngineUse.INVOKED
+
+    def test_a_program_written_but_never_run_is_invoked(self):
+        transcript = Transcript(
+            cell_id="t",
+            tool_calls=[
+                ToolCall(1, "Write", {"file_path": "q.dl", "content": "p(X) :- q(X)."}),
+                ToolCall(2, "Write", {"file_path": "answer.txt"}),
+            ],
+        )
+        assert classify(transcript) is EngineUse.INVOKED
+
+    def test_running_it_and_then_answering_is_answered_from(self):
+        transcript = Transcript(
+            cell_id="t",
+            tool_calls=[
+                ToolCall(1, "Write", {"file_path": "q.dl", "content": "p(X) :- q(X)."}),
+                ToolCall(2, "Bash", {"command": "datalog q.dl -q 'p(X)'"}),
+                ToolCall(3, "Write", {"file_path": "answer.txt"}),
+            ],
+        )
+        assert classify(transcript) is EngineUse.ANSWERED_FROM
+
+    def test_a_shell_redirect_counts_as_writing_the_answer(self):
+        """A subject already in a pipeline writes the file with `>`, not `Write`."""
+        transcript = Transcript(
+            cell_id="t",
+            tool_calls=[
+                ToolCall(1, "Bash", {"command": "datalog q.dl -q 'p(X)' > out.txt"}),
+                ToolCall(2, "Bash", {"command": "cut -d'\"' -f2 out.txt > answer.txt"}),
+            ],
+        )
+        assert classify(transcript) is EngineUse.ANSWERED_FROM
+
+    def test_an_answer_written_before_the_engine_ran_is_not_answered_from(self):
+        """It ran the engine *after* committing an answer, so the answer cannot
+        have come from it. Ordering is the whole distinction."""
+        transcript = Transcript(
+            cell_id="t",
+            tool_calls=[
+                ToolCall(1, "Grep", {"pattern": "u01"}),
+                ToolCall(2, "Write", {"file_path": "answer.txt"}),
+                ToolCall(3, "Bash", {"command": "datalog q.dl -q 'p(X)'"}),
+            ],
+        )
+        assert classify(transcript) is EngineUse.INVOKED
+
+    def test_running_it_and_never_answering_is_invoked(self):
+        transcript = Transcript(
+            cell_id="t",
+            tool_calls=[ToolCall(1, "Bash", {"command": "datalog q.dl -q 'p(X)'"})],
+        )
+        assert classify(transcript) is EngineUse.INVOKED
+
+    def test_listing_the_skill_directory_is_not_reaching_for_it(self):
+        """The false positive `engine_use.py` was written to kill: `ls` over a
+        path containing the word is not use."""
+        transcript = Transcript(
+            cell_id="t",
+            tool_calls=[
+                ToolCall(1, "Bash", {"command": "ls .claude/skills/datalog/"}),
+                ToolCall(2, "Write", {"file_path": "answer.txt"}),
+            ],
+        )
+        assert classify(transcript) is EngineUse.NONE
+
+    def test_it_rides_on_the_record_as_a_string(self):
+        """`Signals.to_dict` goes to JSONL; the value has to survive the trip."""
+        transcript = Transcript(
+            cell_id="t",
+            tool_calls=[
+                ToolCall(1, "Bash", {"command": "datalog q.dl -q 'p(X)'"}),
+                ToolCall(2, "Write", {"file_path": "answer.txt"}),
+            ],
+        )
+        assert measure(transcript).to_dict()["engine_use"] == "answered-from"
