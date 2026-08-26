@@ -21,13 +21,23 @@ null result is indistinguishable from a broken instrument.
 
 ## The unit of measurement
 
-A **cell** is one `(task, arm, strength)`:
+A **cell** is one `(task, arm, strength, trial)`:
 
-- **arm** — `engine` or `prose`. Both are the same agent, same tools, same
-  workspace, same files. The engine arm additionally has the `datalog` binary and
-  its skill; the prose arm has neither and is free to write a Python script
-  instead. That is the honest comparison: an agent's real alternative to the
+- **arm** — `prose`, `engine`, or `engine-forced`. All three are the same agent,
+  same tools, same workspace, same files. The two engine arms additionally have the
+  `datalog` binary and its skill; `prose` has neither and is free to write a Python
+  script instead. That is the honest comparison: an agent's real alternative to the
   engine is not prose, it is ad-hoc code.
+
+  `engine` and `prose` get a **byte-identical** prompt, so `engine` measures
+  *adoption and capability together* — would an agent pick this up, and does it
+  help. `engine-forced` appends a block mandating a program, so it measures
+  capability alone. Without both, a null is uninterpretable: an engine arm that
+  never reached for the engine is not a test of the engine.
+- **track** — `in-context`, where both arms can read the whole fact base and the
+  difficulty comes from logical structure, or `at-scale`, where the fixture
+  deliberately exceeds the prose arm's window. They answer different questions and
+  are reported in separate tables, never averaged into one headline.
 - **strength** — Claude Opus 5 and Claude Haiku 4.5. The weaker arm is the
   informative one: the strongest model routes around gaps instead of falling into
   them, so a guide only it can follow is a guide that fails in production.
@@ -63,15 +73,19 @@ harness corpus fetch                           # the pinned source corpus, once
 harness run --dry-run --all                    # full grid, stub subject, no API calls
 harness run --domain access_control --smoke    # one real cell, both arms, both strengths
 harness run --domain controls --strength haiku-4.5   # a cheaper slice
+harness run --arm prose --arm engine-forced --repeats 3   # named arms, three trials each
 harness run --resume results/<run-id>          # finish a run the window cut off
 harness report results/<run-id>                # render to markdown
+
+harness power --effect 0.10                    # how many paired items would it take?
+harness score --task access_control/who-can-read-r03 --program q.dl   # run and grade one
 
 harness reference                              # the pinned corpus still answers the same
 harness blocks                                 # doc blocks an ablation can cut
 harness run --ablate count-wildcard --domain static_analysis   # cut one, engine arm only
 ```
 
-A full grid is 112 cells and about **35 minutes of wall time** — cheap enough to
+A full grid is 168 cells and roughly **50 minutes of wall time** — cheap enough to
 re-run whenever the skill's documentation changes, which is the point of building
 it rather than eyeballing it. What it is *not* cheap in is the account's
 five-hour session window, which is the real budget: a grid does not fit in one

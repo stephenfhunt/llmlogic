@@ -15,6 +15,87 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-08-25** — **A local subject, and the two Anthropic-shaped assumptions in
+  the way.** Two of the three claims now in scope need a model weaker than haiku,
+  and there is none. `Subject` is already the seam — one method, and everything
+  downstream depends on `Transcript`. `confine.violation` and
+  `engine_use.program_from_call` are pure functions and are reused, so controls 3
+  and 4 hold by construction rather than by reimplementation.
+  - **`runner.FATAL` is a regex over Anthropic error text.** A misclassified local
+    failure records as an ordinary wrong answer — the exact defect that filed 46
+    phantom `no-answer` cells on 2026-08-24. It moves behind a per-subject
+    classifier before any local cell is graded. `Strength`'s per-MTok prices and
+    context window move with it.
+  - **The timeout is ours, and it goes on the tool call.** The engine has no fuel,
+    cap or timeout by decision (`../datalog/spec.md` non-goals, rejected twice) and
+    a weak model will write value-creating recursion. A `timeout` shim around the
+    binary was rejected: it changes the engine arm's environment, which is the one
+    thing this design holds fixed. — `notes/discriminating-instrument.md`
+
+- **2026-08-25** — **A delta with no interval is not a null.** `report.py`
+  subtracted two percentages and stopped; there is no statistics code in the
+  project, no repeats, and n=48 per arm. So: `--repeats N` with the trial index in
+  the cell identity, McNemar's exact test on the pairing the design already has,
+  Wilson intervals on every printed rate, and `harness power` before a grid is
+  paid for. Pure stdlib — Wilson and an exact binomial are ~20 lines and a
+  dependency is a decision (`AGENTS.md`).
+  - **Partial credit is recoverable, not a re-run.** `Grade` already carries
+    `missing`/`extra` and the truth size is known, so per-item F1 comes out of the
+    existing `records.jsonl`. The 2026-08-24 grid gets a finer read for free, and
+    `results/` is not touched.
+  - **`hypotheses.md`, written before the grid.** The comparisons went from one to
+    three this session. Naming the primary endpoint in advance is what keeps that
+    from being three chances to find something.
+
+- **2026-08-25** — **A slate is selected by calibration, not designed.** An item
+  the subject scores 0% or 100% on carries almost no information about whether the
+  engine helped; the informative band is the middle. So a large candidate pool is
+  generated, a cheap pass runs it on the prose arm at one weak strength, and items
+  landing in roughly 0.2–0.8 are kept and pinned to a manifest.
+  - **This is the step that would have caught the ceiling before the grid was paid
+    for.** Opus was 20/20 in prose on the live domains and nothing said so until
+    112 cells had run. One arm at one strength is the cheapest possible version of
+    that check.
+  - **Generation multiplies the `scheduling` risk**, so validation is mechanical:
+    the oracle agrees with a second independent formulation, the fixture obeys
+    every rule its question states, and two independent readings of the question
+    agree. Divergent items are quarantined, not shipped — hand-verification proved
+    the oracle matched the author's reading and could not prove there was only
+    one. — `notes/discriminating-instrument.md`
+
+- **2026-08-25** — **Two difficulty tracks, and the token cap is one track's
+  definition rather than a global rule.** `FIXTURE_TOKEN_BUDGET` exists because a
+  fixture that defeats the prose arm on size alone measures the context window;
+  that reasoning holds, and it is also why the slate has no headroom. The
+  resolution is two questions, not a relaxed cap: `in-context` keeps the budget and
+  takes its difficulty from structure — depth, negation, distractors, the
+  count-over-wildcard trap; `at-scale` deliberately exceeds the prose arm's window.
+  - **They are reported in separate tables and never averaged.** A win in the first
+    is a claim about reasoning; a win in the second is a claim about scale, and
+    saying which is what keeps the second from reading as rigged.
+  - **Difficulty is structure, not size.** Closure depth ≥ 6 with cycles, answer
+    sets of 30–200 rows so the silent subset has room to happen, negation over a
+    *derived* relation, an override layer applied after closure. `at-scale` is the
+    same generators at 10k–100k rows, bounded by what
+    `../datalog/notes/performance-baseline.md` measured.
+    — `notes/discriminating-instrument.md`
+
+- **2026-08-25** — **Three arms, and control 3 keeps the arm it was written for.**
+  The first grid could not be read: seven domains scored identically in both arms
+  because the engine arm reached for the engine in **9 of 56 cells**, so in 47 of
+  them the two conditions differed only in which files were on disk. One arm
+  cannot answer both *would an agent pick this up* (which needs control 3) and
+  *does using it help* (which needs it used). So `prose`, `engine` — prompt
+  byte-identical, control 3 intact — and `engine-forced`, whose prompt is the base
+  plus one appended mandate block.
+  - **`engine-forced` vs `prose` is S1's sentence read literally.** `engine` vs
+    `engine-forced` is the adoption gap, which is a finding about the skill, and
+    the ablation machinery already exists to act on it.
+  - **Reach becomes a three-valued outcome**, closing the open question below: the
+    first real transcript was a `Skill` call carrying a whole program with nothing
+    executed. `none` / `invoked` / `answered-from`, and only the third is engine
+    use in the sense S1 means. — `notes/discriminating-instrument.md`
+
 - **2026-08-25** — **The harness refuses an engine binary older than the source
   it was built from, and refuses rather than builds.** `datalog/target/release/`
   is not versioned and everything measured against it is: the corpus pins live in
@@ -391,12 +472,19 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
   answer out of it* are three signals, and the first one on its own is the least
   informative of the three. Decide the enum on more than this one cell — but the
   Skill-without-execution arm is now known to exist, and it is not a mis-parse.
+  - ***Answered*** 2026-08-25: three values, and this transcript is the middle
+    one. `none` / `invoked` / `answered-from`; only the third is engine use in the
+    sense S1 means, and recording `invoked` separately is what stops a program
+    that never ran being counted as a success.
 
 - **What counts as "reached for it"?** Writing a `.dl` file is clear; asking the
   engine one question and then answering from `grep` is the case the signal exists
   for, and a boolean will not carry it. `signals.py` therefore records counts and
   no classification. Likely a small enum, decided against real transcripts rather
   than in advance.
+  - ***Answered*** 2026-08-25: the small enum, decided against the transcript
+    above. `grep` after `answered-from` is the escape this was written for and is
+    now expressible; a count alone never was.
 - **How many rounds does a cell get?** The first program is recorded before any
   feedback regardless, but the *final* answer needs a stopping rule, and an
   unbounded agent loop makes cost unpredictable. Candidates: a fixed round cap, a

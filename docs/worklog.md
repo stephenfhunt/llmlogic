@@ -24,6 +24,60 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-25 (later) — The instrument learns to discriminate
+
+The 2026-08-24 grid returned +0 with every domain scoring *identically* in both
+arms — not a null, three instrument defects at once. This session built the three
+independent fixes. 417 harness tests green (+180), ruff clean, and
+`harness run --dry-run --all` is now a **168-cell three-arm grid** rendering
+intervals, paired tests and partial credit offline; nothing paid for yet. Long form:
+[`experiments/notes/discriminating-instrument.md`](../experiments/notes/discriminating-instrument.md).
+
+**Done**
+- **A third arm, `engine-forced`.** `engine` keeps a byte-identical prompt to
+  `prose` and so measures adoption *and* capability together; the new arm appends a
+  mandate and measures capability alone. The report renders all three pairwise
+  comparisons, each a different question.
+- **Reach became an outcome, not a footnote** — `none` / `invoked` /
+  `answered-from`, closing the open question an unexecuted-program `Skill` call
+  raised. On `engine-forced` the same number is the compliance check.
+- **`stats.py`, pure stdlib** — Wilson intervals, McNemar's exact test on the
+  pairing the design already had, a bootstrap on the delta, per-item F1, `harness
+  power`. It priced the third defect at once: a 10-point effect wants **155 paired
+  items** against a slate of 56.
+- **Two tracks and the first generator.** `access_control` gained
+  `generate(seed, difficulty, track)`, `validate` rejecting degenerate items, and
+  110 tests over 12 seeds — including the oracle against a second formulation *on
+  generated graphs*, which the by-eye check on the pinned fixture never was. The 28
+  pinned tasks are untouched, fingerprints asserted.
+- **`harness score`**, `--repeats N`, resume refusing a fixture that moved, and
+  `cache_creation_tokens` on the record.
+
+**Decided** (`experiments/decisions.md`, five entries)
+- **A delta with no interval is not a null.** The old report computed a raw
+  percentage-point difference and stopped.
+- **A slate is selected by calibration, not designed** — guessing which knob is
+  hard is how the ceiling got built in the first place.
+- **The token cap is one track's definition, not a global rule**, so `at-scale` can
+  exceed the prose arm's window on purpose and is never averaged with the rest.
+- **Control 3 keeps the arm it was written for**, which is what makes a third arm
+  right rather than a prompt edit.
+
+**Removed**
+- `report.py`'s raw-difference rendering, and `_by_task` pooling, which averaged
+  opus with haiku — the two subjects whose difference is why both are in the grid.
+- `access_control/truth.py` rewritten whole after splicing left duplicate
+  definitions; two ROADMAP items superseded by the `at-scale` track and the queued
+  local subject; the 2026-08-24 S1 entry rotated to the archive.
+
+**Next up**
+- **Generators for the other six packs**, absorbing the owed `scheduling` re-run;
+  then `harness calibrate`, and `hypotheses.md` before any grid is paid for.
+- `LocalSubject` — the weak end is where the signal is, and two of the three
+  in-scope claims are unmeasurable without it.
+- **Open question:** `at-scale` answers run 1,800–6,300 rows, which measures
+  transcription as much as querying. An aggregate variant was considered, not built.
+
 ## 2026-08-25 — Every diagnostic gets a code, and the last criterion closes
 
 The §12 code vocabulary — designed, built and pinned in one session. **S3 flips
@@ -136,54 +190,3 @@ tests green, ruff clean, clippy clean — and the crate now passes
 - Still open: per-file error attribution, suggestion coverage (13 of 77), the
   cast-inside-a-comparison silence, `declare`-defines-a-predicate, and re-running
   the repaired `scheduling` domain under a new run id.
-
-## 2026-08-24 — S1 is measured, the answer is null, and v1 moves to S3
-
-The first full 112-cell grid finished, across three session windows. **S1 flips
-to measured** (`datalog/spec.md` §1) — the criterion asks that the experiment was
-*run*, and it was. 230 harness tests green (+7), 579 crate tests green, ruff clean.
-
-**Done**
-- **The grid ran to completion**: 112 cells, 0 errored. Both arms **41/48**, or
-  **38/40** with the void `scheduling` domain struck out; controls 8/8 in both, so
-  the null is not a broken instrument. — `results/run-20260824T104501Z/`.
-- **Two instrument defects, both found by running it.** A session limit was filed
-  as 46 ordinary `no-answer` cells under a report saying "0 errored" — fixed by an
-  `ERROR` verdict, halt-on-fatal, `--resume` and `--limit`. That fix then
-  over-reached onto the harness's own `max_turns` cap, which would have
-  **rewarded a model that flails**; `FATAL` and `STOPPING_RULE` now differ.
-- **`scheduling` was repaired.** 21 of its 29 assignments were ones the person
-  could not work while every question's preamble stated that rule, so applying the
-  rule first deleted every clash — three of four `double-booked` cells wrote an
-  empty file, correctly.
-- **S3 captured as the v1 gate**, re-measured rather than re-read: §2 and §12
-  carried 46 + 33 spanless error sites from 2026-08-18; it is **77 + 36**, still
-  0% against 3 of 3 for lex and parse.
-
-**Decided**
-- **A failed cell is `ERROR` and excluded**; the turn cap is not a failure and is
-  graded on what it left behind. **The budget is the five-hour window, not
-  dollars.** — `experiments/decisions.md` 2026-08-24.
-- **The null is about *supplying* the engine, not using it.** The engine arm
-  reached in **9 of 56 cells** — opus 1, haiku 8 — and every incorrect answer on
-  the live slate came from a cell that wrote no program.
-- **Hand-verifying 28 tasks against their oracles proved the oracle matched the
-  *author's* reading**, not that there was only one reading. The subjects were the
-  first readers who did not already know the answer.
-- **v1 now turns on S3** (§17 2026-08-24): what scopes it is spans, so a semantic
-  diagnostic points at a name — `variable Q in rule 0` — not a place.
-
-**Removed**
-- `ROSTER`, the glued-on preamble behind the `scheduling` defect, for two narrower
-  constants. README's "$35–40 per grid", a bill that does not exist. The oldest
-  worklog entry rotated to the archive.
-
-**Next up**
-- **Spans on semantic and source errors** — the v1 item: `lower.rs` (26 sites) and
-  `engine/mod.rs` (35), done when the three `Semantic` programs in
-  `experiments/reference/malformed/` gain a position.
-- **Re-run `scheduling` under a new run id** — repaired, and its 2026-08-24
-  numbers are void. Cannot be resumed into the finished grid.
-- **The slate is at a ceiling**: opus is 20/20 in prose on the live domains, so no
-  delta is detectable downstream of reach. Harder questions, or the parked
-  **local-model subject** — the signal lives at the weak end.

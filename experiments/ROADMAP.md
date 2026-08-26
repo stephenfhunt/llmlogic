@@ -44,8 +44,9 @@ run", never "unwanted".
 One pack each: `fixture.py` · `truth.py` · `tasks.py`. All **v1** — the slate is
 what makes the result readable, and a grid of one domain measures one domain.
 
-- **`access_control`** — _shipped._ Four tasks over a generated policy graph;
-  truth is a BFS, property-checked against a fixpoint formulation.
+- **`access_control`** — _shipped._ Four pinned tasks over a generated policy
+  graph; truth is a BFS, property-checked against a fixpoint formulation. The first
+  pack with `generate(seed, difficulty, track)` beside `build()`.
 - **`ontology`** — _shipped._ Multiple inheritance, property overriding, and a
   disjointness check over the same closure.
 - **`imports`** — _shipped._ Dates, aggregates and missing amounts across CSV,
@@ -63,6 +64,54 @@ what makes the result readable, and a grid of one domain measures one domain.
   `decisions.md` 2026-08-22.
 - **`controls`** — _shipped._ Four tasks: two single-hop lookups, two one-step.
   Without them a null result is indistinguishable from a broken instrument.
+
+### Making it discriminate
+
+The 2026-08-24 grid could not be read: seven domains scored identically in both
+arms, the engine arm reached in 9 of 56 cells, opus is 20/20 in prose, and there
+is no statistics code. Three independent defects; fixing any one alone leaves the
+grid unable to answer S1. The argument and the numbers are in
+[`notes/discriminating-instrument.md`](notes/discriminating-instrument.md).
+
+- **A third arm, `engine-forced`** — base prompt plus one mandate block, so
+  *would an agent pick this up* and *does using it help* stop competing for one
+  arm. Control 3 stays on `engine`, whose prompt remains byte-identical to
+  `prose`; the mandate is a strict suffix on `engine-forced`, asserted as one.
+  _shipped 2026-08-25._ — `cell.py`, `catalogue.MANDATE`, `tests/test_controls_hold.py`.
+- **Reach as a three-valued outcome** — `none` / `invoked` / `answered-from`,
+  closing the open question a `Skill` call carrying an unexecuted program raised.
+  Only `answered-from` is engine use in the sense S1 means, and on `engine-forced`
+  it doubles as the compliance check. _shipped 2026-08-25._ — `signals.EngineUse`,
+  `decisions.md` 2026-08-25.
+- **Two difficulty tracks** — `in-context` keeps `FIXTURE_TOKEN_BUDGET` and takes
+  its difficulty from structure; `at-scale` exceeds the prose arm's window and is
+  reported in its own table, never averaged with the first. _shipped 2026-08-25._
+  — `task.Task.track`, `report.py`. The size cap is now conditional on the track
+  rather than global.
+- **Parameterised generators** — `generate(seed, difficulty)` beside each pack's
+  `build()`; the 28 pinned tasks stay as the comparable slate. Absorbs the owed
+  `scheduling` re-run, whose 2026-08-24 numbers are void. _building_ —
+  `access_control` shipped (5 difficulties, both tracks, `validate` rejecting
+  degenerate items, 110 tests over 12 seeds); six packs owed.
+- **`harness calibrate`** — generate a large pool, run the prose arm at one weak
+  strength, keep the items whose accuracy lands in the informative band, pin the
+  slate to a manifest. The cheapest possible check for a ceiling. _queued._
+- **Statistics** — `--repeats N`, McNemar on the pairing the design already has,
+  Wilson intervals, per-item F1 beside the binary verdict, and `harness power`
+  before a grid is paid for. Pure stdlib. _shipped 2026-08-25._ — `stats.py`,
+  `report.py`, `cli.cmd_power`. `power --effect 0.10` wants 155 paired items against
+  a slate of 56 — the 2026-08-24 grid's third defect, as a number.
+- **`hypotheses.md`** — the comparisons and the primary endpoint, written before
+  the grid runs. _queued._
+- **A local-model subject** — `LocalSubject`, an OpenAI-compatible tool loop
+  against llama.cpp on the local GPU. Needs its own network isolation and a
+  per-tool-call timeout, since the engine has neither by decision, and moves
+  `runner.FATAL` and `Strength`'s prices behind a per-subject seam. _queued_ —
+  new `local.py`, `decisions.md` 2026-08-25.
+- **`harness score --task <id> --program <file>`** — run a program, grade its
+  output. One command; also the natural home for the reference corpus's check.
+  _shipped 2026-08-25._ — `score.py`. Exit 0/1/2; the wall-clock timeout is the
+  harness's, since the engine has none by decision.
 
 ### Instrument hygiene
 
@@ -102,16 +151,17 @@ what makes the result readable, and a grid of one domain measures one domain.
   to the thing that actually changed on 2026-08-24: `scheduling`'s roster, under
   the same four task ids. Nothing owed by the open run was a `scheduling` cell,
   so it did not bite — but a resume that had owed one would have joined two
-  different experiments with no signal. Fingerprint each task's fixture files
-  into `run.json` and refuse on a mismatch, the way the count check already
-  refuses. _queued_ — `resume.py`, `decisions.md` 2026-08-24.
+  different experiments with no signal. _shipped 2026-08-25._ `resume.fingerprint`
+  writes a sha256 of each task's question, fixture files and truth rows into
+  `run.json`; `resume.moved` refuses on a mismatch, and stays silent for a run that
+  recorded none. — `resume.py`, `decisions.md` 2026-08-24.
 - **TypeScript extraction** — a `tsc`-API fact extractor as a second
   `static_analysis` corpus. The better demo; blocked as a *control* by control 1,
   which wants a plain-Python oracle. _parked — **post-v1**._ — `decisions.md`
   2026-08-22.
 - **A `static_analysis` ceiling case** — the pinned corpus is a whole small
-  package (~36K tokens, inside the budget). A corpus that does *not* fit the prose
-  arm's context is a separate, stated run. _queued — **post-v1**._
+  package (~36K tokens, inside the budget). _superseded_ — "a separate, stated
+  run" is now the `at-scale` track, which states it for every domain.
 - **Prompt caching** — stable fixture/system prefix behind a breakpoint; assert
   `cache_read_input_tokens` is non-zero across cells. _queued — **post-v1**
   (cost, not validity)._
@@ -136,8 +186,7 @@ what makes the result readable, and a grid of one domain measures one domain.
 - **`Record` should carry `cache_creation_tokens`** — `Usage` captures it and the
   record drops it, so a run cannot explain its own cost and the pilot's
   `$0.07/cell` took three fields and half an hour to re-derive as a warmed
-  number. _queued — **post-v1** (legibility, not validity)._
-  — `decisions.md` 2026-08-24.
+  number. _shipped 2026-08-25._ — `record.Record`, `decisions.md` 2026-08-24.
 
 ### Later
 
@@ -145,15 +194,9 @@ what makes the result readable, and a grid of one domain measures one domain.
   a single-shot task is an episode of length 1. Minesweeper first: deduction is
   provably the bottleneck, scoring is objective, no opponent to model. The core
   must not foreclose it; nothing more is built now. _parked — **post-v1**._
-- **A local-model subject** — `Subject` is a protocol with two implementations
-  already (`StubSubject`, `AgentSubject`); a locally-hosted model is a third, and
-  costs a window of nothing to run. The reason to want it is what the grid keeps
-  showing: **the signal lives at the weak end.** Opus answers correctly without
-  reaching for the engine, so a strength below haiku is where "does the engine
-  help?" has room to be answered at all — and small distilled models are the
-  cheapest check that the instrument discriminates rather than measuring a
-  ceiling. Hardware is limited; a run that takes all night costs nothing but the
-  night. _parked — **post-v1**._
+- **A local-model subject** — _superseded_ by the queued item under *Making it
+  discriminate*: the reason to want it (the signal lives at the weak end) is now
+  one of the three defects the grid has to fix, not a later nicety.
 
 - **Second engine** — the harness measures one engine against its own absence. A
   second engine as a third arm is a different question. _parked — **post-v1**._
