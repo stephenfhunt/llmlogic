@@ -48,22 +48,29 @@ what makes the result readable, and a grid of one domain measures one domain.
   graph; truth is a BFS, property-checked against a fixpoint formulation. The first
   pack with `generate(seed, difficulty, track)` beside `build()`.
 - **`ontology`** — _shipped._ Multiple inheritance, property overriding, and a
-  disjointness check over the same closure.
+  disjointness check over the same closure. Generated: diamonds spliced at a
+  shared grandparent, declarations on one spine so *exactly one value* holds.
 - **`imports`** — _shipped._ Dates, aggregates and missing amounts across CSV,
-  JSONL and a redundant Parquet copy. — `decisions.md` 2026-08-22.
+  JSONL and a redundant Parquet copy. — `decisions.md` 2026-08-22. Generated: the
+  pinned seed search becomes a tie repair, and customers get a season.
 - **`eligibility`** — _shipped._ Four criteria in prose, and the applicants a
-  missing income leaves undecided rather than refused.
+  missing income leaves undecided rather than refused. Generated: difficulty is
+  how many columns can be blank, and thresholds are calibrated to the draw.
 - **`scheduling`** — _shipped._ Interval overlap: double bookings, unstaffable
   shifts, forced assignments, rest violations. Its roster and two of its
   questions were **repaired 2026-08-24** after the first grid found them
   ambiguous; the 2026-08-24 numbers for this domain are void. —
-  `decisions.md` 2026-08-24.
+  `decisions.md` 2026-08-24. Generated: difficulty is how much the day overlaps
+  itself, and `check` asserts every assignment is one its person could work.
 - **`static_analysis`** — _shipped._ The agent extracts its own facts from a
   pinned `sqlparse`; carries the `grep`-escape finding. Its questions define
   their abstractions syntactically. — `../datalog/skill/recipes/source-analysis.md`,
-  `decisions.md` 2026-08-22.
+  `decisions.md` 2026-08-22. **The one pack with no generator**, and
+  `domains.NO_GENERATOR` says why: there is nothing to seed.
 - **`controls`** — _shipped._ Four tasks: two single-hop lookups, two one-step.
   Without them a null result is indistinguishable from a broken instrument.
+  Generated, but flat: no `at-scale`, and a row ceiling — a control that gets
+  hard stops being a control.
 
 ### Making it discriminate
 
@@ -88,11 +95,14 @@ grid unable to answer S1. The argument and the numbers are in
   reported in its own table, never averaged with the first. _shipped 2026-08-25._
   — `task.Task.track`, `report.py`. The size cap is now conditional on the track
   rather than global.
-- **Parameterised generators** — `generate(seed, difficulty)` beside each pack's
-  `build()`; the 28 pinned tasks stay as the comparable slate. Absorbs the owed
-  `scheduling` re-run, whose 2026-08-24 numbers are void. _building_ —
-  `access_control` shipped (5 difficulties, both tracks, `validate` rejecting
-  degenerate items, 110 tests over 12 seeds); six packs owed.
+- **Parameterised generators** — `generate(seed, difficulty, track)` beside each
+  pack's `build()`; the 28 pinned tasks stay as the comparable slate, hashed in
+  `tests/test_pinned_slate.py`. Absorbs the owed `scheduling` re-run, whose
+  2026-08-24 numbers are void: the next grid replaces those numbers.
+  _shipped 2026-08-26._ — six of seven packs; `static_analysis` has none by
+  decision. `harness.generate` holds the degeneracy rules,
+  `domains.generate(name, …)` is the single entry point, and a pack's `check`
+  holds what only it can know. 994 tests over 12 seeds.
 - **`harness calibrate`** — generate a large pool, run the prose arm at one weak
   strength, keep the items whose accuracy lands in the informative band, pin the
   slate to a manifest. The cheapest possible check for a ceiling. _queued._

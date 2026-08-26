@@ -63,6 +63,16 @@ than to sample topics.
 | `static_analysis` | recursion, negation | facts the agent extracts from a pinned real package |
 | `controls` | single-hop, one-step | tiny and closed — the negative controls |
 
+Each pack ships **two** fixtures: the pinned one its four questions are written
+against, and `generate(seed, difficulty, track)` for a fresh one. The 28 pinned
+tasks are the comparable slate and are hashed in `tests/test_pinned_slate.py`;
+the generated ones are the pool a calibration pass selects from. Difficulty is
+*structure* — closure depth, how many columns can be blank, how much the day
+overlaps itself — and the `at-scale` track exceeds the prose arm's window on
+purpose. `static_analysis` has no generator: its fixture is a fetched real
+package, so there is nothing to seed. Long form:
+[`notes/generating-the-slate.md`](notes/generating-the-slate.md).
+
 ## Running it
 
 ```sh

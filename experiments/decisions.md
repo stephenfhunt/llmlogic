@@ -15,6 +15,64 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-08-26** — **`static_analysis` is the one pack with no generator, and
+  says so.** Its fixture is a fetched, pinned copy of `sqlparse`; there is
+  nothing to seed. A synthetic package would have given real difficulty knobs and
+  an `at-scale` track, and would have traded away the property the pack exists
+  for — *real third-party code*, which is where the `grep`-escape finding came
+  from and where "the agent extracts its own facts" stops being a simulation.
+  - **Stated rather than discovered at call time.** `domains.NO_GENERATOR` holds
+    the reason and `domains.generate` raises it; `domains.generators()` reports
+    presence of `generated`, so a pack that is *deliberately* without one reads
+    differently from one that has not got round to it. A calibrated slate quietly
+    missing a domain is the 2026-08-24 failure mode in different clothes.
+  - *Consequence, accepted:* `static_analysis` keeps its four pinned tasks and is
+    outside whatever `harness calibrate` selects. The comparable slate still
+    carries it.
+
+- **2026-08-26** — **A control that gets hard stops being a control.**
+  `controls` gets a generator — a calibrated slate needs controls of matching
+  provenance, or a null is again indistinguishable from a broken instrument — but
+  it is flat by construction: names and values vary, the table grows by a few
+  rows to `MAX_ROWS`, and the number of hops never moves.
+  - **No `at-scale` track, refused with a message.** A single-hop lookup in a
+    fact base nobody can hold is a question about *retrieval*, and a positive
+    delta there has an innocent explanation the null exists to rule out. It was
+    considered as a genuinely interesting third thing to measure, and declined
+    because it would be measured in the column that reads as the null.
+  - **Four questions, not five**, and `generate.validate` stopped calling a
+    one-row truth guessable on a negative control: the rule exists so an item
+    carries information about whether the engine helped, and a control is the
+    item that is deliberately trivial. — `notes/generating-the-slate.md`
+
+- **2026-08-26** — **One home for the degeneracy rules; a pack adds only what
+  only it knows.** `access_control` proved *empty truth*, *the whole universe*
+  and *a single guessable row* generic, and six more copies of one rule is the
+  drift mechanism `../datalog/bugs/resolved/003` names. They live in
+  `harness/generate.py`; `<pack>.tasks.check` holds the rest, and
+  `domains.validate(name, task)` runs both.
+  - **A pack's `check` holds what a person used to supply by reading it.**
+    `scheduling` asserts every assignment is one its person could work — the
+    2026-08-24 defect, mechanised. Each such invariant was true of the
+    hand-written fixture only because somebody had read it.
+  - **The second formulation is the emitted file wherever a format is the
+    trap** — `applicant.csv`, `shipment.jsonl`, the Parquet copy — not a second
+    pass over the tuples that wrote them.
+  - **A generator's defects are in its output distribution, not its control
+    flow.** Every degeneracy fixed this session passed a reading of the code and
+    was found by running it over 60 fixtures and printing the answer sizes.
+    The list, and the per-pack knobs: `notes/generating-the-slate.md`.
+
+- **2026-08-26** — **A big frozen value memoizes its hash.** The oracles take
+  their fixture as an argument and reach an `lru_cache` on it; a frozen
+  dataclass rehashes its tuple fields on **every** call, so an `at-scale`
+  `Roster` rehashed 60,000 rows per lookup and one test took eleven seconds
+  against 1.8s for the file. `__hash__` computes once and caches; `__eq__` still
+  decides equality, so value semantics are unchanged.
+  - *Where:* `scheduling.Roster` and `imports.Ledger`, the two whose oracle API
+    is per-lookup rather than per-question. Not added speculatively to the
+    others — the cost showed up in a profile, and that is the evidence it wants.
+
 - **2026-08-25** — **A local subject, and the two Anthropic-shaped assumptions in
   the way.** Two of the three claims now in scope need a model weaker than haiku,
   and there is none. `Subject` is already the seam — one method, and everything
