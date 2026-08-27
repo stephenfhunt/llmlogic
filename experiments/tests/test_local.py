@@ -450,6 +450,14 @@ class TestSweepPlumbing:
         monkeypatch.setattr(local.urllib.request, "urlopen", _fake_models({"qwen3:8b"}))
         assert local.preflight("http://x/v1", ["qwen3:8b"], min_context=32768) == []
 
+    def test_a_strength_claims_the_window_it_will_be_served(self):
+        """The overflow guard measures the conversation against the *strength*
+        and the truncation happens at the *server*, so a strength claiming more
+        than the server gives is the 4,096-token defect again — this time inside
+        the harness rather than outside it."""
+        for strength in local.strengths(["m"], ["native"], context_tokens=16_384):
+            assert strength.context_tokens == 16_384
+
     def test_preflight_reports_a_server_that_is_not_there(self):
         problems = local.preflight("http://127.0.0.1:9/v1", ["whatever"])
         assert problems and "no model server" in problems[0]

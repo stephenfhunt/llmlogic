@@ -521,6 +521,7 @@ def strengths(
     protocols: list[str],
     endpoint: str = DEFAULT_BASE_URL,
     reasoning_effort: str | None = None,
+    context_tokens: int = DEFAULT_CONTEXT_TOKENS,
 ) -> tuple:
     """The local strengths a sweep crosses: every model × every protocol.
 
@@ -545,7 +546,7 @@ def strengths(
                     model=model,
                     input_per_mtok=0.0,
                     output_per_mtok=0.0,
-                    context_tokens=DEFAULT_CONTEXT_TOKENS,
+                    context_tokens=context_tokens,
                     endpoint=endpoint,
                     tool_protocol=protocol,
                     reasoning_effort=reasoning_effort,

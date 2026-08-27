@@ -74,8 +74,16 @@ def cmd_run(args: argparse.Namespace) -> int:
             for problem in problems:
                 print(problem, file=sys.stderr)
             return 1
+        # The window the strengths claim is the window `preflight` just held the
+        # server to. They cannot be allowed to disagree: the overflow guard
+        # measures against the strength, and the truncation happens at the server.
+        window = args.min_context or local.DEFAULT_CONTEXT_TOKENS
         strengths = local.strengths(
-            args.local_model, args.protocol or ["native"], args.endpoint, args.reasoning_effort
+            args.local_model,
+            args.protocol or ["native"],
+            args.endpoint,
+            args.reasoning_effort,
+            window,
         )
         return _run_grid(args, tasks, strengths, local=True)
 
