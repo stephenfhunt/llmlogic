@@ -35,6 +35,13 @@ from harness.runner import new_run_id, run_grid
 from harness.score import DEFAULT_TIMEOUT, score
 from harness.subject import StubSubject
 
+#: Packs a calibration pool does not draw from unless asked by name. `controls`
+#: is the negative control: the band would judge it *too easy* — which is what a
+#: healthy control is — and a control selected for difficulty has stopped being
+#: one. `_calibrated_slate` carries the pinned four into every calibrated grid
+#: instead, so precondition 1 stays checkable without the pass paying for them.
+CALIBRATION_EXCLUDES = frozenset({"controls"})
+
 RESULTS_ROOT = Path(__file__).resolve().parents[2] / "results"
 SLATES_ROOT = Path(__file__).resolve().parents[2] / "slates"
 WORKSPACE_ROOT = arms.WORKSPACE_ROOT
@@ -53,7 +60,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         # items it holds was decided by the calibration pass, and re-deriving it
         # from flags here is how the two would drift apart.
         try:
-            tasks = calibrate.load(Path(args.slate))
+            tasks = _calibrated_slate(Path(args.slate))
         except calibrate.ManifestError as exc:
             print(str(exc), file=sys.stderr)
             return 1
@@ -66,26 +73,11 @@ def cmd_run(args: argparse.Namespace) -> int:
         tasks = tasks[:1]
 
     if args.local_model:
-        # A local run is not billed and not rate-limited, so it is bounded by
-        # wall clock rather than by the account's window — which is what makes it
-        # the arm of this project that can be left running overnight.
-        problems = local.preflight(args.endpoint, args.local_model, args.min_context)
-        if problems:
-            for problem in problems:
-                print(problem, file=sys.stderr)
+        prepared = _local_sitting(args)
+        if prepared is None:
             return 1
-        # The window the strengths claim is the window `preflight` just held the
-        # server to. They cannot be allowed to disagree: the overflow guard
-        # measures against the strength, and the truncation happens at the server.
-        window = args.min_context or local.DEFAULT_CONTEXT_TOKENS
-        strengths = local.strengths(
-            args.local_model,
-            args.protocol or ["native"],
-            args.endpoint,
-            args.reasoning_effort,
-            window,
-        )
-        return _run_grid(args, tasks, strengths, local=True)
+        strengths, local_meta = prepared
+        return _run_grid(args, tasks, strengths, local_meta)
 
     strengths = STRENGTHS
     if args.strength:
@@ -96,10 +88,73 @@ def cmd_run(args: argparse.Namespace) -> int:
             print(f"no such strength: {sorted(wanted)} — have {known}", file=sys.stderr)
             return 1
 
-    return _run_grid(args, tasks, strengths, local=False)
+    return _run_grid(args, tasks, strengths, None)
 
 
-def _run_grid(args: argparse.Namespace, tasks: list, strengths: tuple, local: bool) -> int:
+def _calibrated_slate(path: Path) -> list:
+    """The items a manifest kept, **plus the pinned negative controls**.
+
+    The band selects for headroom, and a healthy control has none: it is a
+    single-hop lookup the subject should get right every time, so calibration
+    rejects it as *too easy* — correctly. Left at that, a calibrated grid holds
+    no `controls` cells at all, and `hypotheses.md` precondition 1 becomes
+    uncheckable on the one run it exists to gate.
+
+    So the controls are not selected, they are **carried**: the pinned four, the
+    same four every other run in `results/` measured, never the calibrated pool's
+    (`cmd_calibrate` draws no controls for the same reason). One home for the
+    rule, because `_slate_of` has to rebuild exactly this list for a resume.
+    """
+    return calibrate.load(path) + domains.load("controls")
+
+
+def _local_sitting(args: argparse.Namespace) -> tuple[tuple, dict] | None:
+    """Preflight the server, and build the strengths a local sitting crosses.
+
+    Shared by `run` and `calibrate`, because a calibration pass against a local
+    subject is a local sitting in every respect the instrument cares about: the
+    same server, the same window, the same wall-clock currency. Two copies of
+    this would be two places for the window to drift from what `preflight` held
+    the server to.
+
+    Returns ``None`` when the server cannot carry the sitting, having said why —
+    a local run is not billed and not rate-limited, so the failure it has to
+    refuse is a *misconfiguration*, and refusing it here is the only place that
+    happens before cells start.
+    """
+    if not args.dry_run:
+        problems = local.preflight(args.endpoint, args.local_model, args.min_context)
+        if problems:
+            for problem in problems:
+                print(problem, file=sys.stderr)
+            return None
+    # The window the strengths claim is the window `preflight` just held the
+    # server to. They cannot be allowed to disagree: the overflow guard measures
+    # against the strength, and the truncation happens at the server.
+    window = args.min_context or local.DEFAULT_CONTEXT_TOKENS
+    protocols = args.protocol or ["native"]
+    strengths = local.strengths(
+        args.local_model, protocols, args.endpoint, args.reasoning_effort, window
+    )
+    meta = {
+        "endpoint": args.endpoint,
+        "models": list(args.local_model),
+        "protocols": list(protocols),
+        "reasoning_effort": args.reasoning_effort,
+        "max_cell_seconds": args.max_cell_seconds,
+        # Recorded because `resume` has to rebuild the strengths this run was
+        # measured under, and the window is the one field of a local strength
+        # that nothing else in the record implies. A resume that guessed it
+        # would run the second half of a sitting under a different overflow
+        # guard than the first.
+        "context_tokens": window,
+    }
+    return strengths, meta
+
+
+def _run_grid(
+    args: argparse.Namespace, tasks: list, strengths: tuple, local_meta: dict | None
+) -> int:
     """Cross, confirm, record, run — shared by the billed and the local paths.
 
     The only differences a local run makes are where the confirmation comes from
@@ -128,7 +183,7 @@ def _run_grid(args: argparse.Namespace, tasks: list, strengths: tuple, local: bo
             return 1
 
     cells = grid(tasks, strengths, cell_arms, args.ablate, args.repeats)
-    if local:
+    if local_meta:
         # Group a local sitting by model. `grid` varies strength fastest, which
         # is right when a strength is an API parameter and wrong when it is five
         # gigabytes of weights: measured, a model switch costs ~4s against ~0.2s
@@ -146,7 +201,7 @@ def _run_grid(args: argparse.Namespace, tasks: list, strengths: tuple, local: bo
     # spends the night. The store is built after this, not before — a refused run
     # should leave no trace in `results/`, which records runs that happened.
     if not args.dry_run:
-        if local:
+        if local_meta:
             hours = len(cells) * args.max_cell_seconds / 3600
             print(
                 f"{len(cells)} cells at up to {args.max_cell_seconds}s each — "
@@ -177,17 +232,7 @@ def _run_grid(args: argparse.Namespace, tasks: list, strengths: tuple, local: bo
         ablate=args.ablate,
         max_turns=args.max_turns,
         max_budget_usd=args.budget,
-        local=(
-            {
-                "endpoint": args.endpoint,
-                "models": list(args.local_model),
-                "protocols": list(args.protocol or ["native"]),
-                "reasoning_effort": args.reasoning_effort,
-                "max_cell_seconds": args.max_cell_seconds,
-            }
-            if local
-            else None
-        ),
+        local=local_meta,
         slate=(
             {"path": str(Path(args.slate).resolve()), "digest": calibrate.digest(Path(args.slate))}
             if args.slate
@@ -195,7 +240,7 @@ def _run_grid(args: argparse.Namespace, tasks: list, strengths: tuple, local: bo
         ),
     )
 
-    subject = _subject(args, local)
+    subject = _subject(args, bool(local_meta))
     result = run_grid(cells, subject, store, WORKSPACE_ROOT, on_cell=_progress)
     path = report.write(store.dir)
     simulated = " (simulated)" if args.dry_run else ""
@@ -289,7 +334,7 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
     if args.from_run:
         return _reselect(Path(args.from_run), args)
 
-    packs = args.domain or list(domains.generators())
+    packs = args.domain or [p for p in domains.generators() if p not in CALIBRATION_EXCLUDES]
     seeds = args.seed or list(calibrate.DEFAULT_SEEDS)
     difficulties = args.difficulty or list(calibrate.DEFAULT_DIFFICULTIES)
     tracks = args.track or ["in-context"]
@@ -299,11 +344,32 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
         print(str(exc), file=sys.stderr)
         return 1
 
-    strength = next((s for s in STRENGTHS if s.name == args.strength), None)
-    if strength is None:
-        known = ", ".join(s.name for s in STRENGTHS)
-        print(f"no such strength: {args.strength} — have {known}", file=sys.stderr)
-        return 1
+    local_meta = None
+    if args.local_model:
+        prepared = _local_sitting(args)
+        if prepared is None:
+            return 1
+        strengths, local_meta = prepared
+        # A pass is *one* arm at *one* strength, and `calibrate.tally` counts by
+        # task key across every record in the run. Two strengths would put six
+        # trials of one item under one rate, mixing two subjects into a band
+        # that means something only for one — and precondition 4 exists to stop
+        # exactly that. So the crossing `run` sweeps is refused here by name.
+        if len(strengths) != 1:
+            print(
+                f"a calibration pass runs at one strength, and this is "
+                f"{len(strengths)}: {', '.join(s.name for s in strengths)}. A "
+                "slate is calibrated for one subject — run a pass per subject.",
+                file=sys.stderr,
+            )
+            return 1
+        strength = strengths[0]
+    else:
+        strength = next((s for s in STRENGTHS if s.name == args.strength), None)
+        if strength is None:
+            known = ", ".join(s.name for s in STRENGTHS)
+            print(f"no such strength: {args.strength} — have {known}", file=sys.stderr)
+            return 1
 
     tasks = [candidate.task for candidate in candidates]
     cells = grid(tasks, (strength,), (calibrate.ARM,), None, args.trials)
@@ -317,8 +383,18 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
         file=sys.stderr,
     )
     if not args.dry_run:
-        ceiling = len(cells) * args.budget
-        print(f"up to {args.budget:.2f} USD each — ceiling {ceiling:.2f} USD.", file=sys.stderr)
+        if local_meta:
+            hours = len(cells) * args.max_cell_seconds / 3600
+            print(
+                f"up to {args.max_cell_seconds}s each — worst case {hours:.1f}h. No API cost.",
+                file=sys.stderr,
+            )
+        else:
+            ceiling = len(cells) * args.budget
+            print(
+                f"up to {args.budget:.2f} USD each — ceiling {ceiling:.2f} USD.",
+                file=sys.stderr,
+            )
         if not args.yes:
             print("re-run with --yes to spend it.", file=sys.stderr)
             return 2
@@ -336,14 +412,11 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
         ablate=None,
         max_turns=args.max_turns,
         max_budget_usd=args.budget,
-        calibration=calibrate.spec(seeds, packs, difficulties, tracks, args.trials),
+        local=local_meta,
+        calibration=calibrate.spec(seeds, packs, difficulties, tracks, args.trials, strength),
     )
 
-    subject = (
-        StubSubject()
-        if args.dry_run
-        else AgentSubject(max_turns=args.max_turns, max_budget_usd=args.budget)
-    )
+    subject = _subject(args, bool(local_meta))
     result = run_grid(cells, subject, store, WORKSPACE_ROOT, on_cell=_progress)
     report.write(store.dir)
     simulated = " (simulated)" if args.dry_run else ""
@@ -496,7 +569,14 @@ def cmd_resume(args: argparse.Namespace) -> int:
     except (calibrate.ManifestError, calibrate.PoolError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
-    strengths = tuple(s for s in STRENGTHS if s.name in set(meta["strengths"]))
+    local_meta = meta.get("local")
+    if local_meta:
+        rebuilt = _local_strengths_of(local_meta, meta["strengths"])
+        if rebuilt is None:
+            return 1
+        strengths = rebuilt
+    else:
+        strengths = tuple(s for s in STRENGTHS if s.name in set(meta["strengths"]))
     cell_arms = tuple(meta["arms"])
     # `repeats` is part of the grid's shape: rebuilding without it produces only
     # the first trial of each cell, and every later trial in the record then
@@ -543,22 +623,88 @@ def cmd_resume(args: argparse.Namespace) -> int:
 
     budget = meta.get("max_budget_usd", args.budget)
     max_turns = meta.get("max_turns", args.max_turns)
-    print(
-        f"{len(owed)} of {len(cells)} cells outstanding in {run_dir.name} — "
-        f"ceiling {len(owed) * budget:.2f} USD.",
-        file=sys.stderr,
-    )
+    if local_meta:
+        seconds = local_meta.get("max_cell_seconds", local.DEFAULT_MAX_CELL_SECONDS)
+        hours = len(owed) * seconds / 3600
+        print(
+            f"{len(owed)} of {len(cells)} cells outstanding in {run_dir.name} — "
+            f"up to {seconds}s each, worst case {hours:.1f}h. No API cost.",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"{len(owed)} of {len(cells)} cells outstanding in {run_dir.name} — "
+            f"ceiling {len(owed) * budget:.2f} USD.",
+            file=sys.stderr,
+        )
     if not args.yes:
         print("re-run with --yes to spend it.", file=sys.stderr)
         return 2
 
     store = RecordStore(RESULTS_ROOT, run_dir.name)
-    subject = AgentSubject(max_turns=max_turns, max_budget_usd=budget)
+    if local_meta:
+        subject = local.LocalSubject(
+            base_url=local_meta["endpoint"],
+            max_turns=max_turns,
+            max_cell_seconds=local_meta.get("max_cell_seconds", local.DEFAULT_MAX_CELL_SECONDS),
+        )
+    else:
+        subject = AgentSubject(max_turns=max_turns, max_budget_usd=budget)
     result = run_grid(owed, subject, store, WORKSPACE_ROOT, on_cell=_progress)
     path = report.write(store.dir)
     print(f"\n{len(result.records)} cells resumed · {result.cost_usd:.2f} USD")
     print(f"report: {path}")
     return _halted(result, store.dir, len(owed))
+
+
+def _local_strengths_of(local_meta: dict, recorded: list[str]) -> tuple | None:
+    """The local strengths a stopped run was measured under, rebuilt from itself.
+
+    Not from the flags given now, for the reason `_slate_of` rebuilds the slate
+    that way: the two halves of a resumed run have to be one experiment. A local
+    strength carries an endpoint, a protocol and a **window**, and the window is
+    what the overflow guard measures a conversation against — so a resume that
+    guessed it would bound the second half differently from the first.
+
+    A run that recorded no window is refused rather than defaulted. That is the
+    fourth instance of this instrument being able to report plausible numbers
+    from a misconfiguration (`notes/a-local-subject.md`), and the ruling from the
+    third stands: refuse, do not degrade.
+    """
+    window = local_meta.get("context_tokens")
+    if not window:
+        print(
+            "this run recorded no served context window, so the strengths it "
+            "measured under cannot be rebuilt — a resume would guess the window "
+            "the overflow guard bounds a cell against. Start a new run.",
+            file=sys.stderr,
+        )
+        return None
+
+    problems = local.preflight(local_meta["endpoint"], local_meta["models"], window)
+    if problems:
+        for problem in problems:
+            print(problem, file=sys.stderr)
+        return None
+
+    strengths = local.strengths(
+        local_meta["models"],
+        local_meta["protocols"],
+        local_meta["endpoint"],
+        local_meta.get("reasoning_effort"),
+        window,
+    )
+    wanted = set(recorded)
+    rebuilt = tuple(s for s in strengths if s.name in wanted)
+    if len(rebuilt) != len(wanted):
+        print(
+            f"the run recorded strengths {sorted(wanted)} but its local block "
+            f"rebuilds {[s.name for s in strengths]} — the two halves would not "
+            "be one experiment. Start a new run.",
+            file=sys.stderr,
+        )
+        return None
+    return rebuilt
 
 
 def _slate_of(run_dir: Path, meta: dict) -> list:
@@ -578,7 +724,7 @@ def _slate_of(run_dir: Path, meta: dict) -> list:
                 f"{path.name} has changed since this run started — the slate it "
                 "names is not the slate that was measured. Start a new run."
             )
-        return calibrate.load(path)
+        return _calibrated_slate(path)
     return domains.load_all(meta["domains"])
 
 
@@ -815,6 +961,41 @@ def main(argv: list[str] | None = None) -> int:
         default=calibrate.STRENGTH.name,
         help="the one strength the pass runs at; the weak end is where the "
         "signal is, so the default is the weaker model",
+    )
+    cal.add_argument(
+        "--local-model",
+        action="append",
+        metavar="MODEL",
+        help="calibrate against a locally-served model instead of the API. A "
+        "slate is calibrated for one subject, so unlike `run` this takes one "
+        "model and one protocol",
+    )
+    cal.add_argument(
+        "--protocol",
+        action="append",
+        choices=("native", "structured"),
+        help="how the local subject calls tools: a `tools` array, or a constrained decoder",
+    )
+    cal.add_argument(
+        "--endpoint",
+        default=local.DEFAULT_BASE_URL,
+        help="OpenAI-compatible base URL for --local-model",
+    )
+    cal.add_argument(
+        "--min-context",
+        type=int,
+        default=local.DEFAULT_CONTEXT_TOKENS,
+        help="refuse to start if a model is served with a smaller window; 0 skips the check",
+    )
+    cal.add_argument(
+        "--reasoning-effort",
+        help="passed through to a thinking model; `none` turns thinking off",
+    )
+    cal.add_argument(
+        "--max-cell-seconds",
+        type=int,
+        default=local.DEFAULT_MAX_CELL_SECONDS,
+        help="wall clock per cell. A local pass is bounded by time, not money",
     )
     cal.add_argument("--limit", type=int, help="stop cleanly after N cells")
     cal.add_argument(

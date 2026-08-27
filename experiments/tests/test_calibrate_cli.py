@@ -10,7 +10,7 @@ import json
 
 import pytest
 
-from harness import calibrate, cli
+from harness import calibrate, cli, domains
 from harness.cli import main
 
 
@@ -139,9 +139,40 @@ class TestRunningTheSlate:
         records = [
             json.loads(line) for line in (run_dir / "records.jsonl").read_text().splitlines()
         ]
-        assert {r["task_id"] for r in records} == kept
+        controls = {task.id for task in domains.load("controls")}
+        assert {r["task_id"] for r in records} == kept | controls
         meta = json.loads((run_dir / "run.json").read_text())
         assert meta["slate"]["digest"] == calibrate.digest(slate)
+
+    def test_a_calibrated_grid_still_carries_the_negative_controls(self, offline):
+        """The band rejects a control as *too easy*, which is what a healthy
+        control is. Without carrying the pinned four, a calibrated grid holds
+        none — and `hypotheses.md` precondition 1 cannot be checked on the run
+        it gates."""
+        main(["calibrate", "--dry-run", "--domain", "eligibility"])
+        slate = latest_run(offline) / "slate.json"
+        assert "controls" not in {
+            entry["domain"] for entry in json.loads(slate.read_text())["kept"]
+        }
+
+        main(["run", "--dry-run", "--slate", str(slate)])
+        records = [
+            json.loads(line)
+            for line in (latest_run(offline) / "records.jsonl").read_text().splitlines()
+        ]
+        assert {r["task_id"] for r in records if r["domain"] == "controls"} == {
+            task.id for task in domains.load("controls")
+        }
+
+    def test_a_pool_draws_no_controls_unless_asked_by_name(self, offline):
+        """A control selected for difficulty has stopped being a control."""
+        main(["calibrate", "--dry-run", "--difficulty", "3"])
+        meta = json.loads((latest_run(offline) / "run.json").read_text())
+        assert "controls" not in meta["calibration"]["packs"]
+
+        main(["calibrate", "--dry-run", "--domain", "controls", "--difficulty", "3"])
+        meta = json.loads((latest_run(offline) / "run.json").read_text())
+        assert meta["calibration"]["packs"] == ["controls"]
 
     def test_a_slate_whose_items_moved_is_refused(self, offline):
         main(["calibrate", "--dry-run", "--domain", "eligibility"])
@@ -186,7 +217,7 @@ class TestRebuildingASlate:
 
         rebuilt = cli._slate_of(run_dir, meta)
 
-        assert [task.key for task in rebuilt] == [task.key for task in calibrate.load(slate)]
+        assert [task.key for task in rebuilt] == [task.key for task in cli._calibrated_slate(slate)]
 
     def test_a_manifest_edited_since_the_run_is_refused(self, offline):
         main(["calibrate", "--dry-run", "--domain", "eligibility"])

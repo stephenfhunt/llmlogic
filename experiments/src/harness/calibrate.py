@@ -26,7 +26,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from harness import domains, report, resume
-from harness.cell import HAIKU_4_5
+from harness.cell import HAIKU_4_5, Strength
 from harness.record import RecordStore
 from harness.task import Task
 
@@ -267,13 +267,25 @@ def _verdict(track: str, rate: float) -> tuple[bool, str]:
 
 
 def spec(
-    seeds: list[int], packs: list[str], difficulties: list[int], tracks: list[str], trials: int
+    seeds: list[int],
+    packs: list[str],
+    difficulties: list[int],
+    tracks: list[str],
+    trials: int,
+    strength: Strength = STRENGTH,
 ) -> dict:
     """The pool as data, so a stopped pass can be rebuilt exactly.
 
-    Written into a calibration run's ``run.json``. `resume` rebuilds a grid from
-    what the run recorded rather than from the flags given now — a resume that
-    re-drew a different pool would join two different passes.
+    Written into a calibration run's ``run.json``, and carried verbatim into the
+    manifest. `resume` rebuilds a grid from what the run recorded rather than
+    from the flags given now — a resume that re-drew a different pool would join
+    two different passes.
+
+    ``strength`` is **the subject that did the selecting**, and it is recorded
+    rather than assumed because an item's difficulty is not a property of the
+    item alone (`hypotheses.md`, precondition 4). A slate calibrated on haiku is
+    not calibrated for a 14B served locally, and a manifest that cannot say
+    which one selected it cannot be checked against the grid that runs it.
     """
     return {
         "packs": list(packs),
@@ -282,7 +294,18 @@ def spec(
         "tracks": list(tracks),
         "trials": trials,
         "arm": ARM,
-        "strength": STRENGTH.name,
+        "strength": strength.name,
+        "model": strength.model,
+        "local": (
+            {
+                "endpoint": strength.endpoint,
+                "protocol": strength.tool_protocol,
+                "reasoning_effort": strength.reasoning_effort,
+                "context_tokens": strength.context_tokens,
+            }
+            if strength.is_local
+            else None
+        ),
     }
 
 
