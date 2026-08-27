@@ -28,9 +28,9 @@ raw transcripts (Claude Code auto-saves those under
 
 `LocalSubject` ships: our own tool loop over an OpenAI-compatible endpoint, so the
 weak end of the scale is reachable at last. **1,391 harness tests green (+19)**,
-ruff clean, the 168-cell offline grid unchanged. A 432-cell local sweep is
-**running as this is written** — `results/run-20260826T204936Z` — and the next session reads
-it. Long form: [`experiments/notes/a-local-subject.md`](../experiments/notes/a-local-subject.md).
+ruff clean, the 168-cell offline grid unchanged. The 432-cell local sweep it was
+built for **finished, and is uninterpretable by its own pre-registration** —
+`results/run-20260826T204936Z`, 3.5h, $0.00. Long form: [`experiments/notes/a-local-subject.md`](../experiments/notes/a-local-subject.md).
 
 **Done**
 - **`local.py`** — the loop, the tools spelled as the SDK spells them, the skill
@@ -69,10 +69,25 @@ preconditions under which a run is *unreadable* rather than null.
   per-subject one, and the 2026-08-25 (later) worklog entry rotated to the archive.
   The plan's `at-scale`-by-construction rule was dropped before it was written.
 
+**The sweep, read**
+- **Both preconditions failed**: negative controls 18/72 = **25%** against the 75%
+  floor, and mandate compliance 21/144 = **15%** against 80%. `hypotheses.md`
+  fired on its first use and refused the endpoint. 10% correct overall.
+- **`engine-forced` is catastrophic for a weak subject** — 2/144 correct, 96
+  `no-answer`. Told it must run a program it burns the budget trying: 96 cells
+  `invoked` the engine, 21 got an answer out of it. Left unprompted the `engine`
+  arm reaches essentially never (1/144 `answered-from`, 113 `none`).
+- **Structured decoding is a floor, not an improvement**: `llama3.1` and
+  `qwen2.5-coder` go 0% native → 15%/12% structured; `qwen3` is 17% either way.
+  Exactly what the enforcement asymmetry predicts.
+- **Two claims of mine that the full run contradicted**, both made from ~16 cells:
+  `no-answer` did not collapse (47%, against 55% before), and the format example
+  moved failures from `unparseable` to `no-answer` rather than resolving them.
+
 **Next up**
-- **Read the sweep** in `results/run-20260826T204936Z`, then a local run of the calibrated
-  slate. At 131 of 432 cells it stands at 11% correct against ~5% before this
-  session's fixes, and `structured` leads `native` on all three models.
+- **An 8B subject is not viable for this instrument**, and it is a capability
+  limit, not a prompt one: of 205 `no-answer` cells, 76 took zero turns and 75
+  looped to the cap. Neither responds to more nudging.
 - **A calibration pass that clears power**, which is the real blocker: 78 tasks
   are needed for a 10-point effect and the pinned slate is 28, `--repeats` does
   not buy paired items, and the pass has to be run **per subject** — a slate

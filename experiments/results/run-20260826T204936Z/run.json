@@ -1,0 +1,53 @@
+{
+  "run_id": "run-20260826T204936Z",
+  "started_at": "2026-08-26T20:49:36.885511+00:00",
+  "dry_run": false,
+  "domains": [
+    "access_control",
+    "controls"
+  ],
+  "tasks": 8,
+  "cells": 432,
+  "strengths": [
+    "qwen3-8b-native",
+    "qwen3-8b-structured",
+    "llama3.1-8b-native",
+    "llama3.1-8b-structured",
+    "qwen2.5-coder-7b-native",
+    "qwen2.5-coder-7b-structured"
+  ],
+  "arms": [
+    "prose",
+    "engine",
+    "engine-forced"
+  ],
+  "repeats": 3,
+  "fingerprints": {
+    "controls/department-of": "567d471f8808ed9b",
+    "controls/customer-of-order": "b3be9a92dea55f77",
+    "controls/orders-above-100": "a30f549bcca6c4ce",
+    "controls/engineering-headcount": "397c66f0ec307dd6",
+    "access_control/who-can-read-r03": "0499ee734ce6341f",
+    "access_control/resources-for-u04": "bac0dc855085b84e",
+    "access_control/users-with-no-access": "7d7ca9fd98a296e1",
+    "access_control/delete-without-read": "5a8b0fd34f012c34"
+  },
+  "ablate": null,
+  "max_turns": 30,
+  "max_budget_usd": 2.0,
+  "local": {
+    "endpoint": "http://127.0.0.1:11434/v1",
+    "models": [
+      "qwen3:8b",
+      "llama3.1:8b",
+      "qwen2.5-coder:7b"
+    ],
+    "protocols": [
+      "native",
+      "structured"
+    ],
+    "reasoning_effort": "none",
+    "max_cell_seconds": 180
+  },
+  "slate": null
+}
