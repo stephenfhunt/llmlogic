@@ -15,6 +15,39 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-08-27** — **The generated pool's floor is above this subject's ceiling,
+  at every difficulty the knob reaches.** 408 cells of the first paid calibration
+  pass (`results/cal-20260827T035804Z`, halted deliberately) answer the
+  2026-08-26 open question — *if the pool comes back mostly too hard, are the
+  knobs mis-scaled or is the band wrong?* — and the answer is neither the band
+  nor a knob that can be turned further:
+
+  | difficulty | correct | no-answer | hit a stopping rule |
+  |---|---|---|---|
+  | 1 | 19/137 = **14%** | 36 | 26 |
+  | 2 | 10/135 = 7% | 45 | 29 |
+  | 3 | 7/135 = 5% | 45 | 40 |
+
+  At the **easiest** setting four of five packs sit at or under 16% —
+  `eligibility` 0/25, `scheduling` 2/25, `imports` 3/25, `ontology` 4/25 — and
+  72% of items with two trials are at zero correct, which the band rejects as
+  *too hard*. Difficulty 1 is the generators' floor, so there is no knob left.
+  - **The real gap is between the rungs, not inside them.** The same subject
+    scores **83%** on `controls` and 14% on the easiest generated item. The slate
+    has nothing between a single-hop lookup and multi-hop reasoning, and
+    calibration cannot select what was never generated. Whatever comes next —
+    easier generated forms, a stronger subject, a smaller effect — is a decision
+    about *that gap*, and it is the first time the instrument has been able to
+    state it as a measurement.
+  - **23% of cells bought no measurement**: 95 of 408 hit a stopping rule, and
+    `scheduling` ran a median 234.6s against a 240s cap with 43 of 75 capped. An
+    item the subject cannot answer inside the cap measures the cap.
+  - **Stopped rather than finished**, at 408 of 1,125 cells and ~22h remaining:
+    the projection was ~75 kept items against the 155 the +20-point endpoint
+    needs, and precondition 2 already fails, so the grid it would feed could not
+    read the primary endpoint anyway. No slate was written — `_write_slate`
+    refuses a halted pass, which is the rule working.
+
 - **2026-08-26** — **The pipe-joined answer was the prompt's fault, and the fix
   goes in the prompt, not the parser.** For a single-column question the format
   bullet read *"each line has the fields `order_id`, separated by `|`"* — naming a

@@ -24,6 +24,48 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-27 (later) — The first paid pass, and the rung that is not there
+
+The calibration pass ran 408 of 1,125 cells and was **stopped deliberately**
+(`results/cal-20260827T035804Z`). It answers the question it was launched to
+answer, just not the way it was meant to: the generated pool is too hard for this
+subject at **every difficulty the generators reach**, so there was nothing in the
+band to select.
+
+**Done**
+- **The pass, read.** correct by difficulty: **d1 14%, d2 7%, d3 5%**. At the
+  easiest setting `eligibility` is 0/25, `scheduling` 2/25, `imports` 3/25,
+  `ontology` 4/25. 72% of two-trial items sit at zero correct, which rejects as
+  *too hard*. Difficulty 1 is the floor, so no knob remains.
+- **23% of cells bought no measurement** — 95 of 408 hit a stopping rule, and
+  `scheduling` ran a median 234.6s against a 240s cap, 43 of 75 capped.
+- **Stopped at ~22h remaining**, projecting ~75 kept items against the 155 the
+  +20-point endpoint needs — and precondition 2 already fails, so the grid it
+  would feed could not read the primary endpoint. No slate written: a halted pass
+  refuses selection, which is the rule working.
+- **The format fix looks to have taken.** `unparseable` is 9/408 = **2.2%**, five
+  of them `wrong-arity`, against 15.4% of single-column cells before it. Different
+  item mix and one run, so it is a direction and not yet a result.
+
+**Decided** (`experiments/decisions.md`, one entry)
+- **The gap is between the rungs, not inside them.** The same subject scores 83%
+  on `controls` and 14% on the easiest generated item; the slate has nothing in
+  between, and calibration cannot select what was never generated. That is now a
+  measurement rather than a suspicion, and it is the blocker.
+
+**Removed**
+- Nothing deleted. The previous entry's *Next up* — resume the pass — is
+  superseded by this one; "The pass that picks the slate" rotated to the archive.
+
+**Next up**
+- **Build the missing rung, or change the subject.** Either the generators grow a
+  form easier than today's difficulty 1, or the calibrating subject is stronger
+  than a 14B. A slate cannot be calibrated into a gap.
+- **`scheduling` needs its own look** before any re-run: capped in 43 of 75 cells,
+  it spends the most time and returns the least evidence of any pack.
+- **Still owed from the earlier entry:** the mandate arm (`invoked` 16/24), the
+  prompt-blind `resume.fingerprint`, and writing the partial-read rule down.
+
 ## 2026-08-27 — The gate that inverted its own interim read
 
 `qwen3:14b` at 16k with q4 KV **clears the controls floor on `structured`** — the
@@ -162,56 +204,3 @@ preconditions under which a run is *unreadable* rather than null.
   it cannot, a null on the measured slate stays unreadable however good the
   instrument is, and the answer is a larger model at a smaller window — the
   fixtures are ~275 tokens, so context is not the scarce resource here.
-
-## 2026-08-26 (later) — The pass that picks the slate
-
-`harness calibrate` — the consumer everything on 2026-08-26 was built for. A
-generated pool runs once on the prose arm at the weak strength, the band keeps
-what is not unanimous, and what it keeps is pinned to a manifest a grid runs
-from. **1,353 harness tests green (+52)**, ruff clean, `harness run --dry-run
---all` still renders the 168-cell grid offline. **No paid pass has run**: the
-slate has still never met a real subject.
-
-**Done**
-- **`calibrate.py`** — pool, tally, band, manifest. `harness calibrate` runs the
-  pass and selects from it; `--from <run-dir>` selects again from a pass already
-  paid for; `harness run --slate <manifest>` runs what it kept. The whole of it
-  is exercised by `--dry-run` against the stub, which is what keeps a step this
-  expensive tested.
-- **Three trials per item**, because the band is empty at one: 0 and 1 are the
-  only reachable accuracies, and both are outside [0.2, 0.8].
-- **A pool that fails loudly**: building it is offline, so a degenerate item
-  aborts rather than shrinking it, and two seeds agreeing in the four hex digits
-  an id carries are refused by name before a cell runs.
-- **A manifest holds provenance and a fingerprint, not fixtures**, and `load`
-  refuses an item that no longer hashes to what the pass measured.
-- **A resume knew one way to rebuild a grid and needed three** — pool, manifest,
-  pinned slate (`cli._slate_of`). Writing it found that the rebuild had been
-  **dropping `repeats`** all along: a repeated run resumed into trial 0 and then
-  refused its own later trials as strangers. Nothing had owed one.
-
-**Decided** (`experiments/decisions.md`, three entries)
-- **A band needs three trials before it can be expressed at all**, and a failed
-  cell is not a trial — *hard* is a keep on one of the two bands, so an ERROR
-  counted as a miss selects an item because the instrument broke.
-- **`at-scale` is calibrated too, and its band is a floor.** ~0 is what that
-  track claims; the interesting direction is the rejection, since an at-scale
-  item prose answers well did not defeat the arm it was built to defeat.
-- **Selection is separable from collection**, so moving the band costs nothing.
-  Re-running a stochastic subject to move it would be a different pass.
-- The 2026-08-25 calibration entry is annotated with what building it taught:
-  0.2–0.8 survived contact, the trial count and the second track did not.
-
-**Removed**
-- Nothing deleted: `cmd_resume`'s single rebuild path was *replaced* by
-  `_slate_of`. The planned rule selecting `at-scale` by construction was dropped
-  before it was written, in favour of calibrating that track too.
-
-**Next up**
-- **A paid calibration pass** — the default pool is 87 items in 261 cells at
-  haiku. That is the first time the generated slate meets a real subject, and the
-  first evidence about whether the items are informative rather than merely hard.
-- Then **`hypotheses.md`** before a grid is paid for, and `LocalSubject`.
-- **Open question:** if the pool comes back mostly *too hard* at difficulty 2–4,
-  the knobs are mis-scaled rather than the band being wrong — and only the
-  rejection histogram says which.

@@ -162,11 +162,17 @@ grid unable to answer S1. The argument and the numbers are in
 - **A local sweep of the calibrated slate** — the run the above exists for:
   models x protocols x arms over `controls` and `access_control`, three trials.
   _queued_ — the next session.
-- **A calibration pass that clears power** — the blocker before any grid is worth
-  running. 78 tasks are needed for a 10-point effect and the pinned slate is 28,
-  so the pool wants roughly six `(seed, difficulty)` combinations and the pass
-  must be run **per subject**. `harness calibrate` has still never been run
-  against a real subject. _queued — the next session._
+- **A calibration pass that clears power** — first pass run 2026-08-27 against
+  `qwen3:14b` and **halted at 408 of 1,125 cells**: the pool is too hard at every
+  difficulty the generators reach (14% / 7% / 5%), so it projected ~75 kept items
+  against the 155 a +20-point effect needs. _blocked_ on the item below. —
+  `results/cal-20260827T035804Z`, `decisions.md` 2026-08-27.
+
+- **A rung between `controls` and the measured slate** — the same subject scores
+  83% on single-hop lookups and 14% on the easiest generated multi-hop item, so
+  calibration has nothing in the band to select. Either the generators grow an
+  easier form or the subject changes; a slate cannot be calibrated into a gap.
+  _designing — **v1**, and now the blocker._ — `decisions.md` 2026-08-27.
 - **`harness score --task <id> --program <file>`** — run a program, grade its
   output. One command; also the natural home for the reference corpus's check.
   _shipped 2026-08-25._ — `score.py`. Exit 0/1/2; the wall-clock timeout is the
