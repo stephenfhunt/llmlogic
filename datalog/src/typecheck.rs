@@ -25,6 +25,7 @@
 use crate::ast::{AggOp, ArithOp, Span, TypeName};
 use crate::error::{Error, ErrorCode};
 use crate::ir;
+use crate::print::print_value;
 
 /// The inferred type of every column, once a program type-checks.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,6 +69,20 @@ fn type_of(value: &ir::Value) -> Option<TypeName> {
         ir::Value::Timestamp(_) => TypeName::Timestamp,
         ir::Value::Duration(_) => TypeName::Duration,
     })
+}
+
+/// A type as a clash message names it: the type word, and the term that fixed
+/// it where there was one — `symbol `alice`` rather than bare `symbol`.
+///
+/// `bugs/009`: the type words alone are what a subject looped fifteen rewrites
+/// against, because "used as both symbol and string" never says that `name` was
+/// read as a symbol. Naming the term makes a lowercase-identifier-where-a-
+/// variable-was-meant self-evident without the engine guessing intent.
+fn describe(ty: TypeName, witness: Option<&str>) -> String {
+    match witness {
+        Some(term) => format!("{} `{}`", type_label(ty), term),
+        None => type_label(ty).to_string(),
+    }
 }
 
 fn is_numeric(ty: TypeName) -> bool {
@@ -213,11 +228,26 @@ fn type_label(ty: TypeName) -> &'static str {
 /// for each rule/query variable and each literal operand. Each class carries at
 /// most one concrete [`TypeName`]; unifying two classes with different concrete
 /// types is a type conflict.
+/// The concrete type a class settled on, and the term that fixed it.
+///
+/// `bugs/009`: storing the type alone is why a column-level clash could name
+/// one side. The type is *what* the class resolved to; `witness` is **how the
+/// term that pinned it was written** — `alice` for a symbol against `"alice"`
+/// for a string — which is the difference a reader needs and the difference the
+/// type words alone cannot show.
+#[derive(Debug, Clone)]
+struct Fixed {
+    ty: TypeName,
+    /// `None` where the type came from inference or a declaration rather than a
+    /// literal — a `count` result is an int with no term to point at.
+    witness: Option<String>,
+}
+
 struct TypeChecker<'a> {
     program: &'a ir::Program,
     parent: Vec<usize>,
     rank: Vec<u8>,
-    ty: Vec<Option<TypeName>>,
+    ty: Vec<Option<Fixed>>,
     /// A human-readable description of each slot, for error messages.
     label: Vec<String>,
     /// Slots that must resolve to a numeric type (arithmetic / ordered
@@ -308,16 +338,22 @@ impl<'a> TypeChecker<'a> {
     /// Constrains a slot's class to a concrete type, reporting a conflict if the
     /// class already resolved to a different one.
     fn set_type(&mut self, node: usize, t: TypeName) {
+        self.set_type_from(node, t, None);
+    }
+
+    /// [`Self::set_type`], carrying the literal that pinned the type so a clash
+    /// can name both sides as they were written (`bugs/009`).
+    fn set_type_from(&mut self, node: usize, t: TypeName, witness: Option<String>) {
         let root = self.find(node);
-        match self.ty[root] {
-            None => self.ty[root] = Some(t),
-            Some(existing) if existing == t => {}
-            Some(existing) => {
+        match &self.ty[root] {
+            None => self.ty[root] = Some(Fixed { ty: t, witness }),
+            Some(fixed) if fixed.ty == t => {}
+            Some(fixed) => {
                 let message = format!(
                     "{} is used as both {} and {}",
                     self.label[root],
-                    type_label(existing),
-                    type_label(t),
+                    describe(fixed.ty, fixed.witness.as_deref()),
+                    describe(t, witness.as_deref()),
                 );
                 self.raise(ErrorCode::TypeClash, message);
             }
@@ -331,19 +367,31 @@ impl<'a> TypeChecker<'a> {
         if ra == rb {
             return;
         }
-        let merged = match (self.ty[ra], self.ty[rb]) {
-            (Some(x), Some(y)) if x != y => {
+        let clash = match (&self.ty[ra], &self.ty[rb]) {
+            (Some(x), Some(y)) if x.ty != y.ty => Some((x.clone(), y.clone())),
+            _ => None,
+        };
+        let merged = match clash {
+            Some((x, y)) => {
+                // Deliberately *not* `describe`: here the two sides are two
+                // slots, not two terms. A variable's class took its type from
+                // whatever pinned it, so appending that literal would read as
+                // the variable's own value — "variable `Q` has type int `4`"
+                // says something the message does not mean. Naming the term is
+                // apt in `set_type_from`, where the incoming side **is** the
+                // term being typed; provenance for an inherited type is the
+                // secondary-span question (`bugs/009`), not this one.
                 let message = format!(
                     "{} has type {} but {} has type {}",
                     self.label[ra],
-                    type_label(x),
+                    type_label(x.ty),
                     self.label[rb],
-                    type_label(y),
+                    type_label(y.ty),
                 );
                 self.raise(ErrorCode::TypeClash, message);
                 Some(x)
             }
-            (x, y) => x.or(y),
+            None => self.ty[ra].clone().or_else(|| self.ty[rb].clone()),
         };
         let (root, child) = if self.rank[ra] >= self.rank[rb] {
             (ra, rb)
@@ -365,7 +413,7 @@ impl<'a> TypeChecker<'a> {
             for (col, value) in fact.tuple.0.iter().enumerate() {
                 // `absent` is type-neutral: it pins no column type (§4).
                 if let Some(ty) = type_of(value) {
-                    self.set_type(base + col, ty);
+                    self.set_type_from(base + col, ty, Some(print_value(value)));
                 }
             }
         }
@@ -406,7 +454,7 @@ impl<'a> TypeChecker<'a> {
                 // head/fact leaves the column to be typed by its other rows.
                 ir::Term::Const(value) => {
                     if let Some(ty) = type_of(value) {
-                        self.set_type(base + col, ty);
+                        self.set_type_from(base + col, ty, Some(print_value(value)));
                     }
                 }
                 ir::Term::Var(var) => self.union(vars[var.0 as usize], base + col),
@@ -511,7 +559,7 @@ impl<'a> TypeChecker<'a> {
             ir::Expr::Term(ir::Term::Const(value)) => match type_of(value) {
                 Some(ty) => {
                     let node = self.fresh(format!("literal {}", type_label(ty)));
-                    self.set_type(node, ty);
+                    self.set_type_from(node, ty, Some(print_value(value)));
                     node
                 }
                 // A bare `absent` literal is type-neutral (§4): a fresh
@@ -574,7 +622,7 @@ impl<'a> TypeChecker<'a> {
     /// The concrete type a slot's class has settled on, if any.
     fn slot_type(&mut self, slot: usize) -> Option<TypeName> {
         let root = self.find(slot);
-        self.ty[root]
+        self.ty[root].as_ref().map(|fixed| fixed.ty)
     }
 
     /// Resolves the deferred arithmetic and reducer constraints (§8/§9).
@@ -771,7 +819,7 @@ impl<'a> TypeChecker<'a> {
         self.resolve_deferred();
         for (node, at) in std::mem::take(&mut self.numeric) {
             let root = self.find(node);
-            if let Some(ty) = self.ty[root]
+            if let Some(ty) = self.ty[root].as_ref().map(|fixed| fixed.ty)
                 && !is_numeric(ty)
             {
                 let message = format!(
@@ -804,7 +852,7 @@ impl<'a> TypeChecker<'a> {
                         continue;
                     };
                     let root = self.find(self.col_base[p] + col);
-                    if let Some(inferred) = self.ty[root]
+                    if let Some(inferred) = self.ty[root].as_ref().map(|fixed| fixed.ty)
                         && inferred != declared_ty
                     {
                         let message = format!(
@@ -837,6 +885,8 @@ impl<'a> TypeChecker<'a> {
                         // left unconstrained, so a declared-only column still
                         // reports its asserted type.
                         self.ty[root]
+                            .as_ref()
+                            .map(|fixed| fixed.ty)
                             .or_else(|| info.field_types.as_ref().and_then(|types| types[col]))
                     })
                     .collect()

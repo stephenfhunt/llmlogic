@@ -300,6 +300,67 @@ fn a_type_error_is_reported() {
     );
 }
 
+/// `bugs/009`, the half that does not need spans: a column-level clash names
+/// both terms **as they were written**.
+///
+/// This is the part that cost the fifteen rewrites. "used as both symbol and
+/// string" never says that the token was *read* as a symbol; `symbol `alice``
+/// does, and a lowercase identifier where a variable was meant becomes
+/// self-evident without the engine guessing intent.
+#[test]
+fn a_column_type_clash_names_both_terms_as_they_were_written() {
+    let errors = datalog::run("p(alice).\n?- p(\"alice\").\n").expect_err("symbol vs string");
+    let rendered = errors
+        .iter()
+        .find(|e| e.code == ErrorCode::TypeClash)
+        .expect("a type clash")
+        .to_string();
+    assert!(rendered.contains("symbol `alice`"), "{rendered}");
+    assert!(rendered.contains("string `\"alice\"`"), "{rendered}");
+}
+
+/// The same, between two facts — where the clash is found by `set_type` against
+/// a class an earlier fact pinned, rather than against a query.
+#[test]
+fn two_facts_clashing_name_both_their_terms() {
+    let errors = datalog::run("p(1).\np(\"x\").\n?- p(X).\n").expect_err("int vs string");
+    let rendered = errors
+        .iter()
+        .find(|e| e.code == ErrorCode::TypeClash)
+        .expect("a type clash")
+        .to_string();
+    assert!(rendered.contains("int `1`"), "{rendered}");
+    assert!(rendered.contains("string `\"x\"`"), "{rendered}");
+}
+
+/// The *variable* form deliberately does not name terms, and this pins that.
+///
+/// Its two sides are two slots, not two terms: a variable's class took its type
+/// from whatever literal pinned the column, so "variable `Q` has type int `4`"
+/// would read as Q's own value. Provenance for an inherited type is the
+/// secondary-span question `bugs/009` leaves open, not something to smuggle in
+/// through the type word. The reference corpus pins this message byte-exact
+/// (`experiments/reference/malformed/type-clash.err`), so a change here reddens
+/// it there too.
+#[test]
+fn a_variable_type_clash_names_types_without_borrowing_a_literal() {
+    let program = "declare item(name: string, qty: int, weight: float).\n\
+                   item(\"bolt\", 4, 1.5).\n\
+                   total(N) :- item(qty: Q, weight: W), N = Q + W.\n\
+                   ?- total(N).\n";
+    let errors = datalog::run(program).expect_err("int vs float");
+    let rendered = errors
+        .iter()
+        .find(|e| e.code == ErrorCode::TypeClash)
+        .expect("a type clash")
+        .to_string();
+    assert!(rendered.contains("has type int but"), "{rendered}");
+    assert!(
+        !rendered.contains("int `4`"),
+        "borrowed a literal: {rendered}"
+    );
+}
+
 /// `bugs/009` — a column-level type clash must name **both** occurrences.
 ///
 /// The variable form already does (`variable Q ... but variable W ...`); the
