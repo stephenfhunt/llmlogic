@@ -177,8 +177,34 @@ def _example(shape: tuple[str, ...]) -> str:
     return "\n".join(FIELD_SEPARATOR.join(f"{letter}{row}" for letter in letters) for row in (1, 2))
 
 
-def _base(task: Task) -> str:
+def _fields_line(task: Task) -> str:
+    """The field bullet, which cannot be one sentence for both arities.
+
+    Written as one, it told a single-column question that its lines had "the
+    fields `order_id`, separated by `|`" — naming a separator where there is
+    nothing to separate, while `_example` showed `a1` and `a2` on their own
+    lines. Measured across `results/`: **15.4% of single-column cells graded
+    `unparseable` against 1.9% of two-column ones**, and 144 of the 145
+    single-column ones had more `|`-fields on a line than the question has
+    columns. The models were following this line, not ignoring it.
+
+    Grading stays strict, deliberately. Flattening those answers at parse time
+    would have turned 119 of them into 104 `wrong` and 15 `correct` — mostly
+    relabelling format failures as reasoning ones, some of it false credit where
+    `engineering|engineering` collapses to the truth under set semantics — and
+    the wrong-flips fall 47/34/23 across prose, engine and engine-forced, which
+    is bias toward the engine (`grade.py`). Fix the instruction, not the ruler.
+    """
     shape = FIELD_SEPARATOR.join(task.answer_shape)
+    if len(task.answer_shape) == 1:
+        return (
+            f"- each line is one `{shape}` value and nothing else — do not join "
+            f"values with `{FIELD_SEPARATOR}`"
+        )
+    return f"- each line has the fields `{shape}`, separated by `{FIELD_SEPARATOR}`"
+
+
+def _base(task: Task) -> str:
     return f"""\
 The files in your current working directory describe a situation. Answer the
 question below from them. Refer to the files by their plain names, as listed —
@@ -193,7 +219,7 @@ Question:
 Write your final answer to `{ANSWER_FILE}` in that same directory:
 
 - one result per line, and nothing else in the file — no prose, no headers
-- each line has the fields `{shape}`, separated by `{FIELD_SEPARATOR}`
+{_fields_line(task)}
 - order does not matter; duplicates are ignored
 - if the answer is empty, write an empty file
 

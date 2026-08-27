@@ -46,6 +46,10 @@ class Record:
     #: from one that returned nothing — both of which grade `wrong`.
     truth_size: int
     answer_raw: str | None
+    #: Set on an `unparseable` verdict: which of `grade`'s three ways it failed.
+    #: Absent on every record written before it existed, and the report says so
+    #: rather than filling it in.
+    unparseable_reason: str | None
 
     first_program: str | None
     first_program_turn: int | None
@@ -90,6 +94,7 @@ class Record:
             extra=grade.extra,
             truth_size=len(cell.task.truth.rows),
             answer_raw=grade.raw,
+            unparseable_reason=grade.reason,
             first_program=transcript.first_program,
             first_program_turn=transcript.first_program_turn,
             signals=signals.to_dict(),

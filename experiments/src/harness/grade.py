@@ -14,6 +14,15 @@ from harness.task import Answer, Task
 
 ANSWER_FILE = "answer.txt"
 
+#: Why an answer would not parse. Three, because they have three different
+#: causes and only one of them is the subject's: `WRONG_ARITY` on a
+#: single-column question is the pipe-joining habit the format bullet used to
+#: invite (`catalogue._fields_line`), `PROSE` is a sentence where rows belong,
+#: and `EMPTY_FIELD` is a line with a missing value.
+WRONG_ARITY = "wrong-arity"
+PROSE = "prose-in-answer"
+EMPTY_FIELD = "empty-field"
+
 
 class Verdict(StrEnum):
     CORRECT = "correct"
@@ -39,6 +48,11 @@ class Grade:
     #: that returned a superset over-derived.
     missing: int = 0
     extra: int = 0
+    #: Populated on UNPARSEABLE: *which* of the three ways it failed to parse.
+    #: One bucket could not tell a prose sentence from a single-column answer
+    #: joined with `|`, and the second is a prompt defect while the first is the
+    #: subject ignoring the format — `catalogue._fields_line` was found this way.
+    reason: str | None = None
 
     @property
     def correct(self) -> bool:
@@ -62,7 +76,7 @@ def grade(task: Task, workspace: Path) -> Grade:
     raw = path.read_text(encoding="utf-8", errors="replace")
     answer = Answer.parse(raw)
     if answer is None:
-        return Grade(Verdict.UNPARSEABLE, None, raw)
+        return Grade(Verdict.UNPARSEABLE, None, raw, reason=EMPTY_FIELD)
 
     # Format noise is not a reasoning failure, and separating the two is not
     # cosmetic: the prose arm writes sentences more often than the engine arm, so
@@ -70,7 +84,7 @@ def grade(task: Task, workspace: Path) -> Grade:
     # — the one direction of bias this harness cannot afford.
     expected_arity = len(task.answer_shape)
     if answer.rows and answer.arities() != {expected_arity}:
-        return Grade(Verdict.UNPARSEABLE, None, raw)
+        return Grade(Verdict.UNPARSEABLE, None, raw, reason=WRONG_ARITY)
 
     # Arity alone cannot catch a one-column answer: "o2" and "The orders over 100
     # are o2, o4 and o5." are both single fields. Fall back to the shape of the
@@ -80,7 +94,7 @@ def grade(task: Task, workspace: Path) -> Grade:
     truth_has_spaces = any(any(" " in field for field in row) for row in task.truth.rows)
     if not truth_has_spaces and task.truth.rows:
         if any(any(" " in field for field in row) for row in answer.rows):
-            return Grade(Verdict.UNPARSEABLE, None, raw)
+            return Grade(Verdict.UNPARSEABLE, None, raw, reason=PROSE)
 
     if answer.rows == task.truth.rows:
         return Grade(Verdict.CORRECT, answer, raw)

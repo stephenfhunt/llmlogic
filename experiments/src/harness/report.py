@@ -168,6 +168,30 @@ def _comparisons(records: list[dict], arms: tuple[str, ...]) -> list[str]:
     return header + rows + tail
 
 
+def _unparseable_line(records: list[dict]) -> str:
+    """How the answers that would not parse failed, not just how many.
+
+    Worth a line of its own because the three causes are not one finding: a
+    single-column answer joined with `|` was the **prompt** telling it to
+    (`catalogue._fields_line`, fixed 2026-08-26), while a sentence where rows
+    belong is the subject ignoring the format. Runs recorded before the reason
+    existed say so rather than being filled in.
+    """
+    unparseable = [r for r in records if r["verdict"] == "unparseable"]
+    if not unparseable:
+        return "- **Answers that would not parse:** none."
+    counts: dict[str, int] = {}
+    for record in unparseable:
+        reason = record.get("unparseable_reason") or "not recorded"
+        counts[reason] = counts.get(reason, 0) + 1
+    why = ", ".join(f"{n} {reason}" for reason, n in sorted(counts.items(), key=lambda p: -p[1]))
+    return (
+        f"- **Answers that would not parse:** {len(unparseable)} — {why}. "
+        "A format failure is not a wrong answer, and `wrong-arity` on a "
+        "single-column question is the instrument's own to fix, not the subject's."
+    )
+
+
 def _reach(records: list[dict]) -> list[str]:
     """Reach as an outcome with an interval, not a footnote.
 
@@ -310,6 +334,7 @@ def render(run_dir: Path) -> str:
     lines += [
         "### Process signals",
         "",
+        _unparseable_line(graded),
         f"- **First program captured before feedback:** {first_programs}/{len(engine_records)}.",
         f"- **Switched back to search after using the engine:** {switched}. "
         "This is the silent one — the subject had the engine, tried it, and went back to text.",
