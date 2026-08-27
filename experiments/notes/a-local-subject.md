@@ -16,10 +16,45 @@ produce.
 
 ## What it runs on
 
-ollama 0.33, rootless, in `~/.local/ollama`; one RTX 3060, 12 GiB. At the
-32,768-token window the harness holds it to, one model is resident at a time:
+ollama 0.33, rootless, in `~/.local/ollama`; one RTX 3060, 12 GiB, of which the
+desktop holds ~0.8 GiB. One model is resident at a time.
 
-| model | VRAM at 32k | tool calls |
+**Start the server deliberately — the defaults are wrong for this.** ollama serves
+at 4,096 tokens unless told otherwise, which is the defect that cost a sweep and
+the whole model survey before it:
+
+```sh
+OLLAMA_CONTEXT_LENGTH=16384 OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q4_0 \
+  OLLAMA_KEEP_ALIVE=30m ollama serve
+```
+
+`preflight` refuses a run whose window is smaller than it assumes, so a wrong
+setting fails loudly rather than quietly — but it cannot start the server for you.
+`KEEP_ALIVE` matters because cells are grouped by model: without it the model is
+evicted between cells and reloaded at ~4s a time.
+
+**What fits, measured rather than computed** (`size_vram` against `size` from
+`/api/ps` — equal means fully resident, less means spilled to CPU and roughly ten
+times slower):
+
+| model | window | KV | total | on GPU |
+|---|---|---|---|---|
+| `qwen3:8b` | 32k | f16 | 9.16 GiB | ✓ |
+| `qwen3:8b` | 32k | q8_0 | 7.11 GiB | ✓ |
+| `qwen3:14b` | 32k | f16 | 13.93 GiB | ✗ spills 4.6 GiB |
+| `qwen3:14b` | 32k | q8_0 | 11.61 GiB | ✗ |
+| `qwen3:14b` | 16k | q8_0 | 10.18 GiB | ✗ by ~0.7 GiB — what the desktop holds |
+| **`qwen3:14b`** | **16k** | **q4_0** | **9.07 GiB** | **✓** |
+| `qwen3:14b` | 8k | f16 | 9.61 GiB | ✓ |
+
+**A 14B on this card costs the window, and the window is not free.** The 8k that
+fits without KV quantization is *too small for the engine arm*: SKILL.md is ~3,200
+tokens against a guard threshold of 6,144, before a single tool result. 16k with
+q4 KV is the configuration that holds both a 14B and a working conversation.
+
+At the 32,768-token window the earlier sweeps used:
+
+| model | VRAM at 32k (f16 KV) | tool calls |
 |---|---|---|
 | `llama3.1:8b` | 8.4 GiB | native ✓ |
 | `qwen3:8b` | 9.2 GiB | native ✓, thinking off via `reasoning_effort` |

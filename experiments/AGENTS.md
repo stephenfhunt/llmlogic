@@ -79,6 +79,19 @@ cells; `--resume` re-runs what a run is missing or failed, appending to the same
 directory; `--limit N` sizes a sitting to the window. See `decisions.md`
 2026-08-24.
 
+**A local run needs its server started deliberately.** ollama serves at 4,096
+tokens unless told otherwise, and that silently invalidated a whole sweep:
+
+```sh
+OLLAMA_CONTEXT_LENGTH=16384 OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q4_0 \
+  OLLAMA_KEEP_ALIVE=30m ~/.local/ollama/bin/ollama serve
+harness run --local-model qwen3:14b --min-context 16384 --protocol structured --yes
+```
+
+`--min-context` sets both what preflight holds the server to *and* what the
+strengths claim, so the overflow guard and the server cannot disagree. What fits
+on this card is measured in `notes/a-local-subject.md`.
+
 **A local run is bounded by wall clock, not by an account window.** It is the arm
 that can be left running overnight: `--local-model` crossed with `--protocol`,
 `--max-cell-seconds` per cell, and a preflight that refuses a server whose context
