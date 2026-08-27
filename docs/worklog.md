@@ -88,8 +88,11 @@ preconditions under which a run is *unreadable* rather than null.
 - **An 8B subject is not viable for this instrument**, and it is a capability
   limit, not a prompt one: of 205 `no-answer` cells, 76 took zero turns and 75
   looped to the cap. Neither responds to more nudging.
-- **Run `qwen3:14b` at 16k with q4 KV** — pulled and measured, 9.07 GiB fully
-  resident. The server settings are in `experiments/AGENTS.md`; `--min-context
+- **Run `qwen3:14b` at 16k with q4 KV** — pulled, measured at 9.07 GiB fully
+  resident, and smoke-tested: **3/4 on the negative controls in one trial**,
+  against 25% across 72 cells for the 8B models. Promising, and explicitly *not*
+  the measurement precondition 1 asks for — this session twice read a trend off a
+  handful of cells and the full run contradicted it both times. The server settings are in `experiments/AGENTS.md`; `--min-context
   16384` makes preflight and the overflow guard agree. **Correction to what this
   session said twice:** context is *not* free to trade for model size. The
   conversation sets the window, not the fixture, and the 8k a 14B fits in without
