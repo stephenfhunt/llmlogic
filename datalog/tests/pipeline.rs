@@ -300,6 +300,75 @@ fn a_type_error_is_reported() {
     );
 }
 
+/// `bugs/009` — a column-level type clash must name **both** occurrences.
+///
+/// The variable form already does (`variable Q ... but variable W ...`); the
+/// column form names one label and a span belonging to whichever occurrence
+/// arrived second, so neither side of the conflict is locatable. §12: "the
+/// position says where to look for it, which is what stops the message
+/// degrading with program length."
+///
+/// `#[ignore]`d and failing until `set_type` carries the site that fixed a
+/// class's type, in the style of `bugs/002`'s criterion (`src/api.rs:1182`).
+#[test]
+#[ignore = "bugs/009: set_type records the type without the site that fixed it"]
+fn a_column_type_clash_names_both_occurrences() {
+    let errors = datalog::run("p(alice).\n?- p(\"alice\").\n").expect_err("symbol vs string");
+    let clash = errors
+        .iter()
+        .find(|e| e.code == ErrorCode::TypeClash)
+        .expect("a type clash");
+    let rendered = clash.to_string();
+    // Deliberately not pinning a layout — the fix chooses one. Both sides have
+    // to be *findable*: the earlier occurrence's line, and the term as written,
+    // which is what says how the token was read.
+    assert!(
+        rendered.contains("1:"),
+        "the fact that made column 0 a symbol is on line 1, unnamed in: {rendered}"
+    );
+    assert!(
+        rendered.contains("alice"),
+        "neither term appears, so nothing says how each was read: {rendered}"
+    );
+}
+
+/// `bugs/009`'s **general property**: every `type-clash` diagnostic locates both
+/// sides of the conflict, whichever form produced it.
+///
+/// Filed with the bug rather than after it, per `bugs/README.md` — `001` was
+/// still reachable by a second spelling because its property was named and never
+/// written. The variable form satisfies this today only because `union` happens
+/// to hold two labelled slots, and nothing pins that; the column form fails, and
+/// the two-fact case below carries no span at all.
+#[test]
+#[ignore = "bugs/009: the column form locates at most one side"]
+fn every_type_clash_locates_both_sides() {
+    let programs = [
+        // column form: symbol against string
+        "p(alice).\n?- p(\"alice\").\n",
+        // column form, two facts: today this renders with no position whatsoever
+        "p(1).\np(\"x\").\n?- p(X).\n",
+        // variable form: passes today, and is here so it stays passing
+        "declare item(name: string, qty: int, weight: float).\n\
+         item(\"bolt\", 4, 1.5).\n\
+         total(N) :- item(qty: Q, weight: W), N = Q + W.\n\
+         ?- total(N).\n",
+    ];
+    for program in programs {
+        let errors = datalog::run(program).expect_err("a type clash");
+        let clash = errors
+            .iter()
+            .find(|e| e.code == ErrorCode::TypeClash)
+            .unwrap_or_else(|| panic!("no type clash for:\n{program}"));
+        let rendered = clash.to_string();
+        let located = rendered.matches(" at ").count() + rendered.matches("(at ").count();
+        assert!(
+            located >= 2,
+            "only {located} side(s) located for:\n{program}rendered: {rendered}"
+        );
+    }
+}
+
 #[test]
 fn ordered_comparison_uses_every_types_natural_order() {
     // §8: ordered comparisons use the operand type's natural order — strings and
