@@ -24,6 +24,55 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-27 (later still) — `bugs/009`, the half that needed no new machinery
+
+The first defect this harness produced *about the engine* gets its first fix. A
+column-level type clash now names both terms as they were written, which is the
+part that cost a local subject fifteen rewrites. **590 datalog tests green**,
+clippy and fmt clean, and the pinned reference diagnostic is byte-identical.
+
+**Done**
+- **`Fixed { ty, witness }`** replaces a bare `TypeName` in the typechecker's
+  union-find, so a class remembers the literal that pinned it. The three call
+  sites with a literal — facts, constant atom arguments, literal operands — pass
+  it through `print_value`, which already spells a symbol bare and a string
+  quoted. That spelling difference *is* the diagnosis:
+
+  ```
+  - `employee` column 0 is used as both symbol and string (at 3:4)
+  + `employee` column 0 is used as both symbol `name` and string `"Carol"` (at 3:4)
+  ```
+- **Three tests pin the new shape**, including the deliberate *exclusion* below.
+
+**Decided** (`datalog/bugs/009`, not §17 — one normative home, and the bug file
+is where a reader of this message will look)
+- **The `union` form does not name terms, on purpose.** Its two sides are two
+  slots, not two terms: a variable's class inherited its type from whatever
+  pinned the column, so *"variable `Q` has type int `4`"* would read as Q's own
+  value. It was written that way, seen to be wrong, and backed out;
+  `a_variable_type_clash_names_types_without_borrowing_a_literal` fails if it
+  returns.
+- **The bug's own root-cause note was wrong and is corrected in place.** "The fix
+  is one field" holds for the *term*, not the *position*: `Error` carries exactly
+  one span and renders one `(at …)`, and the typechecker never sees the source,
+  so a second position cannot go in the message text. And `ir::Fact` carries no
+  span at all — it derives `Eq`/`Hash` as a set member (§17), so a span cannot go
+  on `Fact` without changing fact identity or breaking 108 uses of `.facts`.
+
+**Removed**
+- Nothing. `bugs/009` stays **open** and both `#[ignore]`d criteria stay red:
+  they assert positions, which this does not deliver. The 2026-08-26 (later
+  still) worklog entry rotated to the archive.
+
+**Next up**
+- **A design pass on the diagnostic model**, which is what closes 009: related
+  spans on `Error`, how `locate_all` resolves them, how they render and serialize
+  for a future `--format json`, and what locates an **imported** row — §12 says
+  source name plus row and column, not a program span. Needs a §12 amendment and
+  a §17 entry, so it is a design session and not a patch.
+- Unchanged from earlier today: the mandate arm, the missing rung between
+  `controls` and the measured slate, and the prompt-blind `resume.fingerprint`.
+
 ## 2026-08-27 (later) — The first paid pass, and the rung that is not there
 
 The calibration pass ran 408 of 1,125 cells and was **stopped deliberately**
@@ -119,88 +168,3 @@ A 1,125-cell calibration pass is running detached.
   4/4 and structured 3/4; the full run said 58% and 83%. Wants to be a rule.
 - **Open question:** `resume.fingerprint` does not cover the prompt, so today's
   `_fields_line` change is invisible to `resume.moved`.
-
-## 2026-08-26 (later still) — A second subject, and four silent misconfigurations
-
-`LocalSubject` ships: our own tool loop over an OpenAI-compatible endpoint, so the
-weak end of the scale is reachable at last. **1,391 harness tests green (+19)**,
-ruff clean, the 168-cell offline grid unchanged. The 432-cell local sweep it was
-built for **finished, and is uninterpretable by its own pre-registration** —
-`results/run-20260826T204936Z`, 3.5h, $0.00. Long form: [`experiments/notes/a-local-subject.md`](../experiments/notes/a-local-subject.md).
-
-**Done**
-- **`local.py`** — the loop, the tools spelled as the SDK spells them, the skill
-  as a `Skill` tool advertised from SKILL.md's own frontmatter, `bash` under
-  `unshare -rn`, stdlib only. `confine.violation` and
-  `engine_use.program_from_call` are imported, so controls 3 and 4 hold by
-  construction. Verified: `/etc/passwd` denied, the `truth.py` answer key denied,
-  no network inside a cell.
-- **Two tool protocols, crossed as strengths.** `harness run --local-model M
-  --protocol P` sweeps them through the existing grid; `Strength` carries the
-  endpoint, protocol and effort, so one subject instance covers the sweep.
-- **The weak end needed three things before it could be measured at all**: the
-  exit condition checked, the answer format *shown* rather than described, and
-  `thought` on every structured action. Two move the instrument and say so.
-- **Bounds that make an overnight run finishable** — wall clock, tokens per
-  completion, conversation size — each a *stopping rule*, never an ERROR.
-- **`Signals.ran_engine` contradicted `engine_use`** on any transcript that
-  invoked the skill without running anything. Narrow now.
-
-**Also written:** `experiments/hypotheses.md`, the pre-registration — one primary
-endpoint (paired `engine-forced` − `prose`, `in-context`, weaker strength) and the
-preconditions under which a run is *unreadable* rather than null.
-
-**Decided** (`experiments/decisions.md`, five entries)
-- **The tool protocol is a property of the model.** `structured` is a grammar the
-  model cannot leave; `native` is a description it may follow — `qwen3:8b` called
-  a tool whose only required parameter was `zebra` with `{"file": …}`.
-- **The completion reminder and the format example**, both recorded as instrument
-  changes: the first is an asymmetry with the SDK subject, the second changes the
-  shared prompt for everyone.
-- **A misconfigured instrument must refuse, not degrade** — the third instance,
-  so it is a pattern.
-
-**Removed**
-- Nothing deleted. `runner.FATAL` was *replaced* as the only fatal classifier by a
-  per-subject one, and the 2026-08-25 (later) worklog entry rotated to the archive.
-  The plan's `at-scale`-by-construction rule was dropped before it was written.
-
-**The sweep, read**
-- **Both preconditions failed**: negative controls 18/72 = **25%** against the 75%
-  floor, and mandate compliance 21/144 = **15%** against 80%. `hypotheses.md`
-  fired on its first use and refused the endpoint. 10% correct overall.
-- **`engine-forced` is catastrophic for a weak subject** — 2/144 correct, 96
-  `no-answer`. Told it must run a program it burns the budget trying: 96 cells
-  `invoked` the engine, 21 got an answer out of it. Left unprompted the `engine`
-  arm reaches essentially never (1/144 `answered-from`, 113 `none`).
-- **Structured decoding is a floor, not an improvement**: `llama3.1` and
-  `qwen2.5-coder` go 0% native → 15%/12% structured; `qwen3` is 17% either way.
-  Exactly what the enforcement asymmetry predicts.
-- **Two claims of mine that the full run contradicted**, both made from ~16 cells:
-  `no-answer` did not collapse (47%, against 55% before), and the format example
-  moved failures from `unparseable` to `no-answer` rather than resolving them.
-
-**Next up**
-- **An 8B subject is not viable for this instrument**, and it is a capability
-  limit, not a prompt one: of 205 `no-answer` cells, 76 took zero turns and 75
-  looped to the cap. Neither responds to more nudging.
-- **Run `qwen3:14b` at 16k with q4 KV** — pulled, measured at 9.07 GiB fully
-  resident, and smoke-tested: **3/4 on the negative controls in one trial**,
-  against 25% across 72 cells for the 8B models. Promising, and explicitly *not*
-  the measurement precondition 1 asks for — this session twice read a trend off a
-  handful of cells and the full run contradicted it both times. The server settings are in `experiments/AGENTS.md`; `--min-context
-  16384` makes preflight and the overflow guard agree. **Correction to what this
-  session said twice:** context is *not* free to trade for model size. The
-  conversation sets the window, not the fixture, and the 8k a 14B fits in without
-  KV quantization cannot hold SKILL.md (~3,200 tokens) plus a working
-  conversation.
-- Then **`harness calibrate` against whichever subject clears the controls**, at
-  ~6 `(seed, difficulty)` combinations, before any grid.
-- **A calibration pass that clears power**, which is the real blocker: 78 tasks
-  are needed for a 10-point effect and the pinned slate is 28, `--repeats` does
-  not buy paired items, and the pass has to be run **per subject** — a slate
-  calibrated on haiku is not calibrated for an 8B model.
-- **Open question:** whether an 8B subject clears the negative controls at all. If
-  it cannot, a null on the measured slate stays unreadable however good the
-  instrument is, and the answer is a larger model at a smaller window — the
-  fixtures are ~275 tokens, so context is not the scarce resource here.
