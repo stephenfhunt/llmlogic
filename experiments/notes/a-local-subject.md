@@ -47,6 +47,42 @@ times slower):
 | **`qwen3:14b`** | **16k** | **q4_0** | **9.07 GiB** | **✓** |
 | `qwen3:14b` | 8k | f16 | 9.61 GiB | ✓ |
 
+**The desktop is holding 0.7 GiB of the card, and that is the whole margin.**
+Measured 2026-08-26, with `Xorg` on the NVIDIA GPU:
+
+| holder | VRAM |
+|---|---|
+| `Xorg` | 451 MiB |
+| `firefox` | 174 MiB |
+| `systemsettings` | 86 MiB |
+| `plasmashell` | 23 MiB |
+| `kwin_x11` | 8 MiB |
+| **total** | **742 MiB** |
+
+That is *exactly* the amount by which the 16k/q8 row above spills. The machine is
+a Ryzen 7 5700G, so it has an iGPU (`RADV RENOIR`) the display could run on
+instead, and the 3060 is where every one of those megabytes is being spent on a
+desktop. **Moving the display to the iGPU buys the q8 KV cache**, which is the
+one that matters: q4_0 is the aggressive setting, and it degrades exactly the
+long-conversation attention every cell in a run depends on.
+
+**The table above is not measurements alone — it solves.** Qwen3-14B is 40
+layers, 8 KV heads, 128-wide keys and values, so one token of KV cache is
+`40 × 8 × (128+128) = 81,920` elements: **160 KB at f16, 80 KB at q8, 40 KB at
+q4**. Against the measured totals that fixes the weights at **8.45 GiB** and
+leaves a residual of ~0.5 GiB for compute buffers:
+
+| context | KV | predicted | measured | residual |
+|---|---|---|---|---|
+| 16k q4 | 0.62 | 9.07 | 9.07 | +0.00 |
+| 16k q8 | 1.25 | 9.70 | 10.18 | +0.48 |
+| 32k q8 | 2.50 | 10.95 | 11.61 | +0.66 |
+| 32k f16 | 5.00 | 13.45 | 13.93 | +0.48 |
+| 8k f16 | 1.25 | 9.70 | 9.61 | −0.09 |
+
+So the next configuration does not need a survey, it needs arithmetic: with the
+display moved, `8.45 + KV + 0.5 ≤ 11.9` allows **q8 KV to about 32k**.
+
 **A 14B on this card costs the window, and the window is not free.** The 8k that
 fits without KV quantization is *too small for the engine arm*: SKILL.md is ~3,200
 tokens against a guard threshold of 6,144, before a single tool result. 16k with
@@ -65,6 +101,64 @@ At the 32,768-token window the earlier sweeps used:
 and 699 — the difference between a slate that fits a sitting and one that does
 not. Whether thinking *helps* is a separate question the harness can now ask,
 because the thinking text is kept.
+
+## The card is power-bound, not thermally bound
+
+Measured mid-run: 76 °C, **168.9 W against a 170 W cap**, SM clock 1777 of 2130
+MHz, `SW Power Cap: Active`, and a hardware-thermal-slowdown counter of **0 µs**
+across the whole session. The reduced clock is the governor holding the envelope,
+not the card in trouble.
+
+**The power cap cannot be raised** — `Max Power Limit` is 170.00 W, equal to the
+default; only the 100 W floor is reachable. It would not help anyway: decode here
+is **memory-bandwidth-bound**. 360 GB/s against 8.45 GiB of weights puts a ceiling
+near 41 tok/s and the observed rate is 21–31, which is 50–75% of it — the
+signature of a bandwidth limit, where a compute-bound job would sit at a few
+percent of its FLOPs ceiling. Watts are not the lever; bytes per second are.
+
+The iGPU is no use for *inference* for the same reason: it shares DDR4 at roughly
+50 GB/s, about seven times less, and splitting layers runs the model at the slow
+link. ollama declines it by default (`OLLAMA_IGPU_ENABLE`), which is correct. Its
+value is displacing the desktop, above.
+
+## Another stack: what vLLM would and would not buy
+
+Worked from the memory model above rather than from the reputation, because the
+reputation points the wrong way. vLLM's AWQ weights (~8.6 GiB) plus its
+CUDA-graph and activation overhead (~1.2 GiB against llama.cpp's ~0.5) leave a
+**smaller** KV budget, and **fp8 is its KV floor** where llama.cpp reaches q4:
+
+| stack | today | display on the iGPU |
+|---|---|---|
+| ollama / llama.cpp, q8 KV | ~30k tokens | **~38k** |
+| vLLM, AWQ + fp8 KV | ~19k | ~27k |
+
+PagedAttention reclaims per-sequence over-allocation across *many concurrent*
+sequences; a harness that runs one cell at a time has none to reclaim. So the
+answer to *"can we hold q8, or a bigger window?"* is the display move and
+`OLLAMA_KV_CACHE_TYPE=q8_0`, on the stack already here.
+
+What vLLM is worth trying for is **grammar-constrained decoding**, which
+`structured` — the protocol decided on precisely because it is a grammar the
+model cannot leave — pays for under llama.cpp's GBNF. Median cell time, native
+against structured, on the 2026-08-26 sweep:
+
+| model | arm | native | structured | |
+|---|---|---|---|---|
+| `llama3.1-8b` | engine | 4.7s | 36.7s | **×7.8** |
+| `llama3.1-8b` | engine-forced | 6.5s | 48.6s | ×7.5 |
+| `qwen2.5-coder-7b` | engine-forced | 1.5s | 50.5s | **×33** |
+| `qwen3-8b` | engine-forced | 44.4s | 89.8s | ×2.0 |
+
+xgrammar compiles the grammar once instead of walking it per token. Second prize
+is **prefix caching**, which a three-trial slate reuses by construction. Third is
+continuous batching, which needs the harness to run cells concurrently and would
+change what the per-cell wall clock — a *stopping rule* — means.
+
+The costs are a multi-GB torch install, a separate AWQ/GPTQ artifact, no
+co-residency with ollama, and a `preflight` branch: vLLM's silent
+misconfiguration is `gpu_memory_utilization`, not a 4096 default, and the rule
+from three instances stands — refuse, do not degrade.
 
 ## Two tool protocols, and only one of them is enforced
 

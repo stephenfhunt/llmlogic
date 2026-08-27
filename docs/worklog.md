@@ -24,6 +24,60 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-27 — The gate that inverted its own interim read
+
+`qwen3:14b` at 16k with q4 KV **clears the controls floor on `structured`** — the
+precondition every 8B failed. 144 cells, 2h, $0.00
+(`results/run-20260827T015701Z`). The mandate still does not take, on either
+protocol. **1,410 harness tests green (+19)**, ruff clean, 52 datalog tests green.
+A 1,125-cell calibration pass is running detached.
+
+**Done**
+- **The gate, per protocol.** Precondition 1: `structured` **10/12 = 83% PASS**,
+  `native` 7/12 = 58% FAIL. Precondition 2: **25% / 29%** against an 80% floor.
+  The measured slate is on the floor — `access_control` 0/36 and 3/36.
+- **`harness calibrate` takes the local seam** (`cli._local_sitting`), refusing two
+  strengths by name — `tally` counts by task key, so a two-protocol pass would put
+  two subjects in one band. The same work made a local run **resumable at all**:
+  `cmd_resume` rebuilt strengths from the two Anthropic ones and always built
+  `AgentSubject`, so a halted local run refused itself.
+- **The pipe-joined answer was the prompt's fault**: for one column the bullet
+  said *"the fields `order_id`, separated by `|`"*. **15.4% of single-column cells
+  `unparseable` against 1.9% of two-column ones.** `catalogue._fields_line` splits
+  by arity; `unparseable` now records which of three ways it failed.
+- **`datalog/bugs/009`** — a column type clash names one occurrence, sometimes no
+  span at all, found by a local subject looping 15 rewrites against it. Two
+  `#[ignore]`d criteria: the instance, and the property.
+- **The card is power-bound, not thermally bound; the desktop holds 742 MiB** —
+  the margin the 16k/q8 row spills by. — `notes/a-local-subject.md` (also vLLM).
+
+**Decided** (`experiments/decisions.md`, four entries)
+- **Fix the instruction, not the ruler.** Tolerating `|` would turn 119 answers
+  into 104 `wrong` and 15 `correct`, the wrong-flips falling 47/34/23 across the
+  arms — bias toward the engine, which `grade.py` cannot afford.
+- **A pass is one subject and the manifest says which** (`spec` had hardcoded
+  haiku); **a calibrated grid carries the pinned controls**, the pool draws none.
+- **`hypotheses.md` addendum: a local grid is powered for +20 points, not +10.**
+  Paired items grow as the baseline nears 50%, and the band puts it there by
+  construction — +10 there wants 705 paired items, not 155.
+
+**Removed**
+- Nothing deleted. The 4-cell first gate run was dropped before it entered the
+  record — launched without `--reasoning-effort none`, so it was thinking-on and
+  not the subject the smoke measured. "Five generators" rotated to the archive.
+
+**Next up**
+- **Resume the pass** — `harness run --resume results/cal-20260827T035804Z --yes`;
+  ~5–10h. Then `calibrate --from` selects; no slate is written until every item is
+  measured, by design.
+- **The mandate is the blocker, not the slate.** `invoked` dominates on
+  `engine-forced` (16/24). Read those transcripts before designing a grid around
+  that arm; `bugs/009` is one cause and probably not the only one.
+- **A partial read has pointed the wrong way three times** — trial 0 said native
+  4/4 and structured 3/4; the full run said 58% and 83%. Wants to be a rule.
+- **Open question:** `resume.fingerprint` does not cover the prompt, so today's
+  `_fields_line` change is invisible to `resume.moved`.
+
 ## 2026-08-26 (later still) — A second subject, and four silent misconfigurations
 
 `LocalSubject` ships: our own tool loop over an OpenAI-compatible endpoint, so the
@@ -161,58 +215,3 @@ slate has still never met a real subject.
 - **Open question:** if the pool comes back mostly *too hard* at difficulty 2–4,
   the knobs are mis-scaled rather than the band being wrong — and only the
   rejection histogram says which.
-
-## 2026-08-26 — Five generators, and what only running them showed
-
-The owed generators landed: **six of seven packs** now have
-`generate(seed, difficulty, track)` beside `build()`, so `harness calibrate` has
-a pool to select from. **1,301 harness tests green (+884)**, ruff clean, and
-`harness run --dry-run --all` still renders the 168-cell grid offline. Long form:
-[`experiments/notes/generating-the-slate.md`](../experiments/notes/generating-the-slate.md).
-
-**Done**
-- **The slate was pinned before anything moved.** All 28 fingerprints asserted in
-  `tests/test_pinned_slate.py`: a fixture refactor changes what the comparable
-  slate measures without changing a task id.
-- **One home for the degeneracy rules** (`harness/generate.py`), a pack's
-  `check` for what only it knows, and `domains.generate(name, …)` /
-  `domains.validate(name, …)` as the entry points a calibration pass consumes.
-- **`eligibility`, `ontology`, `scheduling`, `imports`, `controls`**, one commit
-  each. Every fixture became a hashable value the oracle can be *handed* — which
-  is what lets it be checked against a second formulation on generated data,
-  rather than only on the fixture it was written for.
-- **A fifth question per pack**, because every wrong answer to the pinned four is
-  a **subset** of the right one and their shape cannot say which mistake was
-  made. Each fifth is false in both directions.
-- **`scheduling`'s `check` mechanises the 2026-08-24 defect**: every assignment
-  is one its person could work. Hand-verification passed that fixture — proving
-  the oracle matched the author's reading, not that there was one reading.
-
-**Decided** (`experiments/decisions.md`, four entries)
-- **`static_analysis` gets no generator**, and says so at the call. Its fixture
-  is a fetched real package; a synthetic one trades away what the pack is for.
-- **A control that gets hard stops being a control** — no `at-scale`, a row
-  ceiling, four questions not five, and `validate` no longer calls a one-row
-  truth guessable on a negative control.
-- **A generator's defects are in its output distribution, not its control
-  flow.** Nine degeneracies passed a reading of the code and were found by
-  running the generators over 60 fixtures: `eligibility` d1 with one eligible
-  applicant, `ontology` conflicts falling into classes reserved as empty,
-  `imports`' universal quantifier satisfied by 864 of 864 customers,
-  `scheduling` answering 3,534 rows at scale.
-- **A big frozen value memoizes its hash** — an `at-scale` `Roster` rehashed
-  60,000 rows per cached lookup; one test took eleven seconds, the file now 1.8s.
-
-**Removed**
-- `access_control`'s private `Degenerate`, `validate`, `_median_by` and its
-  fingerprint test, folded into the shared homes. `imports`' seed-search comment,
-  replaced by `_break_ties`. `scheduling`'s role-scoped `at-scale` helpers,
-  unneeded once the background population worked one shift each. The 2026-08-24
-  worklog entry, rotated to the archive.
-
-**Next up**
-- **`harness calibrate`** — the consumer. Everything it needs now exists.
-- Then **`hypotheses.md`** before a grid is paid for, and `LocalSubject`.
-- **Open question:** the generated slate has never met a real subject. The
-  answer-size bands say the items are not trivially passable; only a calibration
-  pass says whether they are *informative*.

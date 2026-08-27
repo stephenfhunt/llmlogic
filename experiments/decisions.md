@@ -15,6 +15,73 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-08-26** — **The pipe-joined answer was the prompt's fault, and the fix
+  goes in the prompt, not the parser.** For a single-column question the format
+  bullet read *"each line has the fields `order_id`, separated by `|`"* — naming a
+  separator where there is nothing to separate, while `_example` showed `a1` and
+  `a2` on their own lines. Measured across every run in `results/`: **15.4% of
+  single-column cells graded `unparseable` against 1.9% of two-column ones**, and
+  144 of the 145 single-column ones put more `|`-fields on a line than the
+  question has columns. `catalogue._fields_line` now splits by arity.
+  - **Tolerating `|` at parse time was considered and rejected.** It would have
+    turned 119 such answers into **104 `wrong` and 15 `correct`** — mostly
+    relabelling format failures as reasoning failures, which is what
+    `UNPARSEABLE` exists to prevent — and some of the 15 is false credit, since
+    `engineering|engineering` collapses to the truth under set semantics. The
+    wrong-flips fall **47 prose / 34 engine / 23 engine-forced**: adopting it
+    would depress the prose arm most, the one direction of bias `grade.py` says
+    this harness cannot afford. Reinterpreting a row by the truth's arity is also
+    the answer key choosing how to read the submission.
+  - **An instrument change, applied to every arm and to both subjects**, like the
+    answer-format example before it. Runs already in `results/` were measured
+    under the old bullet and their `unparseable` counts are not comparable with
+    later ones.
+  - **`unparseable` now records *which* of the three ways it failed**
+    (`wrong-arity`, `prose-in-answer`, `empty-field`) and the report tables them.
+    One bucket could not tell a prompt defect from a subject ignoring the format,
+    which is why this took three runs and a question to notice.
+
+- **2026-08-26** — **A calibration pass runs against one subject, and the
+  manifest says which.** `harness calibrate` grew the local seam `run` already
+  had — `--local-model`, `--protocol`, `--endpoint`, `--min-context`,
+  `--reasoning-effort`, `--max-cell-seconds`, priced in wall clock — because a
+  slate is calibrated *for one subject* (`hypotheses.md`, precondition 4) and the
+  weak end of the scale is now a local model. One helper preflights and builds
+  the strengths for both commands; two copies would be two places for the window
+  to drift from what preflight held the server to.
+  - **Two protocols are refused here, though `run` sweeps them.** `calibrate.tally`
+    counts by task key across the whole run, so a two-strength pass would put six
+    trials of one item under one rate — two subjects inside a band that means
+    something for only one.
+  - **`spec` records the strength that ran**, not `STRENGTH`: it had hardcoded
+    haiku, so a manifest could not have answered the precondition that asks it.
+    No `MANIFEST_VERSION` bump — no manifest written under the old meaning exists
+    outside a dry-run directory.
+
+- **2026-08-26** — **A calibrated grid carries the negative controls; the pool
+  draws none.** The band selects for headroom and a healthy control has none, so
+  calibration rejects it as *too easy* — correctly. Left there, a grid run from a
+  manifest holds no `controls` cells at all and precondition 1 is uncheckable on
+  the very run it gates. So the pinned four are **carried, not selected**
+  (`cli._calibrated_slate`, one home, because `_slate_of` rebuilds the same list
+  for a resume), and `CALIBRATION_EXCLUDES` keeps them out of the default pool: a
+  control selected for difficulty has stopped being a control. Naming
+  `--domain controls` still draws them, which is a deliberate act.
+
+- **2026-08-26** — **`--dry-run` skips preflight, and a local resume that cannot
+  rebuild its window refuses.** Two halves of the same rule. There is no server to
+  hold a window to when nothing is served, and without the skip the local plumbing
+  could only be exercised by having a GPU busy — the thing `AGENTS.md` says a
+  change must not become. And `cmd_resume` could not resume a local run *at all*:
+  it rebuilt strengths from the two Anthropic ones and always built `AgentSubject`,
+  so the grid came back empty and it refused itself. It now rebuilds from the
+  run's own `local` block — which had to start recording `context_tokens`, the one
+  field of a local strength nothing else implies.
+  - **A run that recorded no window is refused, not defaulted.** The overflow
+    guard measures a conversation against the strength's window, so a guess bounds
+    the second half of a sitting differently from the first. Fourth instance of
+    *refuse, do not degrade* (`notes/a-local-subject.md`).
+
 - **2026-08-26** — **A local subject, built; and the tool protocol is a property
   of the model, not a design choice.** `LocalSubject` is our own loop over an
   OpenAI-compatible endpoint, stdlib only. `confine.violation` and
@@ -643,6 +710,17 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
     project would have been the wrong altitude even if the build had allowed it.
 
 ## Open questions
+
+- **A task's fingerprint does not cover the prompt it is asked with.**
+  `resume.fingerprint` hashes the question, the fixture files and the truth rows
+  — so today's `catalogue._fields_line` change is **invisible** to
+  `resume.moved`, and a run halted before it and resumed after it would mix two
+  prompts under one run id with nothing saying so. That is the 2026-08-24 lesson
+  (*a fixture that moved under a resume*) with the prompt in the fixture's place,
+  and the instrument has now changed three times in two days. Not fixed tonight
+  on purpose: including the base prompt in the fingerprint changes **every**
+  recorded fingerprint, which would refuse the resume of the calibration pass
+  about to run. Decide before the next instrument change, not after.
 
 - **"Reached for it" now has its first real transcript, and it splits the
   question.** A haiku engine cell invoked the **`Skill` tool** with its whole

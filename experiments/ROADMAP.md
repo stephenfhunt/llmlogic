@@ -148,6 +148,17 @@ grid unable to answer S1. The argument and the numbers are in
   reporting plausible numbers from a misconfigured instrument, so the rule is now
   stated: refuse, do not degrade. _shipped 2026-08-26._ — `local.preflight`,
   `decisions.md` 2026-08-26.
+- **`harness calibrate` against a local subject** — one model, one protocol,
+  priced in wall clock, the manifest recording which subject selected the slate.
+  Also made a local run **resumable at all**, and put the pinned `controls` back
+  into a calibrated grid. _shipped 2026-08-26._ — `cli._local_sitting`,
+  `cli._local_strengths_of`, `cli._calibrated_slate`, `decisions.md` 2026-08-26.
+
+- **A vLLM serving stack, tried against ollama** — for grammar-decoding speed and
+  prefix caching, explicitly **not** for VRAM, where the arithmetic says it loses.
+  _queued — **post-v1** (throughput, not validity)._ —
+  [`notes/a-local-subject.md`](notes/a-local-subject.md), *Another stack*.
+
 - **A local sweep of the calibrated slate** — the run the above exists for:
   models x protocols x arms over `controls` and `access_control`, three trials.
   _queued_ — the next session.

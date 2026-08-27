@@ -61,6 +61,7 @@ pytest                          # harness units + property tests
 harness run --dry-run --all     # the full grid, stub subject, zero API calls
 harness run --domain access_control --smoke   # one real cell, both arms
 harness calibrate --dry-run     # the selection pass, offline, against the stub
+harness calibrate --local-model qwen3:14b --protocol structured --yes  # a pass per subject
 harness run --local-model qwen3:8b --protocol structured --yes  # a local sweep
 harness run --slate slates/<run-id>.json      # the grid over a calibrated slate
 harness run --resume results/<run-id>  # finish a run the session window cut off
@@ -90,7 +91,12 @@ harness run --local-model qwen3:14b --min-context 16384 --protocol structured --
 
 `--min-context` sets both what preflight holds the server to *and* what the
 strengths claim, so the overflow guard and the server cannot disagree. What fits
-on this card is measured in `notes/a-local-subject.md`.
+on this card is measured in `notes/a-local-subject.md`. `calibrate` takes the same
+flags, at **one** model and one protocol: a slate is calibrated for one subject.
+
+**A local run resumes like any other**, rebuilding its strengths from the `local`
+block its `run.json` recorded — including the served window, without which it
+refuses rather than guessing what the overflow guard bounded the first half by.
 
 **A local run is bounded by wall clock, not by an account window.** It is the arm
 that can be left running overnight: `--local-model` crossed with `--protocol`,

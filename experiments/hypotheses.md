@@ -140,3 +140,33 @@ naming here so that it can be recognised rather than explained away.
 ## Addenda
 
 *(Dated entries only. Amend, never revise.)*
+
+### 2026-08-26 — What a local-subject grid is powered for, and why it is not +10
+
+The preconditions above size the slate for **+10 points** and quote 78 tasks.
+That figure carries an assumption it did not state: `harness power`'s default
+baseline of **0.85**. Paired items needed grow as the weaker arm approaches 50%,
+because that is where discordant pairs are most numerous —
+`stats.required_items` uses `psi = effect + 2·min(baseline, 1 − (baseline +
+effect))`. At a 50% baseline, +10 points needs **705 paired items at one
+strength**, not 155.
+
+And a slate calibrated into the informative band [0.2, 0.8] has a baseline near
+50% **by construction**. The band and the power arithmetic pull in opposite
+directions: the items with headroom for the engine to show in are the noisiest
+items to measure it on. Nothing above is wrong; the two facts had simply never
+been put next to each other.
+
+So, for a **local subject** — one model, so paired items are tasks:
+
+- **The primary endpoint's effect is +20 points**, needing 155 paired items at a
+  50% baseline. The endpoint itself is unchanged: paired `engine-forced` −
+  `prose`, `in-context`, weaker strength, McNemar's exact, two-sided.
+- **Why +20.** W1 claims the engine helps *more* at the weak end; +10 is a
+  strong-subject scale. The alternative — ~1,400 pool items, ~4,200 pass cells
+  and a 6,345-cell grid — buys a smaller effect for three or four nights.
+- **What it costs, stated in advance.** A null now excludes +20, not +10. A true
+  effect between 10 and 20 points reads as *uninterpretable*, not positive.
+- **Unchanged for the API subject**, whose grid is still sized at +10 against its
+  own baseline. The two subjects were never comparable to each other, and this
+  makes them less so; W2 already carried that caveat.
