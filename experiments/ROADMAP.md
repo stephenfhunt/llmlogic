@@ -168,6 +168,12 @@ grid unable to answer S1. The argument and the numbers are in
   against the 155 a +20-point effect needs. _blocked_ on the item below. —
   `results/cal-20260827T035804Z`, `decisions.md` 2026-08-27.
 
+- **`engine-forced` writes Datalog it has invented** — four cells, four
+  different fabricated CSV loaders, zero `Skill` calls, where the engine has
+  `import "f.csv" as r.`. Whether `MANDATE` should name the reference in the
+  workspace is an open question, not a patch. _designing — **v1**._ —
+  `decisions.md` 2026-08-28 (later).
+
 - **A rung between `controls` and the measured slate** — the same subject scores
   83% on single-hop lookups and 14% on the easiest generated multi-hop item, so
   calibration has nothing in the band to select. Either the generators grow an
@@ -185,8 +191,9 @@ grid unable to answer S1. The argument and the numbers are in
   (`cell.ARM_BUDGET`), a mandate that names the answer format, and an
   `engine_unusable` move graded as its own verdict. _shipped 2026-08-27._ —
   `decisions.md` 2026-08-27 (later iv/v), `notes/a-local-subject.md`
-  (*What is wrong with engine-forced*). **The arm's accuracy is now unmeasured**:
-  every prior `engine-forced` number was cap-bound and none carries forward.
+  (*What is wrong with engine-forced*). **Re-gated 2026-08-28**: no cell at its
+  cap in any arm, no fact-shaped answers, `engine_unusable` used once — and the
+  arm's remaining errors are invented engine syntax, which is the next item.
 - **A cap-hit rate per arm, in every report** — the unequal budget is an
   arm-asymmetric parameter on the arm carrying the primary endpoint, so a result
   is readable only while no arm ends at its cap. _shipped 2026-08-27._ —

@@ -397,6 +397,43 @@ that does not record itself is a silent truncation.** That is this project's
 standing failure mode found for the fourth time — and the first time in its own
 bounds rather than in someone else's default.
 
+### What the fixes did, and what they uncovered (2026-08-28)
+
+Re-gated on `controls`, all 4 tasks x 3 arms, thinking on
+(`results/run-20260828T104124Z`). The mechanism moved exactly as intended, and
+the arm's accuracy is now a different question than it was:
+
+| | before (every run on disk) | this gate |
+|---|---|---|
+| ended at its cap | 48% | **0/4** |
+| turns | median 13, max 21 of 24 | 4, 5, 6, 9 of 48 |
+| wall clock | 617s mean, 900s cap firing | 135-327s of 1800s |
+| fact-shaped answers | 3.7% of answers | **none** — `Sales`, `acme`, bare values |
+| the mandate's exit | did not exist | `engine_unusable` used once, correctly |
+
+**It is not the cap any more, and it is not the format. It is the syntax.** All
+four of the arm's first programs invented a way to load a CSV — `read_csv/4`,
+`csv_load/3`, `csv_read_line/2`, `csv_read/4` — four different guesses, none of
+them the engine's `import "employee.csv" as employee.`. **Not one of the four
+cells called `Skill`**, where the previous gate's did in 2 of 4. The workspace
+carries the skill at `.claude/skills/datalog/SKILL.md` and the tool advertises
+it, and the arm wrote from priors regardless.
+
+So `engine-forced` at 1/4 is now measuring *whether the subject can write this
+engine's Datalog unaided*, which is a real question about S1 but not the one the
+arm was built for. `MANDATE` names the engine, the answer format and the repair
+loop, and says nothing about the reference sitting in the workspace — deliberate
+on `engine`, where reaching unprompted is the measurement (control 3), and
+load-bearing in a way nobody chose on `engine-forced`, where reaching is already
+mandated.
+
+**And one number the gate puts under pressure:** `answered-from` was 3/4 = 75%
+against precondition 2's 80% floor, the missing cell being the `engine_unusable`
+one — a cell that complied with the mandate as written. A compliance check that
+counts the mandate's own legal exit as non-compliance is measuring the wrong
+thing; whether that verdict belongs in the numerator is an open question in
+`decisions.md`, not a number to adjust after seeing it.
+
 ## Four silent misconfigurations, and the pattern
 
 The dangerous failures here were all **quiet**. Nothing errored; numbers came out;

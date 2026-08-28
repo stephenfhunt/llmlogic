@@ -15,6 +15,25 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-08-28 (later)** — **The `engine-forced` fixes took, and what was under
+  them is a syntax problem.** Re-gated on `controls`, all 4 tasks x 3 arms
+  (`results/run-20260828T104124Z`): **no cell ended at its budget in any arm**
+  against the arm's previous 48%, 4-9 turns against a 48 cap, no fact-shaped
+  answers, and `engine_unusable` used once instead of a loop. Long form:
+  [`notes/a-local-subject.md`](notes/a-local-subject.md) (*What the fixes did*).
+  - **All four first programs invented a CSV loader** — `read_csv/4`,
+    `csv_load/3`, `csv_read_line/2`, `csv_read/4` — where the engine has
+    `import "f.csv" as r.`, and **not one of the four cells called `Skill`**.
+    The arm is currently measuring whether the subject can write this engine's
+    Datalog unaided. That is a real S1 question and not the one the arm was
+    built for.
+  - **`MANDATE` says nothing about the reference in the workspace.** Deliberate
+    on `engine`, where reaching unprompted *is* the measurement (control 3);
+    unchosen on `engine-forced`, where reaching is already mandated. Changing it
+    is an instrument change and gets its own decision, not a patch tonight.
+  - **prose 3/4 = 75%**, precondition 1 at its boundary — the pass launched on
+    it. `engine-forced` 1/4 is n=4 and is a floor check, not the arm's accuracy.
+
 - **2026-08-28** — **A slate now checks its subject, not only its items.** The
   manifest recorded the calibrating subject and nothing compared it to the one
   about to run, so `run --slate <thinking-on slate> --reasoning-effort none` was
@@ -895,6 +914,31 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
     project would have been the wrong altitude even if the build had allowed it.
 
 ## Open questions
+
+- **Does `engine_unusable` count as complying with the mandate?** Precondition 2
+  reads `answered-from` >= 80% on `engine-forced`, and the 2026-08-28 gate came
+  in at **3/4 = 75%** with the missing cell being the one that declared the
+  engine unusable — which is the mandate's own legal exit, used exactly as
+  written. As it stands the compliance check counts obedience as
+  non-compliance. Two readings, and they differ in what a run is allowed to
+  claim: *the mandate took* (the subject reached, the engine refused, it said
+  so) argues for the numerator; *the comparison is void without engine-derived
+  answers* argues for leaving it out and letting the precondition fail. **Decide
+  before a grid reads precondition 2, and decide it on the rule rather than on a
+  number already seen** — this question exists because the gate produced 75%,
+  which is exactly the circumstance in which moving a threshold is not allowed.
+
+- **Should `MANDATE` name the skill?** The arm reaches for the engine and writes
+  invented syntax: four cells, four different fabricated CSV loaders, zero
+  `Skill` calls (2026-08-28). The reference is in the workspace and advertised
+  as a tool. Telling `engine-forced` to read it would make the arm measure *does
+  the engine help when used correctly* rather than *can this subject reconstruct
+  the engine's surface from priors* — but it is an instrument change on the arm
+  carrying the primary endpoint, and it widens the gap between `engine` and
+  `engine-forced` beyond the mandate itself. The alternative is to leave it and
+  report the finding as being about the skill's discoverability, which is a
+  `datalog` question and arguably the more useful one. Not decided on four
+  cells.
 
 - **A fact-shaped answer is a format failure scored as a wrong answer, and only
   one arm can produce it.** The thinking-on gate wrote `carol_dept("engineering").`
