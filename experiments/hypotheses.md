@@ -141,6 +141,42 @@ naming here so that it can be recognised rather than explained away.
 
 *(Dated entries only. Amend, never revise.)*
 
+### 2026-08-28 (later) — A behavioural run, pre-registered as not an endpoint
+
+A 40-cell run of `prose` against `engine-briefed` over the pinned slate — four
+packs plus `controls`, 20 tasks, one trial each. **It is exploratory, it is not
+S1, and no accuracy claim comes out of it.** Written down before it runs, because
+it will produce a `engine-briefed − prose` delta with an interval and that number
+will be sitting in the report whatever it says.
+
+**Why it is not an endpoint.** Two independent reasons, either sufficient:
+
+- The comparison is already recorded above as an **upper bound**, not S1.
+- At 20 tasks it is 20 paired items against the 155 a +10-point effect needs.
+  A run below power is not run (precondition 3), and this is deliberately below
+  it. The interval will include both zero and +10 — the definition of
+  *uninterpretable* in **How the result will be read**, and it is being entered
+  into knowingly rather than discovered afterwards.
+
+**What it is for**, and what may be claimed from it — process signals, each a
+rate the arms can be compared on without an accuracy claim:
+
+| what | why it is worth 40 cells |
+|---|---|
+| cap-hit and truncation, per arm | whether the instrument is readable at this difficulty at all. `prose` and `engine-briefed` do not share a budget |
+| `answered-from`, `engine-briefed` | the arm has never run outside `controls`; compliance there is untested |
+| fabricated fact bases | the current blocker (`ROADMAP.md`), measured on 16 real items instead of one |
+| wall clock per arm per cell | what sizes the next real pass. The 7.5h → 42h error was an unmeasured cost extrapolated from `controls` |
+
+**The slate may be a floor, and that is anticipated here rather than after.** On
+these exact items with thinking off, `prose` scored 1/24 and `engine-forced`
+0/24. If both arms land near zero this run says nothing about the engine — which
+is the same finding as *the missing rung*, and is why nothing above rests on the
+accuracy number.
+
+**Precondition 5 still binds.** The instrument is checked as for any run; what is
+suspended is the *power* requirement, and only because no claim is drawn.
+
 ### 2026-08-28 — A fourth arm, and the primary endpoint does not move
 
 `engine-briefed` is added: `engine-forced` plus the engine's reference

@@ -15,6 +15,57 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-08-28 (later vi)** — **`engine_unusable` leaves the compliance ratio
+  rather than joining a side of it.** Precondition 2 asks *did the mandate take*,
+  and the two candidate readings each answered half of it: the cell obeyed the
+  mandate (so not evidence of failure, and not a denominator entry), and no
+  program ran (so nothing about whether the engine helps, and not a numerator
+  entry). It answers neither question and is counted in neither. On the
+  unmandated `engine` arm nothing changes — there the number is a *measurement*
+  of adoption, and a cell that reached and failed is part of what adoption is.
+  - **Decided on the rule, as the open question required.** The 2026-08-28 gate
+    read **3/4 = 75%** against an 80% floor with the missing cell being exactly
+    this; that is the one circumstance in which moving a threshold is not
+    allowed, and the reading that put the cell in the numerator would have moved
+    it by another name.
+  - **The cost, stated:** excluding cells shrinks the n every other number in
+    that row rests on, and a subject whose engine will not run could exclude its
+    way to a compliant-looking arm. So the count is printed as its own column
+    rather than folded away — a high one is a finding about the engine, and the
+    report says to read it.
+  - Answers the open question below. Pinned in `tests/test_report.py`.
+
+- **2026-08-28 (later v)** — **The output cap is a stopping rule, and like the
+  other three it recorded nothing.** A completion that spends its whole budget
+  reasoning returns empty `content`; the structured loop called that a
+  **malformed call**, told the model so, and retried against an unchanged
+  conversation. The message was false — no action had been emitted — and named a
+  fault the model could not act on, so the next lap was identical, at ~150s each
+  on a 14B, until the wall clock ended the cell.
+  - **This is the fifth instance of the standing failure mode**, and the second
+    found in the harness's own bounds. The tell is the same every time: a
+    plausible number with a silent mechanism under it.
+  - **Ask the server, do not infer.** `finish_reason` was in every reply and read
+    by nothing. A truncation and a malformed call arrive identically and want
+    opposite responses — one is the harness's cap, one is the subject's mistake
+    and must stay measurable — so `_truncated` asks, and a reply that got an
+    action out is not one however the server ended the turn.
+  - **Stop at two, not six.** The loop is deterministic: the reasoning is not fed
+    back, so a third lap re-thinks the same thing from the same conversation.
+    `_OUT_OF_TRUNCATIONS` joins `runner.STOPPING_RULE`, so the cell is graded on
+    what it left behind rather than owed forever by `resume`.
+  - **`malformed_calls` had been collected and dropped since it was written** —
+    the counter whose own docstring explains why tool-syntax failure must not be
+    folded into a reasoning number was itself invisible. It reaches the record
+    now, with `truncated_completions` and `empty_replies` beside it.
+  - **Not raising `--max-output-tokens`.** Measured: the blocks are ~18,000
+    characters of *non-terminating* plan — 213 distinct sentences of 220, the
+    model solving the whole problem in its head before reading a file, where the
+    cells that finish read one on their first turn. A bigger cap buys a longer
+    spiral at ~200s a lap. `reasoning_effort` is the real knob if the counter
+    says truncation is still common, and it is a subject change that gets its own
+    gate. Long form: [`notes/a-local-subject.md`](notes/a-local-subject.md).
+
 - **2026-08-28 (later ii)** — **A fourth arm, `engine-briefed`**: `engine-forced`
   plus `SKILL.md` in the prompt. The gate above found the arm reaching for the
   engine and then writing invented syntax, so it was measuring *finding the
@@ -75,6 +126,15 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
     900s on six reasoning chunks truncated at the 4,096-token cap and emitted
     **no action at all** (0 turns); another spent 17 turns in `Write`/`Edit`
     churn fixing its own escaping. More clock fixes neither.
+  - ***Amended*** 2026-08-28 (later v) — **the first of those two was not one
+    cell, and it was not the subject being slow.** Re-read against the
+    transcripts: **10 of the 12** carry at least one truncated completion, 28 in
+    all, and the two carrying none finished in 119s and 137s. What the record
+    called *the wall clock* was substantially the harness retrying a cut-off
+    completion as a malformed one, so the 42h projection is an upper bound on a
+    cost that was partly the instrument's. The parking still stands — the second
+    pathology and the missing rung are untouched — but its headline number is not
+    a measurement of the subject.
   - **Not re-launched with a bigger cap.** A band selected now would rank items
     by how often prose runs out of clock — the same artefact this session
     removed from `engine-forced`, reintroduced on the arm that does the
@@ -996,6 +1056,11 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
   before a grid reads precondition 2, and decide it on the rule rather than on a
   number already seen** — this question exists because the gate produced 75%,
   which is exactly the circumstance in which moving a threshold is not allowed.
+  - ***Answered*** 2026-08-28 (later vi), before a grid read it. **Neither
+    reading, because each answered half the question**: the cell obeyed, so it is
+    not denominator evidence; no program ran, so it is not numerator evidence. It
+    leaves the ratio, and the count is printed as its own column so that
+    excluding cells cannot quietly manufacture a compliant-looking arm.
 
 - **Should `MANDATE` name the skill?** The arm reaches for the engine and writes
   invented syntax: four cells, four different fabricated CSV loaders, zero

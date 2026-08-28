@@ -198,6 +198,58 @@ class TestRender:
         out = render(self._run(tmp_path, records))
         assert "Cells ended by that:** prose 1" in out
 
+    def test_a_cell_that_declared_the_engine_unusable_leaves_the_compliance_ratio(self, tmp_path):
+        """It answers neither question the ratio is built from. The mandate's own
+        legal exit is not evidence the mandate failed to take, so it does not
+        belong in the denominator; no program ran, so it says nothing about
+        whether the engine helps, and it does not belong in the numerator.
+
+        Decided on the rule, in advance: the 2026-08-28 gate read 3/4 = 75%
+        against an 80% floor with the missing cell being exactly this, which is
+        the one circumstance in which moving a threshold is not allowed.
+        """
+        rows = [
+            _record(
+                arm="engine-forced",
+                task_id=f"t{i}",
+                signals={**_record()["signals"], "engine_use": "answered-from"},
+            )
+            for i in range(3)
+        ]
+        rows.append(
+            _record(
+                arm="engine-forced",
+                task_id="t3",
+                verdict="engine-unusable",
+                signals={**_record()["signals"], "engine_use": "invoked"},
+            )
+        )
+        out = render(self._run(tmp_path, rows))
+        assert "| engine-forced | opus-5 | 3/3 " in out, "not 3/4, and not 4/4"
+
+    def test_the_unmandated_engine_arm_keeps_every_cell(self, tmp_path):
+        """On `engine` the number is a *measurement* of adoption, not a
+        compliance check, and a cell that reached and failed is part of what
+        adoption looks like."""
+        rows = [
+            _record(
+                arm="engine",
+                task_id=f"t{i}",
+                signals={**_record()["signals"], "engine_use": "answered-from"},
+            )
+            for i in range(3)
+        ]
+        rows.append(
+            _record(
+                arm="engine",
+                task_id="t3",
+                verdict="engine-unusable",
+                signals={**_record()["signals"], "engine_use": "invoked"},
+            )
+        )
+        out = render(self._run(tmp_path, rows))
+        assert "| engine | opus-5 | 3/4 " in out
+
     def test_the_two_tracks_get_their_own_tables(self, tmp_path):
         records = [_record(arm="prose", task_id="t1", track="in-context")]
         records += [_record(arm="prose", task_id="t2", track="at-scale")]

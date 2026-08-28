@@ -25,7 +25,7 @@ from __future__ import annotations
 from collections import defaultdict
 from pathlib import Path
 
-from harness.cell import ARMS, ENGINE_ARMS, STRENGTHS
+from harness.cell import ARMS, ENGINE_ARMS, MANDATED_ARMS, STRENGTHS
 from harness.record import RecordStore
 from harness.resume import failed
 from harness.runner import STOPPING_RULE
@@ -296,8 +296,8 @@ def _reach(records: list[dict]) -> list[str]:
     if not engine_records:
         return []
     lines = ["### Reach — did the subject actually use the engine?", ""]
-    lines.append("| arm | strength | answered-from | invoked | none |")
-    lines.append("|---|---|---|---|---|")
+    lines.append("| arm | strength | answered-from | invoked | none | unusable |")
+    lines.append("|---|---|---|---|---|---|")
     for arm in _arms_present(engine_records):
         for name in _strengths_present(engine_records):
             rows = [r for r in engine_records if r["arm"] == arm and r["strength"] == name]
@@ -311,13 +311,20 @@ def _reach(records: list[dict]) -> list[str]:
                 # `answered-from` as 0 would be a fabricated number, not a
                 # missing one, so the row says what it actually knows.
                 ran = sum(1 for r in rows if r["signals"].get("ran_engine"))
-                lines.append(f"| {arm} | {name} | — (ran the engine: {ran}/{len(rows)}) | — | — |")
+                lines.append(
+                    f"| {arm} | {name} | — (ran the engine: {ran}/{len(rows)}) | — | — | — |"
+                )
                 continue
             answered = counts["answered-from"]
-            interval = wilson(answered, len(rows))
+            # A cell that declared the engine unusable leaves the compliance
+            # ratio rather than joining either side of it. See the note below
+            # the table, and `decisions.md` 2026-08-28 (later v).
+            unusable = sum(1 for r in rows if r["verdict"] == "engine-unusable")
+            eligible = len(rows) - unusable if arm in MANDATED_ARMS else len(rows)
+            share = f"{answered}/{eligible} {wilson(answered, eligible)}" if eligible else "—"
             lines.append(
-                f"| {arm} | {name} | {answered}/{len(rows)} {interval} "
-                f"| {counts['invoked']} | {counts['none']} |"
+                f"| {arm} | {name} | {share} "
+                f"| {counts['invoked']} | {counts['none']} | {unusable} |"
             )
     lines += [
         "",
@@ -326,6 +333,14 @@ def _reach(records: list[dict]) -> list[str]:
         "(`decisions.md` 2026-08-25). On the `engine` arm this is a measurement; "
         "on the mandated arms it is a **compliance check** — a low number there "
         "means the mandate did not take, and the comparison it feeds is void.",
+        "",
+        "**`unusable` cells are out of the mandated arms' denominator, not in "
+        "their numerator.** Declaring the engine unusable is the mandate's own "
+        "legal exit, so it is not evidence the mandate failed to take — but no "
+        "program ran, so it carries nothing about whether the engine helps. It "
+        "answers neither question and is counted in neither "
+        "(`decisions.md` 2026-08-28). Read the column: a high one is a finding "
+        "about the engine, and it shrinks the n every other number rests on.",
         "",
     ]
     return lines
