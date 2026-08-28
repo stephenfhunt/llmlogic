@@ -513,6 +513,70 @@ called it a malformed call and said so — a false statement about what the mode
 did, naming a fault it could not act on. The reasoning is not fed back, so the
 next lap starts from an unchanged conversation and is identical. ~150s each.
 
+## What the briefed arm does on a real item (2026-08-28)
+
+`engine-briefed` had never run outside `controls`. Sixteen cells over
+`access_control` and `ontology` (`results/run-20260828T162946Z`), against `prose`
+on the same tasks:
+
+| | `prose` | `engine-briefed` |
+|---|---|---|
+| correct | 2/8 | 1/8 |
+| mean per-item F1 | 0.55 | 0.19 |
+| `answered-from` (compliance) | — | **8/8** |
+| ended at a stopping rule | 2/8 | 1/8 |
+| truncated completions | 10 in 5 cells | 4 in 4 cells |
+| wall clock, total | 0.83h | 1.75h |
+
+**Compliance is the number that carried.** 8/8 outside the controls, with the
+briefing in the prompt and no cell declaring the engine unusable. Whatever else
+is wrong, the mandate takes.
+
+**The cost ratio is 2.1×, not 10.3×.** On `controls` the briefed arm was ten
+times prose; on real items prose gets slow too. That is the number that sizes a
+pass, and it is the one the 7.5h → 42h error came from getting wrong.
+
+**Both arms truncate.** Prose more (10 in 5 cells against 4 in 4), which fits:
+prose has to hold the derivation in its head where the briefed arm's turns are
+short tool calls. Not a prose-only pathology.
+
+### Two ways a briefed cell burns its budget, both about *silence*
+
+**`who-can-read-r03` — 1,800s, 35 turns, capped.** Thirty-two of the thirty-five
+turns were `Bash`, every one a variation on the same quote-stripping pipeline:
+
+```
+grep -o "answer("[^"]*"" | cut -d"" -f2      # broken quoting
+awk -F" '{print $2}'                          # unterminated
+```
+
+It was not debugging its Datalog. The chain: its first program wrote the textbook
+reflexive closure `includes_trans(Role, Role).`; the engine **correctly** refused
+it (`semantic error [not-ground]`); the model satisfied the engine by *deleting*
+the rule rather than rewriting it safely, which silently made `has_role` require
+at least one inclusion step and dropped every direct grant; the program then
+returned **zero answers**. Adding a safe reflexive rule —
+`includes_trans(R, R) :- granted(_, R).` — to its own final file produces
+`answer("u03")`, `answer("u06")`, … immediately.
+
+**`department-of` on the gate — 795s, 18 turns.** Same shape, smaller: the
+question asks about `carol`, the model queried `"Carol"`, and matched nothing.
+Turns 7-13 were seven consecutive `Edit`s with no run between them.
+
+**What both are really about.** `datalog` signals no rows as **exit 1, nothing on
+stdout, nothing on stderr** — deliberate, specified in `spec.md` §14 on `grep`'s
+vocabulary, and stated in `SKILL.md`. The spec even names this failure: *"an exit
+code survives a pipe only if the caller asks it to."* It is right for a shell
+caller under `pipefail`. **An LLM agent is a caller that pipes everything and
+checks nothing** — the subject wrote `datalog … | grep … > answer.txt` thirty-two
+times and never once ran the program bare to see what it said.
+
+So this is not an engine defect and no bug was filed. It is a **briefing** gap,
+and a narrow one: `SKILL.md` states what the exit codes *mean* and never says to
+*look*, and it names transitive closure only in its *when to use this* list —
+no worked example, and nothing about the reflexive case being unsafe as a bare
+fact, which is exactly the form the model reached for.
+
 ## Five silent misconfigurations, and the pattern
 
 The dangerous failures here were all **quiet**. Nothing errored; numbers came out;
@@ -525,6 +589,8 @@ they were worthless.
 | the *conversation* filling a 32k window a 275-token fixture never could | measuring `input_tokens` per cell — median 9.9k, p90 265k, max 762k | the later half of one sweep |
 | `ran_engine` true on a transcript whose only call was `Skill` | running a local model at all | contradicted `engine_use` in every record since it was written |
 | a completion cut off mid-thought, retried as a malformed call | reading `reasoning` block lengths against wall clock, cell by cell | the 240-cell pass, parked on a 42h projection that was partly this |
+| a cell that wrote nothing scoring a perfect per-item F1 | reading `missing`/`extra` behind a 0.92 that did not match 2/8 correct | a secondary endpoint, reporting a number that meant nothing |
+| `final` with no answer file, recorded as having finished | one cell reading `turns=0, trunc=0, err=None` and no explanation for it | one cell, and the ability to tell walking away from being stopped |
 
 The pattern is that this harness's expensive failures do not announce themselves,
 and that a preflight check pays for itself the first time it fires. It is the same

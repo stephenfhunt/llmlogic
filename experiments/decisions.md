@@ -15,6 +15,39 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-08-28 (later viii)** — **Sitting 1 failed its own gate, and the 16 cells
+  it bought were worth more than the 16 it stopped.** The staged A/B pre-committed
+  to continuing only while cap-hit stayed low; it came in at **prose 2/8 (25%)**
+  and `engine-briefed` 1/8. Stopped, fixed, and re-launched as one clean 32.
+  - **The gate did the job it was written for.** Two of prose's three `no-answer`
+    cells were the output cap and the third was the walk-away path — its
+    effective n was 5 of 8. Reading a delta off that is reading the instrument.
+  - **Half a run on a patched instrument is not half a run.** The alternative was
+    16 cells under three defects and 16 under none, which is two experiments
+    under one run id — the failure `resume.moved` exists to prevent, arrived at
+    voluntarily.
+  - **What sitting 1 is kept for**: `engine-briefed` compliance **8/8 outside
+    `controls`**, which was untested; both arms truncating on real items (prose
+    10 in 5 cells, briefed 4 in 4); a **2.1×** cost ratio, against 10.3× on the
+    controls. Those answer what the run was for and do not need the other half.
+
+- **2026-08-28 (later vii)** — **Mean per-item F1 gave a perfect score to a cell
+  that wrote nothing.** `grade` returns `no-answer`, `unparseable` and
+  `engine_unusable` before it has anything to compare, so `missing` and `extra`
+  keep their `0` defaults — and `f1(0, 0, n)` is **1.0**. The metric exists to
+  separate *dropped one row of forty* from *returned nothing* (`hypotheses.md`),
+  and for the second case it did the reverse.
+  - **The bias is arm-shaped, not random.** It flatters whichever arm fails by
+    writing no file. On the first real slate that was `prose`: **0.92 against
+    `engine-briefed`'s 0.19**, on 2/8 correct against 1/8. Corrected, 0.55.
+  - **Fixed in `_mean_f1`, not in `grade`** — read off the verdict, so every run
+    already in `results/` re-renders correctly rather than only the next one.
+    Both of today's were re-rendered; no past verdict was touched.
+  - **The direction matters and is not the safe one.** `grade.grade` says bias
+    toward the engine is what this harness cannot afford; this was bias *against*
+    it, which is conservative for S1 and still simply wrong — a secondary
+    endpoint in `hypotheses.md` was reporting a number that meant nothing.
+
 - **2026-08-28 (later vi)** — **`engine_unusable` leaves the compliance ratio
   rather than joining a side of it.** Precondition 2 asks *did the mandate take*,
   and the two candidate readings each answered half of it: the cell obeyed the
@@ -34,6 +67,22 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
     rather than folded away — a high one is a finding about the engine, and the
     report says to read it.
   - Answers the open question below. Pinned in `tests/test_report.py`.
+
+- **2026-08-28 (later ix)** — **A subject that walks away is not a subject that
+  was stopped, and the record could not tell them apart.** `final` with no answer
+  file, through both completion reminders, set `final_text` and nothing else. One
+  prose cell reasoned for 15,432 characters, made **zero tool calls**, said
+  `final` three times, and recorded `turns=0, trunc=0, err=None` — the same row a
+  cell that did nothing cheaply would write. `finished_without_answer` carries
+  the difference now.
+  - **And the reminder was aimed wrong.** Its own docstring says it exists for a
+    subject that *has* the answer and forgot the file. To one that has not opened
+    a file, *"write your answer"* is an invitation to file a guess — the one
+    thing a `no-answer` cell must not be nudged into. A subject with no tool
+    calls is now told it has not read the data.
+  - **Not a change to the reminder's count**, which is a subject-behaviour knob
+    and a second variable. What changed is which sentence it sends and whether
+    giving up is recorded.
 
 - **2026-08-28 (later v)** — **The output cap is a stopping rule, and like the
   other three it recorded nothing.** A completion that spends its whole budget

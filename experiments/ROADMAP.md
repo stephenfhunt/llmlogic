@@ -185,10 +185,30 @@ grid unable to answer S1. The argument and the numbers are in
 
 - **A 40-cell `prose` vs `engine-briefed` behavioural run** — the pinned slate,
   4 packs plus `controls`, staged so a bad projection is caught in the first
-  sitting. Pre-registered as **not an endpoint**: 20 paired items against the 155
-  a +10-point effect needs, so it is read on cap-hit, truncation, compliance,
-  fabrication and cost. _building — **v1**._ — `hypotheses.md` addendum
-  2026-08-28 (later).
+  sitting. Pre-registered as **not an endpoint**. The gate worked: sitting 1
+  failed it at 25% cap-hit and surfaced three instrument defects, all now fixed,
+  so the 32 was re-launched clean rather than continued. _building — **v1**._ —
+  `results/run-20260828T162946Z`, `hypotheses.md` addendum 2026-08-28 (later).
+
+- **Mean per-item F1 scored an empty cell 1.0** — `grade` returns `no-answer`
+  before it has anything to compare, so `f1(0, 0, n)` was perfect. Arm-shaped:
+  it flattered whichever arm fails by writing no file. _shipped 2026-08-28._ —
+  `report._mean_f1`, `decisions.md` 2026-08-28 (later vii).
+
+- **A subject that walks away read as one that finished** — `final` with no
+  answer file, through both reminders, recorded `turns=0, err=None`.
+  `finished_without_answer` carries it, and a subject with no tool calls is now
+  told it has not read the data rather than told to write an answer.
+  _shipped 2026-08-28._ — `local.NOTHING_READ`, `decisions.md` 2026-08-28 (later ix).
+
+- **`SKILL.md` does not teach the two things the briefed arm got wrong** — it
+  states what the exit codes mean and never says to *look* (the subject piped
+  through `grep` 32 times and never ran the program bare), and it names
+  transitive closure only in its *when to use* list, with no worked example and
+  nothing about the reflexive case being unsafe as a bare fact — which is the
+  form the model reached for. A `datalog` skill item, not an engine defect:
+  `spec.md` §14 specifies the silent exit 1 deliberately. _designing — **v1**._ —
+  `notes/a-local-subject.md` (*What the briefed arm does on a real item*).
 
 - **A calibration pass that clears power** — first pass run 2026-08-27 against
   `qwen3:14b` and **halted at 408 of 1,125 cells**: the pool is too hard at every
