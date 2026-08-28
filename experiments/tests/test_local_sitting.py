@@ -73,6 +73,7 @@ class TestACalibrationPassCanBeLocal:
         assert meta["local"]["models"] == ["qwen3:14b"]
         assert meta["local"]["protocols"] == ["structured"]
         assert meta["local"]["context_tokens"] == 16384
+        assert meta["local"]["max_output_tokens"] == local.DEFAULT_MAX_OUTPUT_TOKENS
         assert meta["strengths"] == ["qwen3-14b-structured"]
 
     def test_the_manifest_says_which_subject_calibrated_it(self, offline):
@@ -152,7 +153,7 @@ class TestALocalRunCanBeResumed:
     """The 432-cell sweep finished, so this path had never been walked. An
     overnight pass is exactly where it would have been."""
 
-    def _stopped(self, offline, window=16384):
+    def _stopped(self, offline, window=16384, max_output_tokens=local.DEFAULT_MAX_OUTPUT_TOKENS):
         """A local run that recorded its metadata and then stopped, owing
         everything. Written directly rather than run, because a `--dry-run` is
         deliberately not resumable and a real one needs a server."""
@@ -177,6 +178,7 @@ class TestALocalRunCanBeResumed:
                 "reasoning_effort": "none",
                 "max_cell_seconds": 240,
                 "context_tokens": window,
+                "max_output_tokens": max_output_tokens,
             },
             slate=None,
         )
@@ -200,6 +202,35 @@ class TestALocalRunCanBeResumed:
         )
         main(["run", "--resume", str(run_dir), "--yes"])
         assert isinstance(chosen[0], local.LocalSubject)
+
+    def test_a_thinking_run_resumes_under_its_own_output_cap(self, offline, monkeypatch, served):
+        """The cap bounds *reasoning plus answer*. A resume that fell back to
+        the 2,048 default would truncate the second half's thoughts where the
+        first half's completed — the same shape as the window this block
+        already records, and the reason it is recorded beside it."""
+        run_dir = self._stopped(offline, max_output_tokens=local.THINKING_MAX_OUTPUT_TOKENS)
+        chosen = []
+        monkeypatch.setattr(
+            cli, "run_grid", lambda cells, subject, *a, **k: chosen.append(subject) or _empty()
+        )
+        main(["run", "--resume", str(run_dir), "--yes"])
+        assert chosen[0].max_output_tokens == local.THINKING_MAX_OUTPUT_TOKENS
+
+    def test_a_run_that_recorded_no_output_cap_falls_back_to_the_default(
+        self, offline, monkeypatch, served
+    ):
+        """Runs recorded before the cap was a field resume at the default it
+        was actually measured under, rather than being refused."""
+        run_dir = self._stopped(offline)
+        meta = meta_of(run_dir)
+        del meta["local"]["max_output_tokens"]
+        (run_dir / "run.json").write_text(json.dumps(meta))
+        chosen = []
+        monkeypatch.setattr(
+            cli, "run_grid", lambda cells, subject, *a, **k: chosen.append(subject) or _empty()
+        )
+        main(["run", "--resume", str(run_dir), "--yes"])
+        assert chosen[0].max_output_tokens == local.DEFAULT_MAX_OUTPUT_TOKENS
 
     def test_a_local_calibration_pass_resumes_from_its_pool(self, offline, served, capsys):
         """The pass a night is spent on is the one that most needs this: it

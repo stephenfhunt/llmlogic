@@ -110,7 +110,22 @@ DEFAULT_CONTEXT_TOKENS = 32_768
 #: legitimate turn in the whole sweep was 421 tokens. Without this, `max_turns`
 #: and the cell's wall clock both bound the *loop* while one turn inside it runs
 #: unbounded.
+#:
+#: **This bounds reasoning *and* answer, which makes it thinking-on's trap.**
+#: Measured on `qwen3:14b` 2026-08-27: a five-constraint puzzle spent ~1,870
+#: tokens thinking, hit this cap mid-thought, and returned content that did not
+#: parse as an action — a `malformed_calls` retry whose cause is invisible in
+#: the record, because ollama reports `completion_tokens` **excluding** the
+#: reasoning it just charged against the cap. So a thinking run raises it
+#: (`--max-output-tokens`), and the wall clock, not the usage number, is the
+#: honest signal of what a thinking turn cost.
 DEFAULT_MAX_OUTPUT_TOKENS = 2048
+
+#: What a thinking run needs instead. Same measurement: the cap that let the
+#: same puzzle finish its thought and emit a parseable action, with headroom.
+#: Not the default, because thinking is a knob and the guard above is what
+#: stops a decode loop when it is off.
+THINKING_MAX_OUTPUT_TOKENS = 4096
 
 #: How much of a tool's output goes back to the model. A weak model with a 32k
 #: window that reads a whole fixture into context has no room left to think, and

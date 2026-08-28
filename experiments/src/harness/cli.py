@@ -148,6 +148,10 @@ def _local_sitting(args: argparse.Namespace) -> tuple[tuple, dict] | None:
         # would run the second half of a sitting under a different overflow
         # guard than the first.
         "context_tokens": window,
+        # Same reason, and it bites harder with thinking on: the cap bounds
+        # *reasoning plus answer*, so a resume that guessed it would truncate
+        # the second half's thoughts where the first half's completed.
+        "max_output_tokens": args.max_output_tokens,
     }
     return strengths, meta
 
@@ -265,6 +269,7 @@ def _subject(args: argparse.Namespace, local_run: bool):
             base_url=args.endpoint,
             max_turns=args.max_turns,
             max_cell_seconds=args.max_cell_seconds,
+            max_output_tokens=args.max_output_tokens,
         )
     return AgentSubject(max_turns=args.max_turns, max_budget_usd=args.budget)
 
@@ -647,6 +652,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
             base_url=local_meta["endpoint"],
             max_turns=max_turns,
             max_cell_seconds=local_meta.get("max_cell_seconds", local.DEFAULT_MAX_CELL_SECONDS),
+            max_output_tokens=local_meta.get("max_output_tokens", local.DEFAULT_MAX_OUTPUT_TOKENS),
         )
     else:
         subject = AgentSubject(max_turns=max_turns, max_budget_usd=budget)
@@ -911,6 +917,14 @@ def main(argv: list[str] | None = None) -> int:
         "degraded one; 0 skips the check",
     )
     run.add_argument(
+        "--max-output-tokens",
+        type=int,
+        default=local.DEFAULT_MAX_OUTPUT_TOKENS,
+        help="tokens one completion may generate. Bounds **reasoning plus "
+        "answer**, so a thinking model needs this raised or it spends the whole "
+        "budget thinking and emits no action",
+    )
+    run.add_argument(
         "--reasoning-effort",
         help="passed through to a thinking model; `none` turns thinking off",
     )
@@ -986,6 +1000,14 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=local.DEFAULT_CONTEXT_TOKENS,
         help="refuse to start if a model is served with a smaller window; 0 skips the check",
+    )
+    cal.add_argument(
+        "--max-output-tokens",
+        type=int,
+        default=local.DEFAULT_MAX_OUTPUT_TOKENS,
+        help="tokens one completion may generate. Bounds **reasoning plus "
+        "answer**, so a thinking model needs this raised or it spends the whole "
+        "budget thinking and emits no action",
     )
     cal.add_argument(
         "--reasoning-effort",
