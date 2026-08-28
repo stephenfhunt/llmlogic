@@ -32,7 +32,13 @@ from harness.task import Task
 
 #: The manifest format. Bumped when a field changes meaning, so a manifest
 #: written by an older harness is refused rather than half-understood.
-MANIFEST_VERSION = 1
+#:
+#: 2 — ``pool.local`` gained ``max_output_tokens``. A version 1 manifest cannot
+#: say what output cap selected it, and the cap is part of the subject
+#: (`decisions.md` 2026-08-27): it bounds reasoning *plus* answer, so the same
+#: model at two caps is two subjects. Bumping rather than defaulting is what
+#: makes the field's absence unrepresentable instead of silently filled in.
+MANIFEST_VERSION = 2
 
 #: Trials per pool item. **One trial is 0 or 1**, so a band over the middle is
 #: empty by construction and the whole pass selects nothing. At three the
@@ -273,6 +279,7 @@ def spec(
     tracks: list[str],
     trials: int,
     strength: Strength = STRENGTH,
+    max_output_tokens: int | None = None,
 ) -> dict:
     """The pool as data, so a stopped pass can be rebuilt exactly.
 
@@ -286,7 +293,19 @@ def spec(
     item alone (`hypotheses.md`, precondition 4). A slate calibrated on haiku is
     not calibrated for a 14B served locally, and a manifest that cannot say
     which one selected it cannot be checked against the grid that runs it.
+
+    ``max_output_tokens`` is the one part of a local subject that `Strength` does
+    not carry — it is a `local.LocalSubject` parameter — and it is **required**
+    for a local pass rather than defaulted, because a default is how a subject
+    gets recorded as something it was not. It bounds reasoning plus answer, so
+    the same model at two caps is two subjects (`decisions.md` 2026-08-27).
     """
+    if strength.is_local and max_output_tokens is None:
+        raise ManifestError(
+            "a local pass has to record its output cap: it bounds reasoning plus "
+            "answer, so the same model at two caps is two subjects, and a "
+            "manifest that cannot name it cannot be checked against a grid"
+        )
     return {
         "packs": list(packs),
         "seeds": list(seeds),
@@ -302,6 +321,7 @@ def spec(
                 "protocol": strength.tool_protocol,
                 "reasoning_effort": strength.reasoning_effort,
                 "context_tokens": strength.context_tokens,
+                "max_output_tokens": max_output_tokens,
             }
             if strength.is_local
             else None

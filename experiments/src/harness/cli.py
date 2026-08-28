@@ -418,7 +418,15 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
         max_turns=args.max_turns,
         max_budget_usd=args.budget,
         local=local_meta,
-        calibration=calibrate.spec(seeds, packs, difficulties, tracks, args.trials, strength),
+        calibration=calibrate.spec(
+            seeds,
+            packs,
+            difficulties,
+            tracks,
+            args.trials,
+            strength,
+            args.max_output_tokens if local_meta else None,
+        ),
     )
 
     subject = _subject(args, bool(local_meta))

@@ -11,10 +11,11 @@ import json
 
 import pytest
 
-from harness import calibrate, domains, generate, resume
+from harness import calibrate, domains, generate, local, resume
 from harness.calibrate import Candidate, Outcome, PoolError
 
 SEED = 20260826
+LOCAL_ENDPOINT = "http://127.0.0.1:11434/v1"
 
 
 def write_records(run_dir, rows):
@@ -219,6 +220,49 @@ class TestBand:
         assert selection.kept == []
         assert len(selection.rejected) == len(drawn)
         assert all("too easy" in judged.reason for judged in selection.rejected)
+
+
+class TestTheSubjectAPassRecords:
+    """A manifest has to name the subject that selected it, all of it.
+
+    An item's difficulty is not a property of the item alone, so a slate is
+    calibrated *for one subject* — and the local subject is four settings now,
+    not one. The output cap is the one `Strength` does not carry, and it is the
+    one that bounds reasoning plus answer.
+    """
+
+    def _local(self, effort="none", window=16384):
+        return local.strengths(["qwen3:14b"], ["structured"], LOCAL_ENDPOINT, effort, window)[0]
+
+    def test_an_api_pass_records_no_local_block(self):
+        spec = calibrate.spec([SEED], ["controls"], [3], ["in-context"], 3)
+        assert spec["local"] is None
+        assert spec["strength"] == calibrate.STRENGTH.name
+
+    def test_a_local_pass_records_every_setting_that_is_the_subject(self):
+        spec = calibrate.spec([SEED], ["controls"], [3], ["in-context"], 3, self._local(), 4096)
+        assert spec["local"] == {
+            "endpoint": LOCAL_ENDPOINT,
+            "protocol": "structured",
+            "reasoning_effort": "none",
+            "context_tokens": 16384,
+            "max_output_tokens": 4096,
+        }
+
+    def test_a_local_pass_that_cannot_name_its_output_cap_is_refused(self):
+        """Not defaulted. A default is how a subject gets recorded as something
+        it was not, which is the failure this project has now had five times."""
+        with pytest.raises(calibrate.ManifestError) as excinfo:
+            calibrate.spec([SEED], ["controls"], [3], ["in-context"], 3, self._local())
+        assert "output cap" in str(excinfo.value)
+
+    def test_thinking_on_and_thinking_off_record_differently(self):
+        """The two subjects the last three sessions were spent separating."""
+        args = ([SEED], ["controls"], [3], ["in-context"], 3)
+        on = calibrate.spec(*args, self._local(None), 4096)
+        off = calibrate.spec(*args, self._local("none"), 4096)
+        assert on["local"]["reasoning_effort"] is None
+        assert off["local"]["reasoning_effort"] == "none"
 
 
 class TestManifest:

@@ -236,7 +236,9 @@ class TestALocalRunCanBeResumed:
         """The pass a night is spent on is the one that most needs this: it
         rebuilds its slate from the recorded pool *and* its subject from the
         recorded local block, and neither existed for a local run before."""
-        spec = calibrate.spec([20260826], ["controls"], [3], ["in-context"], 3, _LOCAL_STRENGTH)
+        spec = calibrate.spec(
+            [20260826], ["controls"], [3], ["in-context"], 3, _LOCAL_STRENGTH, 4096
+        )
         candidates = calibrate.from_spec(spec)
         store = RecordStore(offline / "results", "cal-local-test")
         store.write_metadata(
