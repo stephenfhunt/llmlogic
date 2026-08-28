@@ -15,6 +15,27 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-08-28** — **A slate now checks its subject, not only its items.** The
+  manifest recorded the calibrating subject and nothing compared it to the one
+  about to run, so `run --slate <thinking-on slate> --reasoning-effort none` was
+  accepted and the grid measured a subject the band was never drawn for.
+  `calibrate.subject_moved` refuses it before any cell runs; a `--resume` is not
+  asked, because it rebuilds its subject from its own `run.json`.
+  - **Five fields, and one exclusion stated by name.** Model, protocol,
+    reasoning effort, window and output cap are the subject; `endpoint` is not —
+    the same model served at the same settings from another URL is the same
+    subject, and refusing on a moved port is how a check gets ignored.
+  - **Containment, not equality.** The calibrator must be *among* the strengths
+    the grid crosses, not the only one: `hypotheses.md` reads the primary
+    endpoint at the weaker strength while the grid runs both, so demanding an
+    exact match would refuse the run the slate exists for.
+  - **The manifest could not name the whole subject** until now — the output cap
+    is a `LocalSubject` parameter, not a `Strength` field, so `spec` recorded
+    four settings of five. It is **required** for a local pass rather than
+    defaulted (`MANIFEST_VERSION` 2), because a default is how a subject gets
+    recorded as something it was not. Nothing in `slates/` to refuse: no paid
+    pass has written one.
+
 - **2026-08-27 (later iv)** — **`engine-forced` was measuring its own turn cap,
   and three things change.** Across every run on disk it ended at the cap in
   **48%** of cells against 16% for `prose`, 75% of those writing nothing; 64% of
@@ -922,6 +943,13 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
   block against the run's strengths. Not done tonight because it is new work
   outside what this session was asked for; **do it before launching the grid**,
   not after the night is spent.
+  - ***Answered*** 2026-08-28, and before the grid as this said to.
+    `calibrate.subject_moved` compares the five fields that are the subject and
+    excludes `endpoint` by name. Two things the question had not seen: the
+    manifest could not name the **output cap** at all (a `LocalSubject`
+    parameter, not a `Strength` field), so the check had a hole exactly at the
+    newest flag; and the rule has to be **containment, not equality**, or it
+    refuses the two-strength grid `hypotheses.md` describes.
 
 - **A task's fingerprint does not cover the prompt it is asked with.**
   `resume.fingerprint` hashes the question, the fixture files and the truth rows

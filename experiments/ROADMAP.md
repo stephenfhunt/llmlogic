@@ -242,6 +242,14 @@ grid unable to answer S1. The argument and the numbers are in
   writes a sha256 of each task's question, fixture files and truth rows into
   `run.json`; `resume.moved` refuses on a mismatch, and stays silent for a run that
   recorded none. — `resume.py`, `decisions.md` 2026-08-24.
+- **A slate is checked against its subject, not only its items** — the manifest
+  recorded which subject selected it and nothing compared that to the grid about
+  to run, so a thinking-on slate run with `--reasoning-effort none` was accepted
+  silently. `calibrate.subject_moved` refuses it; the manifest now names the
+  output cap too (`MANIFEST_VERSION` 2). _shipped 2026-08-28._ —
+  `calibrate.subject_moved`, `cli._slate_subject_holds`, `decisions.md`
+  2026-08-28.
+
 - **`Signals.ran_engine` contradicted `engine_use`** — `measure` counted a
   `Skill` invocation as the engine having run while `classify` did not, so a cell
   whose only tool call was `Skill` recorded `invoked` and `ran_engine=True` in the
