@@ -1,0 +1,148 @@
+{
+  "run_id": "cal-20260828T110615Z",
+  "started_at": "2026-08-28T11:06:15.505668+00:00",
+  "dry_run": false,
+  "domains": [
+    "access_control",
+    "eligibility",
+    "imports",
+    "ontology"
+  ],
+  "tasks": 80,
+  "cells": 240,
+  "strengths": [
+    "qwen3-14b-structured"
+  ],
+  "arms": [
+    "prose"
+  ],
+  "repeats": 3,
+  "fingerprints": {
+    "access_control/g27da-d1-who-can-read": "0a690652ff2a5277",
+    "access_control/g27da-d1-resources-for-user": "883d544ef04929ac",
+    "access_control/g27da-d1-no-access": "2109c6b17967c332",
+    "access_control/g27da-d1-delete-without-read": "780ae094aaf6a316",
+    "access_control/g27da-d1-needs-the-full-closure": "37f13a259fa43ac6",
+    "access_control/g27da-d2-who-can-read": "9e2ce805e445b208",
+    "access_control/g27da-d2-resources-for-user": "a4526bb8f300f1b2",
+    "access_control/g27da-d2-no-access": "501b0676199c06bb",
+    "access_control/g27da-d2-delete-without-read": "de3f6e76e6d42ede",
+    "access_control/g27da-d2-needs-the-full-closure": "87598e58aa051ee5",
+    "access_control/g2825-d1-who-can-read": "5630dc31251c16d9",
+    "access_control/g2825-d1-resources-for-user": "eb4049cb433de09e",
+    "access_control/g2825-d1-no-access": "0cbbcb999fc0aaf2",
+    "access_control/g2825-d1-delete-without-read": "44e2ff465d080f00",
+    "access_control/g2825-d1-needs-the-full-closure": "4bbed410c8190403",
+    "access_control/g2825-d2-who-can-read": "7010440cb439d2bb",
+    "access_control/g2825-d2-resources-for-user": "6e93a3b7352f080f",
+    "access_control/g2825-d2-no-access": "5b0e619be75ab650",
+    "access_control/g2825-d2-delete-without-read": "15ce7f5fffe2ad1f",
+    "access_control/g2825-d2-needs-the-full-closure": "222b067791af0692",
+    "ontology/g27da-d1-instances-of": "4cf681864d2a3330",
+    "ontology/g27da-d1-power_profile": "482eb0aafd7b74d5",
+    "ontology/g27da-d1-inconsistent-instances": "d2744c7718d7ca9f",
+    "ontology/g27da-d1-classes-with-no-instances": "b3e6f88b56af4fc6",
+    "ontology/g27da-d1-dead-declarations": "d7e943475e78f82b",
+    "ontology/g27da-d2-instances-of": "26de04360ab85b4e",
+    "ontology/g27da-d2-power_profile": "19a04a27ef5cb8ba",
+    "ontology/g27da-d2-inconsistent-instances": "283489f9990e2c43",
+    "ontology/g27da-d2-classes-with-no-instances": "034f9be824bace64",
+    "ontology/g27da-d2-dead-declarations": "5000b61ccecf9ce4",
+    "ontology/g2825-d1-instances-of": "f35865c46c619a9d",
+    "ontology/g2825-d1-power_profile": "9d309e8ff5899271",
+    "ontology/g2825-d1-inconsistent-instances": "dfbd49769d9dceab",
+    "ontology/g2825-d1-classes-with-no-instances": "45b491c755559e22",
+    "ontology/g2825-d1-dead-declarations": "b7d04dcaef20d3ea",
+    "ontology/g2825-d2-instances-of": "1d003772779a008e",
+    "ontology/g2825-d2-power_profile": "7a2c88f2991e60dc",
+    "ontology/g2825-d2-inconsistent-instances": "44067f6788788567",
+    "ontology/g2825-d2-classes-with-no-instances": "f0e49cd39a943828",
+    "ontology/g2825-d2-dead-declarations": "8b1de95b9c5f1fce",
+    "imports/g27da-d1-late-shipments": "002c549378a0edd3",
+    "imports/g27da-d1-regions-over-threshold": "07270581c1d558da",
+    "imports/g27da-d1-customers-with-no-recent-orders": "37ecaaeee2152fa9",
+    "imports/g27da-d1-busiest-month-per-region": "67c5e7d5845476a7",
+    "imports/g27da-d1-ordered-every-month": "4c049f9943be1a82",
+    "imports/g27da-d2-late-shipments": "4394e6afb422c59e",
+    "imports/g27da-d2-regions-over-threshold": "c0e412bd118d2649",
+    "imports/g27da-d2-customers-with-no-recent-orders": "4b1156b9e1b18139",
+    "imports/g27da-d2-busiest-month-per-region": "fd1c8ce093e8cec2",
+    "imports/g27da-d2-ordered-every-month": "6100f5ab7f9e2a50",
+    "imports/g2825-d1-late-shipments": "178b4edadd8ab717",
+    "imports/g2825-d1-regions-over-threshold": "7aee29c47a20209e",
+    "imports/g2825-d1-customers-with-no-recent-orders": "ee95bda004effbe1",
+    "imports/g2825-d1-busiest-month-per-region": "b5f06844e1ac7fe2",
+    "imports/g2825-d1-ordered-every-month": "28bdb440e689b17b",
+    "imports/g2825-d2-late-shipments": "93df51cbd5015ee7",
+    "imports/g2825-d2-regions-over-threshold": "8f2ae07df9d6fffe",
+    "imports/g2825-d2-customers-with-no-recent-orders": "1b276f785b95bd81",
+    "imports/g2825-d2-busiest-month-per-region": "0999e1bb958da71d",
+    "imports/g2825-d2-ordered-every-month": "b6ff78bfaaab4459",
+    "eligibility/g27da-d1-eligible": "eb8138e00d7ea3c7",
+    "eligibility/g27da-d1-blocked-by-exactly-one": "72996019eb7cb98c",
+    "eligibility/g27da-d1-undetermined": "1d908ed7beeff286",
+    "eligibility/g27da-d1-households-over-dependants": "73dab86d95958936",
+    "eligibility/g27da-d1-more-undetermined-than-eligible": "fe54ff91a1b41fcf",
+    "eligibility/g27da-d2-eligible": "dbdc567017375ae4",
+    "eligibility/g27da-d2-blocked-by-exactly-one": "c76ca0a8811785a6",
+    "eligibility/g27da-d2-undetermined": "01e62c236f6d6994",
+    "eligibility/g27da-d2-households-over-dependants": "cf48dc30e803e09e",
+    "eligibility/g27da-d2-more-undetermined-than-eligible": "b75ba6ecd72b63a8",
+    "eligibility/g2825-d1-eligible": "609374663efb5e1e",
+    "eligibility/g2825-d1-blocked-by-exactly-one": "a774bc18ae132e65",
+    "eligibility/g2825-d1-undetermined": "60fb52a577b6e162",
+    "eligibility/g2825-d1-households-over-dependants": "0f371f12f20f44df",
+    "eligibility/g2825-d1-more-undetermined-than-eligible": "15b6da5aefa991c2",
+    "eligibility/g2825-d2-eligible": "3eca6078973cb89d",
+    "eligibility/g2825-d2-blocked-by-exactly-one": "dbb463e0526b2762",
+    "eligibility/g2825-d2-undetermined": "ded2074d7a8ecb6a",
+    "eligibility/g2825-d2-households-over-dependants": "f028d31dea7accff",
+    "eligibility/g2825-d2-more-undetermined-than-eligible": "d6a68b63074763fc"
+  },
+  "ablate": null,
+  "max_turns": 30,
+  "max_budget_usd": 2.0,
+  "local": {
+    "endpoint": "http://127.0.0.1:11434/v1",
+    "models": [
+      "qwen3:14b"
+    ],
+    "protocols": [
+      "structured"
+    ],
+    "reasoning_effort": null,
+    "max_cell_seconds": 900,
+    "context_tokens": 24576,
+    "max_output_tokens": 4096
+  },
+  "calibration": {
+    "packs": [
+      "access_control",
+      "ontology",
+      "imports",
+      "eligibility"
+    ],
+    "seeds": [
+      20260826,
+      20260901
+    ],
+    "difficulties": [
+      1,
+      2
+    ],
+    "tracks": [
+      "in-context"
+    ],
+    "trials": 3,
+    "arm": "prose",
+    "strength": "qwen3-14b-structured",
+    "model": "qwen3:14b",
+    "local": {
+      "endpoint": "http://127.0.0.1:11434/v1",
+      "protocol": "structured",
+      "reasoning_effort": null,
+      "context_tokens": 24576,
+      "max_output_tokens": 4096
+    }
+  }
+}

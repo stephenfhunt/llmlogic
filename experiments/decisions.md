@@ -36,6 +36,33 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
     addendum 2026-08-28. `briefed − prose` is an **upper bound** on what the
     engine buys this subject, because an agent handed the manual is more equipped
     than the one S1 describes.
+  - ***Consequences*** — measured the same night, 16 cells
+    (`results/run-20260828T132615Z`). **The discovery hypothesis holds on
+    syntax**: 3 of 4 briefed cells opened with `import "f.csv" as r.` against 0
+    of 4 forced, compliance went 3/4 → **4/4**, and no arm ended at its budget.
+    Accuracy 2/4 against 1/4 at n=4 — the arm is not measured by this, and the
+    one flip (`Sales` → `engineering`) is the shape the fix predicts. **What it
+    did not fix**: a briefed cell ran the engine and wrote `"o2"` where the
+    contract wants `o2`, and another *fabricated the fact base inline* rather
+    than importing it. Removing the syntax barrier exposed the next two.
+
+- **2026-08-28 (later iv)** — **The engine's quotes are the format failure one
+  level in, and the fix is again the instruction.** `datalog` prints
+  `answer("o2").`; the mandate said write `x` and not the fact, and said nothing
+  about the quotes, so a compliant cell wrote `"o2"` and graded `wrong` with 3
+  rows missing and 3 extra. Exact precedent, exactly one day old: *fix the
+  instruction, not the ruler* (the fact-syntax fix). The mandate now says the
+  quotes come off.
+  - **Arm-asymmetric and conservative in direction** — only an engine arm can
+    transcribe the engine's quoting, and it costs the engine, which is the one
+    bias `grade.grade` says this harness cannot afford in the other direction.
+  - **It re-bases the mandated arms' prompts** for the second time in two days,
+    so today's n=4 gates do not compare forward. Cheap, because both were floor
+    checks on an arm whose accuracy is stated as unmeasured.
+  - **The engine has no bare-value output mode** (`datalog --help`: canonical
+    facts only), so every agent consuming it must strip quotes and every
+    instruction must say so. That is a `datalog` observation, not an
+    `experiments` one, and it is left here as a pointer rather than acted on.
 
 - **2026-08-28 (later iii)** — **The 240-cell pass was measuring its own wall
   clock, and is parked.** Launched, stopped at 13 cells: **7 of the first 12

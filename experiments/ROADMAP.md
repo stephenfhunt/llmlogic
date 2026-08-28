@@ -177,15 +177,20 @@ grid unable to answer S1. The argument and the numbers are in
 
 - **`engine-briefed`, a fourth arm** — `engine-forced` plus `SKILL.md` in the
   prompt, so *finding the manual* stops competing with *does the engine help*.
+  Gated the same night: **import syntax 0/4 → 3/4, compliance 3/4 → 4/4**.
   `briefed − forced` is what discovery costs; `briefed − prose` is an upper
   bound on S1 for this subject, never S1 itself. _shipped 2026-08-28._ —
   `cell.BRIEFED_ARM`, `arms.briefing`, `hypotheses.md` addendum 2026-08-28.
 
 - **`engine-forced` writes Datalog it has invented** — four cells, four
   different fabricated CSV loaders, zero `Skill` calls, where the engine has
-  `import "f.csv" as r.`. Whether `MANDATE` should name the reference in the
-  workspace is an open question, not a patch. _designing — **v1**._ —
-  `decisions.md` 2026-08-28 (later).
+  `import "f.csv" as r.`. _answered by `engine-briefed` above, 2026-08-28._ What
+  briefing did **not** fix is the item below.
+
+- **A briefed cell can still fabricate its fact base** — `engineering-headcount`
+  wrote `employee(name: "Alice", …)` inline with the CSV beside it, 22 turns,
+  no answer. Not a syntax gap: the manual was in the prompt. _designing —
+  **v1**._ — `decisions.md` 2026-08-28 (later ii), `notes/a-local-subject.md`.
 
 - **A rung between `controls` and the measured slate** — the same subject scores
   83% on single-hop lookups and 14% on the easiest generated multi-hop item, so

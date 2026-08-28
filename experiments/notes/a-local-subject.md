@@ -434,6 +434,37 @@ counts the mandate's own legal exit as non-compliance is measuring the wrong
 thing; whether that verdict belongs in the numerator is an open question in
 `decisions.md`, not a number to adjust after seeing it.
 
+### What briefing the arm bought (2026-08-28)
+
+`engine-briefed` — `engine-forced` plus `SKILL.md` in the prompt — measured the
+same night on the same four control tasks (`results/run-20260828T132615Z`):
+
+| | `engine-forced` | `engine-briefed` |
+|---|---|---|
+| first program used `import "f.csv" as r.` | **0/4** | **3/4** |
+| `answered-from` (compliance) | 3/4 | **4/4** |
+| correct | 1/4 | 2/4 |
+| ended at its budget | 0/4 | 0/4 |
+
+**The discovery hypothesis holds on the thing it predicted**: given the manual,
+the subject stops inventing the import syntax. Accuracy at n=4 says nothing yet,
+and the arm's one flip — `department-of`, `Sales` → `engineering` — is a single
+cell.
+
+**What the fix exposed underneath.** Two failures that the syntax barrier had
+been hiding:
+
+- **The engine's quotes.** `orders-above-100` ran a correct program, stripped
+  the fact wrapper, and kept the quoting: `"o2"` where the contract wants `o2`,
+  graded `wrong` with 3 rows missing and 3 extra. `datalog` has no bare-value
+  output mode, so every consumer must strip quotes and every instruction must
+  say so. The mandate now does.
+- **A fabricated fact base.** `engineering-headcount` wrote its facts inline —
+  `employee(name: "Alice", department: "Engineering", …)` — inventing rows
+  rather than importing the CSV sitting beside it, then spent 22 turns and 1,027s
+  and wrote no answer. Having the manual did not stop it; it is a different
+  failure from not knowing the syntax.
+
 ## Four silent misconfigurations, and the pattern
 
 The dangerous failures here were all **quiet**. Nothing errored; numbers came out;
