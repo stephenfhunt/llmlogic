@@ -148,9 +148,14 @@ You must answer using the `datalog` logic engine, which is on your PATH.
 - Write your reasoning as a Datalog program in a `.dl` file.
 - Run it with `datalog` and read the facts it prints.
 - Your answer must be what the engine derived, not what you worked out yourself.
+- The engine prints its results as Datalog facts, like `answer("x").`. The
+  answer file takes the values themselves, in the format described above — write
+  `x`, not the fact the engine printed it in.
 
 If the engine rejects your program, repair it from the diagnostic and run it
-again.
+again. If it still will not run your program after several attempts, use the
+`engine_unusable` action to say so and stop — that is a real outcome and a
+better one than an empty answer file.
 """
 
 

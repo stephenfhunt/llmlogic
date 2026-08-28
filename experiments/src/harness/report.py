@@ -27,6 +27,7 @@ from pathlib import Path
 from harness.cell import ARMS, STRENGTHS
 from harness.record import RecordStore
 from harness.resume import failed
+from harness.runner import STOPPING_RULE
 from harness.stats import bootstrap_delta, f1, mcnemar, wilson
 
 #: Which pairings the report renders, and what each one asks. Ordered most
@@ -192,6 +193,42 @@ def _unparseable_line(records: list[dict]) -> str:
     )
 
 
+def _budget_line(records: list[dict]) -> list[str]:
+    """Where each arm's budget bound it, and what it declared instead.
+
+    Two numbers that have to travel together with any `engine-forced` result.
+    The arms do not get the same turn and wall-clock budget — `cell.ARM_BUDGET`
+    gives `engine-forced` twice, because it must write and repair a program
+    before it can answer at all — and that is an arm-asymmetric instrument
+    parameter sitting on the primary endpoint. **A result is only free of it
+    while no arm is ending at its cap**, so the rate is printed rather than
+    assumed, per arm, next to the outcome the budget was supposed to buy.
+
+    Before this, `engine-forced` hit its cap in 48% of cells with 75% of those
+    writing nothing, and the report said none of it.
+    """
+    if not records:
+        return []
+    arms_seen = sorted({r["arm"] for r in records})
+    parts = []
+    for arm in arms_seen:
+        rows = [r for r in records if r["arm"] == arm]
+        capped = sum(1 for r in rows if STOPPING_RULE.search(r.get("error") or ""))
+        parts.append(f"{arm} {capped}/{len(rows)} ({100 * capped / len(rows):.0f}%)")
+    unusable = [r for r in records if r["verdict"] == "engine-unusable"]
+    lines = [
+        f"- **Cells that ended at their budget:** {', '.join(parts)}. "
+        "The arms do not share one budget (`cell.ARM_BUDGET`), so a difference "
+        "between them is only readable while these are low — a capped cell "
+        "measures the cap.",
+        f"- **Declared the engine unusable:** {len(unusable)}. "
+        "The subject tried, the engine would not run its program, and it said so "
+        "instead of looping. Not a correct answer, but a different fact from an "
+        "empty file — and evidence about the engine rather than a hole.",
+    ]
+    return lines
+
+
 def _reach(records: list[dict]) -> list[str]:
     """Reach as an outcome with an interval, not a footnote.
 
@@ -335,6 +372,7 @@ def render(run_dir: Path) -> str:
         "### Process signals",
         "",
         _unparseable_line(graded),
+        *_budget_line(graded),
         f"- **First program captured before feedback:** {first_programs}/{len(engine_records)}.",
         f"- **Switched back to search after using the engine:** {switched}. "
         "This is the silent one — the subject had the engine, tried it, and went back to text.",

@@ -46,7 +46,7 @@ from pathlib import Path
 
 from harness import arms
 from harness.arms import Workspace
-from harness.cell import Cell
+from harness.cell import Cell, budget_for
 from harness.confine import violation
 from harness.engine_use import program_from_call
 from harness.grade import ANSWER_FILE
@@ -91,6 +91,15 @@ CONTEXT_BUDGET = 0.75
 #: What a cell that ran out of wall clock records. Not fatal — that cell spent
 #: its budget and the next one deserves its own.
 _OUT_OF_TIME = "cell exceeded its wall clock"
+
+#: What a cell that ran out of *turns* records — and until 2026-08-27 it recorded
+#: nothing at all. The loop simply ended, so a cell stopped by the turn cap was
+#: indistinguishable in the transcript from one that finished and wrote nothing.
+#: That is how `engine-forced` ending at its cap in 48% of cells stayed invisible
+#: through three sessions of reading these records. Matches `runner.STOPPING_RULE`
+#: deliberately: it is the harness's own rule, so the cell is still graded on what
+#: it left behind rather than discarded as an instrument failure.
+_OUT_OF_TURNS = "cell reached max_turns"
 
 #: Wall clock for one completion. A 7B on a 3060 answers in seconds; minutes
 #: means the server is thrashing, and a cell that hangs is a sitting that ends.
@@ -350,6 +359,17 @@ REMINDER = (
 #: way out of the loop is the turn cap.
 FINAL_ACTION = "final"
 
+#: The engine arms' honest exit. Offered only where the engine is, because it is
+#: a statement *about the engine* and means nothing in `prose`.
+#:
+#: `engine-forced` forbids answering from anything but the engine, so a subject
+#: whose program will not run has no legal move left and loops until a stopping
+#: rule ends it: 48% of its cells hit the turn cap, 75% of those writing nothing.
+#: That records as NO_ANSWER, which cannot be told apart from never engaging.
+#: This action is the missing move — it costs the cell its answer either way, and
+#: buys a reason that is itself evidence about S1.
+ABANDON_ACTION = "engine_unusable"
+
 
 def action_schema(has_engine: bool) -> dict:
     """One JSON schema covering every legal move, as a discriminated union.
@@ -398,7 +418,54 @@ def action_schema(has_engine: bool) -> dict:
             "required": ["thought", "action", "arguments"],
         }
     )
+    if has_engine:
+        variants.append(
+            {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "thought": THOUGHT,
+                    "action": {"const": ABANDON_ACTION},
+                    # A reason, unlike `final`'s absent text field, because here
+                    # the text *is* the measurement — there is no answer file for
+                    # it to be an alternative to.
+                    "arguments": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {"reason": {"type": "string"}},
+                        "required": ["reason"],
+                    },
+                },
+                "required": ["thought", "action", "arguments"],
+            }
+        )
     return {"oneOf": variants}
+
+
+def abandon_schema() -> dict:
+    """`ABANDON_ACTION` in the shape the `native` protocol needs.
+
+    `structured` gets it as a variant of `action_schema`; `native` reads a
+    `tools` array, so the same move has to appear there or the two protocols
+    would offer the subject different sets of legal actions — which would make
+    the protocol a second independent variable.
+    """
+    return {
+        "type": "function",
+        "function": {
+            "name": ABANDON_ACTION,
+            "description": (
+                "The engine will not run your program and you have tried to repair "
+                "it. Stop and say why."
+            ),
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {"reason": {"type": "string"}},
+                "required": ["reason"],
+            },
+        },
+    }
 
 
 def protocol_brief(has_engine: bool) -> str:
@@ -417,6 +484,11 @@ def protocol_brief(has_engine: bool) -> str:
         fields = ", ".join(function["parameters"]["properties"])
         lines.append(f"- {function['name']}({fields}) — {function['description']}")
     lines.append(f"- {FINAL_ACTION}(text) — you are done; the answer file is already written.")
+    if has_engine:
+        lines.append(
+            f"- {ABANDON_ACTION}(reason) — the engine will not run your program and "
+            "you have tried to repair it; stop and say why."
+        )
     return "\n".join(lines)
 
 
@@ -826,7 +898,14 @@ class LocalSubject:
         tools = Tools(workspace, self.tool_timeout)
         endpoint, model, protocol, effort = self._configure(cell)
         started = time.monotonic()
-        deadline = started + self.max_cell_seconds
+        # Turns and wall clock both scale with the arm, for one reason: an arm
+        # that must write and repair a program before it can answer needs more
+        # of both, and an equal cap over unequal work is a handicap rather than
+        # a held constant (`cell.ARM_BUDGET`). Scaling only the turns would just
+        # move which stopping rule fires.
+        budget = budget_for(cell.arm)
+        turns = max(1, round(self.max_turns * budget))
+        deadline = started + self.max_cell_seconds * budget
         window = cell.strength.context_tokens
         served = dict(endpoint=endpoint, model=model, reasoning_effort=effort, deadline=deadline)
         messages = [
@@ -835,9 +914,13 @@ class LocalSubject:
         ]
         try:
             if protocol == "structured":
-                self._structured(transcript, tools, workspace, messages, served, deadline, window)
+                self._structured(
+                    transcript, tools, workspace, messages, served, deadline, window, turns
+                )
             else:
-                self._native(transcript, tools, workspace, messages, served, deadline, window)
+                self._native(
+                    transcript, tools, workspace, messages, served, deadline, window, turns
+                )
         except LocalError as exc:
             transcript.error = str(exc)
         except Exception as exc:  # noqa: BLE001 — a failed cell is data, not a crash
@@ -845,7 +928,9 @@ class LocalSubject:
         transcript.wall_seconds = round(time.monotonic() - started, 2)
         return transcript
 
-    def _structured(self, transcript, tools, workspace, messages, served, deadline, window) -> None:
+    def _structured(
+        self, transcript, tools, workspace, messages, served, deadline, window, turns
+    ) -> None:
         """One grammar-constrained action per turn.
 
         A malformed call is not *recovered* here, it is unrepresentable: the
@@ -857,7 +942,7 @@ class LocalSubject:
         schema = action_schema(workspace.has_engine)
         turn = 0
         reminders = 0
-        for _ in range(self.max_turns):
+        for _ in range(turns):
             if time.monotonic() > deadline:
                 transcript.error = _OUT_OF_TIME
                 return
@@ -881,6 +966,14 @@ class LocalSubject:
                 messages.append({"role": "user", "content": f"Malformed action: {exc}"})
                 continue
 
+            if name == ABANDON_ACTION:
+                # No completion reminder here. The reminder exists to catch a
+                # subject that has the answer and forgot the file; this subject
+                # is saying it has no answer to write, and nudging it back into
+                # the loop would spend the turns this action exists to save.
+                transcript.abandoned = str(arguments.get("reason") or "(no reason given)")
+                return
+
             if name == FINAL_ACTION:
                 if reminders < COMPLETION_REMINDERS and not _answered(workspace):
                     reminders += 1
@@ -896,11 +989,17 @@ class LocalSubject:
                 transcript.denials.append(f"turn {turn}: {name} — {result.text}")
             messages.append({"role": "user", "content": result.text})
 
-    def _native(self, transcript, tools, workspace, messages, served, deadline, window) -> None:
+        transcript.error = _OUT_OF_TURNS
+
+    def _native(
+        self, transcript, tools, workspace, messages, served, deadline, window, turns
+    ) -> None:
         schemas = tool_schemas(workspace.has_engine)
+        if workspace.has_engine:
+            schemas = [*schemas, abandon_schema()]
         turn = 0
         reminders = 0
-        for _ in range(self.max_turns):
+        for _ in range(turns):
             if time.monotonic() > deadline:
                 transcript.error = _OUT_OF_TIME
                 return
@@ -940,11 +1039,20 @@ class LocalSubject:
                     messages.append(_tool_reply(call, f"Malformed arguments: {malformed}"))
                     continue
 
+                if name == ABANDON_ACTION:
+                    # Not a tool: `Tools.run` has nothing to execute for it, and
+                    # dispatching would record an unknown-tool result where the
+                    # measurement should be.
+                    transcript.abandoned = str(arguments.get("reason") or "(no reason given)")
+                    return
+
                 self._record(transcript, turn, name, arguments)
                 result = tools.run(name, arguments)
                 if result.denied:
                     transcript.denials.append(f"turn {turn}: {name} — {result.text}")
                 messages.append(_tool_reply(call, result.text))
+
+        transcript.error = _OUT_OF_TURNS
 
 
 def _answered(workspace: Workspace) -> bool:

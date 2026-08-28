@@ -48,6 +48,13 @@ class Transcript:
     #: fact about the run, and a spike here means the containment is doing
     #: work the fixtures should have made unnecessary.
     denials: list[str] = field(default_factory=list)
+    #: Set when the subject used the engine arms' `engine_unusable` action: it
+    #: tried, the engine would not run its program, and it said so rather than
+    #: looping to the cap. The text is its stated reason. Distinct from `error`
+    #: on purpose — `error` discards the cell as unclean evidence, and this is
+    #: the opposite, a cell that produced a *result* about the engine.
+    abandoned: str | None = None
+
     #: What the SDK says the cell cost. Preferred over the harness's own
     #: price arithmetic when present — it knows about cache reads and any
     #: mid-run model fallback, and the price table here can go stale.

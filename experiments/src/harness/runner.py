@@ -95,10 +95,7 @@ def run_cell(
         # this project can afford — see ``decisions.md`` 2026-08-24. The turn cap
         # is the exception, because it is the harness's own rule and not a
         # failure of the instrument: that cell is graded on what it left behind.
-        if transcript.error and not STOPPING_RULE.search(transcript.error):
-            # The raw text survives so a discarded cell can still be read; the
-            # parsed answer does not, because this cell contributed none.
-            result = Grade(Verdict.ERROR, None, result.raw)
+        result = _verdict_for(transcript, result)
     except Exception as exc:  # noqa: BLE001 — a failed cell is data, not a crash
         transcript = Transcript(cell_id=cell.id, error=f"{type(exc).__name__}: {exc}")
         result = Grade(Verdict.ERROR, None, None)
@@ -109,6 +106,32 @@ def run_cell(
     store.append(record)
     store.save_transcript(transcript)
     return record
+
+
+def _verdict_for(transcript: Transcript, graded: Grade) -> Grade:
+    """The verdict, after the transcript has its say about the answer file.
+
+    Two overrides, and they pull in opposite directions:
+
+    - **A cell whose subject failed is not clean evidence**, even if an answer
+      file happens to parse: the verdict would then depend on where in the turn
+      sequence the failure landed. Excluding it is the direction of bias this
+      project can afford — see ``decisions.md`` 2026-08-24. The harness's own
+      stopping rules are the exception, because a cell the *cap* ended is graded
+      on what it left behind.
+    - **A declared `engine_unusable` is promoted out of NO_ANSWER**, which is the
+      opposite move: not discarding a cell but rescuing one. Only where nothing
+      parseable was left behind — a declaration on top of a real answer is graded
+      on the answer, because what the subject produced is the better evidence and
+      the two would otherwise disagree in the record.
+    """
+    if transcript.error and not STOPPING_RULE.search(transcript.error):
+        # The raw text survives so a discarded cell can still be read; the
+        # parsed answer does not, because this cell contributed none.
+        return Grade(Verdict.ERROR, None, graded.raw)
+    if transcript.abandoned and graded.verdict is Verdict.NO_ANSWER:
+        return Grade(Verdict.ENGINE_UNUSABLE, None, graded.raw)
+    return graded
 
 
 def _fatal(subject: Subject, error: str) -> bool:

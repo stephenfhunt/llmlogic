@@ -33,6 +33,16 @@ class Verdict(StrEnum):
     #: for a reasoning result.
     UNPARSEABLE = "unparseable"
     NO_ANSWER = "no-answer"
+    #: The subject declared, in the engine arms, that the engine would not run
+    #: its program. Split out of NO_ANSWER because the two are different facts:
+    #: *nothing was produced* pools a subject that never engaged with one that
+    #: tried, failed, and said so — and only the second is evidence about the
+    #: engine. Measured 2026-08-27: `engine-forced` was 64% NO_ANSWER, 57% of it
+    #: cells that ran to the turn cap, and that number could not be read.
+    #:
+    #: Not correct, so every accuracy figure treats it as a miss; the point is
+    #: that the *reason* survives into the record instead of being pooled away.
+    ENGINE_UNUSABLE = "engine-unusable"
     #: The cell itself failed — an API error, a timeout, a crashed subject.
     ERROR = "error"
 

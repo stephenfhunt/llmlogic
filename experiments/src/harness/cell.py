@@ -26,6 +26,34 @@ ARMS: tuple[Arm, ...] = ("prose", "engine", "engine-forced")
 #: independent variable stops meaning one thing.
 ENGINE_ARMS: frozenset[str] = frozenset({"engine", "engine-forced"})
 
+#: How much of a cell's budget — turns *and* wall clock — each arm is given, as a
+#: multiple of the run's own cap.
+#:
+#: **An equal cap is not a held constant when the arms need unequal turns.**
+#: `prose` answers in read-then-write; `engine-forced` must additionally write a
+#: program, run it, read the diagnostic, repair, and re-run before it can write
+#: anything at all, and every repair is a round trip. Measured over every run on
+#: disk (2026-08-27): the cells that *succeeded* took a median 4 turns on
+#: `engine`, 13 on `engine-forced`, and `engine-forced` ended at the cap in
+#: **48%** of cells against 16% for `prose` — 75% of those writing no answer. Its
+#: 5% correct was substantially a measurement of this number.
+#:
+#: 2.0 rather than the 3.25 the observed ratio implies: the successful cells top
+#: out at 21 turns against a 24 cap, so that distribution is itself truncated and
+#: the honest reading is *at least* twice, not exactly 3.25.
+#:
+#: **The cost, stated plainly:** this is an arm-asymmetric instrument parameter
+#: on the arm carrying the primary endpoint, so a gain on `engine-forced` now has
+#: two candidate causes — the engine, or the budget. `report.py` prints the
+#: cap-hit rate per arm for exactly this reason: a result is only free of the
+#: confound while no arm is ending at its cap. See `decisions.md` 2026-08-27.
+ARM_BUDGET: dict[str, float] = {"prose": 1.0, "engine": 1.0, "engine-forced": 2.0}
+
+
+def budget_for(arm: str) -> float:
+    """The arm's multiple of the run's turn and wall-clock caps."""
+    return ARM_BUDGET.get(arm, 1.0)
+
 
 @dataclass(frozen=True)
 class Strength:
