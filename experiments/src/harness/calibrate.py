@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -416,6 +417,99 @@ def read(path: Path) -> dict:
 def digest(path: Path) -> str:
     """A hash of the manifest bytes, for a run to record which slate it ran."""
     return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
+
+
+#: The fields of a local subject a slate is calibrated *for*, and the one that is
+#: deliberately absent. ``endpoint`` is not compared: the same model served at the
+#: same settings from a different URL is the same subject, and refusing a moved
+#: port would be refusing on the one field that is about the machine rather than
+#: about what the subject does. Stated here rather than left implicit, because an
+#: unstated exclusion is how the next silent degrade gets in.
+SUBJECT_FIELDS = ("protocol", "reasoning_effort", "context_tokens", "max_output_tokens")
+
+
+def _subject_of_pool(pool: dict) -> dict:
+    """The subject a manifest says selected it, as comparable fields."""
+    local = pool.get("local")
+    return {
+        "model": pool.get("model"),
+        "local": {field: local.get(field) for field in SUBJECT_FIELDS} if local else None,
+    }
+
+
+def _subject_of_strength(strength: Strength, max_output_tokens: int | None) -> dict:
+    """The same shape for a strength a grid is about to run."""
+    return {
+        "model": strength.model,
+        "local": (
+            {
+                "protocol": strength.tool_protocol,
+                "reasoning_effort": strength.reasoning_effort,
+                "context_tokens": strength.context_tokens,
+                "max_output_tokens": max_output_tokens,
+            }
+            if strength.is_local
+            else None
+        ),
+    }
+
+
+def _differences(recorded: dict, offered: dict) -> list[str]:
+    """Which fields moved, in words, recorded against what would run now."""
+    moved = []
+    if recorded["model"] != offered["model"]:
+        moved.append(f"model: calibrated on {recorded['model']}, this grid runs {offered['model']}")
+    if (recorded["local"] is None) != (offered["local"] is None):
+        was = "served locally" if recorded["local"] else "an API model"
+        now = "served locally" if offered["local"] else "an API model"
+        moved.append(f"subject: calibrated against {was}, this grid runs {now}")
+    elif recorded["local"] is not None:
+        for field in SUBJECT_FIELDS:
+            if recorded["local"][field] != offered["local"][field]:
+                moved.append(
+                    f"{field}: calibrated at {recorded['local'][field]!r}, "
+                    f"this grid runs {offered['local'][field]!r}"
+                )
+    return moved
+
+
+def subject_moved(
+    payload: dict, strengths: Sequence[Strength], max_output_tokens: int | None = None
+) -> str | None:
+    """Whether the grid about to run holds the subject that selected this slate.
+
+    `load` checks the *items* — fixtures, question, truth — and that was the
+    whole check. It says nothing about **who** the band was drawn for, and an
+    item's difficulty is not a property of the item alone (`hypotheses.md`,
+    precondition 4): a slate calibrated with thinking on is not calibrated for
+    the same model with `--reasoning-effort none`, and that grid was accepted
+    silently. Precondition 4 failing without a word is this project's standing
+    failure mode, recorded five times.
+
+    The rule is **containment, not equality**: the calibrating subject has to be
+    among the strengths the grid crosses, not the only one. A grid that sweeps
+    two strengths is the design (`hypotheses.md` reads its primary endpoint at
+    the weaker one), and demanding a single match would refuse the run the slate
+    was made for. What is refused is a grid that does not hold the calibrator at
+    all — because then nothing in it was measured against the band.
+
+    Returns the refusal as a sentence, or ``None`` when the subject is there.
+    """
+    recorded = _subject_of_pool(payload.get("pool") or {})
+    offered = [_subject_of_strength(strength, max_output_tokens) for strength in strengths]
+    if recorded in offered:
+        return None
+    lines = [
+        "this slate was calibrated for a different subject, and the band it "
+        "selected means nothing for another one (`hypotheses.md`, precondition 4)."
+    ]
+    if len(offered) == 1:
+        lines += [f"  - {moved}" for moved in _differences(recorded, offered[0])]
+    else:
+        names = ", ".join(strength.name for strength in strengths)
+        lines.append(f"  - the calibrating subject is not among the {len(offered)} run: {names}")
+    lines.append("Re-calibrate for this subject, or run the one the manifest names.")
+    return "\n".join(lines)
 
 
 def load(path: Path) -> list[Task]:

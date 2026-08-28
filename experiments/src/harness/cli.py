@@ -77,18 +77,49 @@ def cmd_run(args: argparse.Namespace) -> int:
         if prepared is None:
             return 1
         strengths, local_meta = prepared
-        return _run_grid(args, tasks, strengths, local_meta)
+    else:
+        local_meta = None
+        strengths = STRENGTHS
+        if args.strength:
+            wanted = set(args.strength)
+            strengths = tuple(s for s in STRENGTHS if s.name in wanted)
+            if not strengths:
+                known = ", ".join(s.name for s in STRENGTHS)
+                print(f"no such strength: {sorted(wanted)} — have {known}", file=sys.stderr)
+                return 1
 
-    strengths = STRENGTHS
-    if args.strength:
-        wanted = set(args.strength)
-        strengths = tuple(s for s in STRENGTHS if s.name in wanted)
-        if not strengths:
-            known = ", ".join(s.name for s in STRENGTHS)
-            print(f"no such strength: {sorted(wanted)} — have {known}", file=sys.stderr)
-            return 1
+    # The subject is checked *after* the strengths are built, because until then
+    # there is nothing to compare the manifest against — and before a single cell
+    # runs, because that is the whole point of checking it here.
+    if args.slate and not _slate_subject_holds(Path(args.slate), strengths, args):
+        return 1
 
-    return _run_grid(args, tasks, strengths, None)
+    return _run_grid(args, tasks, strengths, local_meta)
+
+
+def _slate_subject_holds(path: Path, strengths: tuple, args: argparse.Namespace) -> bool:
+    """Refuse a grid that does not hold the subject its slate was calibrated for.
+
+    **Refuse, do not degrade** (`decisions.md` 2026-08-26): the alternative is a
+    grid that runs, reports, and measures a different subject than the band
+    selected for — precondition 4 failing with nothing said, which this project
+    has now recorded five times and never once caught while it was happening.
+
+    Only `run --slate` needs this. A **resume** does not: `_slate_of` rebuilds
+    both the slate and the subject from the run's own `run.json`, so the second
+    half of a sitting cannot drift from the first by construction — the check
+    would have nothing to disagree with.
+    """
+    cap = args.max_output_tokens if args.local_model else None
+    try:
+        moved = calibrate.subject_moved(calibrate.read(path), strengths, cap)
+    except calibrate.ManifestError as exc:  # already reported by `_calibrated_slate`
+        print(str(exc), file=sys.stderr)
+        return False
+    if moved:
+        print(moved, file=sys.stderr)
+        return False
+    return True
 
 
 def _calibrated_slate(path: Path) -> list:
