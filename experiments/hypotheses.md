@@ -141,6 +141,34 @@ naming here so that it can be recognised rather than explained away.
 
 *(Dated entries only. Amend, never revise.)*
 
+### 2026-08-28 (later ii) — The local subject is deterministic, so `--repeats` buys nothing
+
+`LocalSubject` runs at **temperature 0.0**. Measured rather than inferred: the
+clean 32-cell run reproduced sitting 1 cell for cell — `who-can-read-r03` at
+445s/5 turns/1 truncation in both, `engine-briefed` on the same task capped at
+1,800s/35 turns in both, `resources-for-u04` at 137s and 136s.
+
+**This sharpens precondition 3.** It already said `--repeats` does not buy paired
+items, because trials of one cell collapse to a single observation. The stated
+consolation was that repeats buy *reliability* — they separate a lucky answer
+from a reliable one. **Against this subject they do not buy that either**, and
+the sentence should be read as: repeats buy nothing here at all, and only more
+**tasks** move anything.
+
+Two consequences worth naming before they are convenient:
+
+- **No variance estimate is available from this subject** by repeating cells. A
+  per-cell interval would have to come from varying the seed, the temperature, or
+  the item — each of which changes what is being measured, and none of which is
+  the same thing as a repeat.
+- **A re-run is a re-derivation, not a sample.** Re-running a slate after an
+  instrument fix reproduces the old answers except where the fix bites, which is
+  what makes such a re-run cheap in information and worth doing only for
+  comparability — one run id, one instrument. It is not corroboration.
+
+This says nothing about the SDK subject, which is not run at temperature 0 and is
+a different subject in every other respect (2026-08-26).
+
 ### 2026-08-28 (later) — A behavioural run, pre-registered as not an endpoint
 
 A 40-cell run of `prose` against `engine-briefed` over the pinned slate — four
