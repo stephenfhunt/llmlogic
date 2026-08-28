@@ -166,8 +166,29 @@ grid unable to answer S1. The argument and the numbers are in
   the first 12 prose cells ended at the 900s cap, projecting 42h not 7.5h,
   because the 7.5h extrapolated a `controls` rate to a multi-hop pool. Not
   re-launched until the subject's tool use is settled: a band selected now ranks
-  items by how often prose runs out of clock. _parked — **v1**._ —
-  `results/cal-20260828T110615Z`, `decisions.md` 2026-08-28 (later iii).
+  items by how often prose runs out of clock. **The 42h is an upper bound on a
+  cost that was partly the instrument's** — see the truncation item below.
+  _parked — **v1**._ — `results/cal-20260828T110615Z`, `decisions.md`
+  2026-08-28 (later iii, amended later v).
+
+- **The output cap was a stopping rule that recorded nothing** — a completion
+  that spends its budget reasoning returns empty content, and the loop called it
+  a malformed call, said so, and retried into an identical lap. 28 of them across
+  12 prose cells; 10 of the 12 carried one. `finish_reason` now decides,
+  `TRUNCATION_LIMIT` stops at two, and three counters reach the record.
+  _shipped 2026-08-28._ — `local._truncated`, `decisions.md` 2026-08-28 (later v).
+
+- **`engine_unusable` leaves the compliance ratio** rather than joining a side of
+  it: obeyed the mandate, so not denominator evidence; ran no program, so not
+  numerator evidence. Its count is a column of its own. _shipped 2026-08-28._ —
+  `report._reach`, `decisions.md` 2026-08-28 (later vi).
+
+- **A 40-cell `prose` vs `engine-briefed` behavioural run** — the pinned slate,
+  4 packs plus `controls`, staged so a bad projection is caught in the first
+  sitting. Pre-registered as **not an endpoint**: 20 paired items against the 155
+  a +10-point effect needs, so it is read on cap-hit, truncation, compliance,
+  fabrication and cost. _building — **v1**._ — `hypotheses.md` addendum
+  2026-08-28 (later).
 
 - **A calibration pass that clears power** — first pass run 2026-08-27 against
   `qwen3:14b` and **halted at 408 of 1,125 cells**: the pool is too hard at every

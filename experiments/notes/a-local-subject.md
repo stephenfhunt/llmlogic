@@ -465,7 +465,55 @@ been hiding:
   and wrote no answer. Having the manual did not stop it; it is a different
   failure from not knowing the syntax.
 
-## Four silent misconfigurations, and the pattern
+## What the 900s cap actually was (2026-08-28)
+
+The parked pass's headline — *7 of 12 prose cells at the 900s wall clock* — was
+read as **multi-hop items are slow**, and that reading is what produced the 42h
+projection. The transcripts say something else.
+
+**Per cell, on `results/cal-20260828T110615Z`** (`reasoning` block lengths, in
+characters; a block near 18,000 is one that spent the whole 4,096-token output
+cap):
+
+| cell | tool calls | blocks near the cap | wall |
+|---|---|---|---|
+| `d1-resources-for-user` | 5 | **0** | 119s |
+| `d2-resources-for-user` | 6 | **0** | 137s |
+| `d1-who-can-read` | 6 | 1 | 237s |
+| `g2825-d1-resources-for-user` | 5 | 1 | 281s |
+| `g2825-d1-who-can-read` | 5 | 1 | 483s |
+| `d1-delete-without-read` | 5 | 2 | **900s** |
+| `d2-who-can-read` | 6 | 2 | **947s** |
+| `d2-delete-without-read` | 7 | 3 | **900s** |
+| `d1-no-access` | 7 | 4 | **900s** |
+| `d1-needs-the-full-closure` | 17 | 4 | **902s** |
+| `d2-no-access` | 3 | 5 | **900s** |
+| `d2-needs-the-full-closure` | **0** | **6** | **900s** |
+
+**10 of 12 carry at least one; 28 in all.** The two carrying none are the two
+that finished. The last row is the mechanism at its purest: six completions,
+24,576 output tokens — exactly six times the cap — **zero tool calls**, and a
+record reading `turns=0`, `no-answer`, *cell exceeded its wall clock*.
+
+**What is in the tokens, and why the cap is the wrong lever.** Not a degenerate
+repetition loop — 213 distinct sentences out of 220. The model is planning the
+whole algorithm in its head, before reading a file, and never committing:
+
+> *"But how to find all roles that are reachable in two steps or more…"*
+> *"But since I can't process the data, I need to make an educated guess."*
+
+The healthy first block on the same pack is ~1,800 characters and ends *"Let me
+read that file."* A legitimate action is ~120 tokens. So 4,096 is not a tight cap
+on the *action*; it is being consumed by a plan that does not terminate, and a
+larger cap buys a longer spiral. On `controls`, where every cell finishes, output
+per turn is 113-185 tokens across all four arms and not one completion truncates.
+
+**Why it laps.** `content` comes back empty, `json.loads("")` raises, and the loop
+called it a malformed call and said so — a false statement about what the model
+did, naming a fault it could not act on. The reasoning is not fed back, so the
+next lap starts from an unchanged conversation and is identical. ~150s each.
+
+## Five silent misconfigurations, and the pattern
 
 The dangerous failures here were all **quiet**. Nothing errored; numbers came out;
 they were worthless.
@@ -476,12 +524,20 @@ they were worthless.
 | one completion decoding to 11,963 tokens, unbounded | watching the GPU while committing | one sweep |
 | the *conversation* filling a 32k window a 275-token fixture never could | measuring `input_tokens` per cell — median 9.9k, p90 265k, max 762k | the later half of one sweep |
 | `ran_engine` true on a transcript whose only call was `Skill` | running a local model at all | contradicted `engine_use` in every record since it was written |
+| a completion cut off mid-thought, retried as a malformed call | reading `reasoning` block lengths against wall clock, cell by cell | the 240-cell pass, parked on a 42h projection that was partly this |
 
 The pattern is that this harness's expensive failures do not announce themselves,
 and that a preflight check pays for itself the first time it fires. It is the same
 lesson as the stale engine binary (2026-08-25) and the fixture that moved under a
 resume (2026-08-24), which is now three independent instances and no longer a
 coincidence.
+
+**The fifth is the one that should be uncomfortable**, because the bound was ours.
+`finish_reason` sat in every reply and was read by nothing, so the harness
+inferred *the model emitted junk* from evidence that equally meant *we cut it
+off*. The two want opposite responses. Every prior instance was a vendor default
+or a stale artefact; this one and the turn cap before it were the harness
+mis-describing its own behaviour to itself.
 
 So: preflight refuses a server that is not there, a model that was never pulled,
 and a window smaller than the run assumes; a cell is bounded in wall clock, in
