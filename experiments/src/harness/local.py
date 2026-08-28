@@ -101,6 +101,49 @@ _OUT_OF_TIME = "cell exceeded its wall clock"
 #: it left behind rather than discarded as an instrument failure.
 _OUT_OF_TURNS = "cell reached max_turns"
 
+#: How many completions in a row may come back cut off at the output cap before
+#: the cell is ended. **Two, because the third lap has never produced anything
+#: different.** Measured 2026-08-28 on `results/cal-20260828T110615Z`: the loop
+#: is deterministic — the reasoning is not fed back, so the model re-thinks from
+#: an unchanged conversation and spends the same budget the same way. One cell
+#: laid down six identical 18,000-character plans, made zero tool calls, and
+#: burned all 900 seconds of its wall clock.
+TRUNCATION_LIMIT = 2
+
+#: What a cell stopped by that records. The fourth stopping rule, and the fourth
+#: time this project has found one that recorded nothing: until 2026-08-28 a
+#: completion cut off mid-thought came back with empty ``content``, failed to
+#: parse, and was counted as a **malformed call** — a claim about tool syntax
+#: laid against a model that had not emitted a call at all. Matches
+#: `runner.STOPPING_RULE` for the same reason `_OUT_OF_TURNS` does: it is the
+#: harness's own bound, so the cell is graded on what it left behind rather than
+#: discarded as an instrument failure.
+_OUT_OF_TRUNCATIONS = "cell was cut off at the output cap"
+
+#: What the server calls a completion that hit `max_tokens`. OpenAI's spelling,
+#: which ollama and vLLM both follow.
+_LENGTH = "length"
+
+#: What a truncated completion is told, in place of the `Malformed action:` the
+#: parse error used to produce. That message was **false** — the model emitted no
+#: action to be malformed — and it named a fault the model could not act on, so
+#: it re-thought from scratch. This one says what happened and gives the one
+#: instruction that breaks the spiral: the cells that finish read a file on their
+#: first turn; the cells that truncate plan the whole solution before touching
+#: the data.
+TRUNCATED_REPLY = (
+    "Your previous reply was cut off at the output limit before you produced an "
+    "action: it was all reasoning and nothing was emitted. Do not plan the whole "
+    "solution before acting — reply now with a single short action, reading a "
+    "file if you have not yet."
+)
+
+#: What a completion that returned nothing at all is told. Distinct from the
+#: above because the cause is different — the server ended the turn on its own
+#: terms rather than at the cap — and folding them together is what put a
+#: truncation into a tool-syntax counter in the first place.
+EMPTY_REPLY = "Your previous reply was empty. Reply with a single JSON action, as described."
+
 #: Wall clock for one completion. A 7B on a 3060 answers in seconds; minutes
 #: means the server is thrashing, and a cell that hangs is a sitting that ends.
 #: Also clamped by whatever is left of the cell's own budget — otherwise a single
@@ -123,11 +166,16 @@ DEFAULT_CONTEXT_TOKENS = 32_768
 #: **This bounds reasoning *and* answer, which makes it thinking-on's trap.**
 #: Measured on `qwen3:14b` 2026-08-27: a five-constraint puzzle spent ~1,870
 #: tokens thinking, hit this cap mid-thought, and returned content that did not
-#: parse as an action — a `malformed_calls` retry whose cause is invisible in
-#: the record, because ollama reports `completion_tokens` **excluding** the
-#: reasoning it just charged against the cap. So a thinking run raises it
-#: (`--max-output-tokens`), and the wall clock, not the usage number, is the
-#: honest signal of what a thinking turn cost.
+#: parse as an action. So a thinking run raises it (`--max-output-tokens`).
+#:
+#: **Raising it is not the whole answer, and past a point it is the wrong one.**
+#: At 4,096 the same subject on a multi-hop item laid down 18,000-character plans
+#: that were not nearly-finished thoughts but non-terminating ones — it was
+#: planning the whole solution before reading a file, where the cells that
+#: succeed read one on their first turn. A larger cap buys a longer spiral. What
+#: the cap needs is to be *seen* when it fires: `_truncated` asks the server,
+#: `TRUNCATION_LIMIT` stops the loop, and `Transcript.truncated_completions`
+#: carries it to the report. See `decisions.md` 2026-08-28.
 DEFAULT_MAX_OUTPUT_TOKENS = 2048
 
 #: What a thinking run needs instead. Same measurement: the cap that let the
@@ -942,6 +990,7 @@ class LocalSubject:
         schema = action_schema(workspace.has_engine)
         turn = 0
         reminders = 0
+        truncations = 0
         for _ in range(turns):
             if time.monotonic() > deadline:
                 transcript.error = _OUT_OF_TIME
@@ -949,12 +998,33 @@ class LocalSubject:
             if self._overflowed(transcript, messages, window):
                 return
             reply = self.complete(messages, schema=schema, **served)
-            message = (reply.get("choices") or [{}])[0].get("message") or {}
+            choice = (reply.get("choices") or [{}])[0]
+            message = choice.get("message") or {}
             transcript.usage = transcript.usage + _usage(reply)
             _keep_reasoning(transcript, message)
 
             content = str(message.get("content") or "")
             messages.append({"role": "assistant", "content": content})
+
+            # Asked of the server, not inferred from the parse failure. The two
+            # look identical from here — both arrive as content that will not
+            # load — and telling a truncated model its *action* was malformed is
+            # a false statement about what it did.
+            if _truncated(choice, content):
+                transcript.truncated_completions += 1
+                truncations += 1
+                if truncations >= TRUNCATION_LIMIT:
+                    transcript.error = _OUT_OF_TRUNCATIONS
+                    return
+                messages.append({"role": "user", "content": TRUNCATED_REPLY})
+                continue
+            truncations = 0
+
+            if not content.strip():
+                transcript.empty_replies += 1
+                messages.append({"role": "user", "content": EMPTY_REPLY})
+                continue
+
             try:
                 action = json.loads(content)
                 name = str(action["action"])
@@ -999,6 +1069,7 @@ class LocalSubject:
             schemas = [*schemas, abandon_schema()]
         turn = 0
         reminders = 0
+        truncations = 0
         for _ in range(turns):
             if time.monotonic() > deadline:
                 transcript.error = _OUT_OF_TIME
@@ -1019,6 +1090,23 @@ class LocalSubject:
                     **({"tool_calls": calls} if calls else {}),
                 }
             )
+
+            # Checked **before** the no-calls branch, which is why this arm needs
+            # it as much as the structured one: a reply cut off mid-thought also
+            # carries no `tool_calls`, so without this it reads as *the subject
+            # is finished* and gets the completion reminder — a second wrong
+            # diagnosis of the same event, and one that ends the cell early
+            # rather than late.
+            if _truncated(choice, str(message.get("content") or ""), calls):
+                transcript.truncated_completions += 1
+                truncations += 1
+                if truncations >= TRUNCATION_LIMIT:
+                    transcript.error = _OUT_OF_TRUNCATIONS
+                    return
+                messages.append({"role": "user", "content": TRUNCATED_REPLY})
+                continue
+            truncations = 0
+
             if not calls:
                 if reminders < COMPLETION_REMINDERS and not _answered(workspace):
                     reminders += 1
@@ -1057,6 +1145,27 @@ class LocalSubject:
 
 def _answered(workspace: Workspace) -> bool:
     return (workspace.path / ANSWER_FILE).exists()
+
+
+def _truncated(choice: dict, content: str, calls: list | None = None) -> bool:
+    """Did this completion end at the output cap without producing an action?
+
+    **The server is asked, not the parse failure.** ``finish_reason`` is in every
+    reply and was read by nothing until 2026-08-28, which is why a completion
+    that spent its whole budget thinking was indistinguishable from one that
+    emitted a call it could not spell. The two want opposite responses: a
+    malformed call is the subject's mistake and should stay measurable, while a
+    truncation is the *harness's* cap firing and must be recorded as one.
+
+    ``length`` alone is not enough. A model can finish an action and be clipped
+    on a trailing token, and that reply is usable — so a completion that got
+    something out is not a truncation, whichever way the server ended it. The
+    case this catches is the one measured on ``cal-20260828T110615Z``: the whole
+    budget in ``reasoning``, nothing in ``content``, six laps, no tool calls.
+    """
+    if str(choice.get("finish_reason") or "") != _LENGTH:
+        return False
+    return not (calls or content.strip())
 
 
 def _keep_reasoning(transcript: Transcript, message: dict) -> None:

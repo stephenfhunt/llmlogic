@@ -39,6 +39,9 @@ def _record(**overrides) -> dict:
         "answer_raw": "",
         "first_program": None,
         "first_program_turn": None,
+        "malformed_calls": 0,
+        "truncated_completions": 0,
+        "empty_replies": 0,
         "signals": {
             "engine_use": "none",
             "wrote_program": False,
@@ -160,6 +163,40 @@ class TestRender:
         # the vocabulary, it does not report a number.
         assert "engine-forced − prose" not in out
         assert "| **engine-forced** |" not in out
+
+    def test_the_output_cap_is_reported_apart_from_the_wall_clock(self, tmp_path):
+        """Because it was inside it. A cell whose completions kept coming back
+        cut off mid-thought ended on the wall clock, and the budget line
+        attributed every second to the work being long — 28 of them across 12
+        prose cells on `results/cal-20260828T110615Z`, ~150s each."""
+        records = [
+            _record(arm="prose", task_id="t1", truncated_completions=6, turns=0),
+            _record(arm="prose", task_id="t2", truncated_completions=0),
+        ]
+        out = render(self._run(tmp_path, records))
+        assert "Completions cut off at the output cap" in out
+        assert "prose 6 in 1/2 cells" in out
+
+    def test_a_run_from_before_the_counter_reads_as_unknown_not_as_zero(self, tmp_path):
+        """The mistake this whole line exists to stop repeating: an absent
+        measurement is not a measurement of absence. Every record on disk before
+        2026-08-28 carries no such key."""
+        records = [_record(arm="prose", task_id="t1")]
+        records[0].pop("truncated_completions", None)
+        out = render(self._run(tmp_path, records))
+        assert "prose n/a" in out
+
+    def test_a_cell_the_cap_ended_is_named(self, tmp_path):
+        records = [
+            _record(
+                arm="prose",
+                task_id="t1",
+                truncated_completions=2,
+                error="cell was cut off at the output cap",
+            )
+        ]
+        out = render(self._run(tmp_path, records))
+        assert "Cells ended by that:** prose 1" in out
 
     def test_the_two_tracks_get_their_own_tables(self, tmp_path):
         records = [_record(arm="prose", task_id="t1", track="in-context")]

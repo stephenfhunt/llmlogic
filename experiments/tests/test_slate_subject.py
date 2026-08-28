@@ -241,7 +241,7 @@ class TestTheCommandRefusesBeforeAnyCellRuns:
         assert exit_code == 1
         assert "calibrated" in capsys.readouterr().err
 
-    def test_a_resume_rebuilds_the_subject_it_would_be_checked_against(self, offline):
+    def test_a_resume_rebuilds_the_subject_it_would_be_checked_against(self, offline, monkeypatch):
         """Which is why the guard is on `run --slate` and not on `--resume`.
 
         A resume takes its strengths from the run's own `run.json`, not from the
@@ -250,6 +250,11 @@ class TestTheCommandRefusesBeforeAnyCellRuns:
         guard to disagree with — and this is the assertion that says so, rather
         than a comment claiming it.
         """
+        # `_local_strengths_of` preflights the server before it rebuilds, so
+        # without this the rebuild returns `None` on any machine with no ollama
+        # running and the assertion below reads as a guard failure. The rest of
+        # this file needs no server; this line is what keeps that true.
+        monkeypatch.setattr(local, "preflight", lambda *a, **k: [])
         slate = local_slate(offline)
         main(
             [

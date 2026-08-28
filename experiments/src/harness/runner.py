@@ -46,8 +46,17 @@ FATAL = re.compile(r"session limit|rate limit|usage limit|\b429\b", re.IGNORECAS
 #: The local subject's per-cell **wall clock** is the same kind of rule and is
 #: matched here too. Without that it reads as ``ERROR``, and an ERROR cell is one
 #: `resume` owes forever — it would time out again on every sitting and the run
-#: could never finish.
-STOPPING_RULE = re.compile(r"maximum number of turns|max_turns|wall clock", re.IGNORECASE)
+#: could never finish. So is the **output cap**, added 2026-08-28: a cell whose
+#: completions keep coming back cut off mid-thought has spent its budget and
+#: answered badly, exactly as one that ran out of turns has.
+#:
+#: Each rule is matched by its own words. `local._OUT_OF_CONTEXT` instead carries
+#: a trailing ``(wall clock rule)`` to land on the third alternative here — the
+#: workaround predates this comment, and is not the pattern to copy.
+STOPPING_RULE = re.compile(
+    r"maximum number of turns|max_turns|wall clock|cut off at the output cap",
+    re.IGNORECASE,
+)
 
 
 class RunHalted(Exception):

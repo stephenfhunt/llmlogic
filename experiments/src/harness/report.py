@@ -232,6 +232,59 @@ def _budget_line(records: list[dict]) -> list[str]:
     return lines
 
 
+def _truncation_line(records: list[dict]) -> list[str]:
+    """Completions the output cap ate, and the cells it ended.
+
+    **This is what the cap-hit line above was quietly absorbing.** A completion
+    that spends its whole budget reasoning comes back with nothing in it, and
+    until 2026-08-28 the loop called that a malformed action, told the model so —
+    which was false — and let it re-think from an unchanged conversation. The
+    laps are ~150s each on a 14B, so the cell ended on the wall clock and the
+    report attributed every second of it to *the work being long*.
+
+    Measured on `results/cal-20260828T110615Z`: 28 truncations across 12 prose
+    cells, 10 of the 12 carrying at least one. The two cells carrying none
+    finished in 119s and 137s.
+
+    Printed per arm and next to the budget line for the same reason that one is:
+    the arms do not share a budget, and a truncation rate that differs between
+    them is a difference in how much clock each arm spent on nothing.
+
+    Records written before the counters existed carry no key. They read as `n/a`
+    rather than as zero — an absent measurement is not a measurement of absence,
+    which is the mistake this whole line exists to stop repeating.
+    """
+    if not records:
+        return []
+    parts, cells = [], []
+    for arm in sorted({r["arm"] for r in records}):
+        rows = [r for r in records if r["arm"] == arm]
+        known = [r for r in rows if "truncated_completions" in r]
+        if not known:
+            parts.append(f"{arm} n/a")
+            continue
+        cut = sum(r["truncated_completions"] for r in known)
+        hit = sum(1 for r in known if r["truncated_completions"])
+        parts.append(f"{arm} {cut} in {hit}/{len(known)} cells")
+        stopped = sum(1 for r in known if "cut off at the output cap" in (r.get("error") or ""))
+        if stopped:
+            cells.append(f"{arm} {stopped}")
+    lines = [
+        f"- **Completions cut off at the output cap:** {', '.join(parts)}. "
+        "The whole budget went to reasoning and no action came out, so the turn "
+        "bought nothing and cost its full decode. `n/a` means the run predates "
+        "the counter, not that it was zero.",
+    ]
+    if cells:
+        lines.append(
+            f"- **Cells ended by that:** {', '.join(cells)}. "
+            "Stopped after two in a row, because the loop is deterministic — the "
+            "reasoning is not fed back, so a third lap re-thinks the same thing "
+            "from the same conversation."
+        )
+    return lines
+
+
 def _reach(records: list[dict]) -> list[str]:
     """Reach as an outcome with an interval, not a footnote.
 
@@ -376,6 +429,7 @@ def render(run_dir: Path) -> str:
         "",
         _unparseable_line(graded),
         *_budget_line(graded),
+        *_truncation_line(graded),
         f"- **First program captured before feedback:** {first_programs}/{len(engine_records)}.",
         f"- **Switched back to search after using the engine:** {switched}. "
         "This is the silent one — the subject had the engine, tried it, and went back to text.",

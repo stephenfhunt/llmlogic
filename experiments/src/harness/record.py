@@ -54,6 +54,16 @@ class Record:
     first_program: str | None
     first_program_turn: int | None
 
+    #: The three ways a completion came back without a usable action, kept apart
+    #: because they have three different causes and one of them is the harness's
+    #: own cap. `Transcript` has carried `malformed_calls` since it was written
+    #: and the record dropped it, so the counter with the docstring explaining
+    #: why tool-syntax failure must not be folded into a reasoning number was
+    #: itself invisible. Absent on every record written before 2026-08-28.
+    malformed_calls: int
+    truncated_completions: int
+    empty_replies: int
+
     signals: dict
     input_tokens: int
     output_tokens: int
@@ -97,6 +107,9 @@ class Record:
             unparseable_reason=grade.reason,
             first_program=transcript.first_program,
             first_program_turn=transcript.first_program_turn,
+            malformed_calls=transcript.malformed_calls,
+            truncated_completions=transcript.truncated_completions,
+            empty_replies=transcript.empty_replies,
             signals=signals.to_dict(),
             input_tokens=transcript.usage.input_tokens,
             output_tokens=transcript.usage.output_tokens,

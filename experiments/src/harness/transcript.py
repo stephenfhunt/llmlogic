@@ -76,6 +76,21 @@ class Transcript:
     #: subject, which never hands over a malformed call.
     malformed_calls: int = 0
 
+    #: Completions the server ended at the output cap without an action coming
+    #: out. **A stopping condition, not a subject failure**, and the fourth this
+    #: project has found recording nothing: until 2026-08-28 these arrived as
+    #: content that would not load and were counted above, putting the harness's
+    #: own cap into a number about the model's tool syntax. Measured on
+    #: `results/cal-20260828T110615Z`: 28 of them across 12 prose cells, ~150s
+    #: each, and the report attributed every second to the wall clock.
+    truncated_completions: int = 0
+
+    #: Completions that came back with nothing in them, the server having ended
+    #: the turn on its own terms rather than at the cap. Separate from both
+    #: neighbours because the cause is different, and folding causes together is
+    #: what hid the field above.
+    empty_replies: int = 0
+
     #: The first Datalog program the subject wrote, captured **before any tool
     #: result came back** — that one read the skill; every later one read the
     #: diagnostics. Control 4, and the half of S1 that a final-answer-only

@@ -84,6 +84,37 @@ def _action(name, arguments, thought="because"):
     return _text(json.dumps({"thought": thought, "action": name, "arguments": arguments}))
 
 
+#: What it takes to end a cell cleanly: `final` on its own earns the completion
+#: reminder, because the reminder exists to catch a subject that has the answer
+#: and forgot the file.
+def _finish():
+    return [
+        _action("Write", {"file_path": "answer.txt", "content": "engineering"}),
+        _action(FINAL_ACTION, {}),
+    ]
+
+
+def _cut_off(content="", reasoning="planning" * 4000):
+    """What the server sends back when a completion hits `max_tokens`.
+
+    The whole budget went to `reasoning`, `content` is empty, and the only thing
+    separating this from a model that emitted junk is `finish_reason`.
+    """
+    return {
+        "choices": [
+            {
+                "finish_reason": "length",
+                "message": {
+                    "role": "assistant",
+                    "content": content,
+                    "reasoning": reasoning,
+                },
+            }
+        ],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 4096},
+    }
+
+
 class TestTheNativeLoop:
     def test_it_survives_more_than_one_turn(self, tmp_path):
         """The regression this file exists for. Two tool-calling turns, because
@@ -210,6 +241,120 @@ class TestTheStructuredLoop:
         for variant in action_schema(has_engine=True)["oneOf"]:
             arguments = variant["properties"]["arguments"]
             assert arguments["additionalProperties"] is False
+
+
+class TestACompletionCutOffAtTheOutputCap:
+    """The fourth stopping rule, and the fourth found recording nothing.
+
+    Measured on `results/cal-20260828T110615Z` (2026-08-28): 28 completions
+    across 12 prose cells came back having spent the whole 4,096-token budget in
+    `reasoning` with nothing in `content`. Each was counted as a *malformed
+    call*, told so — which was false, no call had been emitted — and retried
+    against an unchanged conversation, so the model re-thought the same thing at
+    ~150s a lap until the wall clock ended the cell. The report then attributed
+    the whole 900s to the work being long.
+    """
+
+    def test_it_is_not_counted_as_a_malformed_call(self, tmp_path):
+        """The two want opposite responses. A malformed call is the subject's
+        mistake and must stay measurable; a truncation is the harness's own cap
+        firing, and folding it into the tool-syntax counter is what hid it."""
+        subject = Scripted([_cut_off(), *_finish()])
+        transcript = subject.run(cell_for("structured"), workspace_for("prose", tmp_path))
+        assert transcript.truncated_completions == 1
+        assert transcript.malformed_calls == 0
+
+    def test_the_model_is_told_what_actually_happened(self, tmp_path):
+        """`Malformed action: Expecting value: line 1 column 1` was a false
+        statement about what the model did, and named a fault it could not act
+        on — which is why the next lap was identical."""
+        subject = Scripted([_cut_off(), *_finish()])
+        subject.run(cell_for("structured"), workspace_for("prose", tmp_path))
+        sent = subject.seen[1]["messages"][-1]
+        assert sent["role"] == "user"
+        assert sent["content"] == local.TRUNCATED_REPLY
+        assert "Malformed" not in sent["content"]
+
+    def test_two_in_a_row_ends_the_cell(self, tmp_path):
+        """Rather than the sixth, which is what the wall clock allowed. The loop
+        is deterministic: the reasoning is not fed back, so a third lap re-thinks
+        the same thing from the same conversation."""
+        subject = Scripted([_cut_off(), _cut_off(), *_finish()])
+        transcript = subject.run(cell_for("structured"), workspace_for("prose", tmp_path))
+        assert transcript.error == local._OUT_OF_TRUNCATIONS
+        assert transcript.truncated_completions == 2
+        assert len(subject.replies) == 2, "the cell stopped instead of trying again"
+
+    def test_the_run_of_truncations_has_to_be_consecutive(self, tmp_path):
+        """One truncation followed by a real action is a slow turn, not a stuck
+        cell. Counting them cumulatively would end a cell that had recovered."""
+        subject = Scripted(
+            [
+                _cut_off(),
+                _action("Read", {"file_path": "employee.csv"}),
+                _cut_off(),
+                *_finish(),
+            ]
+        )
+        transcript = subject.run(cell_for("structured"), workspace_for("prose", tmp_path))
+        assert transcript.error is None
+        assert transcript.truncated_completions == 2
+        assert [c.name for c in transcript.tool_calls] == ["Read", "Write"]
+
+    def test_a_clipped_reply_that_still_carried_an_action_is_not_one(self, tmp_path):
+        """`finish_reason` alone is not enough. A model can finish its action and
+        be clipped on a trailing token, and that reply is usable — so what counts
+        is whether anything came out, not how the server ended the turn."""
+        usable = _cut_off(
+            content=json.dumps(
+                {
+                    "thought": "t",
+                    "action": "Write",
+                    "arguments": {"file_path": "answer.txt", "content": "engineering"},
+                }
+            )
+        )
+        subject = Scripted([usable, _action(FINAL_ACTION, {})])
+        workspace = workspace_for("prose", tmp_path)
+        transcript = subject.run(cell_for("structured"), workspace)
+        assert transcript.truncated_completions == 0
+        assert (workspace.path / "answer.txt").read_text() == "engineering"
+
+    def test_the_native_loop_does_not_read_it_as_being_finished(self, tmp_path):
+        """A truncated native reply carries no `tool_calls` either, so without
+        the check it falls into the completion reminder — a second wrong
+        diagnosis of the same event, and one that ends the cell early."""
+        subject = Scripted([_cut_off(), _cut_off()])
+        transcript = subject.run(cell_for("native"), workspace_for("prose", tmp_path))
+        assert transcript.error == local._OUT_OF_TRUNCATIONS
+        assert transcript.truncated_completions == 2
+        assert subject.seen[1]["messages"][-1]["content"] == local.TRUNCATED_REPLY
+
+    def test_a_stopped_cell_is_graded_on_what_it_left_behind(self):
+        """Not discarded as `ERROR`. An ERROR cell is one `resume` owes forever,
+        and a cell that spent its budget answering badly is evidence — the same
+        reasoning that put the turn cap and the wall clock in this regex."""
+        from harness.runner import STOPPING_RULE
+
+        assert STOPPING_RULE.search(local._OUT_OF_TRUNCATIONS)
+
+    def test_an_empty_reply_is_its_own_thing(self, tmp_path):
+        """The server ended the turn on its own terms rather than at the cap.
+        Different cause, different counter — folding causes together is what hid
+        the truncation for as long as it hid."""
+        subject = Scripted([_text(""), *_finish()])
+        transcript = subject.run(cell_for("structured"), workspace_for("prose", tmp_path))
+        assert transcript.empty_replies == 1
+        assert transcript.truncated_completions == 0
+        assert transcript.malformed_calls == 0
+
+    def test_junk_that_is_not_truncated_is_still_a_malformed_call(self, tmp_path):
+        """The counter this preserves. A model that emits parseable-looking
+        nonsense has made a tool-syntax mistake, and that has to stay visible."""
+        subject = Scripted([_text("{not json"), *_finish()])
+        transcript = subject.run(cell_for("structured"), workspace_for("prose", tmp_path))
+        assert transcript.malformed_calls == 1
+        assert transcript.truncated_completions == 0
 
 
 class TestPerCellConfiguration:
