@@ -91,6 +91,14 @@ class Transcript:
     #: what hid the field above.
     empty_replies: int = 0
 
+    #: The subject said it was finished with no answer file behind it, through
+    #: both completion reminders. `grade` already calls that `no-answer`; this
+    #: is the *why*, and without it a cell that walked away reads exactly like
+    #: one a stopping rule cut off. Measured 2026-08-28: a prose cell reasoned
+    #: for 15,432 characters, made zero tool calls, and was recorded as having
+    #: finished.
+    finished_without_answer: bool = False
+
     #: The first Datalog program the subject wrote, captured **before any tool
     #: result came back** — that one read the skill; every later one read the
     #: diagnostics. Control 4, and the half of S1 that a final-answer-only

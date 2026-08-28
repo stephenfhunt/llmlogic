@@ -402,6 +402,20 @@ REMINDER = (
     "the question specified, then finish."
 )
 
+#: What a subject that has done **no work at all** is told instead. The reminder
+#: above exists for a subject that *has* the answer and forgot the file, and to
+#: one that has not opened a file it says something else entirely: *write your
+#: answer*, of a question it has not looked at. That is an invitation to file a
+#: guess, which is the one thing a no-answer cell must not be nudged into.
+#:
+#: Measured 2026-08-28 (`results/run-20260828T162946Z`): one prose cell reasoned
+#: for 15,432 characters, made **zero tool calls**, said `final` three times
+#: through both reminders, and was recorded as having finished.
+NOTHING_READ = (
+    "You have not read any of the files yet, so you do not have the answer. Read "
+    "the data first; do not write one from memory."
+)
+
 #: The action a `structured` turn must produce. Not a tool name — a subject that
 #: is finished has to be able to *say* so inside the same grammar, or the only
 #: way out of the loop is the turn cap.
@@ -1045,10 +1059,17 @@ class LocalSubject:
                 return
 
             if name == FINAL_ACTION:
-                if reminders < COMPLETION_REMINDERS and not _answered(workspace):
-                    reminders += 1
-                    messages.append({"role": "user", "content": REMINDER})
-                    continue
+                if not _answered(workspace):
+                    if reminders < COMPLETION_REMINDERS:
+                        reminders += 1
+                        nudge = REMINDER if transcript.tool_calls else NOTHING_READ
+                        messages.append({"role": "user", "content": nudge})
+                        continue
+                    # Recorded, not silently accepted. `grade` already returns
+                    # `no-answer`; what was missing is *why* — a subject that
+                    # declared itself done is a different fact from one a
+                    # stopping rule cut off, and the two were the same line.
+                    transcript.finished_without_answer = True
                 transcript.final_text = "(finished)"
                 return
 
@@ -1108,10 +1129,13 @@ class LocalSubject:
             truncations = 0
 
             if not calls:
-                if reminders < COMPLETION_REMINDERS and not _answered(workspace):
-                    reminders += 1
-                    messages.append({"role": "user", "content": REMINDER})
-                    continue
+                if not _answered(workspace):
+                    if reminders < COMPLETION_REMINDERS:
+                        reminders += 1
+                        nudge = REMINDER if transcript.tool_calls else NOTHING_READ
+                        messages.append({"role": "user", "content": nudge})
+                        continue
+                    transcript.finished_without_answer = True
                 transcript.final_text = str(message.get("content") or "")
                 return
 

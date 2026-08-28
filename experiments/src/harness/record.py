@@ -63,6 +63,7 @@ class Record:
     malformed_calls: int
     truncated_completions: int
     empty_replies: int
+    finished_without_answer: bool
 
     signals: dict
     input_tokens: int
@@ -110,6 +111,7 @@ class Record:
             malformed_calls=transcript.malformed_calls,
             truncated_completions=transcript.truncated_completions,
             empty_replies=transcript.empty_replies,
+            finished_without_answer=transcript.finished_without_answer,
             signals=signals.to_dict(),
             input_tokens=transcript.usage.input_tokens,
             output_tokens=transcript.usage.output_tokens,

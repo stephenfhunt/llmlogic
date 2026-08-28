@@ -357,6 +357,55 @@ class TestACompletionCutOffAtTheOutputCap:
         assert transcript.truncated_completions == 0
 
 
+class TestASubjectThatWalksAway:
+    """`final` with no answer file, through both reminders.
+
+    `grade` calls that `no-answer`, which is right — and identical to what a cell
+    the output cap cut off records, which is not. Measured 2026-08-28
+    (`results/run-20260828T162946Z`): one prose cell reasoned for 15,432
+    characters, made **zero tool calls**, said `final` three times, and the
+    record showed `turns=0, trunc=0, err=None` — indistinguishable from a cell
+    that did nothing for cheap reasons.
+    """
+
+    def test_giving_up_is_recorded(self, tmp_path):
+        subject = Scripted([_action(FINAL_ACTION, {}) for _ in range(3)])
+        transcript = subject.run(cell_for("structured"), workspace_for("prose", tmp_path))
+        assert transcript.finished_without_answer is True
+
+    def test_a_cell_that_wrote_its_answer_is_not_marked(self, tmp_path):
+        subject = Scripted(_finish())
+        transcript = subject.run(cell_for("structured"), workspace_for("prose", tmp_path))
+        assert transcript.finished_without_answer is False
+
+    def test_a_subject_that_read_nothing_is_told_that_and_not_told_to_write(self, tmp_path):
+        """The reminder exists for a subject that *has* the answer and forgot the
+        file. To one that has not opened a file, `write your answer` is an
+        invitation to file a guess — the one thing a no-answer cell must not be
+        nudged into."""
+        subject = Scripted([_action(FINAL_ACTION, {}), *_finish()])
+        subject.run(cell_for("structured"), workspace_for("prose", tmp_path))
+        nudge = subject.seen[1]["messages"][-1]["content"]
+        assert nudge == local.NOTHING_READ
+        assert "Write your answer" not in nudge
+
+    def test_a_subject_that_did_work_still_gets_the_original_reminder(self, tmp_path):
+        subject = Scripted(
+            [
+                _action("Read", {"file_path": "employee.csv"}),
+                _action(FINAL_ACTION, {}),
+                *_finish(),
+            ]
+        )
+        subject.run(cell_for("structured"), workspace_for("prose", tmp_path))
+        assert subject.seen[2]["messages"][-1]["content"] == local.REMINDER
+
+    def test_the_native_loop_records_it_too(self, tmp_path):
+        subject = Scripted([_text("all done") for _ in range(3)])
+        transcript = subject.run(cell_for("native"), workspace_for("prose", tmp_path))
+        assert transcript.finished_without_answer is True
+
+
 class TestPerCellConfiguration:
     def test_the_strength_chooses_the_model_and_protocol(self, tmp_path):
         """One subject instance covers a whole sweep, because the crossing is the

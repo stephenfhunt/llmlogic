@@ -301,6 +301,18 @@ def _truncation_line(records: list[dict]) -> list[str]:
             "reasoning is not fed back, so a third lap re-thinks the same thing "
             "from the same conversation."
         )
+    walked = [r for r in records if r.get("finished_without_answer")]
+    if walked:
+        by_arm = ", ".join(
+            f"{arm} {sum(1 for r in walked if r['arm'] == arm)}"
+            for arm in sorted({r["arm"] for r in walked})
+        )
+        lines.append(
+            f"- **Declared itself finished with no answer written:** {by_arm}. "
+            "Through both completion reminders. Graded `no-answer` like a cell a "
+            "stopping rule cut off, and a different fact from one: this subject "
+            "was not interrupted, it walked away."
+        )
     return lines
 
 
