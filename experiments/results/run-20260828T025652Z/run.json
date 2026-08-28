@@ -1,0 +1,39 @@
+{
+  "run_id": "run-20260828T025652Z",
+  "started_at": "2026-08-28T02:56:52.405290+00:00",
+  "dry_run": false,
+  "domains": [
+    "controls"
+  ],
+  "tasks": 1,
+  "cells": 3,
+  "strengths": [
+    "qwen3-14b-structured"
+  ],
+  "arms": [
+    "prose",
+    "engine",
+    "engine-forced"
+  ],
+  "repeats": 1,
+  "fingerprints": {
+    "controls/department-of": "567d471f8808ed9b"
+  },
+  "ablate": null,
+  "max_turns": 30,
+  "max_budget_usd": 2.0,
+  "local": {
+    "endpoint": "http://127.0.0.1:11434/v1",
+    "models": [
+      "qwen3:14b"
+    ],
+    "protocols": [
+      "structured"
+    ],
+    "reasoning_effort": null,
+    "max_cell_seconds": 900,
+    "context_tokens": 24576,
+    "max_output_tokens": 4096
+  },
+  "slate": null
+}
