@@ -84,15 +84,39 @@ directory; `--limit N` sizes a sitting to the window. See `decisions.md`
 tokens unless told otherwise, and that silently invalidated a whole sweep:
 
 ```sh
-OLLAMA_CONTEXT_LENGTH=16384 OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q4_0 \
-  OLLAMA_KEEP_ALIVE=30m ~/.local/ollama/bin/ollama serve
-harness run --local-model qwen3:14b --min-context 16384 --protocol structured --yes
+LLAMA_ARG_FIT_TARGET=288 OLLAMA_CONTEXT_LENGTH=24576 OLLAMA_FLASH_ATTENTION=1 \
+  OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_KEEP_ALIVE=30m ~/.local/ollama/bin/ollama serve
+harness run --local-model qwen3:14b --min-context 24576 --protocol structured \
+  --max-output-tokens 4096 --max-cell-seconds 900 --yes
 ```
 
 `--min-context` sets both what preflight holds the server to *and* what the
 strengths claim, so the overflow guard and the server cannot disagree. What fits
 on this card is measured in `notes/a-local-subject.md`. `calibrate` takes the same
 flags, at **one** model and one protocol: a slate is calibrated for one subject.
+
+**24k leaves 0.86 GiB spare, which is less than the desktop holds** — it assumes
+nothing new is launched during the run. `LLAMA_ARG_FIT_TARGET=640` with a 20,480
+window is the setting that tolerates a browser.
+
+The pass this configuration exists for — 240 cells, **~7.5h**, one sitting.
+Calibration draws the `prose` arm only, which is why it is not the ~17h the
+engine-forced rate implies. Dry-run verified to record the whole subject
+(`reasoning_effort: null`, 24576, 4096), so a `--resume` rebuilds it:
+
+```sh
+harness calibrate --domain access_control --domain ontology --domain imports \
+  --domain eligibility --seed 20260826 --seed 20260901 \
+  --difficulty 1 --difficulty 2 --local-model qwen3:14b --protocol structured \
+  --min-context 24576 --max-output-tokens 4096 --max-cell-seconds 900 --yes
+```
+
+**Thinking is on** — no `--reasoning-effort` flag. Two bounds move with it, and
+both were measured rather than guessed (`decisions.md` 2026-08-27):
+`--max-output-tokens 4096`, because the cap bounds **reasoning plus answer** and a
+thinking model that runs out mid-thought emits no parseable action; and
+`--max-cell-seconds 900`, because thinking costs ~7.5× wall clock and 240s would
+cap a cell that was going to succeed.
 
 **A local run resumes like any other**, rebuilding its strengths from the `local`
 block its `run.json` recorded — including the served window, without which it

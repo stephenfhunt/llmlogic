@@ -173,6 +173,16 @@ grid unable to answer S1. The argument and the numbers are in
   calibration has nothing in the band to select. Either the generators grow an
   easier form or the subject changes; a slate cannot be calibrated into a gap.
   _designing — **v1**, and now the blocker._ — `decisions.md` 2026-08-27.
+- **Thinking on, as the subject's side of that gap** — the same 14B with
+  `reasoning_effort` unset, at 24k/q8 and `--max-output-tokens 4096`. **Gated on
+  `controls`: 75% per-trial against thinking-off's 67%, and `engine-forced` 25% →
+  50%.** Costs ~7.5× wall clock, which is why the next pass is **240 cells, not
+  1,125**. _queued — **v1**, and the next session's work._ — `decisions.md` 2026-08-27,
+  `notes/a-local-subject.md` (*What thinking costs*).
+- **`scheduling` dropped from the next pass** — capped in 43 of 75 cells at 240s
+  and the slowest pack by median; at 7.5× it would eat the sitting. Needs its own
+  look before it returns. _parked — **v1**, trigger is that look._ —
+  `decisions.md` 2026-08-27.
 - **`harness score --task <id> --program <file>`** — run a program, grade its
   output. One command; also the natural home for the reference corpus's check.
   _shipped 2026-08-25._ — `score.py`. Exit 0/1/2; the wall-clock timeout is the

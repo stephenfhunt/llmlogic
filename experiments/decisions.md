@@ -15,6 +15,82 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-08-27 (later ii)** — **The subject thinks, and two bounds move with
+  it.** `qwen3:14b` runs with `reasoning_effort` unset from the next pass on. It
+  is the only source of subject power that costs no VRAM, and the pool being too
+  hard at every difficulty is a subject problem before it is a generator problem.
+  - **`max_tokens` bounds reasoning *and* answer**, which is the trap. At the
+    2,048 default a five-constraint puzzle spent the whole budget thinking and
+    returned content that was not an action — a `malformed_calls` retry whose
+    cause is invisible, because ollama reports `completion_tokens` **excluding**
+    the reasoning it charged against the cap (67 against ~1,870 spent). Hence
+    `--max-output-tokens`, 4,096 for a thinking run, recorded in the run's
+    `local` block so a **resume cannot silently truncate the second half**.
+  - **~7.5× wall clock**, measured on `controls`: 605s against 80s for the same
+    three cells. `--max-cell-seconds` goes to 900; at 240 a cell that was going to
+    succeed gets capped — engine-forced took 465.9s and was correct.
+  - **Gated before it was adopted**, all 4 controls × 3 arms
+    (`results/run-20260828T012126Z`): **9/12 = 75% per-trial against thinking-off's
+    24/36 = 67%** on the same units, the gain concentrated in `engine-forced`
+    (**25% → 50%**) — the arm this log named the blocker. Not one of the three
+    failures is a wrong conclusion: a Datalog-shaped answer, a prose answer
+    carrying the CSV header, and one cell capped at 904s.
+  - ***Amended*** — an interim single cell showed prose `correct` → `wrong` and
+    was nearly written up as a regression; the re-run and the gate both contradict
+    it. **Compare per-trial with per-trial**: precondition 1's recorded *"10/12 =
+    83% PASS"* is an **any-of-3** figure, and those same cells are 67%
+    majority-of-3. Reading a one-trial 75% against it as a failed floor is a
+    category error, and it was made in this session before it was caught.
+    Measurements: [`notes/a-local-subject.md`](notes/a-local-subject.md).
+
+- **2026-08-27 (later iii)** — **The next calibration pass is 240 cells, not
+  1,125.** At 7.5× wall clock the 2026-08-27 pool is 60+ hours, and a slate is
+  calibrated for one subject, so calibrating thinking-off and running the grid
+  thinking-on is not available. The pass is **4 packs × 2 seeds × difficulties
+  1–2 × 3 trials = 240 cells** (verified against the stub), **~7.5h** — one
+  sitting with room to spare, because calibration draws the `prose` arm only and
+  prose under thinking-on averaged 113s where `engine-forced` averaged 617s. The
+  grid that follows pays the engine-forced rate; the pass that selects does not.
+  - **`scheduling` is dropped**, not merely trimmed: it capped in 43 of 75 cells
+    at 240s and is the slowest pack by median, so at 7.5× it would spend the
+    sitting and return the least evidence. It comes back when it gets the look
+    the 2026-08-27 entry already owes it.
+  - **Difficulties 1 *and* 2 are kept** even though 1 is where the signal was.
+    The band needs bracketing: if thinking lifts the subject, 1 becomes too easy
+    and 2 is where the selection happens. One difficulty risks a second pass that
+    selects nothing, which is the failure this one is recovering from.
+
+- **2026-08-27 (later)** — **q8 KV fits after all, and 16k is its ceiling.** The
+  local subject moves to **`OLLAMA_KV_CACHE_TYPE=q8_0`, window held at 16,384** —
+  one variable changed. 9.70 GiB, 41/41 layers, 31.1 tok/s; 18k spills, so 16k is
+  a ceiling and not a choice. q4_0 is the aggressive setting and degrades exactly
+  the long-conversation attention every cell depends on. Measurements, corrected
+  block-format arithmetic and ollama's ~1.15 GiB unspent reserve:
+  [`notes/a-local-subject.md`](notes/a-local-subject.md).
+  - ***Amended*** same session: **16k was not a ceiling, it was a default.** The
+    ~1.15 GiB reserve is `LLAMA_ARG_FIT_TARGET`, a setting — at 640 MiB the same
+    card loads **20k q8 41/41** (10.03 GiB, 1.21 GiB still free), at 288 it loads
+    24k. **The window moves to 20,480**; 24k is left on the table because its 0.86
+    GiB of headroom is narrower than the desktop it shares the card with, and an
+    OOM mid-cell is a stopping rule firing for a reason the experiment did not
+    ask about. Verified under load: `results/run-20260828T004958Z`, 3/3 at 24k.
+    **The lesson is the note's own** — the fourth silent misconfiguration on this
+    machine was a vendor default (`OLLAMA_CONTEXT_LENGTH=4096`), and this is the
+    fifth: a default margin read as a hardware limit for one session because it
+    was never named as a knob.
+  - **The machine changed, not the desktop.** 2026-08-26 measured this same
+    configuration at 10.18 GiB, spilling; the desktop is 19 MiB lighter today,
+    nowhere near 0.48 GiB. The system update did it; which component is
+    unestablished. **The lever this was waiting on is spent** — moving the display
+    to the iGPU now buys *window* (~24k predicted), not the KV type.
+  - ***Consequences:*** **a KV type is part of the subject.** `run-20260827T015701Z`
+    and the halted `cal-20260827T035804Z` were measured at q4, so a q8 pass is not
+    paired with them and that pass cannot be resumed into one. It was already
+    rejected as unusable, so the cost is zero.
+  - *Verified end to end*: `results/run-20260828T003003Z`, the `controls` smoke,
+    **3/3 correct**, resident throughout. One trial an arm, so `engine-forced`
+    landing `correct` where q4 gave two `no-answer`s is a direction, not a result.
+
 - **2026-08-27** — **The generated pool's floor is above this subject's ceiling,
   at every difficulty the knob reaches.** 408 cells of the first paid calibration
   pass (`results/cal-20260827T035804Z`, halted deliberately) answer the
@@ -743,6 +819,41 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
     project would have been the wrong altitude even if the build had allowed it.
 
 ## Open questions
+
+- **A fact-shaped answer is a format failure scored as a wrong answer, and only
+  one arm can produce it.** The thinking-on gate wrote `carol_dept("engineering").`
+  into `answer.txt` — the right answer in Datalog notation. `grade.py` holds three
+  format guards (empty field, wrong arity, prose-with-spaces) and a one-field
+  fact-shaped string passes all three, so it grades `wrong`. **Only the engine arm
+  writes `name(args).`**, so the noise is arm-asymmetric. The direction is
+  conservative — it costs the engine, and the comment on `grade.grade` says bias
+  *toward* the engine is the one thing this harness cannot afford — so this is
+  power lost, not validity lost. A fourth reason beside `WRONG_ARITY` and `PROSE`
+  is the established shape. Decide against more than one cell; thinking-on makes
+  it likelier, since a thinking model narrates its way into notation.
+
+- **`engine-forced` under thinking-on runs close to its wall clock.** Measured
+  268s, 593s, 704s, 904s — the last is the 900s cap firing, and the median is
+  ~650s. A cap that clips a quarter of an arm's cells is measuring the cap
+  (2026-08-27 said this of `scheduling` at 240s). Raising it lengthens the grid
+  but not the calibration pass, which is prose-only. Decide when the grid is
+  designed, on the pass's own distribution rather than on these four.
+
+- **A slate checks its items against the manifest, but never its subject.**
+  `calibrate.load` refuses a slate whose fixtures, question or truth moved —
+  `resume.fingerprint` pointed at the source tree — and that is the whole check.
+  The manifest *records* the calibrating subject (`pool.strength`, `pool.local`
+  with its window, protocol, reasoning effort and now output cap), and nothing
+  compares it to the subject the grid is about to run. So
+  `run --slate <thinking-on slate> --reasoning-effort none` is accepted, and the
+  grid measures a different subject than the band selected for — which is
+  precondition 4 failing silently, the one failure mode this project has now
+  recorded five times. **It got likelier today**: the local subject went from one
+  flag to four, and every one of them is part of the subject. The fix is the
+  established shape — refuse, do not degrade — comparing the manifest's `local`
+  block against the run's strengths. Not done tonight because it is new work
+  outside what this session was asked for; **do it before launching the grid**,
+  not after the night is spent.
 
 - **A task's fingerprint does not cover the prompt it is asked with.**
   `resume.fingerprint` hashes the question, the fixture files and the truth rows

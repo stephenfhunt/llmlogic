@@ -24,6 +24,98 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-27 (later still, iii) — Thinking back on, gated before it was adopted
+
+`qwen3:14b` runs with `reasoning_effort` unset from the next pass on. **Gated
+first**, all 4 controls × 3 arms (`results/run-20260828T012126Z`, 12 cells, 52
+min): **9/12 = 75% per-trial against thinking-off's 24/36 = 67%** on the same
+units, and the gain is in **`engine-forced`, 25% → 50%** — the arm the earlier
+entry named the blocker. Long form: `experiments/notes/a-local-subject.md`.
+
+**Done**
+- **`--max-output-tokens`** (`ec7bdba`), because `max_tokens` bounds **reasoning
+  plus answer**: at the 2,048 default a five-constraint puzzle spent the budget
+  thinking and returned content that was not an action — invisible in the record,
+  since ollama reports `completion_tokens` *excluding* the reasoning it charged
+  against the cap. Recorded in the run's `local` block so a resume cannot truncate
+  the second half. +2 tests, 1,412 green, ruff clean.
+- **The window and the cap are one setting.** `CONTEXT_BUDGET` leaves 6,144 tokens
+  for the reply at 24k against a 4,096 cap. At 16k it would be 4,096 against
+  4,096 — the overflow guard and the output cap arriving together. Raising the cap
+  without the window trades one silent truncation for another.
+- **Thinking costs ~7.5× wall clock** — 605s against 80s for three `controls`
+  cells. `engine-forced` measured 268/593/704/904s, the last being the 900s cap.
+- **Not one of the three gate failures is a wrong conclusion**: a Datalog-shaped
+  answer, a prose answer carrying the CSV header row, and the capped cell.
+
+**Decided** (`experiments/decisions.md`, two entries + three open questions)
+- **The next pass is 240 cells, not 1,125** — 4 packs × 2 seeds × difficulties
+  1–2 × 3 trials, stub-verified. **~7.5h**: calibration draws the `prose` arm
+  only (113s average) where engine-forced averages 617s. **`scheduling` is
+  dropped** — slowest pack, capped in 43 of 75. Both difficulties kept to bracket
+  the band, since thinking may make 1 too easy.
+- **Compare per-trial with per-trial.** Precondition 1's recorded *"10/12 = 83%
+  PASS"* is an **any-of-3** figure; those cells are 67% majority-of-3. Reading a
+  one-trial 75% against it as a failed floor is a category error — made in this
+  session before it was caught, and amended in place rather than quietly fixed.
+
+**Removed**
+- Nothing. The interim single-cell "prose regressed" read was contradicted by its
+  own re-run and is kept as an amendment, not deleted — it is the session's one
+  wrong turn and the reason the aggregation trap is now written down.
+
+**Next up — the pass is ready to launch.** Server line and the 240-cell
+`calibrate` line are in `experiments/AGENTS.md`, dry-run verified to record the
+whole subject (`reasoning_effort: null`, 24576, 4096) so a resume rebuilds it.
+
+- **Do the slate-subject guard first** — new open question, cheapest insurance
+  here: a manifest records its calibrating subject and *nothing checks it*, so
+  `run --slate` would run the grid under a different one silently. Four
+  subject-bearing flags now, up from one.
+- **The blocker is half-touched.** Thinking is the subject's side of the missing
+  rung; whether it lifts difficulty 1 out of 14% is what this pass asks. If not,
+  the generators still owe an easier form.
+- **Still owed:** the mandate arm, the prompt-blind `resume.fingerprint`,
+  `scheduling`'s own look, and the partial-read rule.
+
+## 2026-08-27 (later still, ii) — q8 KV fits, and the ceiling was a default
+
+A system update was reason to re-measure and the answer moved twice: `qwen3:14b`
+holds **q8_0 KV** — the aggressive q4_0 is retired — at **24,576 tokens**, because
+the ceiling that looked like the card was a default. Two `controls` smokes, 3/3
+each, $0.00. Measurements: `experiments/notes/a-local-subject.md`.
+
+**Done**
+- **The residency probe said 16k, and the probe was reading a default.** At
+  ollama's stock fit margin: 16k ✓ (9.70 GiB, 41/41, 31.1 tok/s); 18k, 20k, 24k
+  all spill. That ~1.15 GiB the fitter declines to spend is
+  **`LLAMA_ARG_FIT_TARGET`** — at 288 MiB, **24k q8 loads 41/41** (10.37 GiB) and
+  holds under load. **24k is the config**: it leaves 0.86 GiB, narrower than the
+  desktop, and the environment is being held still for the pass. `640` with a
+  20,480 window is the setting that tolerates a browser.
+- **The block formats were the other arithmetic error.** `q8_0` costs 1.0625 bytes
+  an element — 32 values plus a 2-byte scale — so KV is **85 KiB a token**, not
+  80. With weights at 8.23 GiB the model predicts every resident row to within
+  0.03 GiB.
+
+**Decided** (`experiments/decisions.md`, one entry, amended once in session)
+- **A KV type is part of the subject** — as are the window, protocol and output
+  cap. `run-20260827T015701Z` and the halted `cal-20260827T035804Z` are q4
+  thinking-off: the next pass is not paired with them and cannot resume into one.
+  Both were already rejected, so this costs nothing.
+- **A vendor default read as a hardware limit is the fifth silent
+  misconfiguration here**, after `OLLAMA_CONTEXT_LENGTH=4096` and the note's
+  three. Corollary: grep the server's own `--help` before believing a limit.
+
+**Removed**
+- The note's Xorg desktop-VRAM table (`Xorg`'s 451 MiB is gone — Wayland now), its
+  10.18 GiB q8 row, its "moving the display buys the q8 KV cache" conclusion (that
+  lever now buys *window*, ~32k, and stays unmade), and the vLLM row's ollama
+  column. Two older entries rotated to the archive.
+
+**Next up**
+- Superseded by the entry above.
+
 ## 2026-08-27 (later still) — `bugs/009`, the half that needed no new machinery
 
 The first defect this harness produced *about the engine* gets its first fix. A
@@ -72,99 +164,3 @@ is where a reader of this message will look)
   a §17 entry, so it is a design session and not a patch.
 - Unchanged from earlier today: the mandate arm, the missing rung between
   `controls` and the measured slate, and the prompt-blind `resume.fingerprint`.
-
-## 2026-08-27 (later) — The first paid pass, and the rung that is not there
-
-The calibration pass ran 408 of 1,125 cells and was **stopped deliberately**
-(`results/cal-20260827T035804Z`). It answers the question it was launched to
-answer, just not the way it was meant to: the generated pool is too hard for this
-subject at **every difficulty the generators reach**, so there was nothing in the
-band to select.
-
-**Done**
-- **The pass, read.** correct by difficulty: **d1 14%, d2 7%, d3 5%**. At the
-  easiest setting `eligibility` is 0/25, `scheduling` 2/25, `imports` 3/25,
-  `ontology` 4/25. 72% of two-trial items sit at zero correct, which rejects as
-  *too hard*. Difficulty 1 is the floor, so no knob remains.
-- **23% of cells bought no measurement** — 95 of 408 hit a stopping rule, and
-  `scheduling` ran a median 234.6s against a 240s cap, 43 of 75 capped.
-- **Stopped at ~22h remaining**, projecting ~75 kept items against the 155 the
-  +20-point endpoint needs — and precondition 2 already fails, so the grid it
-  would feed could not read the primary endpoint. No slate written: a halted pass
-  refuses selection, which is the rule working.
-- **The format fix looks to have taken.** `unparseable` is 9/408 = **2.2%**, five
-  of them `wrong-arity`, against 15.4% of single-column cells before it. Different
-  item mix and one run, so it is a direction and not yet a result.
-
-**Decided** (`experiments/decisions.md`, one entry)
-- **The gap is between the rungs, not inside them.** The same subject scores 83%
-  on `controls` and 14% on the easiest generated item; the slate has nothing in
-  between, and calibration cannot select what was never generated. That is now a
-  measurement rather than a suspicion, and it is the blocker.
-
-**Removed**
-- Nothing deleted. The previous entry's *Next up* — resume the pass — is
-  superseded by this one; "The pass that picks the slate" rotated to the archive.
-
-**Next up**
-- **Build the missing rung, or change the subject.** Either the generators grow a
-  form easier than today's difficulty 1, or the calibrating subject is stronger
-  than a 14B. A slate cannot be calibrated into a gap.
-- **`scheduling` needs its own look** before any re-run: capped in 43 of 75 cells,
-  it spends the most time and returns the least evidence of any pack.
-- **Still owed from the earlier entry:** the mandate arm (`invoked` 16/24), the
-  prompt-blind `resume.fingerprint`, and writing the partial-read rule down.
-
-## 2026-08-27 — The gate that inverted its own interim read
-
-`qwen3:14b` at 16k with q4 KV **clears the controls floor on `structured`** — the
-precondition every 8B failed. 144 cells, 2h, $0.00
-(`results/run-20260827T015701Z`). The mandate still does not take, on either
-protocol. **1,410 harness tests green (+19)**, ruff clean, 52 datalog tests green.
-A 1,125-cell calibration pass is running detached.
-
-**Done**
-- **The gate, per protocol.** Precondition 1: `structured` **10/12 = 83% PASS**,
-  `native` 7/12 = 58% FAIL. Precondition 2: **25% / 29%** against an 80% floor.
-  The measured slate is on the floor — `access_control` 0/36 and 3/36.
-- **`harness calibrate` takes the local seam** (`cli._local_sitting`), refusing two
-  strengths by name — `tally` counts by task key, so a two-protocol pass would put
-  two subjects in one band. The same work made a local run **resumable at all**:
-  `cmd_resume` rebuilt strengths from the two Anthropic ones and always built
-  `AgentSubject`, so a halted local run refused itself.
-- **The pipe-joined answer was the prompt's fault**: for one column the bullet
-  said *"the fields `order_id`, separated by `|`"*. **15.4% of single-column cells
-  `unparseable` against 1.9% of two-column ones.** `catalogue._fields_line` splits
-  by arity; `unparseable` now records which of three ways it failed.
-- **`datalog/bugs/009`** — a column type clash names one occurrence, sometimes no
-  span at all, found by a local subject looping 15 rewrites against it. Two
-  `#[ignore]`d criteria: the instance, and the property.
-- **The card is power-bound, not thermally bound; the desktop holds 742 MiB** —
-  the margin the 16k/q8 row spills by. — `notes/a-local-subject.md` (also vLLM).
-
-**Decided** (`experiments/decisions.md`, four entries)
-- **Fix the instruction, not the ruler.** Tolerating `|` would turn 119 answers
-  into 104 `wrong` and 15 `correct`, the wrong-flips falling 47/34/23 across the
-  arms — bias toward the engine, which `grade.py` cannot afford.
-- **A pass is one subject and the manifest says which** (`spec` had hardcoded
-  haiku); **a calibrated grid carries the pinned controls**, the pool draws none.
-- **`hypotheses.md` addendum: a local grid is powered for +20 points, not +10.**
-  Paired items grow as the baseline nears 50%, and the band puts it there by
-  construction — +10 there wants 705 paired items, not 155.
-
-**Removed**
-- Nothing deleted. The 4-cell first gate run was dropped before it entered the
-  record — launched without `--reasoning-effort none`, so it was thinking-on and
-  not the subject the smoke measured. "Five generators" rotated to the archive.
-
-**Next up**
-- **Resume the pass** — `harness run --resume results/cal-20260827T035804Z --yes`;
-  ~5–10h. Then `calibrate --from` selects; no slate is written until every item is
-  measured, by design.
-- **The mandate is the blocker, not the slate.** `invoked` dominates on
-  `engine-forced` (16/24). Read those transcripts before designing a grid around
-  that arm; `bugs/009` is one cause and probably not the only one.
-- **A partial read has pointed the wrong way three times** — trial 0 said native
-  4/4 and structured 3/4; the full run said 58% and 83%. Wants to be a rule.
-- **Open question:** `resume.fingerprint` does not cover the prompt, so today's
-  `_fields_line` change is invisible to `resume.moved`.

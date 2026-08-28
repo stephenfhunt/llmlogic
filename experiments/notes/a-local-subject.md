@@ -24,8 +24,8 @@ at 4,096 tokens unless told otherwise, which is the defect that cost a sweep and
 the whole model survey before it:
 
 ```sh
-OLLAMA_CONTEXT_LENGTH=16384 OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q4_0 \
-  OLLAMA_KEEP_ALIVE=30m ollama serve
+LLAMA_ARG_FIT_TARGET=640 OLLAMA_CONTEXT_LENGTH=20480 OLLAMA_FLASH_ATTENTION=1 \
+  OLLAMA_KV_CACHE_TYPE=q8_0 OLLAMA_KEEP_ALIVE=30m ollama serve
 ```
 
 `preflight` refuses a run whose window is smaller than it assumes, so a wrong
@@ -35,58 +35,117 @@ evicted between cells and reloaded at ~4s a time.
 
 **What fits, measured rather than computed** (`size_vram` against `size` from
 `/api/ps` — equal means fully resident, less means spilled to CPU and roughly ten
-times slower):
+times slower). The `qwen3:14b` rows were re-measured 2026-08-27 and the q8 answer
+changed; `decisions.md` 2026-08-27 (*q8 KV fits*) holds why.
 
-| model | window | KV | total | on GPU |
+| model | window | KV | needs | on GPU |
 |---|---|---|---|---|
 | `qwen3:8b` | 32k | f16 | 9.16 GiB | ✓ |
 | `qwen3:8b` | 32k | q8_0 | 7.11 GiB | ✓ |
-| `qwen3:14b` | 32k | f16 | 13.93 GiB | ✗ spills 4.6 GiB |
+| `qwen3:14b` | 16k | q8_0 | 9.70 GiB | ✓ — 41/41 layers |
+| **`qwen3:14b`** | **20k** | **q8_0** | **10.03 GiB** | **✓ — needs `FIT_TARGET=640`** |
+| `qwen3:14b` | 24k | q8_0 | 10.37 GiB | ✓ — needs `FIT_TARGET=288`, 0.87 GiB spare |
+| `qwen3:14b` | 18k | q8_0 | 10.35 GiB | ✗ *at the default margin* — 40/41 layers |
+| `qwen3:14b` | 20k | q8_0 | 10.52 GiB | ✗ *at the default margin* |
+| `qwen3:14b` | 24k | q8_0 | 10.89 GiB | ✗ *at the default margin* — 38/41 layers |
 | `qwen3:14b` | 32k | q8_0 | 11.61 GiB | ✗ |
-| `qwen3:14b` | 16k | q8_0 | 10.18 GiB | ✗ by ~0.7 GiB — what the desktop holds |
-| **`qwen3:14b`** | **16k** | **q4_0** | **9.07 GiB** | **✓** |
+| `qwen3:14b` | 32k | f16 | 13.93 GiB | ✗ spills 4.6 GiB |
+| `qwen3:14b` | 16k | q4_0 | 9.07 GiB | ✓ |
 | `qwen3:14b` | 8k | f16 | 9.61 GiB | ✓ |
 
-**The desktop is holding 0.7 GiB of the card, and that is the whole margin.**
-Measured 2026-08-26, with `Xorg` on the NVIDIA GPU:
+**The window's ceiling is a setting, not the card.** Every ✗ row above spills only
+at ollama's *default* fit margin, and that margin is `LLAMA_ARG_FIT_TARGET` — the
+free VRAM per device its fitter declines to spend, ~1.15 GiB unset. Lower it and
+the same windows load 41/41: 20k at 640 MiB, 24k at 288. So the honest reading of
+a ✗ is *"not at the default margin"*, and the question a window has to answer is
+how much true headroom it leaves, which is the last column below.
+
+Residency is corroborated two ways throughout, because `size_vram` alone is one
+signal: the ollama log's `offloaded 41/41 layers`, and decode at **31.1 tok/s**,
+the top of the resident band below. A spilled row is ~10× slower, so a plausible
+`size_vram` with a 3 tok/s decode would mean the probe was being lied to.
+
+**What each window actually leaves free**, measured at the peak of a `controls`
+cell rather than at load — the number that decides whether the desktop can grow
+into it:
+
+| window | fit target | resident | free at peak |
+|---|---|---|---|
+| 16k | default | 9.70 GiB | 1.46 GiB |
+| **20k** | **640 MiB** | **10.03 GiB** | **1.21 GiB** |
+| 24k | 288 MiB | 10.37 GiB | 0.86 GiB |
+
+**20k is the recommended rung, not 24k.** 24k works and was verified under load
+(`results/run-20260828T004958Z`, 3/3), but 0.86 GiB is less than the 0.72 GiB the
+desktop already holds — one browser and it OOMs mid-cell, which is a stopping rule
+firing for a reason that has nothing to do with the experiment. 20k keeps a margin
+wider than the whole desktop and still buys 25% more conversation than 16k.
+
+**A spilled row's `needs` is inflated by the spill.** At 18k the breakdown is 9.67
+GiB on the card plus 0.68 GiB of host buffers for the one layer that did not fit;
+a configuration that fits pays no host side at all. So the right column to read
+across rows is *on GPU*, and `needs` for a ✗ row is not what that window would
+cost if it fit.
+
+**The desktop holds 0.72 GiB of the card.** Measured 2026-08-27, a **Wayland**
+session — `Xorg` is gone, and `plasmashell` has grown into part of what it held:
 
 | holder | VRAM |
 |---|---|
-| `Xorg` | 451 MiB |
-| `firefox` | 174 MiB |
-| `systemsettings` | 86 MiB |
-| `plasmashell` | 23 MiB |
-| `kwin_x11` | 8 MiB |
-| **total** | **742 MiB** |
+| `plasmashell` | 304 MiB |
+| `systemsettings` | 82 MiB |
+| `kwin_wayland` | 52 MiB |
+| `Xwayland` + `xwaylandvideobridge` | 4 MiB |
+| **`nvidia-smi` total, incl. driver** | **723 MiB** |
 
-That is *exactly* the amount by which the 16k/q8 row above spills. The machine is
-a Ryzen 7 5700G, so it has an iGPU (`RADV RENOIR`) the display could run on
-instead, and the 3060 is where every one of those megabytes is being spent on a
-desktop. **Moving the display to the iGPU buys the q8 KV cache**, which is the
-one that matters: q4_0 is the aggressive setting, and it degrades exactly the
-long-conversation attention every cell in a run depends on.
+The machine is a Ryzen 7 5700G, so it has an iGPU (`RADV RENOIR`) the display
+could run on instead, and the 3060 is where every one of those megabytes is being
+spent on a desktop. **Moving the display now buys the window rather than the KV
+type** — the arithmetic below puts q8 at ~32k with the card to itself, on top of
+the 20k that the fit margin already reaches without it.
 
-**The table above is not measurements alone — it solves.** Qwen3-14B is 40
-layers, 8 KV heads, 128-wide keys and values, so one token of KV cache is
-`40 × 8 × (128+128) = 81,920` elements: **160 KB at f16, 80 KB at q8, 40 KB at
-q4**. Against the measured totals that fixes the weights at **8.45 GiB** and
-leaves a residual of ~0.5 GiB for compute buffers:
+**The table above is not measurements alone — it solves**, and the block formats
+are where the naive arithmetic goes wrong. Qwen3-14B is 40 layers, 8 KV heads,
+128-wide keys and values, so one token of KV cache is
+`40 × 8 × (128+128) = 81,920` elements — but `q8_0` stores 32 values in 32 bytes
+**plus a 2-byte scale**, so it costs 1.0625 bytes each, and `q4_0` 0.5625:
 
-| context | KV | predicted | measured | residual |
-|---|---|---|---|---|
-| 16k q4 | 0.62 | 9.07 | 9.07 | +0.00 |
-| 16k q8 | 1.25 | 9.70 | 10.18 | +0.48 |
-| 32k q8 | 2.50 | 10.95 | 11.61 | +0.66 |
-| 32k f16 | 5.00 | 13.45 | 13.93 | +0.48 |
-| 8k f16 | 1.25 | 9.70 | 9.61 | −0.09 |
+| KV type | bytes/element | per token | 16k window |
+|---|---|---|---|
+| f16 | 2 | 160 KiB | 2.50 GiB |
+| q8_0 | 1.0625 | **85 KiB** | **1.33 GiB** |
+| q4_0 | 0.5625 | 45 KiB | 0.70 GiB |
 
-So the next configuration does not need a survey, it needs arithmetic: with the
-display moved, `8.45 + KV + 0.5 ≤ 11.9` allows **q8 KV to about 32k**.
+The 85 KiB is not derived and then hoped for: the server prints it —
+`llama_kv_cache: size = 1360.00 MiB (16384 cells)`. Against the measured totals
+that fixes **weights at 8.23 GiB and compute buffers at ~0.15 GiB**, and the model
+then predicts the resident rows to within 0.02 GiB (8k f16: 9.62 predicted, 9.61
+measured; 16k q4: 9.08 against 9.07; 16k q8: 9.70 against 9.70).
+
+**ollama does not spend the whole card, and that is the gap an earlier version of
+this note could not account for.** Two deductions come off the 12 GiB before a
+byte of model: the driver's own reserve, so llama.cpp sees **11,907 MiB**, and the
+fitter's headroom — at 18k it logged `9901 MiB used, 1171 MiB free` and put a
+layer on the host rather than spend that. So the budget is not *free VRAM*:
+
+    usable ≈ (11.63 − desktop) − FIT_TARGET ≈ 10.81 − FIT_TARGET
+
+**and the second term is a setting**, defaulting to ~1.15 GiB. That default is
+what made 16k look like a ceiling. At `FIT_TARGET=640` the budget is 10.19 GiB and
+20k q8 (10.03) fits; at 288 it is 10.53 and 24k (10.37) fits. The model predicts
+each of those to within 0.03 GiB, which is the check that it is arithmetic and not
+a story fitted after the fact.
+
+The remaining lever is the display: on the iGPU, `usable ≈ 11.60 − FIT_TARGET`,
+so **q8 to ~32k at a safe 640 MiB margin** — and that is where the 32k the earlier
+arithmetic predicted actually lives. It was right about the destination and wrong
+about the route, having worked from the card's nominal 12 GiB and no reserve at
+all.
 
 **A 14B on this card costs the window, and the window is not free.** The 8k that
 fits without KV quantization is *too small for the engine arm*: SKILL.md is ~3,200
 tokens against a guard threshold of 6,144, before a single tool result. 16k with
-q4 KV is the configuration that holds both a 14B and a working conversation.
+q8 KV is the configuration that holds both a 14B and a working conversation.
 
 At the 32,768-token window the earlier sweeps used:
 
@@ -101,6 +160,86 @@ At the 32,768-token window the earlier sweeps used:
 and 699 — the difference between a slate that fits a sitting and one that does
 not. Whether thinking *helps* is a separate question the harness can now ask,
 because the thinking text is kept.
+
+## What thinking costs, and the cap it walks into
+
+`qwen3:14b` is a hybrid reasoning model and the harness had been running it at
+`--reasoning-effort none` for throughput. Turning that off is the one source of
+subject power that costs no VRAM, and the reason it is a knob rather than a
+default is here.
+
+**Thinking is recorded but never re-sent.** The assistant message appended to the
+conversation carries `content` only, not `reasoning` (`local.py`, both protocol
+loops), so thoughts do not accumulate in the window. The cost is per-turn decode,
+not context — which is why a thinking run needs wall clock rather than a bigger
+window.
+
+**The trap is `max_tokens`, which bounds reasoning *and* answer.** Measured on one
+structured completion, temperature 0:
+
+| prompt | effort | wall | thinking | outcome |
+|---|---|---|---|---|
+| single-hop lookup | on | 13.5s | 1,134 chars | parses |
+| three-hop closure | on | 12.6s | 1,442 chars | parses |
+| five-constraint puzzle | on | 62.6s | 8,498 chars | **cap hit, does not parse** |
+| the same, cap 4,096 | on | 60.0s | 7,246 chars | parses |
+| all three | `none` | 1.4–5.4s | — | parse |
+
+**The window and the output cap are one setting, not two.** `CONTEXT_BUDGET` gives
+the conversation 75% of the window and leaves the rest for the reply: at 24k that
+is 6,144 tokens against a 4,096 cap, comfortable. At 16k it would be 4,096 against
+4,096 — a thinking turn allowed to fill the headroom exactly, with the overflow
+guard and the output cap arriving at the same instant. That is the second reason
+the window went to 24k, and it is why raising the cap without the window would
+have traded one silent truncation for another.
+
+At the 2,048 default the puzzle spent its whole budget thinking and returned
+content that was not an action — a `malformed_calls` retry whose cause is
+invisible in the record, because **ollama reports `completion_tokens` excluding
+the reasoning it just charged against the cap** (67 tokens reported against ~1,870
+actually spent). So the usage numbers under-report a thinking turn and the wall
+clock is the honest signal. Hence `--max-output-tokens`, and 4,096 for a thinking
+run.
+
+**Thinking costs ~7.5× wall clock.** The `controls` smoke, three cells, same task,
+same 24k/q8 server:
+
+| arm | thinking off | thinking on |
+|---|---|---|
+| prose | 6.4s, `correct` | 108.2s, **`wrong`** |
+| engine | 5.6s, `correct` | 28.6s, `correct` |
+| engine-forced | 68.3s, `correct` | 465.9s, `correct` |
+| **total** | **80s** | **605s** |
+
+That prose cell is **not** representative — re-run, the same cell was `correct`,
+and the full gate below says so. It is worth keeping only for what it shows about
+the failure mode: thinking-on reasoned for 9,887 characters, explicitly raised the
+risk — *"the case might matter … maybe use case-in[sensitive]"* — then ran
+`awk -F, '/Carol/ {print $2}' employee.csv > answer.txt` against a fixture whose
+row says `carol`, wrote an empty file, and declared itself done without looking.
+More reasoning, more confident, no answer.
+
+**The gate says thinking is a gain, and the gain is where the blocker is.** All 4
+control tasks × 3 arms, one trial, 52 minutes (`results/run-20260828T012126Z`),
+against the thinking-off cells of `run-20260827T015701Z` on the same units:
+
+| arm | thinking off, per-trial | thinking on, per-trial |
+|---|---|---|
+| prose | 10/12 = 83% | 3/4 = 75% |
+| engine | 11/12 = 92% | 4/4 = 100% |
+| **engine-forced** | **3/12 = 25%** | **2/4 = 50%** |
+| **overall** | **24/36 = 67%** | **9/12 = 75%** |
+
+**Compare per-trial with per-trial.** `hypotheses.md` precondition 1 was recorded
+as *"structured 10/12 = 83% PASS"*, and that figure is **any-of-3** — the same
+cells score 67% majority-of-3 and 67% per-trial. A one-trial 75% read against an
+any-of-3 83% is not a failed floor, it is two different statistics.
+
+**Not one of the three failures is a wrong conclusion.** A Datalog-shaped answer
+(`carol_dept("engineering").`), a prose answer carrying the CSV header row
+(`id / o2 / o4 / o5`), and one cell that ran out of wall clock at 904s. The
+reasoning was right in all three; the delivery was not. That is failure modes 1
+and 2 below, and it is what a thinking pass should expect to spend its losses on.
 
 ## The card is power-bound, not thermally bound
 
@@ -130,13 +269,20 @@ CUDA-graph and activation overhead (~1.2 GiB against llama.cpp's ~0.5) leave a
 
 | stack | today | display on the iGPU |
 |---|---|---|
-| ollama / llama.cpp, q8 KV | ~30k tokens | **~38k** |
-| vLLM, AWQ + fp8 KV | ~19k | ~27k |
+| ollama / llama.cpp, q8 KV | **20–24k, measured** | ~32k, predicted |
+| vLLM, AWQ + fp8 KV | ~19k, projected | ~27k, projected |
+
+**The vLLM row is a projection resting on an overhead figure that has since
+moved**, so redo it before it decides anything: llama.cpp's compute buffers
+measure ~0.15 GiB, not the ~0.5 assumed, and the ~1.15 GiB that actually goes
+missing is ollama's fitter declining to spend it — a reserve vLLM manages
+explicitly through `gpu_memory_utilization` and might not pay at all.
 
 PagedAttention reclaims per-sequence over-allocation across *many concurrent*
 sequences; a harness that runs one cell at a time has none to reclaim. So the
-answer to *"can we hold q8, or a bigger window?"* is the display move and
-`OLLAMA_KV_CACHE_TYPE=q8_0`, on the stack already here.
+answer to *"can we hold q8?"* was `OLLAMA_KV_CACHE_TYPE=q8_0` on the stack
+already here, and the remaining question — *a bigger window* — is the display
+move, not a second stack.
 
 What vLLM is worth trying for is **grammar-constrained decoding**, which
 `structured` — the protocol decided on precisely because it is a grammar the
