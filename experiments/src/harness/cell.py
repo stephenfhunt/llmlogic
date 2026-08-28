@@ -18,13 +18,29 @@ from typing import Literal
 
 from harness.task import Task
 
-Arm = Literal["prose", "engine", "engine-forced"]
-ARMS: tuple[Arm, ...] = ("prose", "engine", "engine-forced")
+Arm = Literal["prose", "engine", "engine-forced", "engine-briefed"]
+ARMS: tuple[Arm, ...] = ("prose", "engine", "engine-forced", "engine-briefed")
 
 #: The arms that get the binary and the skill. Membership here, not a string
 #: comparison at each site: the engine arms have to grow together or the
 #: independent variable stops meaning one thing.
-ENGINE_ARMS: frozenset[str] = frozenset({"engine", "engine-forced"})
+ENGINE_ARMS: frozenset[str] = frozenset({"engine", "engine-forced", "engine-briefed"})
+
+#: The arms told to use the engine. `engine` is not one of them — its prompt is
+#: byte-identical to `prose`, which is control 3.
+MANDATED_ARMS: frozenset[str] = frozenset({"engine-forced", "engine-briefed"})
+
+#: The arm that is handed the engine's reference documentation in its prompt
+#: instead of having to find it. **Discovery is the confound it separates
+#: out**: measured 2026-08-28, all four `engine-forced` cells of a `controls`
+#: gate invented a way to load a CSV — `read_csv/4`, `csv_load/3`,
+#: `csv_read_line/2`, `csv_read/4` — against an engine that spells it
+#: `import "f.csv" as r.`, and **not one called `Skill`**, though the reference
+#: was in the workspace and advertised as a tool. An arm that reaches for the
+#: engine and then writes a language it invented is not measuring the engine.
+#: `engine-briefed − engine-forced` is what discovery costs; the pair is the
+#: measurement, which is why this is a fourth arm and not an edit to the third.
+BRIEFED_ARM = "engine-briefed"
 
 #: How much of a cell's budget — turns *and* wall clock — each arm is given, as a
 #: multiple of the run's own cap.
@@ -47,7 +63,17 @@ ENGINE_ARMS: frozenset[str] = frozenset({"engine", "engine-forced"})
 #: two candidate causes — the engine, or the budget. `report.py` prints the
 #: cap-hit rate per arm for exactly this reason: a result is only free of the
 #: confound while no arm is ending at its cap. See `decisions.md` 2026-08-27.
-ARM_BUDGET: dict[str, float] = {"prose": 1.0, "engine": 1.0, "engine-forced": 2.0}
+#:
+#: `engine-briefed` gets the same 2.0 as `engine-forced` and for the same
+#: reason — it does the same work — so the pair differs by the briefing alone.
+#: A budget that moved with the briefing would put two causes under one delta,
+#: which is the mistake this dict's own comment is about.
+ARM_BUDGET: dict[str, float] = {
+    "prose": 1.0,
+    "engine": 1.0,
+    "engine-forced": 2.0,
+    "engine-briefed": 2.0,
+}
 
 
 def budget_for(arm: str) -> float:

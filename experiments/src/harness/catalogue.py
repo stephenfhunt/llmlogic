@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 
+from harness.cell import BRIEFED_ARM, MANDATED_ARMS
 from harness.grade import ANSWER_FILE
 from harness.task import DATA_SUFFIXES, FIELD_SEPARATOR, Fixture, Task
 
@@ -159,14 +160,46 @@ better one than an empty answer file.
 """
 
 
-def assemble(task: Task, arm: str = "prose") -> str:
+#: What introduces the briefing, so the subject knows what it is reading and
+#: that it is the same document as the one in the workspace. One sentence: the
+#: briefing arm exists to remove a *discovery* step, not to add instruction.
+BRIEFING_HEADER = """
+The reference documentation for the `datalog` engine follows. It is the same
+document as the skill in your workspace, reproduced here so you do not have to
+go looking for it.
+
+---
+
+"""
+
+
+def assemble(task: Task, arm: str = "prose", briefing: str | None = None) -> str:
     """The prompt put in front of the subject.
 
     Byte-identical on ``prose`` and ``engine`` — that identity *is* control 3, and
     it is asserted in ``tests/test_controls_hold.py``. ``engine-forced`` is that
-    same text plus ``MANDATE``, appended and nothing else.
+    same text plus ``MANDATE``, appended and nothing else. ``engine-briefed`` is
+    *that* text plus the engine's reference documentation, appended and nothing
+    else, so each arm is a strict suffix of the next and every pairwise delta has
+    one cause.
+
+    The briefing is **passed in, not read here**: this module derives a prompt
+    from a `Task` and touches no filesystem, and `arms` already owns where the
+    skill lives and which block an ablation cuts from it. Refused rather than
+    defaulted when it is missing — a briefed arm with no briefing is
+    `engine-forced` running under another name, and it would record as the arm it
+    is not.
     """
-    return _base(task) + (MANDATE if arm == "engine-forced" else "")
+    if arm == BRIEFED_ARM and not briefing:
+        raise ValueError(
+            f"{BRIEFED_ARM} is the arm that is handed the engine's documentation, "
+            "and none was supplied — running it without one would record an "
+            "engine-forced cell under a briefed arm's name"
+        )
+    if briefing and arm != BRIEFED_ARM:
+        raise ValueError(f"only {BRIEFED_ARM} takes a briefing; {arm} was given one")
+    prompt = _base(task) + (MANDATE if arm in MANDATED_ARMS else "")
+    return prompt + (BRIEFING_HEADER + briefing if arm == BRIEFED_ARM else "")
 
 
 def _example(shape: tuple[str, ...]) -> str:

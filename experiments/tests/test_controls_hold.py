@@ -6,7 +6,7 @@ nobody asked. They are cheap; the failure they prevent is silent.
 
 import pytest
 
-from harness import arms, domains
+from harness import ablate, arms, catalogue, domains
 from harness.catalogue import MANDATE, SchemaDrift, assemble, verify
 from harness.cell import ENGINE_ARMS, FIXTURE_TOKEN_BUDGET, HAIKU_4_5, OPUS_5, Cell
 from harness.domains.controls import fixture as controls_fixture
@@ -94,6 +94,71 @@ def test_engine_forced_actually_names_the_engine():
     engine without naming it is just the `engine` arm with extra words."""
     prompt = assemble(controls_tasks.tasks()[0], "engine-forced").lower()
     assert "datalog" in prompt
+
+
+def test_engine_briefed_differs_from_engine_forced_by_the_briefing_alone(tmp_path):
+    """The pair is the measurement: `briefed − forced` is what discovery costs,
+    and it only means that while the briefing is the whole difference."""
+    for task in domains.load_all():
+        forced = assemble(task, "engine-forced")
+        briefed = assemble(task, "engine-briefed", arms.briefing())
+        assert briefed.startswith(forced)
+        assert briefed == forced + catalogue.BRIEFING_HEADER + arms.briefing()
+
+
+def test_the_briefing_is_the_skill_the_workspace_carries(tmp_path):
+    """Not a paraphrase of it, and not the checkout's copy with its markers.
+
+    A briefing that drifted from the skill would make `briefed − forced` a
+    comparison between two documents rather than between reading one and having
+    to find it."""
+    if not (arms.DATALOG_BIN_DIR / "datalog").exists():
+        pytest.skip("datalog binary not built")
+    workspace = arms.build(Cell(controls_tasks.tasks()[0], "engine-briefed", OPUS_5), tmp_path)
+    copied = (workspace.path / ".claude" / "skills" / "datalog" / "SKILL.md").read_text()
+    assert arms.briefing() == copied
+    assert copied in workspace.prompt
+    assert "<!-- block" not in workspace.prompt
+
+
+def test_an_ablated_briefing_is_cut_like_the_skill_copy(tmp_path):
+    """Otherwise the briefed arm reads in its prompt the paragraph its own skill
+    copy had cut, and the ablation measures nothing."""
+    if not (arms.DATALOG_BIN_DIR / "datalog").exists():
+        pytest.skip("datalog binary not built")
+    block = next(iter(ablate.catalogue(arms.DATALOG_SKILL_DIR)))
+    plain = arms.briefing()
+    cut = arms.briefing(block)
+    assert len(cut) < len(plain)
+
+    cell = Cell(controls_tasks.tasks()[0], "engine-briefed", OPUS_5, ablate=block)
+    workspace = arms.build(cell, tmp_path)
+    copied = (workspace.path / ".claude" / "skills" / "datalog" / "SKILL.md").read_text()
+    assert cut == copied
+    assert cut in workspace.prompt
+
+
+def test_a_block_that_is_not_in_the_skill_refuses_the_briefing():
+    with pytest.raises(ablate.UnknownBlock, match="no block named"):
+        arms.briefing("not-a-block")
+
+
+def test_a_briefed_arm_without_a_briefing_is_refused():
+    """It would be an `engine-forced` cell recorded under the briefed arm's
+    name — the arm's whole content, silently absent."""
+    task = controls_tasks.tasks()[0]
+    with pytest.raises(ValueError, match="none was supplied"):
+        assemble(task, "engine-briefed")
+    with pytest.raises(ValueError, match="only engine-briefed"):
+        assemble(task, "engine-forced", "some documentation")
+
+
+def test_the_briefing_costs_a_readable_share_of_the_window():
+    """It is bounded, and the bound is the reason the arm is affordable at all:
+    a compliant `engine-forced` cell pays about this much for the `Skill` call
+    it should have made, so briefing mostly moves *when* the tokens are spent."""
+    approximate_tokens = len(arms.briefing()) // 4
+    assert approximate_tokens < 5_000, approximate_tokens
 
 
 def test_every_engine_arm_gets_the_engine(tmp_path):

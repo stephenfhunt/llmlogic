@@ -20,9 +20,12 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+from harness.ablate import UnknownBlock
 from harness.ablate import apply as apply_ablation
+from harness.ablate import cut as ablate_cut
+from harness.ablate import strip as ablate_strip
 from harness.catalogue import assemble, verify
-from harness.cell import ENGINE_ARMS, Cell
+from harness.cell import BRIEFED_ARM, ENGINE_ARMS, Cell
 
 #: Repo-relative, resolved from this file so the harness works from any cwd.
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -177,6 +180,31 @@ def _copy_skill(destination: Path, ablate: str | None = None) -> None:
     apply_ablation(skill_root, ablate)
 
 
+def briefing(ablate: str | None = None) -> str:
+    """The engine's reference documentation, as the briefed arm's prompt sees it.
+
+    **The same bytes the workspace copy carries**, from the same file and through
+    the same `ablate` pass: markers always stripped, one named block cut when a
+    run is ablating. If the briefing came from the checkout untouched, an ablated
+    briefed cell would read in its prompt the paragraph its skill copy had cut,
+    and the ablation would measure nothing — which is the failure `_copy_skill`'s
+    own comment is about, one level up.
+
+    ``SKILL.md`` only. `recipes/` is per-pack and `examples/` is a directory of
+    programs; both stay discoverable in the workspace, and putting them in every
+    prompt would spend the window on text most cells have no use for.
+    """
+    text = (DATALOG_SKILL_DIR / "SKILL.md").read_text(encoding="utf-8")
+    if ablate is not None:
+        text, removed = ablate_cut(text, ablate)
+        if not removed:
+            raise UnknownBlock(
+                f"no block named {ablate!r} in SKILL.md — the briefed arm would "
+                "carry a paragraph its own skill copy had cut"
+            )
+    return ablate_strip(text)
+
+
 def _clear(path: Path, root: Path) -> None:
     """Delete a cell's directory, refusing anything that is not one.
 
@@ -235,7 +263,11 @@ def build(cell: Cell, root: Path) -> Workspace:
     return Workspace(
         path=path,
         cell_id=cell.id,
-        prompt=assemble(cell.task, cell.arm),
+        prompt=assemble(
+            cell.task,
+            cell.arm,
+            briefing(cell.ablate) if cell.arm == BRIEFED_ARM else None,
+        ),
         env={"PATH": search_path},
         has_engine=has_engine,
         ablated=cell.ablate if has_engine else None,

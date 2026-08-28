@@ -3,9 +3,10 @@
 Three things changed after the first grid could not be read (`decisions.md`
 2026-08-25), and each is a section here:
 
-- **Three arms, compared pairwise.** ``engine-forced`` vs ``prose`` is S1's
+- **Four arms, compared pairwise.** ``engine-forced`` vs ``prose`` is S1's
   sentence read literally; ``engine`` vs ``prose`` folds in whether the subject
-  picks the engine up at all. One number cannot be both.
+  picks the engine up at all; ``engine-briefed`` vs ``engine-forced`` is what
+  *discovering the documentation* costs. One number cannot be all three.
 - **Every rate gets an interval, and every delta a paired test.** A delta with no
   interval is not evidence of no effect. The pairing is the design — both arms
   answered the same tasks — so McNemar is the right test and is far more powerful
@@ -24,7 +25,7 @@ from __future__ import annotations
 from collections import defaultdict
 from pathlib import Path
 
-from harness.cell import ARMS, STRENGTHS
+from harness.cell import ARMS, ENGINE_ARMS, STRENGTHS
 from harness.record import RecordStore
 from harness.resume import failed
 from harness.runner import STOPPING_RULE
@@ -34,8 +35,10 @@ from harness.stats import bootstrap_delta, f1, mcnemar, wilson
 #: directly-answering-S1 first.
 COMPARISONS: tuple[tuple[str, str, str], ...] = (
     ("engine-forced", "prose", "does the engine make the agent right?"),
+    ("engine-briefed", "prose", "and with the engine's manual in hand?"),
     ("engine", "prose", "does *supplying* the engine help?"),
     ("engine", "engine-forced", "what does not reaching for it cost?"),
+    ("engine-briefed", "engine-forced", "what does *finding the manual* cost?"),
 )
 
 
@@ -236,7 +239,7 @@ def _reach(records: list[dict]) -> list[str]:
     the most important number in the run — with reach that low, 47 of 56 cells
     were not measuring the independent variable at all.
     """
-    engine_records = [r for r in records if r["arm"] in ("engine", "engine-forced")]
+    engine_records = [r for r in records if r["arm"] in ENGINE_ARMS]
     if not engine_records:
         return []
     lines = ["### Reach — did the subject actually use the engine?", ""]
@@ -268,7 +271,7 @@ def _reach(records: list[dict]) -> list[str]:
         "`invoked` is the middle case: it reached for the engine and no program "
         "ran. Only `answered-from` is engine use in the sense S1 means "
         "(`decisions.md` 2026-08-25). On the `engine` arm this is a measurement; "
-        "on `engine-forced` it is a **compliance check** — a low number there "
+        "on the mandated arms it is a **compliance check** — a low number there "
         "means the mandate did not take, and the comparison it feeds is void.",
         "",
     ]
@@ -359,7 +362,7 @@ def render(run_dir: Path) -> str:
 
     lines += _reach(graded)
 
-    engine_records = [r for r in graded if r["arm"] in ("engine", "engine-forced")]
+    engine_records = [r for r in graded if r["arm"] in ENGINE_ARMS]
     switched = sum(1 for r in engine_records if r["signals"]["searches_after_engine"] > 0)
     first_programs = sum(1 for r in engine_records if r["first_program"])
     silent = sum(
