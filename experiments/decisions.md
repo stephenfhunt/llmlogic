@@ -83,6 +83,20 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
   - **Not a change to the reminder's count**, which is a subject-behaviour knob
     and a second variable. What changed is which sentence it sends and whether
     giving up is recorded.
+  - ***Consequences*** — measured on the next cell it touched, and it is **not**
+    only a recording change, which is what this entry first claimed.
+    `ontology.instances-of-sensor` went `no-answer, 151s, 0 turns` →
+    **`correct`, 298s, 4 turns**: told it had read nothing, the subject went and
+    read. So the new sentence moves an arm's absolute score — `prose` 2/8 → 3/8
+    on these two packs.
+  - **The cost of that, stated:** it applies identically to every arm, so the
+    within-subject comparison is untouched, and it is aimed at a failure neither
+    arm should be scored on. But `prose` is the arm that fails by writing no
+    file, so it is the arm this helps, and **sitting 1's `prose` number and the
+    clean run's are not the same measurement**. It also widens the deliberate
+    asymmetry with the SDK subject (2026-08-26), which gets no reminder at all:
+    the gap is now a nudge *and* a different nudge conditioned on the subject's
+    own behaviour.
 
 - **2026-08-28 (later v)** — **The output cap is a stopping rule, and like the
   other three it recorded nothing.** A completion that spends its whole budget
