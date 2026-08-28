@@ -24,6 +24,58 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-28 — The fixes took, and what they uncovered was tool use
+
+Re-gated `engine-forced` on all three arms, launched the 240-cell pass, **stopped
+it at 13 cells**, and built a fourth arm instead. The session's finding is one
+sentence: *both arms are failing on tool use before the engine is in play.*
+
+**Done**
+- **The gate says the three fixes took** (`results/run-20260828T104124Z`, 12
+  cells): **no cell at its budget in any arm** against `engine-forced`'s 48%,
+  4–9 turns of 48, no fact-shaped answers, `engine_unusable` used once. prose
+  3/4 = **75%**, precondition 1 at its boundary.
+- **And what was under them**: all four `engine-forced` first programs invented a
+  CSV loader — `read_csv/4`, `csv_load/3`, `csv_read_line/2`, `csv_read/4` —
+  against `import "f.csv" as r.`, with **zero `Skill` calls** and the manual in
+  the workspace.
+- **A fourth arm, `engine-briefed`** — `engine-forced` plus `SKILL.md` in the
+  prompt (`479067e`), gated at 16 cells (`run-20260828T132615Z`): **import syntax
+  0/4 → 3/4, compliance 3/4 → 4/4**, accuracy 2/4 against 1/4 at n=4. Prompts
+  nest as strict suffixes, same 2.0 budget: the pair differs by the briefing.
+- **The slate-subject guard** (`faa8375`, `7060097`), the open question that said
+  *do it before the grid*: five fields compared, `endpoint` excluded by name,
+  containment not equality — and the manifest could not name the output cap at
+  all until now (`MANIFEST_VERSION` 2). Plus: the mandate says the quotes come
+  off. 1,457 tests green (+28), ruff clean, offline grid renders.
+
+**Decided** (`experiments/decisions.md`, four entries; `hypotheses.md` addendum)
+- **The 240-cell pass is parked**: 7 of the first 12 prose cells ended at the
+  900s cap, projecting **42h not 7.5h** — the 7.5h had extrapolated four
+  `controls` prose cells at 113s to a multi-hop pool. *A rate measured on the
+  controls is not a rate for the slate.* A band selected now would rank items by
+  how often prose runs out of clock.
+- **The primary endpoint does not move onto the new arm.** `briefed − prose` is
+  an **upper bound** on what the engine buys this subject, not S1: an agent
+  handed the manual is more equipped than the one S1 describes.
+- **Open**: whether `engine_unusable` counts as complying with the mandate —
+  precondition 2 read 75% against an 80% floor and the missing cell was the
+  mandate's own legal exit. *Decide on the rule, not on the number already seen.*
+
+**Removed**
+- The *"`MANDATE` should name the skill?"* open question, answered by building
+  the arm instead. The ROADMAP's *"engine-forced writes Datalog it has invented"*
+  item, superseded the same night. Nothing else: the parked pass's 13 cells are
+  kept as the evidence for parking it.
+
+**Next up**
+- **The blocker moved.** It is no longer *a rung between controls and the slate*;
+  it is that this subject's tool use eats the variable. A briefed cell still
+  fabricated its fact base inline with the CSV beside it (22 turns, no answer).
+- **Nothing is calibrated**, and no grid should run until the above is settled.
+- Unchanged: the mandate arm's `invoked` split, the prompt-blind
+  `resume.fingerprint`, `scheduling`'s own look.
+
 ## 2026-08-27 (later still, iv) — engine-forced was measuring its own turn cap
 
 Asked why `engine-forced` could possibly score below `engine` when it has the
@@ -130,41 +182,3 @@ whole subject (`reasoning_effort: null`, 24576, 4096) so a resume rebuilds it.
   the generators still owe an easier form.
 - **Still owed:** the mandate arm, the prompt-blind `resume.fingerprint`,
   `scheduling`'s own look, and the partial-read rule.
-
-## 2026-08-27 (later still, ii) — q8 KV fits, and the ceiling was a default
-
-A system update was reason to re-measure and the answer moved twice: `qwen3:14b`
-holds **q8_0 KV** — the aggressive q4_0 is retired — at **24,576 tokens**, because
-the ceiling that looked like the card was a default. Two `controls` smokes, 3/3
-each, $0.00. Measurements: `experiments/notes/a-local-subject.md`.
-
-**Done**
-- **The residency probe said 16k, and the probe was reading a default.** At
-  ollama's stock fit margin: 16k ✓ (9.70 GiB, 41/41, 31.1 tok/s); 18k, 20k, 24k
-  all spill. That ~1.15 GiB the fitter declines to spend is
-  **`LLAMA_ARG_FIT_TARGET`** — at 288 MiB, **24k q8 loads 41/41** (10.37 GiB) and
-  holds under load. **24k is the config**: it leaves 0.86 GiB, narrower than the
-  desktop, and the environment is being held still for the pass. `640` with a
-  20,480 window is the setting that tolerates a browser.
-- **The block formats were the other arithmetic error.** `q8_0` costs 1.0625 bytes
-  an element — 32 values plus a 2-byte scale — so KV is **85 KiB a token**, not
-  80. With weights at 8.23 GiB the model predicts every resident row to within
-  0.03 GiB.
-
-**Decided** (`experiments/decisions.md`, one entry, amended once in session)
-- **A KV type is part of the subject** — as are the window, protocol and output
-  cap. `run-20260827T015701Z` and the halted `cal-20260827T035804Z` are q4
-  thinking-off: the next pass is not paired with them and cannot resume into one.
-  Both were already rejected, so this costs nothing.
-- **A vendor default read as a hardware limit is the fifth silent
-  misconfiguration here**, after `OLLAMA_CONTEXT_LENGTH=4096` and the note's
-  three. Corollary: grep the server's own `--help` before believing a limit.
-
-**Removed**
-- The note's Xorg desktop-VRAM table (`Xorg`'s 451 MiB is gone — Wayland now), its
-  10.18 GiB q8 row, its "moving the display buys the q8 KV cache" conclusion (that
-  lever now buys *window*, ~32k, and stays unmade), and the vLLM row's ollama
-  column. Two older entries rotated to the archive.
-
-**Next up**
-- Superseded by the entry above.
