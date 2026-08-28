@@ -1,0 +1,56 @@
+{
+  "run_id": "run-20260828T162946Z",
+  "started_at": "2026-08-28T16:29:46.537841+00:00",
+  "dry_run": false,
+  "domains": [
+    "access_control",
+    "eligibility",
+    "imports",
+    "ontology"
+  ],
+  "tasks": 16,
+  "cells": 16,
+  "strengths": [
+    "qwen3-14b-structured"
+  ],
+  "arms": [
+    "prose",
+    "engine-briefed"
+  ],
+  "repeats": 1,
+  "fingerprints": {
+    "access_control/who-can-read-r03": "0499ee734ce6341f",
+    "access_control/resources-for-u04": "bac0dc855085b84e",
+    "access_control/users-with-no-access": "7d7ca9fd98a296e1",
+    "access_control/delete-without-read": "5a8b0fd34f012c34",
+    "ontology/instances-of-sensor": "337d7c1272affa84",
+    "ontology/power-profile": "abbb1aac135b4944",
+    "ontology/inconsistent-instances": "aaf733d932265105",
+    "ontology/classes-with-no-instances": "f28d6e04ffbae8c1",
+    "imports/late-shipments": "7d6238ec4fabe573",
+    "imports/regions-over-threshold": "46c34ed4ff41088e",
+    "imports/customers-with-no-recent-orders": "bd310d78716ad51c",
+    "imports/busiest-month-per-region": "ac39ba49c2e16976",
+    "eligibility/eligible": "7cc487efd54d1aee",
+    "eligibility/blocked-by-exactly-one": "6c5c9cb8d96eafbd",
+    "eligibility/undetermined": "1ac7ece85256cf7d",
+    "eligibility/households-over-dependants": "3e2f1d975d74acc4"
+  },
+  "ablate": null,
+  "max_turns": 30,
+  "max_budget_usd": 2.0,
+  "local": {
+    "endpoint": "http://127.0.0.1:11434/v1",
+    "models": [
+      "qwen3:14b"
+    ],
+    "protocols": [
+      "structured"
+    ],
+    "reasoning_effort": null,
+    "max_cell_seconds": 900,
+    "context_tokens": 24576,
+    "max_output_tokens": 4096
+  },
+  "slate": null
+}

@@ -130,6 +130,37 @@ class TestPartialCredit:
         assert _mean_f1([_record(), legacy]) == "—"
 
 
+class TestPerItemF1CountsAnEmptyCellAsZero:
+    """`grade` returns `no-answer` before it has anything to compare, so
+    `missing` and `extra` keep their `0` defaults — and `f1(0, 0, n)` is 1.0.
+
+    The metric exists to separate *dropped one row of forty* from *returned
+    nothing* (`hypotheses.md`), and for the second case it was doing the
+    opposite. The bias is arm-shaped, not random: whichever arm fails by writing
+    no file is flattered. On `run-20260828T162946Z` that was `prose`, reading
+    0.92 against `engine-briefed`'s 0.19 on 2/8 correct against 1/8.
+    """
+
+    def test_a_cell_that_wrote_nothing_does_not_score_perfectly(self):
+        empty = _record(verdict="no-answer", missing=0, extra=0, truth_size=9)
+        assert _mean_f1([empty]) == "0.00"
+
+    def test_an_unparseable_and_an_unusable_cell_are_the_same_case(self):
+        for verdict in ("unparseable", "engine-unusable"):
+            row = _record(verdict=verdict, missing=0, extra=0, truth_size=9)
+            assert _mean_f1([row]) == "0.00", verdict
+
+    def test_a_genuine_near_miss_still_scores_near_one(self):
+        """The distinction the metric is for. Nine of ten rows is not nothing."""
+        near = _record(verdict="wrong", missing=1, extra=0, truth_size=10)
+        assert _mean_f1([near]) == "0.95"
+
+    def test_an_empty_answer_that_is_correct_still_scores_one(self):
+        """`truth_size == 0` is a real answer for a whole question class, and the
+        cell did write it. Only a cell with no answer set at all is zeroed."""
+        assert _mean_f1([_record(verdict="correct", truth_size=0)]) == "1.00"
+
+
 class TestRender:
     def _run(self, tmp_path: Path, records: list[dict]) -> Path:
         run_dir = tmp_path / "run-x"

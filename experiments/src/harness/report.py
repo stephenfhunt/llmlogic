@@ -61,6 +61,14 @@ def _rate_with_interval(records: list[dict]) -> str:
     return f"{correct}/{len(records)} ({100 * correct / len(records):.0f}%) {interval}"
 
 
+#: Verdicts where the cell produced no answer set at all. `grade` returns these
+#: before it has anything to compare, so `missing` and `extra` keep their `0`
+#: defaults — and `f1(0, 0, n)` is **1.0**, a perfect score for a cell that wrote
+#: nothing. Read off the verdict rather than repaired in `grade`, so every run
+#: already in `results/` re-renders correctly instead of only the next one.
+_NO_ANSWER_SET = frozenset({"no-answer", "unparseable", "engine-unusable"})
+
+
 def _mean_f1(records: list[dict]) -> str:
     """Mean per-item F1, or ``—`` for a run recorded before ``truth_size`` was.
 
@@ -68,11 +76,22 @@ def _mean_f1(records: list[dict]) -> str:
     `scheduling` fixture was repaired after the 2026-08-24 grid, so recovering a
     truth size from the current packs would grade a past run against an oracle it
     never saw — the exact defect class the staleness guard exists for.
+
+    **A cell that returned nothing scores 0, not 1** (2026-08-28). This metric
+    exists to separate *dropped one row of forty* from *returned nothing*
+    (`hypotheses.md`), and until this it did the opposite of that for the second
+    case. The bias was arm-shaped rather than random: an arm fails by writing no
+    file, so on the first real slate `prose` read **0.92** against
+    `engine-briefed`'s 0.19 on 2/8 against 1/8 — three of prose's eight cells
+    were empty and each scored a perfect 1.0.
     """
     scored = [r for r in records if r.get("truth_size") is not None]
     if not scored or len(scored) != len(records):
         return "—"
-    total = sum(f1(r["missing"], r["extra"], r["truth_size"]) for r in scored)
+    total = sum(
+        0.0 if r["verdict"] in _NO_ANSWER_SET else f1(r["missing"], r["extra"], r["truth_size"])
+        for r in scored
+    )
     return f"{total / len(scored):.2f}"
 
 
