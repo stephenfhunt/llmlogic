@@ -15,6 +15,52 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-08-27 (later iv)** — **`engine-forced` was measuring its own turn cap,
+  and three things change.** Across every run on disk it ended at the cap in
+  **48%** of cells against 16% for `prose`, 75% of those writing nothing; 64% of
+  the arm was `no-answer` against 39% for `engine`, and its 5% correct could not
+  be read as a fact about the engine. Diagnosis and numbers:
+  [`notes/a-local-subject.md`](notes/a-local-subject.md) (*What is wrong with
+  engine-forced*).
+  - **The arms no longer share one budget** (`cell.ARM_BUDGET`): `engine-forced`
+    gets **2× the turns and wall clock**, because it must write a program, run
+    it, read the diagnostic, repair and re-run before it can write an answer at
+    all. Its *successful* cells took a median 13 turns against `engine`'s 4, and
+    topped out at 21 against a 24 cap — a truncated distribution, so 2.0 is a
+    floor and not the observed 3.25 ratio.
+  - **The mandate names the answer format.** The engine prints `answer("x").`
+    and the contract wants `x`; fact-shaped answers were **3.7% of
+    `engine-forced` answers and 0% of both other arms**, all graded `wrong`.
+    Precedent is exact: *fix the instruction, not the ruler* (the `|` fix).
+  - **`engine_unusable` is a legal move in the engine arms**, with a required
+    reason, graded `ENGINE_UNUSABLE`. The mandate forbids answering from anything
+    else, so a subject whose program will not run previously had no move but to
+    loop. *Tried and the engine refused* is evidence about S1; `no-answer` pools
+    it with never engaging.
+  - ***The cost, and it is real:*** an unequal budget is an arm-asymmetric
+    instrument parameter **on the arm carrying the primary endpoint**, so a gain
+    on `engine-forced` now has two candidate causes. `report.py` prints cap-hit
+    rate per arm beside it — a result is readable only while those stay low. All
+    three invalidate comparison with existing `engine-forced` cells, which cost
+    nothing, since those were measuring a cap.
+  - *First real-model cell after the change*: 593s/12 turns → **183s/6 turns**,
+    no cap, and a bare value instead of fact syntax (`run-20260828T025652Z`).
+    Still wrong, and n=1 — the mechanism moved, the accuracy is unmeasured.
+
+- **2026-08-27 (later v)** — **A cell stopped by the turn cap now says so.** The
+  local subject's loops simply ended, setting nothing, so a capped cell was
+  indistinguishable in the transcript from one that finished and wrote nothing.
+  `_OUT_OF_TURNS` matches `runner.STOPPING_RULE`, so such a cell is still graded
+  on what it left behind rather than discarded.
+  - **This is why the above took three sessions to find.** The wall clock and the
+    context guard both recorded their stopping rule from the day they were
+    written; the turn cap, the most frequently fired of the three, recorded
+    nothing. Every reading of `engine-forced` since has been of a number with its
+    largest cause invisible. **A stopping rule that does not record itself is not
+    a stopping rule, it is a silent truncation** — the fourth instance of this
+    project's standing failure mode, and the first found in its own bounds rather
+    than in a vendor default.
+
 - **2026-08-27 (later ii)** — **The subject thinks, and two bounds move with
   it.** `qwen3:14b` runs with `reasoning_effort` unset from the next pass on. It
   is the only source of subject power that costs no VRAM, and the pool being too
@@ -59,6 +105,15 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
     The band needs bracketing: if thinking lifts the subject, 1 becomes too easy
     and 2 is where the selection happens. One difficulty risks a second pass that
     selects nothing, which is the failure this one is recovering from.
+  - ***Amended*** 2026-08-27 (later iv). A **prose+engine grid dropping
+    `engine-forced`** was costed here at 4.7× the items per night and recommended
+    on that basis. The premise was wrong: `engine-forced` was expensive *because*
+    it was looping to an unrecorded turn cap, and 617s/cell was a defect and not
+    a price. First cell after the fix is 183s. **Dropping the arm would have
+    retired the primary endpoint to work around a bug** — and the argument for
+    doing so was built on the bug's own symptom. Re-cost the grid after the next
+    pass measures the arm honestly; `engine − prose` remains a real secondary
+    question, but it is no longer a reason to drop anything.
 
 - **2026-08-27 (later)** — **q8 KV fits after all, and 16k is its ceiling.** The
   local subject moves to **`OLLAMA_KV_CACHE_TYPE=q8_0`, window held at 16,384** —
@@ -831,6 +886,14 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
   power lost, not validity lost. A fourth reason beside `WRONG_ARITY` and `PROSE`
   is the established shape. Decide against more than one cell; thinking-on makes
   it likelier, since a thinking model narrates its way into notation.
+  - ***Answered*** 2026-08-27 (later iv), and not by a fourth reason. Measured at
+    **3.7% of `engine-forced` answers, 0% elsewhere**, the cause turned out to be
+    the *instruction*, not the ruler: the mandate said write what the engine
+    derived and never said the engine's output is fact syntax. Fixing `grade.py`
+    would have taught the harness to accept a shape the prompt should not have
+    invited. The guard stays unwritten on purpose — if fact-shaped answers
+    survive the mandate change, that is a subject finding and worth a reason
+    code then.
 
 - **`engine-forced` under thinking-on runs close to its wall clock.** Measured
   268s, 593s, 704s, 904s — the last is the 900s cap firing, and the median is
@@ -838,6 +901,11 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
   (2026-08-27 said this of `scheduling` at 240s). Raising it lengthens the grid
   but not the calibration pass, which is prose-only. Decide when the grid is
   designed, on the pass's own distribution rather than on these four.
+  - ***Answered*** 2026-08-27 (later iv) — and it was worse than these four
+    suggested. Over every run on disk the arm ended at its **turn** cap in 48% of
+    cells, which nothing recorded. Both caps now scale with the arm
+    (`cell.ARM_BUDGET`), and the report prints the rate so the question cannot go
+    unasked again.
 
 - **A slate checks its items against the manifest, but never its subject.**
   `calibrate.load` refuses a slate whose fixtures, question or truth moved —

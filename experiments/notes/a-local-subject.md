@@ -347,6 +347,56 @@ kinds, none of which is "could not work out the answer":
 Each has a fix in `decisions.md`, and each fix is bounded, applied to every arm,
 and recorded — because each one moves the instrument.
 
+## What is wrong with engine-forced
+
+It should not be possible for `engine-forced` to do worse than `engine` on the
+tasks where `engine` reaches — it has the same tools and strictly more
+instruction. It was, by a lot, and the arm's runtime was an order out. Both facts
+had one cause and two passengers.
+
+**The headline, over every run on disk (2026-08-27):**
+
+| arm | n | correct | no-answer | ended at its cap |
+|---|---|---|---|---|
+| prose | 853 | 19% | 31% | 16% |
+| engine | 441 | **29%** | 39% | 20% |
+| `engine-forced` | 343 | **5%** | **64%** | **48%** |
+
+**Nearly half of `engine-forced` was terminated by the turn cap, and 75% of those
+wrote nothing.** Its 5% was substantially a reading of the cap.
+
+**The cause is structural, not incidental.** `prose` answers in read-then-write.
+`engine-forced` must read, write a program, run it, read the diagnostic, repair,
+re-run, *then* write an answer — and every repair is a round trip. Its
+**successful** cells took a median 13 turns against `engine`'s 4, topping out at
+21 against a 24 cap. An equal cap over unequal work is not a held constant.
+
+**What it is not.** Two plausible explanations, both checked and both wrong:
+
+- *It doesn't read the skill.* It reads it **more** — `Skill` invoked in 203/343
+  cells against `engine`'s 149/417. Better informed, and worse.
+- *The arm is mis-built.* It is the base prompt plus `MANDATE`, appended,
+  test-pinned as a strict suffix. There is no wiring defect.
+
+**The two passengers.**
+
+- **The mandate had no exit.** *"Your answer must be what the engine derived, not
+  what you worked out yourself"* means a subject whose program will not compile
+  has no legal move. `engine` falls back to `grep` and scores 29%;
+  `engine-forced` cannot, and loops until a stopping rule ends it.
+- **The engine's output format violates the answer contract.** `datalog` prints
+  `answer("engineering").`; the contract wants `engineering` and "nothing else in
+  the file". The arm was told to transcribe something whose literal form the
+  grader rejects — 3.7% of its answers, 0% of both other arms, all `wrong`.
+
+**And the reason none of this was visible for three sessions:** the turn cap
+recorded nothing. The wall clock wrote `_OUT_OF_TIME` and the context guard wrote
+`_OUT_OF_CONTEXT` from the day each was written; the loop simply ran out, leaving
+a transcript identical to one that finished and wrote no answer. **A stopping rule
+that does not record itself is a silent truncation.** That is this project's
+standing failure mode found for the fourth time — and the first time in its own
+bounds rather than in someone else's default.
+
 ## Four silent misconfigurations, and the pattern
 
 The dangerous failures here were all **quiet**. Nothing errored; numbers came out;

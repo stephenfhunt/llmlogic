@@ -179,6 +179,18 @@ grid unable to answer S1. The argument and the numbers are in
   50%.** Costs ~7.5× wall clock, which is why the next pass is **240 cells, not
   1,125**. _queued — **v1**, and the next session's work._ — `decisions.md` 2026-08-27,
   `notes/a-local-subject.md` (*What thinking costs*).
+- **`engine-forced` was measuring its own turn cap** — 48% of its cells ended
+  there against 16% for `prose`, 75% of those writing nothing, and nothing
+  recorded it. Fixed three ways: a per-arm turn and wall-clock budget
+  (`cell.ARM_BUDGET`), a mandate that names the answer format, and an
+  `engine_unusable` move graded as its own verdict. _shipped 2026-08-27._ —
+  `decisions.md` 2026-08-27 (later iv/v), `notes/a-local-subject.md`
+  (*What is wrong with engine-forced*). **The arm's accuracy is now unmeasured**:
+  every prior `engine-forced` number was cap-bound and none carries forward.
+- **A cap-hit rate per arm, in every report** — the unequal budget is an
+  arm-asymmetric parameter on the arm carrying the primary endpoint, so a result
+  is readable only while no arm ends at its cap. _shipped 2026-08-27._ —
+  `report._budget_line`.
 - **`scheduling` dropped from the next pass** — capped in 43 of 75 cells at 240s
   and the slowest pack by median; at 7.5× it would eat the sitting. Needs its own
   look before it returns. _parked — **v1**, trigger is that look._ —

@@ -24,6 +24,59 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-27 (later still, iv) — engine-forced was measuring its own turn cap
+
+Asked why `engine-forced` could possibly score below `engine` when it has the
+same tools and more instruction. It could not — the number was an artefact. Over
+every run on disk the arm ended at its **turn cap in 48% of cells** against 16%
+for `prose`, 75% of those writing nothing, **and nothing recorded it**. Its 5%
+correct was a reading of the cap. Long form:
+`experiments/notes/a-local-subject.md` (*What is wrong with engine-forced*).
+
+**Done** — three fixes, `1,429` tests green (+17), ruff clean, offline grid renders
+- **A per-arm budget** (`cell.ARM_BUDGET`): `engine-forced` gets 2× the turns and
+  wall clock, because it must write, run, read, repair and re-run before it can
+  answer. Its *successful* cells took a median 13 turns against `engine`'s 4 and
+  topped out at 21 against a 24 cap — truncated, so 2.0 is a floor.
+- **The mandate names the answer format.** `datalog` prints `answer("x").`; the
+  contract wants `x`. Fact-shaped answers were 3.7% of `engine-forced` answers and
+  0% of both other arms, all `wrong`. *Fix the instruction, not the ruler.*
+- **`engine_unusable`**, a legal move in the engine arms with a required reason,
+  graded `ENGINE_UNUSABLE`. The mandate forbids answering from anything else, so a
+  subject whose program will not run previously had no move but to loop.
+- **A capped cell now says so.** `_OUT_OF_TURNS`, matching `runner.STOPPING_RULE`.
+  The wall clock and context guard always recorded theirs; the turn cap — the most
+  fired of the three — recorded nothing, which is why this took three sessions.
+- **Two hypotheses checked and killed**: the arm does *not* under-read the skill
+  (203/343 vs `engine`'s 149/417), and it is not mis-built (base prompt plus
+  `MANDATE`, test-pinned as a strict suffix).
+- **First real cell after the fix**: 593s/12 turns → **183s/6 turns**, no cap, and
+  a bare value instead of fact syntax. Still wrong; n=1.
+
+**Decided** (`experiments/decisions.md`, two entries, two open questions answered)
+- **A stopping rule that does not record itself is a silent truncation** — the
+  fourth instance of this project's standing failure mode, and the first found in
+  its own bounds rather than in a vendor default.
+- ***Amended*: dropping `engine-forced` was the wrong call, on a premise that was
+  the bug's own symptom.** Yesterday's costing made it 4.7× the items per night;
+  617s/cell was a defect, not a price. It would have retired the primary endpoint
+  to work around a bug. `engine − prose` stays a real secondary question.
+- **The cost, stated:** an unequal budget is arm-asymmetric and sits on the arm
+  carrying the primary endpoint, so a gain there now has two candidate causes.
+  `report.py` prints cap-hit rate per arm; a result is readable only while it is
+  low.
+
+**Removed**
+- Every prior `engine-forced` accuracy number. All three fixes change the arm, and
+  those cells were measuring a cap — so nothing is lost that was worth keeping.
+  The 2026-08-27 (later) entry rotated to the archive.
+
+**Next up**
+- **The arm's accuracy is now unmeasured.** Re-gate `controls` on all three arms
+  before the pass, and read cap-hit rate first.
+- Unchanged: the slate-subject guard before any `run --slate`; the 240-cell
+  calibration; the missing rung; the mandate arm's `invoked` split.
+
 ## 2026-08-27 (later still, iii) — Thinking back on, gated before it was adopted
 
 `qwen3:14b` runs with `reasoning_effort` unset from the next pass on. **Gated
@@ -115,52 +168,3 @@ each, $0.00. Measurements: `experiments/notes/a-local-subject.md`.
 
 **Next up**
 - Superseded by the entry above.
-
-## 2026-08-27 (later still) — `bugs/009`, the half that needed no new machinery
-
-The first defect this harness produced *about the engine* gets its first fix. A
-column-level type clash now names both terms as they were written, which is the
-part that cost a local subject fifteen rewrites. **590 datalog tests green**,
-clippy and fmt clean, and the pinned reference diagnostic is byte-identical.
-
-**Done**
-- **`Fixed { ty, witness }`** replaces a bare `TypeName` in the typechecker's
-  union-find, so a class remembers the literal that pinned it. The three call
-  sites with a literal — facts, constant atom arguments, literal operands — pass
-  it through `print_value`, which already spells a symbol bare and a string
-  quoted. That spelling difference *is* the diagnosis:
-
-  ```
-  - `employee` column 0 is used as both symbol and string (at 3:4)
-  + `employee` column 0 is used as both symbol `name` and string `"Carol"` (at 3:4)
-  ```
-- **Three tests pin the new shape**, including the deliberate *exclusion* below.
-
-**Decided** (`datalog/bugs/009`, not §17 — one normative home, and the bug file
-is where a reader of this message will look)
-- **The `union` form does not name terms, on purpose.** Its two sides are two
-  slots, not two terms: a variable's class inherited its type from whatever
-  pinned the column, so *"variable `Q` has type int `4`"* would read as Q's own
-  value. It was written that way, seen to be wrong, and backed out;
-  `a_variable_type_clash_names_types_without_borrowing_a_literal` fails if it
-  returns.
-- **The bug's own root-cause note was wrong and is corrected in place.** "The fix
-  is one field" holds for the *term*, not the *position*: `Error` carries exactly
-  one span and renders one `(at …)`, and the typechecker never sees the source,
-  so a second position cannot go in the message text. And `ir::Fact` carries no
-  span at all — it derives `Eq`/`Hash` as a set member (§17), so a span cannot go
-  on `Fact` without changing fact identity or breaking 108 uses of `.facts`.
-
-**Removed**
-- Nothing. `bugs/009` stays **open** and both `#[ignore]`d criteria stay red:
-  they assert positions, which this does not deliver. The 2026-08-26 (later
-  still) worklog entry rotated to the archive.
-
-**Next up**
-- **A design pass on the diagnostic model**, which is what closes 009: related
-  spans on `Error`, how `locate_all` resolves them, how they render and serialize
-  for a future `--format json`, and what locates an **imported** row — §12 says
-  source name plus row and column, not a program span. Needs a §12 amendment and
-  a §17 entry, so it is a design session and not a patch.
-- Unchanged from earlier today: the mandate arm, the missing rung between
-  `controls` and the measured slate, and the prompt-blind `resume.fingerprint`.
