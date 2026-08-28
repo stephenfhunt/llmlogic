@@ -151,7 +151,8 @@ You must answer using the `datalog` logic engine, which is on your PATH.
 - Your answer must be what the engine derived, not what you worked out yourself.
 - The engine prints its results as Datalog facts, like `answer("x").`. The
   answer file takes the values themselves, in the format described above — write
-  `x`, not the fact the engine printed it in.
+  `x`, not the fact the engine printed it in, and not the quotes it printed
+  around it.
 
 If the engine rejects your program, repair it from the diagnostic and run it
 again. If it still will not run your program after several attempts, use the
