@@ -15,6 +15,48 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-08-28 (later ii)** — **A fourth arm, `engine-briefed`**: `engine-forced`
+  plus `SKILL.md` in the prompt. The gate above found the arm reaching for the
+  engine and then writing invented syntax, so it was measuring *finding the
+  manual* as much as *using the engine* — tool use eating the variable before the
+  variable is tested. The briefing removes the discovery step and nothing else.
+  - **A fourth arm, not an edit to the third.** Editing `engine-forced` in place
+    would invalidate its numbers for the second time in two days and leave the
+    question unaskable of the data. `briefed − forced` **is** the measurement of
+    how much of the arm's failure was discovery.
+  - **Nested prompts, one budget.** `prose` ⊂ `engine-forced` ⊂ `engine-briefed`
+    as strict suffixes (pinned in `tests/test_controls_hold.py`), `engine`
+    byte-identical to `prose`, and the briefed arm carries the same 2.0
+    `ARM_BUDGET` — so each pairwise delta has one cause.
+  - **The briefing is the workspace's own bytes**, through the same `ablate`
+    pass: otherwise an ablated briefed cell reads in its prompt the paragraph its
+    skill copy had cut. ~3,300 tokens of an 18,432-token conversation budget,
+    which a compliant cell already spends on the `Skill` call it should make.
+  - **The primary endpoint does not move** onto the new arm — `hypotheses.md`
+    addendum 2026-08-28. `briefed − prose` is an **upper bound** on what the
+    engine buys this subject, because an agent handed the manual is more equipped
+    than the one S1 describes.
+
+- **2026-08-28 (later iii)** — **The 240-cell pass was measuring its own wall
+  clock, and is parked.** Launched, stopped at 13 cells: **7 of the first 12
+  prose cells ended at the 900s cap** (`results/cal-20260828T110615Z`), median
+  900s, projecting **42h** rather than the 7.5h costed. The 7.5h came from
+  extrapolating four `controls` prose cells at 113s — single-hop lookups — to a
+  multi-hop generated pool. *A rate measured on the controls is not a rate for
+  the slate.*
+  - **Two pathologies, and only one is a clock problem.** One cell spent the whole
+    900s on six reasoning chunks truncated at the 4,096-token cap and emitted
+    **no action at all** (0 turns); another spent 17 turns in `Write`/`Edit`
+    churn fixing its own escaping. More clock fixes neither.
+  - **Not re-launched with a bigger cap.** A band selected now would rank items
+    by how often prose runs out of clock — the same artefact this session
+    removed from `engine-forced`, reintroduced on the arm that does the
+    selecting. The subject's tool use is the blocker; calibrating around it
+    would pin a slate to it.
+  - **The ceiling is arithmetic, not preference:** at a 24,576 window and
+    `CONTEXT_BUDGET` 0.75 the reply headroom is 6,144 tokens, so 4,096 can rise
+    to at most 6,144 without the overflow guard and the output cap colliding.
+
 - **2026-08-28 (later)** — **The `engine-forced` fixes took, and what was under
   them is a syntax problem.** Re-gated on `controls`, all 4 tasks x 3 arms
   (`results/run-20260828T104124Z`): **no cell ended at its budget in any arm**

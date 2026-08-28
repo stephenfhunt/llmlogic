@@ -23,17 +23,22 @@ null result is indistinguishable from a broken instrument.
 
 A **cell** is one `(task, arm, strength, trial)`:
 
-- **arm** — `prose`, `engine`, or `engine-forced`. All three are the same agent,
-  same tools, same workspace, same files. The two engine arms additionally have the
-  `datalog` binary and its skill; `prose` has neither and is free to write a Python
-  script instead. That is the honest comparison: an agent's real alternative to the
-  engine is not prose, it is ad-hoc code.
+- **arm** — `prose`, `engine`, `engine-forced`, or `engine-briefed`. All four are
+  the same agent, same tools, same workspace, same files. The three engine arms
+  additionally have the `datalog` binary and its skill; `prose` has neither and is
+  free to write a Python script instead. That is the honest comparison: an agent's
+  real alternative to the engine is not prose, it is ad-hoc code.
 
-  `engine` and `prose` get a **byte-identical** prompt, so `engine` measures
-  *adoption and capability together* — would an agent pick this up, and does it
-  help. `engine-forced` appends a block mandating a program, so it measures
-  capability alone. Without both, a null is uninterpretable: an engine arm that
-  never reached for the engine is not a test of the engine.
+  The prompts nest, so every pairwise delta has one cause. `engine` and `prose`
+  get a **byte-identical** prompt, so `engine` measures *adoption and capability
+  together* — would an agent pick this up, and does it help. `engine-forced`
+  appends a block mandating a program, so it measures capability alone.
+  `engine-briefed` appends the engine's reference documentation on top of that,
+  so *finding the manual* stops competing with *does the engine help* — the arm
+  exists because a mandated subject was writing invented syntax with the manual
+  unread in its own workspace. Without the set, a null is uninterpretable: an
+  engine arm that never reached for the engine is not a test of the engine, and
+  one that reached and could not spell is not either.
 - **track** — `in-context`, where both arms can read the whole fact base and the
   difficulty comes from logical structure, or `at-scale`, where the fixture
   deliberately exceeds the prose arm's window. They answer different questions and

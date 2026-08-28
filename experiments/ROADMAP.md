@@ -162,11 +162,24 @@ grid unable to answer S1. The argument and the numbers are in
 - **A local sweep of the calibrated slate** — the run the above exists for:
   models x protocols x arms over `controls` and `access_control`, three trials.
   _queued_ — the next session.
+- **The 240-cell pass is parked, having measured its own wall clock** — 7 of
+  the first 12 prose cells ended at the 900s cap, projecting 42h not 7.5h,
+  because the 7.5h extrapolated a `controls` rate to a multi-hop pool. Not
+  re-launched until the subject's tool use is settled: a band selected now ranks
+  items by how often prose runs out of clock. _parked — **v1**._ —
+  `results/cal-20260828T110615Z`, `decisions.md` 2026-08-28 (later iii).
+
 - **A calibration pass that clears power** — first pass run 2026-08-27 against
   `qwen3:14b` and **halted at 408 of 1,125 cells**: the pool is too hard at every
   difficulty the generators reach (14% / 7% / 5%), so it projected ~75 kept items
   against the 155 a +20-point effect needs. _blocked_ on the item below. —
   `results/cal-20260827T035804Z`, `decisions.md` 2026-08-27.
+
+- **`engine-briefed`, a fourth arm** — `engine-forced` plus `SKILL.md` in the
+  prompt, so *finding the manual* stops competing with *does the engine help*.
+  `briefed − forced` is what discovery costs; `briefed − prose` is an upper
+  bound on S1 for this subject, never S1 itself. _shipped 2026-08-28._ —
+  `cell.BRIEFED_ARM`, `arms.briefing`, `hypotheses.md` addendum 2026-08-28.
 
 - **`engine-forced` writes Datalog it has invented** — four cells, four
   different fabricated CSV loaders, zero `Skill` calls, where the engine has

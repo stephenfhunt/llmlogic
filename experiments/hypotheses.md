@@ -141,6 +141,39 @@ naming here so that it can be recognised rather than explained away.
 
 *(Dated entries only. Amend, never revise.)*
 
+### 2026-08-28 — A fourth arm, and the primary endpoint does not move
+
+`engine-briefed` is added: `engine-forced` plus the engine's reference
+documentation in the prompt. It exists because the 2026-08-28 `controls` gate
+found `engine-forced` reaching for the engine and then writing syntax it had
+invented — four cells, four fabricated CSV loaders, no `Skill` call — so the arm
+was measuring whether the subject can *find and read the manual* as much as
+whether the engine helps.
+
+**The primary endpoint is unchanged**: paired `engine-forced` − `prose`,
+`in-context`, weaker strength, McNemar's exact, two-sided. This is said
+explicitly because the temptation the pre-registration exists to resist is
+exactly here — a new arm that may look better is not a licence to move the
+endpoint onto it after seeing a gate.
+
+Two new secondary endpoints, and what each may claim:
+
+| endpoint | question |
+|---|---|
+| `engine-briefed` − `engine-forced` | what does *finding the manual* cost? A capability of the subject and the skill, not of the engine |
+| `engine-briefed` − `prose` | S1 with the documentation handed over: an **upper bound** on what the engine buys this subject, not S1 itself |
+
+**Why the second is a bound and not the claim.** S1 is about an agent with a
+logic engine available, and an agent that is handed the manual unprompted is a
+more equipped agent than the one S1 describes. Reported as a ceiling: if
+`engine-briefed` − `prose` is null, no amount of documentation work rescues the
+engine for this subject, and *that* is the informative reading.
+
+The arms remain nested — `prose` ⊂ `engine-forced` ⊂ `engine-briefed` as strict
+text suffixes, `engine` byte-identical to `prose` — so every pairwise delta has
+one cause. `engine-briefed` carries the same 2.0 budget as `engine-forced`
+(`cell.ARM_BUDGET`), so the pair differs by the briefing alone.
+
 ### 2026-08-26 — What a local-subject grid is powered for, and why it is not +10
 
 The preconditions above size the slate for **+10 points** and quote 78 tasks.
