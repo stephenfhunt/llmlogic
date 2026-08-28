@@ -93,7 +93,10 @@ harness run --local-model qwen3:14b --min-context 24576 --protocol structured \
 `--min-context` sets both what preflight holds the server to *and* what the
 strengths claim, so the overflow guard and the server cannot disagree. What fits
 on this card is measured in `notes/a-local-subject.md`. `calibrate` takes the same
-flags, at **one** model and one protocol: a slate is calibrated for one subject.
+flags, at **one** model and one protocol: a slate is calibrated for one subject —
+and `run --slate` refuses a grid that does not hold that subject, comparing
+model, protocol, reasoning effort, window and output cap against the manifest
+(`endpoint` deliberately not).
 
 **24k leaves 0.86 GiB spare, which is less than the desktop holds** — it assumes
 nothing new is launched during the run. `LLAMA_ARG_FIT_TARGET=640` with a 20,480

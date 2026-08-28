@@ -78,7 +78,10 @@ calibrate` runs one cheap pass — the prose arm at the weaker model, three tria
 an item — and keeps what lands in the informative band: an item the subject
 always gets right, or never does, cannot show whether the engine helped. What it
 keeps is pinned to a manifest in [`slates/`](slates/README.md), and `harness run
---slate` regenerates from it and refuses an item that has moved.
+--slate` regenerates from it and refuses an item that has moved. A slate is
+calibrated **for one subject** — difficulty is not a property of the item alone —
+so the manifest records the subject that selected it and the grid is refused
+unless it holds that subject.
 
 ## Subjects
 
