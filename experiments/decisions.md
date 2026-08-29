@@ -68,6 +68,32 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
     report says to read it.
   - Answers the open question below. Pinned in `tests/test_report.py`.
 
+- **2026-08-28 (later x)** — **The briefed arm is worse than prose on this
+  slate, and the slate is not the floor it was taken for.** 32 cells
+  (`results/run-20260828T203413Z`): **prose 9/16 (56%), `engine-briefed` 4/16
+  (25%)**, delta **−31 pts [−62, +0]**, **1 win / 6 losses**, p = 0.125.
+  Exploratory by pre-registration — 16 paired items against 155, uncalibrated
+  slate — so this is reported and not claimed.
+  - **The direction is the informative part.** `briefed − prose` is the recorded
+    **upper bound** on what the engine buys this subject: the arm is handed the
+    manual and told to use the engine. A negative upper bound says the engine is
+    not being outperformed on documentation grounds — it is losing to `grep` and
+    ad-hoc Python with the manual in hand. That is the falsification-shaped
+    reading `hypotheses.md` names, arriving on the bound rather than on S1, and
+    under-powered.
+  - **Where it loses:** `recursion` 0/4 against prose's 2/4, and `access_control`
+    0/4. Both engine-arm caps were recursion cells burning their budget on
+    silence (see `notes/a-local-subject.md`). Where it wins is `constraint`, 1/1.
+  - **prose scored 1/24 on these exact items with thinking off and 9/16 with it
+    on.** The pinned slate was written off as below the instrument's floor on a
+    measurement of a different subject. **The missing rung may be a
+    thinking-effort question rather than a generator question** — which is the
+    cheaper of the two answers and was not on the table. Re-examine before any
+    generator work.
+  - **The gate that stopped sitting 1 passes here**: cap-hit 12% in both arms.
+    Compliance 15/16, the miss being `busiest-month-per-region`, whose cell hit
+    the truncation rule at turn 0 and so never reached the engine.
+
 - **2026-08-28 (later ix)** — **A subject that walks away is not a subject that
   was stopped, and the record could not tell them apart.** `final` with no answer
   file, through both completion reminders, set `final_text` and nothing else. One

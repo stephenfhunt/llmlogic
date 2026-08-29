@@ -187,8 +187,9 @@ grid unable to answer S1. The argument and the numbers are in
   4 packs plus `controls`, staged so a bad projection is caught in the first
   sitting. Pre-registered as **not an endpoint**. The gate worked: sitting 1
   failed it at 25% cap-hit and surfaced three instrument defects, all now fixed,
-  so the 32 was re-launched clean rather than continued. _building — **v1**._ —
-  `results/run-20260828T162946Z`, `hypotheses.md` addendum 2026-08-28 (later).
+  so the 32 was re-launched clean. **prose 9/16, `engine-briefed` 4/16, −31 pts
+  [−62, +0], 1 win / 6 losses**; cap-hit 12% in both arms. _shipped 2026-08-28._
+  — `results/run-20260828T203413Z`, `decisions.md` 2026-08-28 (later x).
 
 - **Mean per-item F1 scored an empty cell 1.0** — `grade` returns `no-answer`
   before it has anything to compare, so `f1(0, 0, n)` was perfect. Arm-shaped:
@@ -237,7 +238,11 @@ grid unable to answer S1. The argument and the numbers are in
   83% on single-hop lookups and 14% on the easiest generated multi-hop item, so
   calibration has nothing in the band to select. Either the generators grow an
   easier form or the subject changes; a slate cannot be calibrated into a gap.
-  _designing — **v1**, and now the blocker._ — `decisions.md` 2026-08-27.
+  **Re-open before building anything**: `prose` scored 1/24 on the *pinned* slate
+  thinking-off and **9/16 thinking-on** (2026-08-28), so the gap may be a
+  thinking-effort question rather than a generator one — the cheaper of the two
+  answers, and it was never on the table. _designing — **v1**, and still the
+  blocker._ — `decisions.md` 2026-08-27, 2026-08-28 (later x).
 - **Thinking on, as the subject's side of that gap** — the same 14B with
   `reasoning_effort` unset, at 24k/q8 and `--max-output-tokens 4096`. **Gated on
   `controls`: 75% per-trial against thinking-off's 67%, and `engine-forced` 25% →

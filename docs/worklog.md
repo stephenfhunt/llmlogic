@@ -24,6 +24,61 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-28 (later) — A 32-cell A/B, three instrument defects, and a floor that was not one
+
+Asked for a medium A/B of `prose` against `engine-briefed`. Ran it — and getting
+there cost three defects in the harness's own recording, all the same shape: a
+real event the record could not express. Long form:
+`experiments/notes/a-local-subject.md`.
+
+**Done** — 10 commits, **1,480 tests** (+23, one red on trunk before today),
+ruff clean, offline grid renders
+- **The output cap was a stopping rule that recorded nothing.** A completion that
+  spends its budget reasoning returns empty content; the loop called it a
+  *malformed call*, said so — false — and retried into an identical lap at ~150s
+  each. `finish_reason` decides now, `TRUNCATION_LIMIT` stops at two.
+  **`malformed_calls` had been collected and dropped since it was written.**
+- **Mean per-item F1 scored an empty cell 1.0**, flattering whichever arm fails
+  by writing no file: prose read 0.92 against 0.19 on 2/8 against 1/8.
+- **A subject that walks away read as one that finished** — fixed, and the
+  reminder re-aimed. Not only a recording change: the next cell went
+  `no-answer` → `correct`. Amended in place.
+- **`engine_unusable` leaves the compliance ratio**, decided on the rule first.
+- **Three runs**: a controls gate (prose 3/4, compliance 4/4, zero truncations —
+  the counter's first check), sitting 1 (stopped by its gate), the clean 32.
+
+**Decided** (`experiments/decisions.md`, six entries + two amendments;
+`hypotheses.md`, two addenda)
+- **prose 9/16 (56%) against `engine-briefed` 4/16 (25%)** — **−31 pts [−62, +0],
+  1 win / 6 losses**, p = 0.125. Exploratory by pre-registration; reported, not
+  claimed. `briefed − prose` is the recorded **upper bound**, so a negative one
+  says the engine is losing to `grep` *with the manual in hand*. Worst on
+  `recursion`, 0/4.
+- **The pinned slate is not the floor it was written off as**: prose 1/24 on
+  these exact items thinking-off, 9/16 thinking-on. **The missing rung may be a
+  thinking-effort question, not a generator one** — the cheaper answer, and it
+  was never on the table.
+- **The subject is deterministic** (temperature 0.0), so `--repeats` buys
+  neither paired items *nor* reliability. **Sitting 1 failed its own gate and
+  was stopped**: half a run on a patched instrument is two experiments.
+- **Not a `datalog` bug.** The briefed arm's worst cells burn out on the engine's
+  silence, but `spec.md` §14 specifies exit 1 with no output deliberately and
+  anticipates the case. It is a **`SKILL.md`** gap: what exit codes mean without
+  *look at them*, and transitive closure with no worked example and no warning
+  that the reflexive case is unsafe as a bare fact.
+
+**Removed**
+- Sitting 1's cap-hit as a difficulty signal, and the 42h projection's standing
+  as a measurement of the subject — amended, not deleted.
+
+**Next up**
+- **Re-open the missing rung as a thinking-effort question**, before any
+  generator work. The session's cheapest open lead.
+- **A calibration pass is plausible now** — 56% is a band, 14% was not.
+- **The `SKILL.md` gap**, both halves: most likely to move the briefed arm.
+- Unchanged: the mandate arm's `invoked` split, the prompt-blind
+  `resume.fingerprint`, `scheduling`'s own look.
+
 ## 2026-08-28 — The fixes took, and what they uncovered was tool use
 
 Re-gated `engine-forced` on all three arms, launched the 240-cell pass, **stopped
@@ -128,57 +183,3 @@ correct was a reading of the cap. Long form:
   before the pass, and read cap-hit rate first.
 - Unchanged: the slate-subject guard before any `run --slate`; the 240-cell
   calibration; the missing rung; the mandate arm's `invoked` split.
-
-## 2026-08-27 (later still, iii) — Thinking back on, gated before it was adopted
-
-`qwen3:14b` runs with `reasoning_effort` unset from the next pass on. **Gated
-first**, all 4 controls × 3 arms (`results/run-20260828T012126Z`, 12 cells, 52
-min): **9/12 = 75% per-trial against thinking-off's 24/36 = 67%** on the same
-units, and the gain is in **`engine-forced`, 25% → 50%** — the arm the earlier
-entry named the blocker. Long form: `experiments/notes/a-local-subject.md`.
-
-**Done**
-- **`--max-output-tokens`** (`ec7bdba`), because `max_tokens` bounds **reasoning
-  plus answer**: at the 2,048 default a five-constraint puzzle spent the budget
-  thinking and returned content that was not an action — invisible in the record,
-  since ollama reports `completion_tokens` *excluding* the reasoning it charged
-  against the cap. Recorded in the run's `local` block so a resume cannot truncate
-  the second half. +2 tests, 1,412 green, ruff clean.
-- **The window and the cap are one setting.** `CONTEXT_BUDGET` leaves 6,144 tokens
-  for the reply at 24k against a 4,096 cap. At 16k it would be 4,096 against
-  4,096 — the overflow guard and the output cap arriving together. Raising the cap
-  without the window trades one silent truncation for another.
-- **Thinking costs ~7.5× wall clock** — 605s against 80s for three `controls`
-  cells. `engine-forced` measured 268/593/704/904s, the last being the 900s cap.
-- **Not one of the three gate failures is a wrong conclusion**: a Datalog-shaped
-  answer, a prose answer carrying the CSV header row, and the capped cell.
-
-**Decided** (`experiments/decisions.md`, two entries + three open questions)
-- **The next pass is 240 cells, not 1,125** — 4 packs × 2 seeds × difficulties
-  1–2 × 3 trials, stub-verified. **~7.5h**: calibration draws the `prose` arm
-  only (113s average) where engine-forced averages 617s. **`scheduling` is
-  dropped** — slowest pack, capped in 43 of 75. Both difficulties kept to bracket
-  the band, since thinking may make 1 too easy.
-- **Compare per-trial with per-trial.** Precondition 1's recorded *"10/12 = 83%
-  PASS"* is an **any-of-3** figure; those cells are 67% majority-of-3. Reading a
-  one-trial 75% against it as a failed floor is a category error — made in this
-  session before it was caught, and amended in place rather than quietly fixed.
-
-**Removed**
-- Nothing. The interim single-cell "prose regressed" read was contradicted by its
-  own re-run and is kept as an amendment, not deleted — it is the session's one
-  wrong turn and the reason the aggregation trap is now written down.
-
-**Next up — the pass is ready to launch.** Server line and the 240-cell
-`calibrate` line are in `experiments/AGENTS.md`, dry-run verified to record the
-whole subject (`reasoning_effort: null`, 24576, 4096) so a resume rebuilds it.
-
-- **Do the slate-subject guard first** — new open question, cheapest insurance
-  here: a manifest records its calibrating subject and *nothing checks it*, so
-  `run --slate` would run the grid under a different one silently. Four
-  subject-bearing flags now, up from one.
-- **The blocker is half-touched.** Thinking is the subject's side of the missing
-  rung; whether it lifts difficulty 1 out of 14% is what this pass asks. If not,
-  the generators still owe an easier form.
-- **Still owed:** the mandate arm, the prompt-blind `resume.fingerprint`,
-  `scheduling`'s own look, and the partial-read rule.
