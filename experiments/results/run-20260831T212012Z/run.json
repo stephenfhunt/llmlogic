@@ -1,0 +1,40 @@
+{
+  "run_id": "run-20260831T212012Z",
+  "started_at": "2026-08-31T21:20:12.506993+00:00",
+  "dry_run": false,
+  "domains": [
+    "controls",
+    "provenance"
+  ],
+  "tasks": 10,
+  "cells": 20,
+  "limit": null,
+  "strengths": [
+    "haiku-4.5"
+  ],
+  "arms": [
+    "prose",
+    "engine-briefed"
+  ],
+  "repeats": 1,
+  "fingerprints": {
+    "provenance/g2825-d3-access-path": "d9fb67dd56cfa63e",
+    "provenance/g2825-d3-critical-grant": "1b3b0d0b53c8d74d",
+    "provenance/g2825-d3-minimal-repair": "ab8fd5b86486be89",
+    "provenance/g2825-d5-access-path": "b565746025bb4f67",
+    "provenance/g2825-d5-critical-grant": "da8a6a23267a0e46",
+    "provenance/g2825-d5-minimal-repair": "cca91d0cca6d7b48",
+    "controls/department-of": "567d471f8808ed9b",
+    "controls/customer-of-order": "b3be9a92dea55f77",
+    "controls/orders-above-100": "a30f549bcca6c4ce",
+    "controls/engineering-headcount": "397c66f0ec307dd6"
+  },
+  "ablate": null,
+  "max_turns": 30,
+  "max_budget_usd": 2.0,
+  "local": null,
+  "slate": {
+    "path": "/home/stephen/code/llmlogic/experiments/slates/provenance-20260901.json",
+    "digest": "ba57da53e60f6f52"
+  }
+}
