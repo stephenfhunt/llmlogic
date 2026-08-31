@@ -320,3 +320,93 @@ So, for a **local subject** — one model, so paired items are tasks:
 - **Unchanged for the API subject**, whose grid is still sized at +10 against its
   own baseline. The two subjects were never comparable to each other, and this
   makes them less so; W2 already carried that caveat.
+
+### 2026-08-31 (later) — The provenance arm, and the zero it is aimed at
+
+A fifth arm, `engine-briefed-provenance`: `engine-briefed` plus
+`catalogue.PROVENANCE_MANDATE`, appended after the briefing so the briefed
+prompt stays a strict prefix. Written before the run, and this section is the
+pre-registration for it.
+
+**The finding that motivates it, measured before any of this was built.** Across
+every real run on disk — **1,812 transcripts, 23,430 tool calls** — there are
+**zero `?why` / `?whynot` invocations**. Not one. That includes the 16
+`engine-briefed` cells of `run-20260828T203413Z`, which had the whole of
+`SKILL.md` in the prompt: worked examples of both sigils, the sigil-choice rule,
+and the `repair: ask ?whynot …` chain. The count was taken twice, by `grep` over
+the raw files and again by `engine_use.asks_provenance` over the parsed calls,
+and both return 0.
+
+**Why the failures are the right ones to aim at.** Of the 12 failing
+`engine-briefed` cells in that run, triaged offline:
+
+| shape | n | the sigil that fits |
+|---|---|---|
+| a program ran and derived **nothing** (`missing == truth_size`, `extra == 0`) | **9** | `?whynot` |
+| a program ran and derived the wrong rows | 2 | `?why` |
+| no program at all (0 turns) | 1 | neither |
+
+Eleven of twelve got a program running. Nine stared at an empty result set and
+rewrote the program rather than asking why it was empty — `who-can-read-r03` for
+35 turns, `delete-without-read` for 28. This is the mechanism behind the
+2026-08-28 entry's *"the briefed arm's worst cells burn out on the engine's
+silence"*, now counted.
+
+**What the triage does not license.** It says provenance was *applicable* to nine
+cells. It does not say it would have worked, and it does not say the subject
+would ask. Those are the two things the run measures, and they are separable —
+see the secondary endpoint.
+
+#### The primary endpoint
+
+> **Paired `engine-briefed-provenance` − `engine-briefed`, on the 16 pinned
+> items, `qwen3-14b-structured`, by McNemar's exact test, two-sided.**
+
+**Directional prediction, recorded in advance:** positive, and concentrated in
+the nine empty-answer cells. Predicted null on `busiest-month-per-region` (no
+program was ever written, so there is nothing to interrogate), and unsigned on
+the two `?why` cells.
+
+**The primary endpoint of the grid does not move onto this arm.** S1's is still
+`engine-forced` − `prose`. This one is a question about the *skill*, in the same
+family as `engine-briefed` − `engine-forced`: it asks what instruction buys over
+documentation. An arm told when to ask and what to type is more equipped than
+the one S1 describes, and the temptation this document exists to resist is
+exactly the one that would promote it.
+
+#### The secondary endpoint, and why it is not optional
+
+> **Provenance reach — `signals.ProvenanceUse`, three-valued: `none` / `asked` /
+> `acted-on`.**
+
+The primary is unreadable without it, because a null has two opposite readings
+and only this column separates them:
+
+| reach | delta | reading |
+|---|---|---|
+| ~zero | null | **the instruction did not take.** A finding about the block's wording, not about provenance |
+| high | null | **provenance does not help here.** A finding about the feature |
+| high | positive | the arm did what it was built to do |
+
+So a gate that finds reach still at zero **stops the run**: 32 cells measuring an
+instruction nobody followed is six hours spent re-deriving the number this
+section opens with.
+
+#### What is held, and what that costs
+
+- **Both arms run fresh in one run.** The subject is deterministic (temperature
+  0.0), so the archived 4/16 could serve as the control and halve the wall
+  clock. It does not: cross-run control reuse is the error class this project
+  keeps catching, and the re-run doubles as a **determinism check** — if
+  `engine-briefed` does not reproduce 4/16 with the same per-task verdicts, that
+  is a finding touching every prior conclusion and is reported as one.
+- **`ARM_BUDGET` is 2.0 on both arms.** The provenance arm is instructed to take
+  strictly more steps, so its cap may bind where the briefed one's does not.
+  Raising it would put two causes under the endpoint — the instruction, or the
+  turns — so it is held, and `report._budget_line`'s per-arm cap-hit rate is
+  what makes the cost visible. **Stated in advance: if this arm ends at its cap
+  materially more often than `engine-briefed`, the delta is confounded and is
+  reported as such rather than claimed.**
+- **The block is an instruction, not documentation**, and that is the whole
+  hypothesis. Documentation is what `engine-briefed` already carries, and its
+  result is the zero above.

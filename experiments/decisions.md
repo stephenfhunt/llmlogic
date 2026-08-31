@@ -15,6 +15,98 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-08-31 (later)** — **The provenance gate stopped the run, on the rule
+  written before it. The instruction never had its precondition met.**
+  `engine-briefed-provenance` is a fifth arm: `engine-briefed` plus
+  `catalogue.PROVENANCE_MANDATE`, appended *after* the briefing so the briefed
+  prompt stays a strict prefix. Pre-registered in `hypotheses.md` the same day,
+  including the stopping rule that fired.
+  - **The zero it was aimed at is real and was measured twice.** Across every
+    real run on disk — **1,812 transcripts, 23,430 tool calls** — there are
+    **zero `?why` / `?whynot` invocations**, by `grep` over the raw files and
+    again by `engine_use.asks_provenance` over the parsed calls. That includes
+    the 16 `engine-briefed` cells of `run-20260828T203413Z`, which had
+    `SKILL.md`'s worked provenance examples in the prompt.
+  - **And the failures were the right shape.** Of that run's 12 failing briefed
+    cells, **nine derived nothing at all** (`missing == truth_size`,
+    `extra == 0`) and rewrote the program rather than asking why it was empty —
+    `who-can-read-r03` for 35 turns, `delete-without-read` for 28.
+  - **The gate** (`results/run-20260831T165452Z`, 2 cells, both of them
+    empty-answer failures in the prior run): **provenance reach 0/2, zero goals
+    run.** By the pre-registered rule that stops the run, and it did.
+  - **But the mechanism is not "the instruction was ignored".** Both cells
+    complied fully — a correct program, the engine run, the answer written from
+    its output — and **both piped `datalog … | sed … > answer.txt` in a single
+    command**. The second ran the *identical command twice* and stopped. The
+    subject never sees the output, so it cannot notice the result is empty, so
+    the block's opening condition — *"when your program runs but does not print
+    what you expected"* — is never evaluated. This is
+    `notes/a-local-subject.md`'s *"an LLM agent is a caller that pipes
+    everything and checks nothing"*, now blocking a second feature.
+  - **What this does and does not license.** It is **not** evidence that
+    instruction fails to surface provenance; that hypothesis is untested,
+    because its precondition did not occur. It *is* evidence that **observation
+    is upstream of provenance**, the same way reach is upstream of capability.
+  - **The next block has to teach looking, and that is a second cause.** Making
+    the subject read its output before writing the answer is the `SKILL.md`
+    exit-code gap (open since 2026-08-28), not the provenance gap. Folding it
+    into `PROVENANCE_MANDATE` would put two causes under one delta, which is the
+    mistake `cell.ARM_BUDGET`'s own comment is about. **Ruled: they are two
+    blocks and two arms, and the observation one comes first** — there is
+    nothing for provenance to do until the subject looks.
+
+- **2026-08-31 (later)** — **Two defects in `signals.py`, found by using it, and
+  they point in opposite directions.**
+  - **A one-command run-and-redirect read as non-compliance.**
+    `datalog q.dl -q 'goal(X)' > answer.txt` runs the engine and writes the
+    answer out of its stdout in one call — the *strongest* form of answering
+    from the engine — and `classify` required the answer strictly *after* the
+    run (`max(answered) > min(ran)`), so it returned `invoked`. On a mandated
+    arm `invoked` is non-compliance, and compliance decides whether a comparison
+    is void: the cost was a correct cell voiding the arm it belonged to.
+    **`>=` now.** Two cells on disk were affected — and then the very first cell
+    of the provenance gate hit it live, recording a fully compliant cell as
+    `invoked`.
+  - **`classify_script` had the identical bug, and there it was the dominant
+    idiom, not an edge case.** `python3 solve.py > answer.txt` is how a subject
+    already in a pipeline answers: **11 of the 14** ladder cells a strict `>`
+    filed under `wrote` were exactly that shape. The counterfactual arm reads
+    **33/44**, not 22/44.
+  - **The opposite error: `Signals.ran_engine`'s comment claimed an invariant
+    the code never had.** It said a transcript *cannot* be `invoked` with
+    `ran_engine` true. `classify` returns `invoked` for *ran it and answered
+    from something else* as much as for *never ran it* — deliberately, and its
+    own inline comment says so. Measured: **201 records pair the two, 188
+    because the engine ran and no answer was ever written.** That is the
+    classifier working. Read as an invariant, the comment turns a legitimate 188
+    into a phantom defect — which is what it did for an hour. The comment was
+    corrected, not the code.
+  - *Noted, operationally:* a `harness run` already in flight holds the code it
+    imported at launch. The gate recorded `provenance_use` (added before it
+    started) and not `script_use` (added after), and it recorded the compliance
+    bug this entry fixes. **A signal added mid-run is not in that run.**
+
+- **2026-08-31 (later)** — **`wrote_script` was recoverable all along, and it
+  answers the ladder's own open question.** `ROADMAP.md` filed it as *must land
+  before the next run* on the grounds that transcripts are not persisted. They
+  are: **1,812 of them under `results/*/transcripts/`**, each carrying
+  `tool_calls`. `signals.ScriptUse` now records it, built on `engine_use`'s
+  shell-aware splitter rather than a second parser, and **backfilled over the
+  ladder**.
+  - **The result:** on `run-20260831T014254Z`, `prose` answered from a script in
+    **33 of 44** cells and `engine-briefed` in **0 of 44**. So that run's
+    headline `+0 at every rung` was **never prose against the engine — it was a
+    Python script against the engine, tying.** A much less surprising finding on
+    a slate whose every difficulty knob turns deduction, and the strongest
+    argument on record that the missing axis is *search* rather than more depth.
+  - **Backfilling signals is not rewriting a run.** `results/` is append-only
+    for what the instrument *produced*; a value derived from a transcript
+    already on disk adds no new claim about what happened, and reports re-render
+    from records by design. The gate run's `engine_use` was **left as recorded**
+    on the other hand — correcting a classification the run actually made is a
+    different act from adding one it never had, and the correction is documented
+    here instead.
+
 - **2026-08-31** — **The ladder found no rung, because Haiku ceilings the entire
   generator range.** 88 cells, `prose` against `engine-briefed`, d1–d5 at seed
   20260830: **80/80 on the measured slate in both arms**, 8/8 on `controls`,

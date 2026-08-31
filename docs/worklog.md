@@ -24,6 +24,56 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-31 (later) — The provenance arm, and a gate that stopped it one step early
+
+Asked to run a local-model experiment on **briefed provenance** — does
+*instructing* the subject to interrogate its own failures convert them — and to
+build cases where provenance is core rather than incidental. **The gate stopped
+the run, and the reason is more useful than the run would have been.**
+
+**Done** — **1,525 tests** (+17), ruff clean, the 280-cell offline grid renders
+- **The zero, measured twice**: **no `?why` / `?whynot` in 1,812 transcripts,
+  23,430 tool calls** — every real run on disk — by `grep` and by the parser.
+- **Triaged the 12 failing briefed cells first**: **nine derived nothing at all**
+  (`missing == truth_size`), the exact `?whynot` case, burned over 35 and 28
+  turns rewriting the program instead.
+- **`engine-briefed-provenance`** — a fifth arm, an *instruction* not more
+  documentation, appended after the briefing so briefed stays a strict prefix.
+  Pre-registered with its endpoint, prediction, and the rule that then fired.
+- **`signals.ScriptUse`**, and **`ROADMAP.md` was wrong that it could not be
+  backfilled** — transcripts *are* persisted, so it was, over the ladder.
+- **Two defects, opposite directions** — a one-call `datalog … > answer.txt`
+  read as *non-compliance* (`>` wanted `>=`; `classify_script` had it worse, 11
+  of 14 cells); and `ran_engine`'s comment asserting an invariant the code never
+  had, which makes 188 legitimate records look broken.
+
+**Decided** (`decisions.md`, three entries; `hypotheses.md` addendum)
+- **The gate: provenance reach 0/2, zero goals.** Stopped, per the rule.
+- **But not because the instruction was ignored.** Both cells complied fully and
+  **both piped `datalog … | sed … > answer.txt` in one command**; the second ran
+  the identical command twice and stopped. **The subject never sees the output**,
+  so it cannot notice the answer is empty, so the block's opening condition is
+  never evaluated. Provenance is untested, not refuted.
+- **Observation is upstream of provenance**, as reach is upstream of capability.
+  The `SKILL.md` exit-code gap now *blocks a feature* rather than costing rounds,
+  and needs its own block and arm or the delta gets two causes.
+- **The ladder's `+0 at every rung` decomposes**: `prose` answered from a script
+  **33/44**, `engine-briefed` **0/44**. It was never prose against the engine.
+
+**Removed**
+- The "transcripts are not persisted" claim, load-bearing twice in `ROADMAP.md`.
+  The gate keeps its `engine_use` **as recorded**: backfilling a field a run
+  never had is additive, correcting one it did record is not.
+
+**Next up**
+- **Teach the subject to read its own output** — its own block, its own arm, and
+  now the blocker; nothing downstream of it is measurable.
+- **Then re-run the provenance gate**, 2 cells, which settles the question the
+  pre-registration actually asked.
+- **Part 2 unstarted**: provenance-core tasks (`critical-grant`,
+  `minimal-repair`, `access-path`), keeping the set-equality answer contract.
+- Unchanged: `at-scale`, the mandate arm's `invoked` split, `scheduling`.
+
 ## 2026-08-31 — The ladder found no rung: Haiku is over the whole generator range
 
 Asked for a small `prose` vs `engine` head-to-head on Haiku, to find where the
@@ -130,57 +180,5 @@ ruff clean, offline grid renders
   generator work. The session's cheapest open lead.
 - **A calibration pass is plausible now** — 56% is a band, 14% was not.
 - **The `SKILL.md` gap**, both halves: most likely to move the briefed arm.
-- Unchanged: the mandate arm's `invoked` split, the prompt-blind
-  `resume.fingerprint`, `scheduling`'s own look.
-
-## 2026-08-28 — The fixes took, and what they uncovered was tool use
-
-Re-gated `engine-forced` on all three arms, launched the 240-cell pass, **stopped
-it at 13 cells**, and built a fourth arm instead. The session's finding is one
-sentence: *both arms are failing on tool use before the engine is in play.*
-
-**Done**
-- **The gate says the three fixes took** (`results/run-20260828T104124Z`, 12
-  cells): **no cell at its budget in any arm** against `engine-forced`'s 48%,
-  4–9 turns of 48, no fact-shaped answers, `engine_unusable` used once. prose
-  3/4 = **75%**, precondition 1 at its boundary.
-- **And what was under them**: all four `engine-forced` first programs invented a
-  CSV loader — `read_csv/4`, `csv_load/3`, `csv_read_line/2`, `csv_read/4` —
-  against `import "f.csv" as r.`, with **zero `Skill` calls** and the manual in
-  the workspace.
-- **A fourth arm, `engine-briefed`** — `engine-forced` plus `SKILL.md` in the
-  prompt (`479067e`), gated at 16 cells (`run-20260828T132615Z`): **import syntax
-  0/4 → 3/4, compliance 3/4 → 4/4**, accuracy 2/4 against 1/4 at n=4. Prompts
-  nest as strict suffixes, same 2.0 budget: the pair differs by the briefing.
-- **The slate-subject guard** (`faa8375`, `7060097`), the open question that said
-  *do it before the grid*: five fields compared, `endpoint` excluded by name,
-  containment not equality — and the manifest could not name the output cap at
-  all until now (`MANIFEST_VERSION` 2). Plus: the mandate says the quotes come
-  off. 1,457 tests green (+28), ruff clean, offline grid renders.
-
-**Decided** (`experiments/decisions.md`, four entries; `hypotheses.md` addendum)
-- **The 240-cell pass is parked**: 7 of the first 12 prose cells ended at the
-  900s cap, projecting **42h not 7.5h** — the 7.5h had extrapolated four
-  `controls` prose cells at 113s to a multi-hop pool. *A rate measured on the
-  controls is not a rate for the slate.* A band selected now would rank items by
-  how often prose runs out of clock.
-- **The primary endpoint does not move onto the new arm.** `briefed − prose` is
-  an **upper bound** on what the engine buys this subject, not S1: an agent
-  handed the manual is more equipped than the one S1 describes.
-- **Open**: whether `engine_unusable` counts as complying with the mandate —
-  precondition 2 read 75% against an 80% floor and the missing cell was the
-  mandate's own legal exit. *Decide on the rule, not on the number already seen.*
-
-**Removed**
-- The *"`MANDATE` should name the skill?"* open question, answered by building
-  the arm instead. The ROADMAP's *"engine-forced writes Datalog it has invented"*
-  item, superseded the same night. Nothing else: the parked pass's 13 cells are
-  kept as the evidence for parking it.
-
-**Next up**
-- **The blocker moved.** It is no longer *a rung between controls and the slate*;
-  it is that this subject's tool use eats the variable. A briefed cell still
-  fabricated its fact base inline with the CSV beside it (22 turns, no answer).
-- **Nothing is calibrated**, and no grid should run until the above is settled.
 - Unchanged: the mandate arm's `invoked` split, the prompt-blind
   `resume.fingerprint`, `scheduling`'s own look.

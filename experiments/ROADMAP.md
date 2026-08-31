@@ -242,11 +242,42 @@ grid unable to answer S1. The argument and the numbers are in
   Pre-registered as not S1 (`hypotheses.md` 2026-08-30). _shipped 2026-08-31._ —
   `results/run-20260831T014254Z`, `slates/ladder-20260830.json`,
   `harness ladder`, `report._ladder`, `decisions.md` 2026-08-31.
-- **Nothing records how the `prose` arm answered** — the founding decision names
-  ad-hoc code as the honest counterfactual and `signals.py` counts everything
-  except that. On the ladder it is the entire mechanism, and transcripts are not
-  persisted, so it cannot be recovered for a past run. _designing — **v1**._ —
-  `decisions.md` 2026-08-31 (open questions).
+- **Nothing recorded how the `prose` arm answered** — the founding decision names
+  ad-hoc code as the honest counterfactual and `signals.py` counted everything
+  except that. `signals.ScriptUse` records it now, on `engine_use`'s shell-aware
+  splitter rather than a second parser. **The claim that it could not be
+  recovered for a past run was wrong**: 1,812 transcripts sit under
+  `results/*/transcripts/`, each carrying `tool_calls`, and the signal was
+  backfilled over the ladder. **`prose` answered from a script in 33 of 44 cells
+  and `engine-briefed` in 0 of 44** — so that run's `+0 at every rung` was a
+  Python script tying with the engine, not prose tying with it.
+  _shipped 2026-08-31._ — `signals.ScriptUse`, `report._counterfactual`,
+  `decisions.md` 2026-08-31 (later iii).
+- **The provenance arm, and the gate that stopped it** —
+  `engine-briefed-provenance` is `engine-briefed` plus an *instruction* to ask
+  `?whynot` when a program prints nothing, aimed at a measured zero: no `?why` or
+  `?whynot` in 1,812 transcripts, including 12 failing cells that had the manual
+  in the prompt. The 2-cell gate found **reach 0/2** and stopped the run on the
+  pre-registered rule — but the mechanism is that both cells piped
+  `datalog … | sed … > answer.txt` and **never looked at the output**, so the
+  block's opening condition was never evaluated. _shipped (the arm); the run is
+  **stopped, not null** — **v1**._ — `cell.PROVENANCE_ARM`,
+  `catalogue.PROVENANCE_MANDATE`, `signals.ProvenanceUse`,
+  `results/run-20260831T165452Z`, `hypotheses.md` + `decisions.md` 2026-08-31 (later).
+- **Teaching the subject to read its own output — and it comes before provenance**
+  — the open `SKILL.md` exit-code gap is now blocking a second feature, not just
+  costing rounds. Nothing downstream of *observe the result* can be measured
+  until this lands, and it must be **its own block and its own arm**: folded into
+  `PROVENANCE_MANDATE` it would put two causes under one delta.
+  _designing — **v1**, and now the blocker for the provenance question._ —
+  `decisions.md` 2026-08-31 (later i).
+- **A run-and-redirect read as non-compliance** — `datalog … > answer.txt` in one
+  call is the strongest form of answering from the engine and `classify` returned
+  `invoked`, which is non-compliance on a mandated arm. `classify_script` had it
+  too, where it was the *dominant* idiom: 11 of 14 ladder cells. And the mirror
+  error — `ran_engine`'s comment asserted an invariant the code never had, making
+  a legitimate 188 records look like a defect. _shipped 2026-08-31._ —
+  `signals.classify`, `signals.classify_script`, `decisions.md` 2026-08-31 (later ii).
 - **`--limit` and `--resume` were mutually exclusive** — a staged sitting recorded
   its own size as the grid's, so the resume refused its own run. The pair is the
   documented shape of a run, and the offline gate cannot exercise the resume half
