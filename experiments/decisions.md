@@ -15,6 +15,123 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-08-31** — **The ladder found no rung, because Haiku ceilings the entire
+  generator range.** 88 cells, `prose` against `engine-briefed`, d1–d5 at seed
+  20260830: **80/80 on the measured slate in both arms**, 8/8 on `controls`,
+  compliance **44/44 `answered-from`**, zero cap-hits, zero truncations, $6.92.
+  `briefed − prose` is **+0 points at every rung**, and it is the pre-registered
+  *upper bound* — so there is no rung to locate and nothing below it to find.
+  - **Not a null about the engine. A statement about the slate.** An item both
+    arms answer carries no information about a difference, which is the band
+    doctrine (`decisions.md` 2026-08-25) read from the other end.
+  - **It is real, not a grading artefact.** d5 `delete-without-read` is a
+    262-row, two-column closure-then-negation answer, graded `missing=0 extra=0`
+    against the plain-Python oracle, in 10 turns and 47s of prose.
+  - **The blocker is now bracketed on both sides.** The 14B is under the whole
+    range (14% / 7% / 5%); Haiku is over all of it (100% at every rung). The
+    generators' difficulty axis has headroom for **neither subject on the table**,
+    and *a rung between `controls` and the measured slate* was only ever half of
+    the problem.
+  - **Prose stays flat at 5–6 turns from d1 to d5 while the engine arm climbs
+    8 → 12.5** for the same perfect answer. That, not accuracy, is the only thing
+    that moved along the axis.
+  - **What is left untested is `at-scale`**, the one track built to defeat the
+    prose arm by construction rather than by structure. It is the only axis this
+    result does not close.
+
+- **2026-08-30 (later iii)** — **`--limit` and `--resume` could not be used
+  together, and they are the documented way to run a grid.** A staged sitting
+  recorded its *own* size as `run.json`'s `cells`; the resume rebuilds the whole
+  grid from the slate, compared **88 against 16**, and refused the run as a slate
+  that had moved under it. Fixed by recording the grid and the sitting as two
+  numbers (`cells` and `limit`).
+  - **Found on the first sitting ever staged this way.** `--limit` has been used
+    to *cap* a pass that was then read or abandoned; nothing had come back for
+    the second half. `AGENTS.md` has described the pair as the shape of a run
+    since 2026-08-24.
+  - **The offline gate cannot see it and still cannot.** `cmd_resume` refuses a
+    dry run by design, so the resume half has no offline path at all — the new
+    test asserts the metadata a resume *would* compare, which is the most the
+    gate can reach. Named here because it is the gap that let this through, and
+    it is still open.
+  - **The 16 cells stay on disk and the ladder restarts as one run.** Patching a
+    past `run.json` to make it resumable would be rewriting the record to fit the
+    code, and `results/` is append-only. $1.26 is the whole cost of that rule.
+
+- **2026-08-30 (later ii)** — **The `ontology` generator was not deterministic,
+  and only a manifest could see it.** Its diamond splice built a dict out of a
+  **set of strings** and handed the derived list to `rng.choice`; Python
+  randomizes that iteration order per process, so the same seed drew a different
+  fixture in every process. The truth stayed put and the *fixture* moved beneath
+  it.
+  - **Nothing in 1,480 tests could catch it**, because a process agrees with
+    itself: `tests/test_ontology_generated.py` generates and asserts inside one
+    interpreter, and every invariant it checks held on both fixtures.
+  - **`calibrate.load` caught it the first time anything was asked to run from a
+    slate.** The whole manifest design rests on *regenerated, not stored*, and
+    this is the premise under that premise. `harness ladder` wrote a slate; the
+    dry run that read it back refused every `ontology` item.
+  - **The fix is `sorted`, and the guard is a second process**
+    (`tests/test_generator_determinism.py`): two fixed `PYTHONHASHSEED`s, every
+    pack, every rung. Verified separately that `at-scale` is stable too — it is
+    too slow to sit in the suite.
+  - **A ninth instance of this project's standing failure mode**, and the first
+    found *before* it cost a run rather than after. No result on disk is
+    affected: no calibrated slate has ever been run.
+
+- **2026-08-30 (later)** — **A ladder is a slate chosen by construction, and the
+  manifest has to be able to say so.** `calibrate` keeps the middle of a band;
+  a difficulty ladder needs the *same question at every rung*, and which items
+  land in the band is itself a fact about the rung — so screening a ladder
+  measures the screen. `harness ladder` writes the manifest with no pass at all.
+  - **`MANIFEST_VERSION` 3 adds `selection`**: `band` or `none`. Every ladder
+    entry carries `trials: 0, correct: 0`, which in a calibrated manifest is the
+    most damning number the format holds — *the subject answered none of these* —
+    and here means nothing ran. A reader that cannot tell those apart would
+    retire the engine on a slate nobody screened. Bumped, not defaulted: the
+    absence has to be unrepresentable. `pool.arm` is `None` for the same reason.
+  - **It still names its subject.** There was no calibrating subject, but
+    `cli._slate_subject_holds` is about which grid may run the slate, and binding
+    it to haiku is strictly safer than leaving it open. `selection` is what keeps
+    that from reading as a measurement.
+  - **Ordered rung-ascending**, because `load` preserves entry order and
+    `run --limit N` stages a sitting off it: the first rung is the gate.
+
+- **2026-08-30** — **A Haiku ladder, and why `engine-briefed` rather than
+  `engine-forced`.** Everything since 2026-08-26 has been measured on a subject
+  below the instrument's floor. Recomputed from `run-20260824T104501Z`, haiku is
+  **prose 57% / engine 54%** — off the floor *and* off the ceiling — and the
+  pinned slate it scored that on is difficulty-flat. The ladder walks the axis
+  nobody has walked: 8 questions × 5 rungs, one seed, `prose` against
+  `engine-briefed`.
+  - **The bound is the right instrument for a locating run.** `briefed − prose`
+    is pre-registered as an upper bound, not S1. If the *ceiling* never turns
+    positive across five rungs, no `SKILL.md` or generator work rescues the
+    engine for this subject — a cheap decisive negative. If it turns, the rung is
+    where a powered `engine-forced` grid belongs.
+  - **The endpoint does not move onto it** (`hypotheses.md` addendum). This is
+    the temptation the pre-registration exists to resist, and it is being named
+    before the numbers exist rather than after.
+  - **The confound, stated in advance**: generator difficulty moves fact-base
+    size *and* structure together (57 → 876 facts, depth 2 → 6), so a turn in the
+    curve does not say which caused it. Separating them is the `at-scale` track
+    and is not this run.
+  - **`Record` now carries `difficulty`**, for the reason it carries `track`: a
+    report must not have to reconstruct the rung by parsing a task id.
+
+- **2026-08-30 (earlier)** — **The per-cell USD ceiling was a stopping rule that
+  recorded nothing.** `agent.AgentSubject` passes `max_budget_usd` and the SDK
+  ends the query with an `error_max_budget_usd` result, which matched neither
+  `runner.FATAL` nor `runner.STOPPING_RULE` — so it would have graded `ERROR`,
+  and an ERROR cell is one `resume` owes forever, re-running into the same
+  ceiling every sitting. Added to `STOPPING_RULE` as its own alternative.
+  - **Found by looking, not by being bitten.** It has never fired: no cell has
+    come near $2. A ladder is the first run shaped to walk toward it, which is
+    why it was worth looking now rather than reading it out of a stuck resume.
+  - **The same ruling as the turn cap and the output cap** (2026-08-24,
+    2026-08-28): a cell that spent its budget answered badly, which is evidence,
+    and dropping it would reward a model that flails.
+
 - **2026-08-28 (later viii)** — **Sitting 1 failed its own gate, and the 16 cells
   it bought were worth more than the 16 it stopped.** The staged A/B pre-committed
   to continuing only while cap-hit stayed low; it came in at **prose 2/8 (25%)**
@@ -1132,6 +1249,19 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
     project would have been the wrong altitude even if the build had allowed it.
 
 ## Open questions
+
+- **2026-08-31 — nothing records how the `prose` arm answered.** The founding
+  decision (2026-08-21) says the honest counterfactual to a logic engine is
+  **ad-hoc code**, and it is why the prose arm keeps `bash`. `signals.py` watches
+  the engine arm closely and watches both arms for a `grep` escape — and counts
+  nothing about a subject that writes and runs a script. On this run that is the
+  whole mechanism: prose answered a 262-row closure in 5 turns with
+  `searches_total` at 0, so it was neither grepping nor reasoning it out, and the
+  record cannot say what it did instead. Symmetric with the finding `signals.py`
+  was built for, and invisible for the same reason. **Transcripts are not
+  persisted**, so this cannot be recovered for any run already on disk — a
+  counter has to exist before the run that needs it.
+
 
 - **Does `engine_unusable` count as complying with the mandate?** Precondition 2
   reads `answered-from` >= 80% on `engine-forced`, and the 2026-08-28 gate came

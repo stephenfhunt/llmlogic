@@ -141,6 +141,59 @@ naming here so that it can be recognised rather than explained away.
 
 *(Dated entries only. Amend, never revise.)*
 
+### 2026-08-30 — A Haiku difficulty ladder, pre-registered as a locating run
+
+An 88-cell run of `prose` against `engine-briefed`, at **haiku-4.5 only**, over a
+slate that is not calibrated and does not pretend to be: 8 questions × 5
+generator rungs at seed 20260830 (`slates/ladder-20260830.json`), plus the pinned
+`controls`. **It is exploratory, it is not S1, and no accuracy claim comes out of
+it.** Written before it runs, because it will produce a `engine-briefed − prose`
+delta per rung and those numbers will sit in the report whatever they say.
+
+**Why a ladder and not a calibrated slate.** Calibration keeps the items a
+subject scores in the *middle* on, and which items those are is itself a fact
+about the rung — so a screened ladder measures the screen. The whole question
+here is *where along difficulty does the engine start to pay*, and the band is
+what erases that axis. The manifest says `selection: none` for this reason.
+
+**Why haiku, and why now.** Every measurement since 2026-08-26 is of a subject
+below the instrument's floor. Recomputed from `run-20260824T104501Z`, haiku scored
+**prose 23/40 (57%) / engine 22/41 (54%)** — off the floor *and* off the ceiling —
+on a slate that is difficulty-flat. The standing blocker, *a rung between
+`controls` and the measured slate*, is a statement about a subject, and this run
+asks whether the axis exists for a subject that is on it.
+
+**Why the bound arm.** `engine-briefed − prose` is already recorded above as an
+**upper bound** on what the engine buys a subject, not S1. For a locating run
+that is the right instrument in both directions: a ceiling that never turns
+positive across five rungs says no documentation or generator work rescues the
+engine for this subject, and one that does turn names the rung a powered
+`engine-forced` grid should sit on. **The primary endpoint does not move onto
+`engine-briefed`** — restated here because a new run that may look better is
+exactly when it would.
+
+**What may be claimed from it**, none of it an accuracy result:
+
+| what | why 88 cells buys it |
+|---|---|
+| the **ordering** of the per-rung delta | the one thing a ladder can say; a direction to aim a powered pass, not a result |
+| median wall clock and USD **per rung** | what sizes the next grid. The 7.5h → 42h error was a rate measured on `controls` extrapolated to a multi-hop pool |
+| `answered-from` on `engine-briefed` | the arm has never met the SDK subject; whether haiku fabricates engine syntax the way the 14B did is untested |
+| cap-hit and truncation per arm | whether the instrument is readable at these rungs at all |
+
+**Precondition 3 is knowingly suspended.** 40 paired items against the 155 a
++10-point effect needs; every per-rung interval will span zero and then some.
+That is *uninterpretable* by the reading above, entered into deliberately, and
+is why nothing rests on the delta. **1, 2 and 5 still bind**, and are read on a
+`controls` gate before the ladder runs.
+
+**Two confounds, named in advance rather than after.** Generator difficulty moves
+fact-base **size and structure together** (57 → 876 facts, closure depth 2 → 6),
+so a turn in the curve does not say which caused it — separating them is the
+`at-scale` track and is not this run. And `prose` and `engine-briefed` do not
+share a turn or wall-clock budget (`cell.ARM_BUDGET`), so the cap-hit rate has to
+be low at every rung or the rung is measuring the cap.
+
 ### 2026-08-28 (later ii) — The local subject is deterministic, so `--repeats` buys nothing
 
 `LocalSubject` runs at **temperature 0.0**. Measured rather than inferred: the

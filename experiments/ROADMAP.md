@@ -234,6 +234,45 @@ grid unable to answer S1. The argument and the numbers are in
   no answer. Not a syntax gap: the manual was in the prompt. _designing —
   **v1**._ — `decisions.md` 2026-08-28 (later ii), `notes/a-local-subject.md`.
 
+- **A Haiku difficulty ladder** — `prose` vs `engine-briefed` over 8 questions ×
+  5 generator rungs, haiku only, plus the pinned controls: 88 cells, staged and
+  resumed across a session limit. **80/80 in both arms on the measured slate**,
+  8/8 controls, 44/44 compliance, `briefed − prose` **+0 at every rung** — the
+  upper bound is flat because the whole generator range is under Haiku's ceiling.
+  Pre-registered as not S1 (`hypotheses.md` 2026-08-30). _shipped 2026-08-31._ —
+  `results/run-20260831T014254Z`, `slates/ladder-20260830.json`,
+  `harness ladder`, `report._ladder`, `decisions.md` 2026-08-31.
+- **Nothing records how the `prose` arm answered** — the founding decision names
+  ad-hoc code as the honest counterfactual and `signals.py` counts everything
+  except that. On the ladder it is the entire mechanism, and transcripts are not
+  persisted, so it cannot be recovered for a past run. _designing — **v1**._ —
+  `decisions.md` 2026-08-31 (open questions).
+- **`--limit` and `--resume` were mutually exclusive** — a staged sitting recorded
+  its own size as the grid's, so the resume refused its own run. The pair is the
+  documented shape of a run, and the offline gate cannot exercise the resume half
+  at all — that gap is still open. _shipped 2026-08-30._ — `cli._run_grid`,
+  `tests/test_resume.py::TestAStagedSitting`, `decisions.md` 2026-08-30 (later iii).
+- **The `ontology` generator was not deterministic across processes** — a dict
+  built from a set of strings fed `rng.choice`, so the same seed drew a different
+  fixture in every interpreter and `calibrate.load` refused its own slate. The
+  premise under *regenerated, not stored*, and invisible to a suite that
+  generates and asserts in one process. _shipped 2026-08-30._ —
+  `domains/ontology/fixture.py`, `tests/test_generator_determinism.py`,
+  `decisions.md` 2026-08-30 (later ii).
+- **The per-cell USD ceiling recorded nothing** — the SDK's
+  `error_max_budget_usd` matched no rule, so it would have graded `ERROR` and
+  `resume` would have owed the cell forever. Found by looking rather than by
+  being stuck. _shipped 2026-08-30._ — `runner.STOPPING_RULE`, `decisions.md`
+  2026-08-30 (earlier).
+
+- **The generators have headroom for neither subject on the table** — this is the
+  blocker, and it is bracketed on both sides now: the 14B scores 14% / 7% / 5%
+  under the whole difficulty range and Haiku scores **100% over all of it**, d1
+  through d5. A slate cannot be calibrated into a gap, and there is no subject
+  between them. The untouched axis is `at-scale`, which defeats the prose arm by
+  construction rather than by structure. _designing — **v1**, and the blocker._ —
+  `decisions.md` 2026-08-31, `results/run-20260831T014254Z`.
+
 - **A rung between `controls` and the measured slate** — the same subject scores
   83% on single-hop lookups and 14% on the easiest generated multi-hop item, so
   calibration has nothing in the band to select. Either the generators grow an
@@ -241,8 +280,11 @@ grid unable to answer S1. The argument and the numbers are in
   **Re-open before building anything**: `prose` scored 1/24 on the *pinned* slate
   thinking-off and **9/16 thinking-on** (2026-08-28), so the gap may be a
   thinking-effort question rather than a generator one — the cheaper of the two
-  answers, and it was never on the table. _designing — **v1**, and still the
-  blocker._ — `decisions.md` 2026-08-27, 2026-08-28 (later x).
+  answers, and it was never on the table. **And it may be a subject question
+  rather than either**: haiku is 57% in prose on the pinned slate, so the gap is
+  the 14B's, and the ladder above walks the axis on a subject that is on it.
+  _designing — **v1**, and still the blocker._ — `decisions.md` 2026-08-27,
+  2026-08-28 (later x), 2026-08-30.
 - **Thinking on, as the subject's side of that gap** — the same 14B with
   `reasoning_effort` unset, at 24k/q8 and `--max-output-tokens 4096`. **Gated on
   `controls`: 75% per-trial against thinking-off's 67%, and `engine-forced` 25% →

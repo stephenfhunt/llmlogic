@@ -24,6 +24,60 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-31 — The ladder found no rung: Haiku is over the whole generator range
+
+Asked for a small `prose` vs `engine` head-to-head on Haiku, to find where the
+engine starts to pay along size and difficulty. The axis does not exist for this
+subject.
+
+**Done** — **1,508 tests** (+28), ruff clean, offline grid renders
+- **`harness ladder`** — a slate chosen by construction and screened by nothing,
+  the opposite of `calibrate`: *which* items land in the band is itself a fact
+  about the rung. `MANIFEST_VERSION` 3 adds `selection`, so an unscreened slate's
+  `trials: 0` cannot be read as *the subject answered none of these*.
+- **`Record.difficulty`** and a **by-difficulty table** in every report, with
+  median wall and USD per rung — the number that sizes the next grid.
+- **Three instrument defects, each found by trying to use the thing:**
+  **`ontology` generated a different fixture in every process** (a dict built
+  from a set of strings fed `rng.choice` — the premise under *regenerated, not
+  stored*, invisible to 1,480 tests because a process agrees with itself);
+  **`--limit` and `--resume` could not be used together** though they are the
+  documented shape of a run, the staged sitting recording its own size as the
+  grid's; **the per-cell USD ceiling recorded nothing**, so `error_max_budget_usd`
+  would have graded `ERROR` and `resume` would have owed the cell forever.
+- **Three runs**: a controls gate (4/4 prose, 4/4 compliance, **no fabricated
+  import syntax** — the 14B's failure did not transfer), rung 1 staged, and the
+  88-cell ladder, halted by a session limit at 40 and resumed to 88.
+
+**Decided** (`decisions.md`, five entries + one open question;
+`hypotheses.md` addendum)
+- **80/80 in both arms on the measured slate**, 8/8 controls, **44/44
+  compliance**, zero cap-hits, zero truncations, $6.92. **`briefed − prose` is
+  +0 points at every rung** — and it is the pre-registered *upper bound*.
+- **Not a null about the engine; a statement about the slate.** Real, not a
+  grading artefact: d5 `delete-without-read` is a 262-row closure-then-negation
+  answer graded `missing=0 extra=0` against the plain-Python oracle, in 10 turns.
+- **The blocker is bracketed on both sides now.** The 14B is under the whole
+  range (14/7/5%), Haiku is over all of it, and there is no subject between them.
+- **Prose holds 5–6 turns from d1 to d5 while the engine arm climbs 8 → 12.5.**
+  Accuracy did not move along the axis; cost did.
+- **Open: nothing records how the `prose` arm answered.** The founding decision
+  names ad-hoc code as the honest counterfactual; `signals.py` counts the engine
+  and the `grep` escape and not that. On this run it is the whole mechanism.
+
+**Removed**
+- Nothing. The 16-cell staged sitting (`run-20260831T011829Z`) stays on disk
+  rather than being patched resumable: `results/` is append-only, and $1.26 is
+  the whole cost of that rule.
+
+**Next up**
+- **`at-scale` is the only axis left untested** — the track that defeats the
+  prose arm by construction rather than by structure, and the one place this
+  subject cannot bring its own script to bear on the whole fact base.
+- **A `wrote_script` signal before the next run**, not after: transcripts are not
+  persisted, so it is unrecoverable for anything on disk.
+- Unchanged: the `SKILL.md` gap, the mandate arm's `invoked` split, `scheduling`.
+
 ## 2026-08-28 (later) — A 32-cell A/B, three instrument defects, and a floor that was not one
 
 Asked for a medium A/B of `prose` against `engine-briefed`. Ran it — and getting
@@ -130,56 +184,3 @@ sentence: *both arms are failing on tool use before the engine is in play.*
 - **Nothing is calibrated**, and no grid should run until the above is settled.
 - Unchanged: the mandate arm's `invoked` split, the prompt-blind
   `resume.fingerprint`, `scheduling`'s own look.
-
-## 2026-08-27 (later still, iv) — engine-forced was measuring its own turn cap
-
-Asked why `engine-forced` could possibly score below `engine` when it has the
-same tools and more instruction. It could not — the number was an artefact. Over
-every run on disk the arm ended at its **turn cap in 48% of cells** against 16%
-for `prose`, 75% of those writing nothing, **and nothing recorded it**. Its 5%
-correct was a reading of the cap. Long form:
-`experiments/notes/a-local-subject.md` (*What is wrong with engine-forced*).
-
-**Done** — three fixes, `1,429` tests green (+17), ruff clean, offline grid renders
-- **A per-arm budget** (`cell.ARM_BUDGET`): `engine-forced` gets 2× the turns and
-  wall clock, because it must write, run, read, repair and re-run before it can
-  answer. Its *successful* cells took a median 13 turns against `engine`'s 4 and
-  topped out at 21 against a 24 cap — truncated, so 2.0 is a floor.
-- **The mandate names the answer format.** `datalog` prints `answer("x").`; the
-  contract wants `x`. Fact-shaped answers were 3.7% of `engine-forced` answers and
-  0% of both other arms, all `wrong`. *Fix the instruction, not the ruler.*
-- **`engine_unusable`**, a legal move in the engine arms with a required reason,
-  graded `ENGINE_UNUSABLE`. The mandate forbids answering from anything else, so a
-  subject whose program will not run previously had no move but to loop.
-- **A capped cell now says so.** `_OUT_OF_TURNS`, matching `runner.STOPPING_RULE`.
-  The wall clock and context guard always recorded theirs; the turn cap — the most
-  fired of the three — recorded nothing, which is why this took three sessions.
-- **Two hypotheses checked and killed**: the arm does *not* under-read the skill
-  (203/343 vs `engine`'s 149/417), and it is not mis-built (base prompt plus
-  `MANDATE`, test-pinned as a strict suffix).
-- **First real cell after the fix**: 593s/12 turns → **183s/6 turns**, no cap, and
-  a bare value instead of fact syntax. Still wrong; n=1.
-
-**Decided** (`experiments/decisions.md`, two entries, two open questions answered)
-- **A stopping rule that does not record itself is a silent truncation** — the
-  fourth instance of this project's standing failure mode, and the first found in
-  its own bounds rather than in a vendor default.
-- ***Amended*: dropping `engine-forced` was the wrong call, on a premise that was
-  the bug's own symptom.** Yesterday's costing made it 4.7× the items per night;
-  617s/cell was a defect, not a price. It would have retired the primary endpoint
-  to work around a bug. `engine − prose` stays a real secondary question.
-- **The cost, stated:** an unequal budget is arm-asymmetric and sits on the arm
-  carrying the primary endpoint, so a gain there now has two candidate causes.
-  `report.py` prints cap-hit rate per arm; a result is readable only while it is
-  low.
-
-**Removed**
-- Every prior `engine-forced` accuracy number. All three fixes change the arm, and
-  those cells were measuring a cap — so nothing is lost that was worth keeping.
-  The 2026-08-27 (later) entry rotated to the archive.
-
-**Next up**
-- **The arm's accuracy is now unmeasured.** Re-gate `controls` on all three arms
-  before the pass, and read cap-hit rate first.
-- Unchanged: the slate-subject guard before any `run --slate`; the 240-cell
-  calibration; the missing rung; the mandate arm's `invoked` split.
