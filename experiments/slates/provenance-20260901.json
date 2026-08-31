@@ -1,0 +1,114 @@
+{
+  "version": 3,
+  "written_at": "2026-08-31T21:19:55.001132+00:00",
+  "run_id": null,
+  "selection": "none",
+  "pool": {
+    "packs": [
+      "provenance"
+    ],
+    "seeds": [
+      20260901
+    ],
+    "difficulties": [
+      3,
+      5
+    ],
+    "tracks": [
+      "in-context"
+    ],
+    "trials": 0,
+    "arm": null,
+    "strength": "haiku-4.5",
+    "model": "claude-haiku-4-5",
+    "local": null
+  },
+  "bands": null,
+  "kept": [
+    {
+      "domain": "provenance",
+      "id": "g2825-d3-access-path",
+      "seed": 20260901,
+      "difficulty": 3,
+      "track": "in-context",
+      "fingerprint": "d9fb67dd56cfa63e",
+      "question_class": "provenance",
+      "truth_size": 33,
+      "engine_expected_to_help": true,
+      "trials": 0,
+      "correct": 0,
+      "reason": "ladder rung d3 \u2014 not screened"
+    },
+    {
+      "domain": "provenance",
+      "id": "g2825-d3-critical-grant",
+      "seed": 20260901,
+      "difficulty": 3,
+      "track": "in-context",
+      "fingerprint": "1b3b0d0b53c8d74d",
+      "question_class": "provenance",
+      "truth_size": 12,
+      "engine_expected_to_help": true,
+      "trials": 0,
+      "correct": 0,
+      "reason": "ladder rung d3 \u2014 not screened"
+    },
+    {
+      "domain": "provenance",
+      "id": "g2825-d3-minimal-repair",
+      "seed": 20260901,
+      "difficulty": 3,
+      "track": "in-context",
+      "fingerprint": "ab8fd5b86486be89",
+      "question_class": "provenance",
+      "truth_size": 36,
+      "engine_expected_to_help": true,
+      "trials": 0,
+      "correct": 0,
+      "reason": "ladder rung d3 \u2014 not screened"
+    },
+    {
+      "domain": "provenance",
+      "id": "g2825-d5-access-path",
+      "seed": 20260901,
+      "difficulty": 5,
+      "track": "in-context",
+      "fingerprint": "b565746025bb4f67",
+      "question_class": "provenance",
+      "truth_size": 13,
+      "engine_expected_to_help": true,
+      "trials": 0,
+      "correct": 0,
+      "reason": "ladder rung d5 \u2014 not screened"
+    },
+    {
+      "domain": "provenance",
+      "id": "g2825-d5-critical-grant",
+      "seed": 20260901,
+      "difficulty": 5,
+      "track": "in-context",
+      "fingerprint": "da8a6a23267a0e46",
+      "question_class": "provenance",
+      "truth_size": 8,
+      "engine_expected_to_help": true,
+      "trials": 0,
+      "correct": 0,
+      "reason": "ladder rung d5 \u2014 not screened"
+    },
+    {
+      "domain": "provenance",
+      "id": "g2825-d5-minimal-repair",
+      "seed": 20260901,
+      "difficulty": 5,
+      "track": "in-context",
+      "fingerprint": "cca91d0cca6d7b48",
+      "question_class": "provenance",
+      "truth_size": 76,
+      "engine_expected_to_help": true,
+      "trials": 0,
+      "correct": 0,
+      "reason": "ladder rung d5 \u2014 not screened"
+    }
+  ],
+  "rejected": []
+}
