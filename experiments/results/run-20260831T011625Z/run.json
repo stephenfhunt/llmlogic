@@ -1,0 +1,29 @@
+{
+  "run_id": "run-20260831T011625Z",
+  "started_at": "2026-08-31T01:16:25.163894+00:00",
+  "dry_run": false,
+  "domains": [
+    "controls"
+  ],
+  "tasks": 4,
+  "cells": 8,
+  "strengths": [
+    "haiku-4.5"
+  ],
+  "arms": [
+    "prose",
+    "engine-briefed"
+  ],
+  "repeats": 1,
+  "fingerprints": {
+    "controls/department-of": "567d471f8808ed9b",
+    "controls/customer-of-order": "b3be9a92dea55f77",
+    "controls/orders-above-100": "a30f549bcca6c4ce",
+    "controls/engineering-headcount": "397c66f0ec307dd6"
+  },
+  "ablate": null,
+  "max_turns": 30,
+  "max_budget_usd": 0.5,
+  "local": null,
+  "slate": null
+}
