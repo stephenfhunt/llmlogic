@@ -229,6 +229,14 @@ def _run_grid(
         # `resume` is unaffected.
         cells.sort(key=lambda cell: (cell.trial, cell.strength.name))
 
+    # **The grid and the sitting are two numbers, and only one of them is the
+    # experiment.** `--limit` sizes a sitting to the window and `--resume`
+    # finishes what it left — that pair is the documented shape of a run
+    # (`AGENTS.md`). Recording the *limited* count as `cells` made the two
+    # mutually exclusive: a resume rebuilds the whole grid, compared it against
+    # the sitting, and refused its own run as a slate that had moved. Found
+    # 2026-08-30, on the first sitting that was ever staged this way.
+    planned = cells
     if args.limit:
         cells = cells[: args.limit]
 
@@ -251,6 +259,12 @@ def _run_grid(
                 f"ceiling {ceiling:.2f} USD.",
                 file=sys.stderr,
             )
+        if len(cells) != len(planned):
+            print(
+                f"This sitting is {len(cells)} of a {len(planned)}-cell grid; "
+                "`harness run --resume` finishes the rest.",
+                file=sys.stderr,
+            )
         if not args.yes:
             print("re-run with --yes to start it.", file=sys.stderr)
             return 2
@@ -260,7 +274,11 @@ def _run_grid(
         dry_run=args.dry_run,
         domains=sorted({task.domain for task in tasks}),
         tasks=len(tasks),
-        cells=len(cells),
+        # The **grid**, not this sitting: `resume` rebuilds the whole thing and
+        # checks it against this number, so a limited sitting that recorded its
+        # own size would be refusing itself.
+        cells=len(planned),
+        limit=args.limit,
         strengths=[strength.name for strength in strengths],
         arms=list(cell_arms),
         repeats=args.repeats,
@@ -410,6 +428,7 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
 
     tasks = [candidate.task for candidate in candidates]
     cells = grid(tasks, (strength,), (calibrate.ARM,), None, args.trials)
+    planned = cells  # the pass; `cells` below is this sitting of it. See `_run_grid`.
     if args.limit:
         cells = cells[: args.limit]
 
@@ -441,7 +460,8 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
         dry_run=args.dry_run,
         domains=sorted({task.domain for task in tasks}),
         tasks=len(tasks),
-        cells=len(cells),
+        cells=len(planned),
+        limit=args.limit,
         strengths=[strength.name],
         arms=[calibrate.ARM],
         repeats=args.trials,

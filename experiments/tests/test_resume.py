@@ -10,7 +10,7 @@ from dataclasses import replace
 import pytest
 
 from harness import arms, report, resume
-from harness.cell import grid
+from harness.cell import STRENGTHS, grid
 from harness.domains.controls import tasks as controls_tasks
 from harness.record import RecordStore
 from harness.runner import run_cell, run_grid
@@ -236,3 +236,46 @@ class TestFingerprints:
         the defect this guard exists to prevent."""
         assert resume.moved(controls_tasks.tasks(), {}) == {}
         assert resume.moved(controls_tasks.tasks(), {"fingerprints": {}}) == {}
+
+
+class TestAStagedSitting:
+    """`--limit` sizes a sitting and `--resume` finishes it. That pair is the
+    documented shape of a run, and until 2026-08-30 it did not work: the limited
+    sitting recorded *its own* size as `cells`, so the resume rebuilt the whole
+    grid, compared 88 against 16, and refused the run as a slate that had moved.
+
+    Only the metadata is asserted here. `cmd_resume` refuses a dry run by design,
+    so the resume half of the round trip cannot be exercised offline at all —
+    which is the reason this regression reached a paid sitting to be found.
+    """
+
+    def _run(self, tmp_path, monkeypatch, *extra):
+        from harness import cli
+        from harness.cli import main
+
+        monkeypatch.setattr(cli, "RESULTS_ROOT", tmp_path / "results")
+        monkeypatch.setattr(cli, "WORKSPACE_ROOT", tmp_path / "ws")
+        assert main(["run", "--dry-run", "--domain", "controls", *extra]) == 0
+        run_dir = sorted((tmp_path / "results").iterdir())[-1]
+        return json.loads((run_dir / "run.json").read_text())
+
+    def test_a_limited_sitting_records_the_grid_not_the_sitting(self, tmp_path, monkeypatch):
+        whole = self._run(tmp_path, monkeypatch)
+        staged = self._run(tmp_path, monkeypatch, "--limit", "4")
+        assert staged["cells"] == whole["cells"]
+        assert staged["limit"] == 4
+
+    def test_an_unlimited_run_says_it_was_not_staged(self, tmp_path, monkeypatch):
+        assert self._run(tmp_path, monkeypatch)["limit"] is None
+
+    def test_the_rebuilt_grid_matches_what_a_staged_sitting_recorded(self, tmp_path, monkeypatch):
+        """The comparison `cmd_resume` makes, made here against the same slate."""
+        meta = self._run(tmp_path, monkeypatch, "--limit", "4")
+        cells = grid(
+            controls_tasks.tasks(),
+            tuple(s for s in STRENGTHS if s.name in set(meta["strengths"])),
+            tuple(meta["arms"]),
+            meta.get("ablate"),
+            meta.get("repeats", 1),
+        )
+        assert len(cells) == meta["cells"]
