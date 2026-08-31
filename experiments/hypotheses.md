@@ -410,3 +410,47 @@ section opens with.
 - **The block is an instruction, not documentation**, and that is the whole
   hypothesis. Documentation is what `engine-briefed` already carries, and its
   result is the zero above.
+
+### 2026-08-31 (later ii) — Provenance on Haiku, where the repair route cannot fire
+
+The `engine-briefed-provenance` arm asks whether a subject told to interrogate an
+empty result will do it. **On Haiku that question has no cells to be asked in.**
+Measured over `run-20260831T014254Z`, the 88-cell ladder: `engine-briefed` is
+**44/44 correct**, **44/44 `answered-from`**, and ran `datalog` with visible
+stdout in **44 of 44 transcripts**. There is no failure to interrogate, and the
+block's opening condition — *your program ran but did not print what you
+expected* — never holds. Provenance reach on that run was `none` in 44 of 44,
+consistent with the zero across all 1,812 archived transcripts.
+
+So the route left is to ask a question whose **answer is the derivation**. That
+is what `domains/provenance` is: `critical-grant` (which single fact does this
+conclusion rest on), `minimal-repair` (which single fact would make it hold),
+`access-path` (which roles would a proof name), over `access_control`'s graph.
+
+**This section pre-registers a pilot, not a test.**
+
+- **n = 12** — 3 questions × 2 rungs (d3, d5) × `prose` and `engine-briefed`, at
+  `haiku-4.5`, over `slates/provenance-20260901.json`, plus the 8 pinned control
+  cells `run --slate` carries. `stats.required_items` puts a testable effect two
+  orders of magnitude above this, so **no p-value is reported and no delta is
+  claimed**. The question is whether this class of item discriminates at all.
+- **The primary read is reach, not accuracy** — `signals.ProvenanceUse` against a
+  baseline of zero. Accuracy is descriptive and is reported second.
+- **`ScriptUse` is read beside it.** On the ladder it was the whole mechanism:
+  `prose` answered from a script in 33 of 44 cells, `engine-briefed` in 0. A
+  provenance-shaped question that a Python script answers just as well is a
+  finding about the question, and this column is where it shows.
+- **Stated in advance, before the run: these questions make provenance
+  *applicable*, not *necessary*.** `?why` and `?whynot` answer all three in one
+  call, but so does an ordinary `-q` rule — `reference/correct/provenance.dl` is
+  the existence proof, and it uses neither sigil. A null on reach is therefore a
+  finding about what the subject reaches for, **not** a refutation of the
+  feature, and will not be reported as one.
+- **The gate, on the ladder's own precedent:** if both arms score 12/12, this
+  class is over Haiku's ceiling as the generator range already was, and the run
+  stops and is recorded as that — not re-run at another rung until a number
+  moves.
+- **`engine-briefed-provenance` is deliberately not in the pilot.** Its block is
+  worded for a failure that does not occur here, so a null on it would have two
+  causes. It stays pointed at the local subject, behind the observation blocker
+  (`decisions.md` 2026-08-31 later i).
