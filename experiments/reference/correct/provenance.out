@@ -1,0 +1,107 @@
+critical("u27df0001", "g27df06", "role27df00").
+critical("u27df0006", "g27df06", "role27df00").
+critical("u27df0011", "g27df00", "role27df15").
+critical("u27df0013", "g27df05", "role27df02").
+critical("u27df0016", "g27df06", "role27df00").
+critical("u27df0019", "g27df06", "role27df00").
+critical("u27df0022", "g27df05", "role27df02").
+critical("u27df0027", "g27df05", "role27df02").
+critical("u27df0032", "g27df02", "role27df00").
+repair("u27df0001", "g27df03").
+repair("u27df0001", "g27df04").
+repair("u27df0001", "g27df05").
+repair("u27df0003", "g27df03").
+repair("u27df0003", "g27df04").
+repair("u27df0003", "g27df05").
+repair("u27df0006", "g27df03").
+repair("u27df0006", "g27df04").
+repair("u27df0006", "g27df05").
+repair("u27df0009", "g27df03").
+repair("u27df0009", "g27df04").
+repair("u27df0009", "g27df05").
+repair("u27df0011", "g27df03").
+repair("u27df0011", "g27df04").
+repair("u27df0011", "g27df05").
+repair("u27df0014", "g27df03").
+repair("u27df0014", "g27df04").
+repair("u27df0014", "g27df05").
+repair("u27df0015", "g27df03").
+repair("u27df0015", "g27df04").
+repair("u27df0015", "g27df05").
+repair("u27df0016", "g27df03").
+repair("u27df0016", "g27df04").
+repair("u27df0016", "g27df05").
+repair("u27df0017", "g27df03").
+repair("u27df0017", "g27df04").
+repair("u27df0017", "g27df05").
+repair("u27df0019", "g27df03").
+repair("u27df0019", "g27df04").
+repair("u27df0019", "g27df05").
+repair("u27df0020", "g27df03").
+repair("u27df0020", "g27df04").
+repair("u27df0020", "g27df05").
+repair("u27df0023", "g27df03").
+repair("u27df0023", "g27df04").
+repair("u27df0023", "g27df05").
+repair("u27df0025", "g27df03").
+repair("u27df0025", "g27df04").
+repair("u27df0025", "g27df05").
+repair("u27df0026", "g27df03").
+repair("u27df0026", "g27df04").
+repair("u27df0026", "g27df05").
+repair("u27df0030", "g27df03").
+repair("u27df0030", "g27df04").
+repair("u27df0030", "g27df05").
+repair("u27df0032", "g27df03").
+repair("u27df0032", "g27df04").
+repair("u27df0032", "g27df05").
+repair("u27df0033", "g27df03").
+repair("u27df0033", "g27df04").
+repair("u27df0033", "g27df05").
+repair("u27df0034", "g27df03").
+repair("u27df0034", "g27df04").
+repair("u27df0034", "g27df05").
+repair("u27df0035", "g27df03").
+repair("u27df0035", "g27df04").
+repair("u27df0035", "g27df05").
+on_path("u27df0002", "role27df02").
+on_path("u27df0002", "role27df05").
+on_path("u27df0002", "role27df07").
+on_path("u27df0002", "role27df13").
+on_path("u27df0004", "role27df02").
+on_path("u27df0004", "role27df05").
+on_path("u27df0004", "role27df07").
+on_path("u27df0005", "role27df02").
+on_path("u27df0005", "role27df05").
+on_path("u27df0005", "role27df07").
+on_path("u27df0005", "role27df13").
+on_path("u27df0008", "role27df02").
+on_path("u27df0008", "role27df05").
+on_path("u27df0008", "role27df07").
+on_path("u27df0008", "role27df13").
+on_path("u27df0011", "role27df13").
+on_path("u27df0013", "role27df02").
+on_path("u27df0013", "role27df05").
+on_path("u27df0013", "role27df07").
+on_path("u27df0015", "role27df13").
+on_path("u27df0018", "role27df02").
+on_path("u27df0018", "role27df05").
+on_path("u27df0018", "role27df07").
+on_path("u27df0018", "role27df13").
+on_path("u27df0022", "role27df02").
+on_path("u27df0022", "role27df05").
+on_path("u27df0022", "role27df07").
+on_path("u27df0022", "role27df13").
+on_path("u27df0023", "role27df13").
+on_path("u27df0025", "role27df13").
+on_path("u27df0027", "role27df02").
+on_path("u27df0027", "role27df05").
+on_path("u27df0027", "role27df07").
+on_path("u27df0028", "role27df02").
+on_path("u27df0028", "role27df05").
+on_path("u27df0028", "role27df07").
+on_path("u27df0030", "role27df13").
+on_path("u27df0031", "role27df02").
+on_path("u27df0031", "role27df05").
+on_path("u27df0031", "role27df07").
+on_path("u27df0031", "role27df13").

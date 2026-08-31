@@ -1,0 +1,65 @@
+import "member.csv" as member.
+import "grant.csv" as grant.
+import "includes.csv" as includes.
+import "permit.csv" as permit.
+import "revoked.csv" as revoked.
+
+% The same closure `access_control.dl` computes — this pack borrows that graph,
+% so the base rules are its rules, and only the questions are new.
+has_role(U, R) :- member(user: U, group: G), grant(group: G, role: R).
+has_role(U, S) :- has_role(U, R), includes(role: R, included_role: S).
+can(U, Res, A) :- has_role(U, R),
+                  permit(role: R, resource: Res, action: A),
+                  not revoked(user: U, resource: Res).
+
+% 1 — critical-grant, on r27df0020. The counterfactual is carried as two extra
+% columns: `without(G0, R0, U, S)` is the roles U would hold if the single grant
+% row (G0, R0) were deleted. Both spellings of "some other grant" are needed —
+% another group granting the role, and the same group granting another role.
+without(G0, R0, U, S) :- grant(group: G0, role: R0),
+                         member(user: U, group: G), grant(group: G, role: S),
+                         G != G0.
+without(G0, R0, U, S) :- grant(group: G0, role: R0),
+                         member(user: U, group: G0), grant(group: G0, role: S),
+                         S != R0.
+without(G0, R0, U, T) :- without(G0, R0, U, S), includes(role: S, included_role: T).
+can_without(G0, R0, U, Res, A) :- without(G0, R0, U, S),
+                                  permit(role: S, resource: Res, action: A),
+                                  not revoked(user: U, resource: Res).
+critical(U, G0, R0) :- can(U, "r27df0020", "read"),
+                       grant(group: G0, role: R0),
+                       not can_without(G0, R0, U, "r27df0020", "read").
+
+% 2 — minimal-repair, on r27df0017. The mirror counterfactual: `joined(G0, U, S)`
+% is the roles U would hold after being added to group G0.
+joined(G0, U, S) :- member(group: G0), has_role(U, S).
+joined(G0, U, S) :- member(user: U), member(group: G0), grant(group: G0, role: S).
+joined(G0, U, T) :- joined(G0, U, S), includes(role: S, included_role: T).
+can_joined(G0, U, Res, A) :- joined(G0, U, S),
+                             permit(role: S, resource: Res, action: A),
+                             not revoked(user: U, resource: Res).
+repair(U, G0) :- can_joined(G0, U, "r27df0017", "read"),
+                 not can(U, "r27df0017", "read"),
+                 not member(user: U, group: G0).
+
+% 3 — access-path, on r27df0023. A role is on a chain when a directly granted
+% role reaches it and it reaches a role that permits the action. `role/1` gives
+% `reaches` a safe reflexive case: `reaches(R, R).` as a bare fact would be a
+% rule with nothing to range over.
+role(R) :- grant(group: _, role: R).
+role(R) :- includes(role: R, included_role: _).
+role(S) :- includes(role: _, included_role: S).
+role(R) :- permit(role: R, resource: _, action: _).
+reaches(R, R) :- role(R).
+reaches(R, T) :- includes(role: R, included_role: S), reaches(S, T).
+direct_role(U, R) :- member(user: U, group: G), grant(group: G, role: R).
+on_path(U, S) :- can(U, "r27df0023", "read"),
+                 direct_role(U, R),
+                 reaches(R, S),
+                 reaches(S, P),
+                 permit(role: P, resource: "r27df0023", action: "read").
+
+% The three answers, in task order.
+?- critical(U, G, R).
+?- repair(U, G).
+?- on_path(U, S).

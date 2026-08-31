@@ -76,6 +76,11 @@ ANSWERS: dict[str, dict[str, str]] = {
         "token-subclasses": "sub_token",
         "functions-called-from-several-modules": "widely_used",
     },
+    "provenance": {
+        "critical-grant": "critical",
+        "minimal-repair": "repair",
+        "access-path": "on_path",
+    },
     "controls": {
         "department-of": "carol_department",
         "customer-of-order": "o3_customer",

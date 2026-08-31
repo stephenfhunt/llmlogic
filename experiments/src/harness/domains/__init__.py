@@ -31,6 +31,7 @@ SLATE = (
     "eligibility",
     "scheduling",
     "static_analysis",
+    "provenance",
     "controls",
 )
 

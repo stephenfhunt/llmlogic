@@ -32,6 +32,11 @@ QuestionClass = Literal[
     "constraint",
     "aggregation",
     "temporal",
+    # The answer is the derivation rather than the extension — which fact the
+    # conclusion rests on, which one would repair it, which roles a proof would
+    # name. Its own class because it is a different question about the same
+    # closure, and the by-class table is where that shows (`domains/provenance`).
+    "provenance",
     "single-hop",  # negative control: the engine should not help
     "one-step",  # negative control: arithmetic a model does in its head
 ]

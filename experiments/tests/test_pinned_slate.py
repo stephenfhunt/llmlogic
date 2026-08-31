@@ -1,4 +1,4 @@
-"""The 28 pinned tasks, hashed. Nothing below may move them.
+"""The 31 pinned tasks, hashed. Nothing below may move them.
 
 The generators are a refactor of every pack's fixture into a value the oracle can
 be handed — and a refactor that quietly changes a fixture changes what the
@@ -39,6 +39,9 @@ PINNED = {
     "static_analysis/modules-outside-any-import-cycle": "108c27e7304da69f",
     "static_analysis/token-subclasses": "70f144d369d930b1",
     "static_analysis/functions-called-from-several-modules": "45ae6410967678e4",
+    "provenance/critical-grant": "e75817e3f5b99b8e",
+    "provenance/minimal-repair": "9c58b90f9705af82",
+    "provenance/access-path": "d69ebb8ece425f5a",
     "controls/department-of": "567d471f8808ed9b",
     "controls/customer-of-order": "b3be9a92dea55f77",
     "controls/orders-above-100": "a30f549bcca6c4ce",
