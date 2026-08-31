@@ -1,0 +1,41 @@
+{
+  "run_id": "run-20260831T165452Z",
+  "started_at": "2026-08-31T16:54:52.421955+00:00",
+  "dry_run": false,
+  "domains": [
+    "access_control"
+  ],
+  "tasks": 4,
+  "cells": 4,
+  "limit": 2,
+  "strengths": [
+    "qwen3-14b-structured"
+  ],
+  "arms": [
+    "engine-briefed-provenance"
+  ],
+  "repeats": 1,
+  "fingerprints": {
+    "access_control/who-can-read-r03": "0499ee734ce6341f",
+    "access_control/resources-for-u04": "bac0dc855085b84e",
+    "access_control/users-with-no-access": "7d7ca9fd98a296e1",
+    "access_control/delete-without-read": "5a8b0fd34f012c34"
+  },
+  "ablate": null,
+  "max_turns": 30,
+  "max_budget_usd": 2.0,
+  "local": {
+    "endpoint": "http://127.0.0.1:11434/v1",
+    "models": [
+      "qwen3:14b"
+    ],
+    "protocols": [
+      "structured"
+    ],
+    "reasoning_effort": null,
+    "max_cell_seconds": 900,
+    "context_tokens": 24576,
+    "max_output_tokens": 4096
+  },
+  "slate": null
+}
