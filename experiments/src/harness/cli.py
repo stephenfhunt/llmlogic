@@ -228,6 +228,7 @@ def _run_grid(
         # now of one model at a time — and leaves every cell id untouched, so
         # `resume` is unaffected.
         cells.sort(key=lambda cell: (cell.trial, cell.strength.name))
+
     if args.limit:
         cells = cells[: args.limit]
 
@@ -478,6 +479,79 @@ def cmd_calibrate(args: argparse.Namespace) -> int:
         return _halted(result, store.dir, len(cells))
 
     return _write_slate(candidates, store.dir, args)
+
+
+def cmd_ladder(args: argparse.Namespace) -> int:
+    """Write a slate that walks the difficulty axis, screened by nothing.
+
+    `calibrate` answers *which items have headroom for this subject*, and it
+    answers it by keeping the middle of a band. A ladder asks the opposite
+    question — **where along difficulty does the engine start to pay?** — and the
+    band is what would destroy it: which items land in the middle is itself a
+    fact about the rung, so a screened ladder measures the screen.
+
+    So there is no pass and no selection here. This is offline: it draws the
+    pool, keeps the named questions at every rung, and pins them to a manifest
+    that says `selection: none` so nobody later reads its zeros as a subject
+    scoring nothing.
+    """
+    packs = args.domain or [p for p in domains.generators() if p not in CALIBRATION_EXCLUDES]
+    seeds = [args.seed]
+    difficulties = args.difficulty or list(calibrate.DEFAULT_DIFFICULTIES)
+    tracks = args.track or ["in-context"]
+
+    strength = next((s for s in STRENGTHS if s.name == args.strength), None)
+    if strength is None:
+        known = ", ".join(s.name for s in STRENGTHS)
+        print(f"no such strength: {args.strength} — have {known}", file=sys.stderr)
+        return 1
+
+    try:
+        candidates = calibrate.pool(seeds, packs=packs, difficulties=difficulties, tracks=tracks)
+    except (calibrate.PoolError, generate.Degenerate) as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    if args.question:
+        wanted = set(args.question)
+        candidates = [c for c in candidates if calibrate.question(c) in wanted]
+        # **Refuse a name that matched nothing**, rather than writing the ladder
+        # it did match. A typo'd question silently drops one trajectory out of
+        # eight, and a ladder missing a rung of one line reads as a ladder whose
+        # subject failed there.
+        found = {calibrate.question(c) for c in candidates}
+        if missing := sorted(wanted - found):
+            print(
+                f"no item named {', '.join(missing)} in {', '.join(packs)} at "
+                f"difficult{'ies' if len(difficulties) > 1 else 'y'} "
+                f"{', '.join(str(d) for d in difficulties)}",
+                file=sys.stderr,
+            )
+            return 1
+
+    if not candidates:
+        print("the ladder is empty — nothing to write", file=sys.stderr)
+        return 1
+
+    payload = calibrate.ladder(
+        candidates,
+        calibrate.spec(seeds, packs, difficulties, tracks, trials=0, strength=strength, arm=None),
+    )
+
+    out = Path(args.out) if args.out else SLATES_ROOT / f"ladder-{args.seed}.json"
+    if not out.is_absolute():
+        out = Path.cwd() / out
+    calibrate.write(out, payload)
+
+    rungs = sorted({c.difficulty for c in candidates})
+    per_rung = len(candidates) // len(rungs)
+    print(
+        f"{len(candidates)} items — {per_rung} per rung across d"
+        f"{', d'.join(str(d) for d in rungs)}, seed {args.seed}, for "
+        f"{strength.name}. Nothing was screened.",
+    )
+    print(f"slate: {out}")
+    return 0
 
 
 def _reselect(run_dir: Path, args: argparse.Namespace) -> int:
@@ -1075,6 +1149,34 @@ def main(argv: list[str] | None = None) -> int:
     )
     cal.add_argument("--yes", action="store_true", help="required to start a paid pass")
     cal.set_defaults(func=cmd_calibrate)
+
+    lad = sub.add_parser("ladder", help="pin a difficulty ladder, screened by nothing")
+    lad.add_argument("--domain", action="append", help="restrict the ladder to a pack (repeatable)")
+    lad.add_argument(
+        "--seed", type=int, required=True, help="the one seed every rung is drawn from"
+    )
+    lad.add_argument("--difficulty", action="append", type=int, help="a rung to draw (repeatable)")
+    lad.add_argument(
+        "--track",
+        action="append",
+        choices=("in-context", "at-scale"),
+        help="which track to draw; default in-context",
+    )
+    lad.add_argument(
+        "--question",
+        action="append",
+        help="keep only this question, at every rung (repeatable). Holding the "
+        "question constant is what leaves difficulty as the only thing varying "
+        "along the ladder; a name that matches nothing is refused",
+    )
+    lad.add_argument(
+        "--strength",
+        default=calibrate.STRENGTH.name,
+        help="the subject the ladder is for. Recorded so `run --slate` refuses a "
+        "grid that does not hold it",
+    )
+    lad.add_argument("--out", metavar="MANIFEST", help="where to write the slate")
+    lad.set_defaults(func=cmd_ladder)
 
     sc = sub.add_parser("score", help="grade one Datalog program against one task")
     sc.add_argument("--task", required=True, metavar="DOMAIN/ID")

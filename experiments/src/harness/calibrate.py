@@ -39,7 +39,21 @@ from harness.task import Task
 #: (`decisions.md` 2026-08-27): it bounds reasoning *plus* answer, so the same
 #: model at two caps is two subjects. Bumping rather than defaulting is what
 #: makes the field's absence unrepresentable instead of silently filled in.
-MANIFEST_VERSION = 2
+#:
+#: 3 — a manifest says **how** its items were chosen. Until now every manifest
+#: was a calibration pass's output and the format could only mean *this subject
+#: scored these items into the band*. A ladder is chosen by construction and
+#: screened by nothing, and a slate that cannot say so is one a later session
+#: reads as measured evidence it never was. Bumped rather than defaulted for the
+#: reason above: the absence has to be unrepresentable.
+MANIFEST_VERSION = 3
+
+#: How a manifest's items were chosen. ``band`` is `select`'s output — every item
+#: has a measured rate behind it. ``none`` is a slate assembled deliberately, its
+#: rungs unscreened, and its ``trials``/``correct`` therefore zero because nothing
+#: ran, not because nothing was correct.
+SELECTION_BAND = "band"
+SELECTION_NONE = "none"
 
 #: Trials per pool item. **One trial is 0 or 1**, so a band over the middle is
 #: empty by construction and the whole pass selects nothing. At three the
@@ -281,6 +295,7 @@ def spec(
     trials: int,
     strength: Strength = STRENGTH,
     max_output_tokens: int | None = None,
+    arm: str | None = ARM,
 ) -> dict:
     """The pool as data, so a stopped pass can be rebuilt exactly.
 
@@ -294,6 +309,14 @@ def spec(
     item alone (`hypotheses.md`, precondition 4). A slate calibrated on haiku is
     not calibrated for a 14B served locally, and a manifest that cannot say
     which one selected it cannot be checked against the grid that runs it.
+
+    ``arm`` and ``trials`` are what the pass *did*, and a ladder did none of it:
+    it passes ``arm=None`` and ``trials=0``, because recording ``prose`` and three
+    here would say a screen ran. The subject is still recorded — there was no
+    calibrating one, but `cli._slate_subject_holds` is about which grid may run
+    the slate, and binding it is strictly safer than leaving it open. The
+    manifest's ``selection`` field is what keeps that from reading as a
+    measurement.
 
     ``max_output_tokens`` is the one part of a local subject that `Strength` does
     not carry — it is a `local.LocalSubject` parameter — and it is **required**
@@ -313,7 +336,7 @@ def spec(
         "difficulties": list(difficulties),
         "tracks": list(tracks),
         "trials": trials,
-        "arm": ARM,
+        "arm": arm,
         "strength": strength.name,
         "model": strength.model,
         "local": (
@@ -370,10 +393,57 @@ def manifest(selection: Selection, pool_spec: dict, run_id: str | None = None) -
         "version": MANIFEST_VERSION,
         "written_at": datetime.now(UTC).isoformat(),
         "run_id": run_id,
+        "selection": SELECTION_BAND,
         "pool": pool_spec,
         "bands": {"in-context": list(BAND), "at-scale": AT_SCALE_CEILING},
         "kept": [_entry(j) for j in selection.kept],
         "rejected": [_entry(j) for j in selection.rejected],
+    }
+
+
+def question(candidate: Candidate) -> str:
+    """The question a generated item asks, with its seed and rung stripped off.
+
+    A generated id is ``g{tag}-d{difficulty}-{question}``, so the *same* question
+    has a different id at every rung and under every seed. Split on the rung the
+    candidate already knows rather than matching the tag's shape: the tag is the
+    seed's low hex digits and its width is a property of the seed, not of the
+    format.
+    """
+    return candidate.task.id.split(f"-d{candidate.difficulty}-", 1)[-1]
+
+
+def ladder(candidates: list[Candidate], pool_spec: dict) -> dict:
+    """A slate assembled by construction, screened by nothing.
+
+    The opposite of `select`, and it has to be readable as such. A ladder holds
+    one question at every difficulty so that the rung is the only thing varying
+    along it, which is exactly the property `BAND` destroys — the band keeps the
+    items a subject scores in the middle on, and *which* those are is a fact
+    about the rung. A screened ladder is not a ladder.
+
+    So every candidate is kept, `trials` and `correct` are zero because no cell
+    ran, and ``selection`` says ``none`` so the zeros cannot be read as a subject
+    scoring nothing.
+
+    **Ordered rung-ascending**, because `load` preserves entry order and
+    `run --limit N` stages a sitting off it: the first rung is the gate, and a
+    projection taken there is what sizes the rest.
+    """
+    ordered = sorted(candidates, key=lambda c: (c.difficulty, c.pack, c.task.id))
+    kept = [
+        Judged(candidate, None, True, f"ladder rung d{candidate.difficulty} — not screened")
+        for candidate in ordered
+    ]
+    return {
+        "version": MANIFEST_VERSION,
+        "written_at": datetime.now(UTC).isoformat(),
+        "run_id": None,
+        "selection": SELECTION_NONE,
+        "pool": pool_spec,
+        "bands": None,
+        "kept": [_entry(j) for j in kept],
+        "rejected": [],
     }
 
 
@@ -410,6 +480,14 @@ def read(path: Path) -> dict:
         raise ManifestError(
             f"{path} is manifest version {version!r}, this harness writes "
             f"{MANIFEST_VERSION} — the fields do not necessarily mean the same thing"
+        )
+    selection = payload.get("selection")
+    if selection not in (SELECTION_BAND, SELECTION_NONE):
+        raise ManifestError(
+            f"{path} does not say how its items were chosen: `selection` is "
+            f"{selection!r}, not {SELECTION_BAND!r} or {SELECTION_NONE!r}. A slate "
+            "whose items might or might not have been screened is one whose "
+            "`trials` and `correct` cannot be read either way"
         )
     return payload
 
