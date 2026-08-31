@@ -40,6 +40,11 @@ COMPARISONS: tuple[tuple[str, str, str], ...] = (
     ("engine", "prose", "does *supplying* the engine help?"),
     ("engine", "engine-forced", "what does not reaching for it cost?"),
     ("engine-briefed", "engine-forced", "what does *finding the manual* cost?"),
+    (
+        "engine-briefed-provenance",
+        "engine-briefed",
+        "does *instructing* it to ask why convert the failures?",
+    ),
 )
 
 
@@ -424,6 +429,108 @@ def _truncation_line(records: list[dict]) -> list[str]:
     return lines
 
 
+def _counterfactual(records: list[dict]) -> list[str]:
+    """Did the arm bring its own code? **Every** arm, not just the engine ones.
+
+    This is the one table that reads across the whole grid, because the question
+    is not *did it use the engine* but *what did it use instead*. The founding
+    decision names ad-hoc code as the honest alternative to a logic engine, and
+    for four grids nothing counted it: `signals.py` watched the engine and the
+    `grep` escape and not the script.
+
+    What it costs to have been blind to it, measured retroactively on the
+    2026-08-31 ladder: `prose` **36/44**, `engine-briefed` **0/44**. The run's
+    headline `+0 at every rung` was never prose against the engine. It was a
+    Python script against the engine, tying — which is a different finding, and
+    a much less surprising one, on a slate whose every difficulty knob turns
+    deduction.
+    """
+    if not records:
+        return []
+    lines = ["### The counterfactual — did it write its own code?", ""]
+    lines.append("| arm | strength | answered from a script | wrote one | none |")
+    lines.append("|---|---|---|---|---|")
+    for arm in _arms_present(records):
+        for name in _strengths_present(records):
+            rows = [r for r in records if r["arm"] == arm and r["strength"] == name]
+            if not rows:
+                continue
+            counts = defaultdict(int)
+            for record in rows:
+                counts[record["signals"].get("script_use", "unrecorded")] += 1
+            if counts["unrecorded"]:
+                lines.append(f"| {arm} | {name} | — | — | — (not recorded) |")
+                continue
+            answered = counts["answered-from"]
+            share = f"{answered}/{len(rows)} {wilson(answered, len(rows))}"
+            lines.append(f"| {arm} | {name} | {share} | {counts['wrote']} | {counts['none']} |")
+    lines += [
+        "",
+        "**Read this table before the accuracy one.** A null delta between an "
+        "engine arm and `prose` means something different depending on what "
+        "`prose` did: if it answered from a script, the comparison was "
+        "script-against-engine and the slate could not have separated them; if "
+        "it answered from reading, the engine genuinely bought nothing. The "
+        "accuracy table alone cannot tell those apart.",
+        "",
+    ]
+    return lines
+
+
+def _provenance(records: list[dict]) -> list[str]:
+    """Did the subject ask the engine *why* — and did anything follow?
+
+    Its own section rather than a bullet, because it is the secondary endpoint
+    of the provenance run and because a null on the primary is unreadable
+    without it. **Zero reach and no delta** is a finding about the instruction;
+    **high reach and no delta** is a finding about the feature. Those are
+    opposite conclusions from the same accuracy table.
+    """
+    engine_records = [r for r in records if r["arm"] in ENGINE_ARMS]
+    if not engine_records:
+        return []
+    lines = ["### Provenance — did it ask the engine *why*?", ""]
+    lines.append("| arm | strength | acted-on | asked | none | goals run |")
+    lines.append("|---|---|---|---|---|---|")
+    for arm in _arms_present(engine_records):
+        for name in _strengths_present(engine_records):
+            rows = [r for r in engine_records if r["arm"] == arm and r["strength"] == name]
+            if not rows:
+                continue
+            counts = defaultdict(int)
+            for record in rows:
+                counts[record["signals"].get("provenance_use", "unrecorded")] += 1
+            if counts["unrecorded"]:
+                # A run made before the signal existed. Its transcripts are on
+                # disk and answer the question, but this record does not, and a
+                # 0 printed here would be a fabricated number rather than a
+                # missing one — the same rule `_reach` follows above.
+                lines.append(f"| {arm} | {name} | — | — | — | — (not recorded) |")
+                continue
+            acted = counts["acted-on"]
+            goals = sum(r["signals"].get("provenance_runs", 0) for r in rows)
+            share = f"{acted}/{len(rows)} {wilson(acted, len(rows))}"
+            lines.append(
+                f"| {arm} | {name} | {share} | {counts['asked']} | {counts['none']} | {goals} |"
+            )
+    lines += [
+        "",
+        "`asked` is the middle case and merges two: a goal written down but "
+        "never run, and one run on the way out the door. **`goals run` tells "
+        "them apart** — `asked` with a zero there is the first.",
+        "",
+        "**The baseline is zero.** Across every run on disk before 2026-08-31 — "
+        "1,812 transcripts, `engine-briefed` cells included, with `SKILL.md` and "
+        "its worked `?whynot` examples in the prompt — there was not one "
+        "invocation. So a non-zero number in this table is the thing the "
+        "`engine-briefed-provenance` arm was built to produce, and reading the "
+        "accuracy delta without reading this column first is a mistake: they "
+        "answer different halves of one question.",
+        "",
+    ]
+    return lines
+
+
 def _reach(records: list[dict]) -> list[str]:
     """Reach as an outcome with an interval, not a footnote.
 
@@ -572,6 +679,8 @@ def render(run_dir: Path) -> str:
     lines.append("")
 
     lines += _reach(graded)
+    lines += _provenance(graded)
+    lines += _counterfactual(graded)
 
     engine_records = [r for r in graded if r["arm"] in ENGINE_ARMS]
     switched = sum(1 for r in engine_records if r["signals"]["searches_after_engine"] > 0)

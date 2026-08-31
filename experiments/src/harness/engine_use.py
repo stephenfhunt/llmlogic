@@ -27,6 +27,31 @@ _ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 #: sentence mentioning it.
 _DATALOG_SYNTAX = re.compile(r":-|\?why|\?whynot|\w+\s*\([^)]*\)")
 
+#: The interpreters a subject reaches for when it writes code instead of a
+#: Datalog program. Matched on the **command name**, through the same splitter
+#: `invokes_engine` uses, so `cat x.py` and `Read`ing a `.py` file are not
+#: running one.
+#:
+#: `awk` and `sed` are deliberately absent: `signals._SEARCH_COMMANDS` already
+#: counts them as search, and a command that scored as both would be double-
+#: counted in two tables that are meant to partition the same transcript.
+_INTERPRETERS = frozenset(
+    {"python", "python3", "python3.13", "perl", "ruby", "node", "bash", "sh", "zsh"}
+)
+
+#: Files that are a script rather than data or a Datalog program.
+_SCRIPT_SUFFIXES = (".py", ".sh", ".pl", ".rb", ".js")
+
+#: An explanation goal. Both sigils, and `\b` so `?why` does not swallow
+#: `?whynot` — they are separate answers to separate questions and a count that
+#: merged them would be reporting neither.
+#:
+#: This lives here, beside `_DATALOG_SYNTAX`, and not in `signals`. That is the
+#: whole point of this module: there were two substring tests for the engine once
+#: and they disagreed, which is what the docstring above is about. A second
+#: parser for provenance would be the same defect with a new name.
+_PROVENANCE_GOAL = re.compile(r"\?why(?:not)?\b")
+
 
 def _segments(command: str) -> list[str]:
     return [segment.strip() for segment in _SEPARATORS.split(command) if segment.strip()]
@@ -94,4 +119,62 @@ def uses_engine(tool_name: str, tool_input: dict) -> bool:
         # The subject explicitly reaching for the skill is the strongest possible
         # form of "reached for it", and the first real cell did exactly this.
         return "datalog" in str(tool_input.get("command", tool_input)).lower()
+    return False
+
+
+def provenance_in_command(command: str) -> bool:
+    """Did a `datalog` **process** run an explanation goal?
+
+    Narrow, and it has to be: `?whynot` typed into a `.dl` file that is never
+    run explains nothing, and the run this signal exists for is precisely about
+    whether the subject *asks* rather than whether it writes the word down.
+    """
+    return invokes_engine(command) and bool(_PROVENANCE_GOAL.search(command))
+
+
+def asks_provenance(tool_name: str, tool_input: dict) -> bool:
+    """Did this call reach for an explanation, however the subject spelled it?
+
+    The wide predicate — the counterpart to `uses_engine`, not to `_ran_engine`.
+    It counts a goal written into a file or handed to the skill, which
+    `provenance_in_command` deliberately does not.
+    """
+    if tool_name == "Bash":
+        return bool(_PROVENANCE_GOAL.search(str(tool_input.get("command", ""))))
+    if tool_name in ("Write", "Edit"):
+        content = str(tool_input.get("content") or tool_input.get("new_string") or "")
+        return bool(_PROVENANCE_GOAL.search(content))
+    if tool_name == "Skill":
+        return bool(_PROVENANCE_GOAL.search(str(tool_input.get("command", tool_input))))
+    return False
+
+
+def runs_script(command: str) -> bool:
+    """Did this command **execute** an interpreter?
+
+    The counterpart to `invokes_engine`, and it lives beside it for the reason
+    that module docstring gives: these are the same question — *what did this
+    command actually run?* — and answering it in two places is how the two
+    substring tests came to disagree. (The module's name has outgrown its
+    contents; the predicates have not.)
+    """
+    return any(_command_name(segment) in _INTERPRETERS for segment in _segments(command))
+
+
+def script_in_write(tool_input: dict) -> bool:
+    """Did this write put source in a script file?"""
+    path = str(tool_input.get("file_path", ""))
+    return path.endswith(_SCRIPT_SUFFIXES)
+
+
+def writes_script(tool_name: str, tool_input: dict) -> bool:
+    """Did this call author a script, in a file or straight into a heredoc?"""
+    if tool_name in ("Write", "Edit"):
+        return script_in_write(tool_input)
+    if tool_name == "Bash":
+        command = str(tool_input.get("command", ""))
+        # A heredoc into an interpreter is authoring and running in one call —
+        # the shape a subject uses when it is already in a pipeline, and the
+        # one a `.py`-suffix test misses entirely.
+        return runs_script(command) and "<<" in command
     return False
