@@ -260,18 +260,25 @@ def generate(seed: int, difficulty: int = 3, track: str = "in-context") -> Ontol
     # second parent that shares its grandparent, so the grandparent is reached by
     # two routes. A random second edge usually makes a class reachable twice from
     # the *root*, which every class already is.
-    parent_of = {child: parent for child, parent in edges}
+    # **`sorted`, not `edges`.** A set of strings iterates in an order Python
+    # randomizes per process, so a dict built from one — and a list derived from
+    # that dict — hands `rng.choice` a different sequence every time the same
+    # seed is drawn. The truth stayed put and the *fixture* moved, which is the
+    # one shape a manifest cannot survive: `calibrate.load` regenerates a slate
+    # and checks its fingerprint, so an item pinned in one process was refused in
+    # the next. Found 2026-08-30, on the first slate anything had ever run from.
+    parent_of = {child: parent for child, parent in sorted(edges)}
     for _ in range(diamonds):
         candidates = [name for level in levels[2:] for name in level if name in parent_of]
         if not candidates:
             break
         child = rng.choice(candidates)
         grandparent = parent_of.get(parent_of[child])
-        siblings = [
+        siblings = sorted(
             name
             for name, parent in parent_of.items()
             if parent == grandparent and name != parent_of[child]
-        ]
+        )
         if siblings:
             edges.add((child, rng.choice(siblings)))
 
