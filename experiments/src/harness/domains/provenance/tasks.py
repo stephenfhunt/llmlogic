@@ -71,11 +71,12 @@ def _questions(pol, tag: str = "", difficulty: int = 0, track: str = "in-context
         Task(
             id=f"{prefix}critical-grant",
             question=(
-                f"Which user, group and role triples are ones where that group's grant "
-                f"of that role is the only thing giving that user {action} access to "
-                f"{critical}? Equivalently: deleting that one row of grant.csv would "
-                f"take that user's {action} access to {critical} away, and every other "
-                f"user keeps whatever they had. {CLOSURE}"
+                f"Which user, group and role triples are ones where that user's "
+                f"{action} access to {critical} depends on that grant? That is: if the "
+                f"single row (group, role) were deleted from grant.csv, that user could "
+                f"no longer {action} {critical}. The question is about that one user — "
+                f"deleting the row may well cost other users their access too, and that "
+                f"does not disqualify it. {CLOSURE}"
             ),
             truth=truth.critical_grants(critical, action, pol),
             answer_shape=("user", "group", "role"),

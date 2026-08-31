@@ -39,7 +39,7 @@ PINNED = {
     "static_analysis/modules-outside-any-import-cycle": "108c27e7304da69f",
     "static_analysis/token-subclasses": "70f144d369d930b1",
     "static_analysis/functions-called-from-several-modules": "45ae6410967678e4",
-    "provenance/critical-grant": "e75817e3f5b99b8e",
+    "provenance/critical-grant": "92ee22ffdefa4182",
     "provenance/minimal-repair": "9c58b90f9705af82",
     "provenance/access-path": "d69ebb8ece425f5a",
     "controls/department-of": "567d471f8808ed9b",
