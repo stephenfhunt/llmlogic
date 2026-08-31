@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 
-from harness.cell import BRIEFED_ARM, MANDATED_ARMS
+from harness.cell import BRIEFED_ARMS, MANDATED_ARMS, PROVENANCE_ARM
 from harness.grade import ANSWER_FILE
 from harness.task import DATA_SUFFIXES, FIELD_SEPARATOR, Fixture, Task
 
@@ -174,6 +174,49 @@ go looking for it.
 """
 
 
+#: What `engine-briefed-provenance` adds, and the whole of what it adds.
+#:
+#: **An instruction, not documentation, and that distinction is the experiment.**
+#: `?why` / `?whynot` are already documented in `SKILL.md` — worked examples, the
+#: sigil-choice rule, the `repair: ask ?whynot …` chain — and `engine-briefed`
+#: reproduces that document in the prompt. It produced **zero invocations across
+#: 1,812 transcripts**. Adding more prose about provenance would re-run a
+#: question already answered, so this block tells the subject *when to act and
+#: what to type*, which is the step `MANDATE` takes for engine use.
+#:
+#: Naming the exact invocation is deliberate for the same reason `MANDATE` names
+#: the binary: leaving the subject to derive the call from the manual would put
+#: the discovery question back inside the arm built to exclude it.
+#:
+#: **Verified against the engine, not against the manual** (2026-08-31): the
+#: `blocked at` and `repair:` lines are what `?whynot` actually prints, and both
+#: goals exit 0. The honest caveat about the repair — that it advances the rule
+#: rather than promising the goal, and is sometimes unnameable — is in the text
+#: on purpose. `spec.md` §12 records the measured hazard: a suggestion a model
+#: cannot act on costs a round, and one that is wrong is worse than none.
+PROVENANCE_MANDATE = """
+When your program runs but does not print what you expected, **do not rewrite
+it.** Ask the engine why first, and repair from what it tells you.
+
+- It printed nothing, and you expected a row? Ask why that row is missing:
+  `datalog yours.dl -q '?whynot goal("x")'`
+- It printed a row you did not expect? Ask what derived it:
+  `datalog yours.dl -q '?why goal("x")'`
+
+The goal must name one complete fact, with no variables in it. A wrong guess
+between the two still answers, so pick by what you saw and do not deliberate.
+
+`?whynot` reports, for each rule that could have derived the fact, the first
+literal that `blocked` it and a `repair` — a step that advances that rule. The
+repair is not a promise that the goal then holds, and sometimes there is none to
+name. `?why` prints the derivation down to the facts it rests on, tagged
+`[fact]`; when an answer is wrong, that is usually where the problem is.
+
+Both print `%` comment lines and neither changes the exit code, so asking costs
+you nothing.
+"""
+
+
 def assemble(task: Task, arm: str = "prose", briefing: str | None = None) -> str:
     """The prompt put in front of the subject.
 
@@ -191,16 +234,21 @@ def assemble(task: Task, arm: str = "prose", briefing: str | None = None) -> str
     `engine-forced` running under another name, and it would record as the arm it
     is not.
     """
-    if arm == BRIEFED_ARM and not briefing:
+    if arm in BRIEFED_ARMS and not briefing:
         raise ValueError(
-            f"{BRIEFED_ARM} is the arm that is handed the engine's documentation, "
-            "and none was supplied — running it without one would record an "
+            f"{arm} is a briefed arm — it is handed the engine's documentation — "
+            "and none was supplied; running it without one would record an "
             "engine-forced cell under a briefed arm's name"
         )
-    if briefing and arm != BRIEFED_ARM:
-        raise ValueError(f"only {BRIEFED_ARM} takes a briefing; {arm} was given one")
+    if briefing and arm not in BRIEFED_ARMS:
+        names = ", ".join(sorted(BRIEFED_ARMS))
+        raise ValueError(f"only {names} take a briefing; {arm} was given one")
     prompt = _base(task) + (MANDATE if arm in MANDATED_ARMS else "")
-    return prompt + (BRIEFING_HEADER + briefing if arm == BRIEFED_ARM else "")
+    if arm in BRIEFED_ARMS:
+        prompt += BRIEFING_HEADER + briefing
+    if arm == PROVENANCE_ARM:
+        prompt += PROVENANCE_MANDATE
+    return prompt
 
 
 def _example(shape: tuple[str, ...]) -> str:

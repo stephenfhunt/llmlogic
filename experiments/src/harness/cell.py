@@ -3,12 +3,19 @@
 The **arm** is the independent variable. Every arm is the same agent, with the
 same tools, in the same workspace, over the same files.
 
-There are three, because one arm cannot answer two questions that pull in
-opposite directions (``decisions.md`` 2026-08-25). ``engine`` keeps control 3 —
-the subject is never told the engine is there — which is what makes *"did it
-reach for it?"* a measurement. ``engine-forced`` mandates a program, which is
-what makes *"does using it help?"* answerable at all. The first grid had only the
-former, reached in 9 of 56 cells, and could not be read.
+There are five, because one arm cannot answer questions that pull in opposite
+directions (``decisions.md`` 2026-08-25), and each new one isolates a step the
+previous arm left confounded. ``engine`` keeps control 3 — the subject is never
+told the engine is there — which is what makes *"did it reach for it?"* a
+measurement. ``engine-forced`` mandates a program, which is what makes *"does
+using it help?"* answerable at all. The first grid had only the former, reached
+in 9 of 56 cells, and could not be read. ``engine-briefed`` hands over the
+manual, separating *discovery* from *use*. ``engine-briefed-provenance``
+instructs the subject to interrogate its own empty results, separating
+*documented* from *instructed*.
+
+**The prompts nest as strict suffixes, in that order**, so every pairwise delta
+has exactly one cause. ``tests/test_controls_hold.py`` pins the nesting.
 """
 
 from __future__ import annotations
@@ -18,17 +25,33 @@ from typing import Literal
 
 from harness.task import Task
 
-Arm = Literal["prose", "engine", "engine-forced", "engine-briefed"]
-ARMS: tuple[Arm, ...] = ("prose", "engine", "engine-forced", "engine-briefed")
+Arm = Literal[
+    "prose",
+    "engine",
+    "engine-forced",
+    "engine-briefed",
+    "engine-briefed-provenance",
+]
+ARMS: tuple[Arm, ...] = (
+    "prose",
+    "engine",
+    "engine-forced",
+    "engine-briefed",
+    "engine-briefed-provenance",
+)
 
 #: The arms that get the binary and the skill. Membership here, not a string
 #: comparison at each site: the engine arms have to grow together or the
 #: independent variable stops meaning one thing.
-ENGINE_ARMS: frozenset[str] = frozenset({"engine", "engine-forced", "engine-briefed"})
+ENGINE_ARMS: frozenset[str] = frozenset(
+    {"engine", "engine-forced", "engine-briefed", "engine-briefed-provenance"}
+)
 
 #: The arms told to use the engine. `engine` is not one of them — its prompt is
 #: byte-identical to `prose`, which is control 3.
-MANDATED_ARMS: frozenset[str] = frozenset({"engine-forced", "engine-briefed"})
+MANDATED_ARMS: frozenset[str] = frozenset(
+    {"engine-forced", "engine-briefed", "engine-briefed-provenance"}
+)
 
 #: The arm that is handed the engine's reference documentation in its prompt
 #: instead of having to find it. **Discovery is the confound it separates
@@ -41,6 +64,32 @@ MANDATED_ARMS: frozenset[str] = frozenset({"engine-forced", "engine-briefed"})
 #: `engine-briefed − engine-forced` is what discovery costs; the pair is the
 #: measurement, which is why this is a fourth arm and not an edit to the third.
 BRIEFED_ARM = "engine-briefed"
+
+#: The arm that is additionally *instructed* to interrogate its own failures —
+#: `engine-briefed` plus `catalogue.PROVENANCE_MANDATE`, and nothing else.
+#:
+#: **It exists because documenting the feature demonstrably did not surface it.**
+#: `?why` / `?whynot` are in `SKILL.md` with worked examples and the
+#: `repair: ask ?whynot …` chaining idiom, and `engine-briefed` puts that whole
+#: document in the prompt. Measured across every run on disk: **zero `?why` or
+#: `?whynot` invocations in 1,812 transcripts.** So the briefed arm already
+#: answers *"does telling it about provenance surface provenance?"* — no — and
+#: a fifth arm is needed to ask the next question, which is whether *instructing*
+#: it does. That is the same step `MANDATE` is for engine use, taken again one
+#: level in.
+#:
+#: The failure it targets is not hypothetical. Of the 12 failing `engine-briefed`
+#: cells in `run-20260828T203413Z`, **nine derived nothing at all**
+#: (`missing == truth_size`, `extra == 0`) and rewrote the program rather than
+#: asking why it was empty — `who-can-read-r03` for 35 turns, `delete-without-read`
+#: for 28. See `hypotheses.md`, 2026-08-31 addendum.
+PROVENANCE_ARM = "engine-briefed-provenance"
+
+#: The arms handed the engine's reference documentation. Membership, not
+#: equality: the provenance arm is a strict suffix *of the briefed prompt*, so
+#: it needs the same briefing, and the two have to stay in step for the delta
+#: between them to have one cause.
+BRIEFED_ARMS: frozenset[str] = frozenset({BRIEFED_ARM, PROVENANCE_ARM})
 
 #: How much of a cell's budget — turns *and* wall clock — each arm is given, as a
 #: multiple of the run's own cap.
@@ -73,6 +122,17 @@ ARM_BUDGET: dict[str, float] = {
     "engine": 1.0,
     "engine-forced": 2.0,
     "engine-briefed": 2.0,
+    # The same 2.0 again, and the temptation to raise it is the reason to write
+    # this down. `engine-briefed-provenance` is instructed to take *strictly
+    # more* steps than `engine-briefed` — ask, read, then repair — so a cap that
+    # fitted the briefed arm may not fit this one. Raising it anyway would put
+    # two causes under the primary endpoint: the instruction, or the extra
+    # turns. The delta has to be attributable to the block alone, so the budget
+    # is held and `report._budget_line`'s per-arm cap-hit rate is what makes the
+    # cost visible instead of silent. If this arm ends at its cap where the
+    # briefed one does not, that is a finding about the instruction's cost and
+    # it is reported as one.
+    "engine-briefed-provenance": 2.0,
 }
 
 

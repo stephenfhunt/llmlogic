@@ -25,7 +25,7 @@ from harness.ablate import apply as apply_ablation
 from harness.ablate import cut as ablate_cut
 from harness.ablate import strip as ablate_strip
 from harness.catalogue import assemble, verify
-from harness.cell import BRIEFED_ARM, ENGINE_ARMS, Cell
+from harness.cell import BRIEFED_ARMS, ENGINE_ARMS, Cell
 
 #: Repo-relative, resolved from this file so the harness works from any cwd.
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -266,7 +266,7 @@ def build(cell: Cell, root: Path) -> Workspace:
         prompt=assemble(
             cell.task,
             cell.arm,
-            briefing(cell.ablate) if cell.arm == BRIEFED_ARM else None,
+            briefing(cell.ablate) if cell.arm in BRIEFED_ARMS else None,
         ),
         env={"PATH": search_path},
         has_engine=has_engine,

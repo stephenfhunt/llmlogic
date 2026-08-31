@@ -106,6 +106,34 @@ def test_engine_briefed_differs_from_engine_forced_by_the_briefing_alone(tmp_pat
         assert briefed == forced + catalogue.BRIEFING_HEADER + arms.briefing()
 
 
+def test_provenance_arm_differs_from_briefed_by_the_mandate_alone():
+    """The primary endpoint of the provenance run is `provenance − briefed`, and
+    it only means what it says while this block is the whole difference.
+
+    Note the *order*: the mandate goes after the briefing, not before it, so
+    `engine-briefed` stays a strict prefix. Inserted anywhere else the briefed
+    arm's own prompt would change and the pair would stop being comparable —
+    which would silently invalidate the run's control arm, not just this one."""
+    for task in domains.load_all():
+        briefed = assemble(task, "engine-briefed", arms.briefing())
+        provenance = assemble(task, "engine-briefed-provenance", arms.briefing())
+        assert provenance.startswith(briefed)
+        assert provenance == briefed + catalogue.PROVENANCE_MANDATE
+
+
+def test_the_provenance_mandate_names_both_sigils_and_how_to_run_them():
+    """The mirror of the block's own reason for existing. `SKILL.md` already
+    *documents* provenance and produced zero invocations in 1,812 transcripts,
+    so a block that only described it again would re-run a settled question.
+    It has to name the call."""
+    prompt = assemble(controls_tasks.tasks()[0], "engine-briefed-provenance", arms.briefing())
+    mandate = catalogue.PROVENANCE_MANDATE
+    assert "?whynot" in mandate
+    assert "?why " in mandate
+    assert "datalog" in mandate  # the invocation, not just the sigil
+    assert mandate in prompt
+
+
 def test_the_briefing_is_the_skill_the_workspace_carries(tmp_path):
     """Not a paraphrase of it, and not the checkout's copy with its markers.
 
