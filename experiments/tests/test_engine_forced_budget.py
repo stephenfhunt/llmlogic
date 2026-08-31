@@ -211,3 +211,25 @@ class TestTheMandateNamesTheAnswerFormat:
         forced = catalogue.assemble(TASK, "engine-forced")
         assert forced == base + catalogue.MANDATE
         assert catalogue.assemble(TASK, "engine") == base
+
+
+class TestTheBudgetCeilingIsAStoppingRuleToo:
+    """The SDK's own ceiling, which is the one the harness had never matched.
+
+    `AgentSubject` passes `max_budget_usd` and the SDK ends the query with an
+    `error_max_budget_usd` result. Unmatched, that grades `ERROR` — and an ERROR
+    cell is one `resume` owes forever, so it would be re-run into the same
+    ceiling every sitting and the run could never finish. It has never fired: no
+    cell has come near $2. See `decisions.md` 2026-08-30 (earlier).
+    """
+
+    def test_the_sdk_ceiling_is_a_stopping_rule(self):
+        from harness.runner import STOPPING_RULE
+
+        assert STOPPING_RULE.search("error_max_budget_usd")
+
+    def test_it_is_not_fatal_to_the_whole_run(self):
+        """One expensive cell is one cell. Only the account's window ends a run."""
+        from harness.runner import FATAL
+
+        assert not FATAL.search("error_max_budget_usd")

@@ -50,11 +50,20 @@ FATAL = re.compile(r"session limit|rate limit|usage limit|\b429\b", re.IGNORECAS
 #: completions keep coming back cut off mid-thought has spent its budget and
 #: answered badly, exactly as one that ran out of turns has.
 #:
+#: The **per-cell USD ceiling** is the fourth, and it is the one this project has
+#: not yet been bitten by. `agent.AgentSubject` passes `max_budget_usd`, and the
+#: SDK ends the query with an ``error_max_budget_usd`` result
+#: (``claude_agent_sdk/types.py``). Unmatched here that reads as ``ERROR`` — a
+#: cell `resume` owes forever, which would re-run it into the same ceiling every
+#: sitting and never finish the run. It has never fired because no cell has come
+#: near $2, and a difficulty ladder is the first run shaped to walk toward it.
+#:
 #: Each rule is matched by its own words. `local._OUT_OF_CONTEXT` instead carries
 #: a trailing ``(wall clock rule)`` to land on the third alternative here — the
 #: workaround predates this comment, and is not the pattern to copy.
 STOPPING_RULE = re.compile(
-    r"maximum number of turns|max_turns|wall clock|cut off at the output cap",
+    r"maximum number of turns|max_turns|wall clock|cut off at the output cap"
+    r"|error_max_budget_usd",
     re.IGNORECASE,
 )
 
