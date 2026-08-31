@@ -28,6 +28,7 @@ def _record(**overrides) -> dict:
         "question_class": "recursion",
         "engine_expected_to_help": True,
         "track": "in-context",
+        "difficulty": 0,
         "arm": "prose",
         "strength": "opus-5",
         "model": "claude-opus-5",
@@ -305,3 +306,72 @@ class TestRender:
         out = render(self._run(tmp_path, records))
         assert "ran the engine: 1/1" in out
         assert "1/1 [" not in out  # no fabricated `answered-from` rate
+
+
+class TestTheLadder:
+    """The by-difficulty table, and the two ways it must decline to draw one.
+
+    A ladder is the only section that reads a run *along* an axis rather than
+    across its arms, and both of its guards are about not inventing a rung. A run
+    recorded before `Record.difficulty` has no rung at all, and one that ran a
+    single difficulty has one — neither is a trend, and a table drawn over either
+    would be existing numbers wearing a shape that implies one.
+    """
+
+    def _run(self, tmp_path: Path, records: list[dict]) -> Path:
+        return TestRender()._run(tmp_path, records)
+
+    def _ladder_records(self) -> list[dict]:
+        return [
+            _record(arm=arm, task_id=f"t{rung}-{i}", difficulty=rung, strength="haiku-4.5")
+            for rung in (1, 2, 3)
+            for arm in ("prose", "engine-briefed")
+            for i in range(2)
+        ]
+
+    def test_a_run_across_rungs_gets_a_row_for_each(self, tmp_path):
+        out = render(self._run(tmp_path, self._ladder_records()))
+        assert "### By difficulty — the ladder" in out
+        for rung in ("**d1**", "**d2**", "**d3**"):
+            assert rung in out
+
+    def test_the_delta_column_names_the_pair_it_compares(self, tmp_path):
+        out = render(self._run(tmp_path, self._ladder_records()))
+        assert "engine-briefed − prose" in out
+
+    def test_a_single_rung_draws_no_ladder(self, tmp_path):
+        records = [
+            _record(arm=arm, task_id=f"t{i}", difficulty=3)
+            for arm in ("prose", "engine-briefed")
+            for i in range(3)
+        ]
+        assert "By difficulty" not in render(self._run(tmp_path, records))
+
+    def test_a_run_recorded_before_the_field_draws_no_ladder(self, tmp_path):
+        records = []
+        for arm in ("prose", "engine-briefed"):
+            for i in range(3):
+                record = _record(arm=arm, task_id=f"t{i}")
+                record.pop("difficulty", None)
+                records.append(record)
+        out = render(self._run(tmp_path, records))
+        assert "By difficulty" not in out
+        assert "S1 — the measured slate (in-context)" in out  # the rest still renders
+
+    def test_the_controls_are_not_a_rung(self, tmp_path):
+        """The pinned controls ride into every slate run at difficulty 0. They are
+        a different question — the engine is not expected to help — and a ladder
+        that opened with them would read as a rung the engine lost."""
+        records = self._ladder_records()
+        records += [
+            _record(
+                arm=arm,
+                task_id=f"control-{i}",
+                difficulty=0,
+                engine_expected_to_help=False,
+            )
+            for arm in ("prose", "engine-briefed")
+            for i in range(2)
+        ]
+        ladder = render(self._run(tmp_path, records)).split("### By difficulty")[1]
+        assert "**d0**" not in ladder.split("### Negative controls")[0]

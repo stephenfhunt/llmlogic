@@ -30,6 +30,13 @@ class Record:
     #: because the slate moves and `results/` does not: a report reading a past
     #: run must not have to reconstruct what the task was that day.
     track: str
+    #: The generator setting that produced this cell's task, or 0 for a
+    #: hand-authored one. Recorded for the reason `track` is: a difficulty ladder
+    #: is grouped by its own axis, and reconstructing the rung by parsing
+    #: ``g{tag}-d{n}-…`` out of a task id would make the report depend on a
+    #: naming convention rather than on what the run measured. Absent on every
+    #: record written before 2026-08-30, and read as `n/a` rather than as 0.
+    difficulty: int
     arm: str
     strength: str
     model: str
@@ -96,6 +103,7 @@ class Record:
             question_class=cell.task.question_class,
             engine_expected_to_help=cell.task.engine_expected_to_help,
             track=cell.task.track,
+            difficulty=cell.task.difficulty,
             arm=cell.arm,
             strength=cell.strength.name,
             model=cell.strength.model,

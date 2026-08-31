@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from pathlib import Path
+from statistics import median
 
 from harness.cell import ARMS, ENGINE_ARMS, MANDATED_ARMS, STRENGTHS
 from harness.record import RecordStore
@@ -189,6 +190,113 @@ def _comparisons(records: list[dict], arms: tuple[str, ...]) -> list[str]:
         "",
     ]
     return header + rows + tail
+
+
+def _rungs(records: list[dict]) -> dict[int, list[dict]]:
+    """Records grouped by the generator difficulty that produced them.
+
+    Records written before `Record.difficulty` existed carry no key, and they are
+    **dropped here rather than bucketed as 0**: an absent measurement is not a
+    measurement of absence, and a run that predates the field then renders one
+    group, which is what makes the section skip itself instead of drawing a
+    one-row ladder out of nothing.
+    """
+    grouped: dict[int, list[dict]] = defaultdict(list)
+    for record in records:
+        if (rung := record.get("difficulty")) is not None:
+            grouped[rung].append(record)
+    return grouped
+
+
+def _pair_for(arms: tuple[str, ...]) -> tuple[str, str] | None:
+    """The comparison a ladder is read on: the first `COMPARISONS` pair present.
+
+    One pair, not all five. A rung holds a handful of items, so a row per pairing
+    would be five deltas over the same eight observations — five chances to find
+    a turn in a curve that has one column of evidence per rung.
+    """
+    for first, second, _ in COMPARISONS:
+        if first in arms and second in arms:
+            return first, second
+    return None
+
+
+def _ladder(records: list[dict]) -> list[str]:
+    """The difficulty ladder: one row per rung, and what it cost to walk it.
+
+    Rendered only when a run holds **more than one** rung, because that is the
+    only thing this table says. A single-difficulty run — every grid before
+    2026-08-30 — has its numbers in the tables above already, and a one-row
+    ladder would be those numbers wearing a shape that implies a trend.
+
+    Two columns exist for the next pass rather than for this one. **Median wall
+    clock and cost per rung** are what size a grid: the 240-cell pass projected
+    7.5h and measured 42h because a rate taken on `controls` was extrapolated to
+    a multi-hop pool (`decisions.md` 2026-08-28), and a ladder is the one run
+    whose shape measures that curve directly instead of assuming it is flat.
+    """
+    rungs = _rungs(records)
+    if len(rungs) < 2:
+        return []
+    arms = _arms_present(records)
+    pair = _pair_for(arms)
+
+    header = ["| rung | items | " + " | ".join(arms)]
+    if pair:
+        header[0] += f" | {pair[0]} − {pair[1]} | 95% CI | wins/losses"
+    header[0] += " | median wall | median USD |"
+    header.append("|---|---|" + "---|" * (len(arms) + (5 if pair else 2)))
+
+    rows = []
+    for rung in sorted(rungs):
+        cells = rungs[rung]
+        by_arm = {arm: [r for r in cells if r["arm"] == arm] for arm in arms}
+        row = [
+            f"| **d{rung}**",
+            str(len({r["task_id"] for r in cells})),
+            *(_rate_with_interval(by_arm[arm]) for arm in arms),
+        ]
+        if pair:
+            first, second = pair
+            paired = mcnemar(_paired_units(cells, first), _paired_units(cells, second))
+            interval = bootstrap_delta(_paired_units(cells, first), _paired_units(cells, second))
+            row += [
+                f"{100 * paired.delta:+.0f} pts" if paired.n else "—",
+                f"[{100 * interval.low:+.0f}, {100 * interval.high:+.0f}]" if paired.n else "—",
+                f"{paired.b}/{paired.c}" if paired.n else "—",
+            ]
+        row += [
+            " / ".join(
+                f"{median([r['wall_seconds'] for r in by_arm[arm]]):.0f}s" if by_arm[arm] else "—"
+                for arm in arms
+            ),
+            " / ".join(
+                f"{median([r['cost_usd'] for r in by_arm[arm]]):.2f}" if by_arm[arm] else "—"
+                for arm in arms
+            ),
+        ]
+        rows.append(" | ".join(row) + " |")
+
+    return [
+        "### By difficulty — the ladder",
+        "",
+        *header,
+        *rows,
+        "",
+        "**No single rung is testable here.** A rung holds a handful of paired "
+        "items, so every interval in this table spans zero and then some; what a "
+        "ladder can say is the **ordering** across rungs, and even that is a "
+        "direction to aim a powered pass at rather than a result. The rung "
+        "difficulty is the generator's, and it moves fact-base size and structure "
+        "**together** — so a turn in the column does not say which of the two "
+        "caused it.",
+        "",
+        "**Median wall and USD are per cell, in the column order above**, and they "
+        "are the number that sizes the next grid. A rate measured on one rung is "
+        "not a rate for the next one: that extrapolation is what made a 42-hour "
+        "pass look like a 7.5-hour one.",
+        "",
+    ]
 
 
 def _unparseable_line(records: list[dict]) -> str:
@@ -427,6 +535,10 @@ def render(run_dir: Path) -> str:
         rows = [r for r in measured if r.get("track", "in-context") == track]
         if rows:
             lines += _table(rows, heading)
+            # Immediately under the track it decomposes, and never across the
+            # two: the tracks are separate claims, so one ladder spanning both
+            # would average a claim about reasoning with a claim about scale.
+            lines += _ladder(rows)
 
     lines += _table(controls, "Negative controls — the engine is *not* expected to help here")
     lines.append(
