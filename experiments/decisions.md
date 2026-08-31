@@ -15,6 +15,38 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-08-31 (later iii)** — **Provenance on Haiku had to come through the
+  answer, because the repair route has no cells to fire in.** The
+  `engine-briefed-provenance` arm asks whether a subject *told* to interrogate an
+  empty result will do it. On the 88-cell ladder Haiku's `engine-briefed` arm is
+  **44/44 correct, 44/44 `answered-from`, and ran `datalog` with visible stdout in
+  44 of 44 transcripts** — it observes its own output, unlike the local subject
+  (later i), and it never derives nothing. The block's opening condition is never
+  met, so the arm measures nothing on this subject at this difficulty.
+  - **So `domains/provenance`**: three questions whose *answer* is the derivation
+    — `critical-grant` (which single fact does this rest on), `minimal-repair`
+    (which single fact would make it hold), `access-path` (which roles would a
+    proof name). The names are the ones `../docs/worklog.md` filed as Part 2.
+  - **Its own pack, not three more `access_control` tasks.** Two reasons, both
+    load-bearing: `access_control`'s pinned graph is two role-levels deep, where
+    a derivation question answers with one role; and the local subject's
+    pre-registration names **the 16 pinned items**, which a pack growing 4 → 7
+    would move mid-experiment. It borrows the graph, the generator and the BFS
+    oracle — the fact base is not the variable here, the question class is.
+  - **`task.QuestionClass` gains `provenance`**, so the by-class table separates
+    it from `recursion` rather than averaging the two.
+  - **The engine can express all three, and none of them needs `?why`.**
+    `reference/correct/provenance.dl` answers them with ordinary rules — the
+    counterfactuals as two extra columns, the chain as two reachability walks —
+    and agrees with `truth.py` row for row. That is recorded here because it is
+    the honest limit of what the pack can show: it makes provenance
+    **applicable**, not necessary (`hypotheses.md`, 2026-08-31 later ii).
+  - **The oracle reads *on a chain* as two reachability walks**, matching the
+    question's wording and the reference program. The other reading — one walk
+    that does not repeat a role — agrees everywhere the fixture can go and
+    disagrees on a cycle, so the generator's hierarchy being acyclic is now a
+    test rather than an assumption.
+
 - **2026-08-31 (later)** — **The provenance gate stopped the run, on the rule
   written before it. The instruction never had its precondition met.**
   `engine-briefed-provenance` is a fifth arm: `engine-briefed` plus
