@@ -56,6 +56,26 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
     **over-derivation** (all 12 rows plus 2 on `critical-grant`). **Two runs of
     one slate with opposite signs is the pre-registered outcome for n = 6**, and
     it is reported as that: no delta is claimed in either direction.
+  - ***Amended*** — **why the sigils were never the cheapest route, read off the
+    subject's own programs.** `?why` / `?whynot` interrogate **one ground fact**
+    (`SKILL.md`: *"`?-` enumerates; `?why` / `?whynot` interrogate one of the rows
+    it returned"*), and this pack's answer contract is a **row set** of 8–120
+    rows. So the sigils would need one call per candidate, while a rule computes
+    the lot in one fixpoint — and the subject wrote exactly that rule:
+    `user_has_role_except(User, Role, ExceptGroup, ExceptRole)`, the counterfactual
+    **reified as two extra columns**, every deleted-grant world evaluated in
+    parallel, criticality falling out as `not can_read_except(...)`.
+    `minimal-repair` did not even need that — joining a group is monotone, so
+    *would this membership help?* collapses to a join — and `access-path` is two
+    reachability closures and no counterfactual at all. **A set-valued answer
+    contract cannot make a per-fact explanation goal the cheap path**, and that,
+    not the wording of any block, is why this pack could not force the feature.
+  - **And the one place it went wrong was a provenance question.** The d3
+    over-derivation is `has_alternative(User, Group)` written as *another **group**
+    grants a conferring role*, missing *the same group grants another one*: both
+    extra rows are `u28250009`, whose only group grants two independently
+    sufficient roles, so neither grant is critical. One `?why` on either row would
+    have shown the derivation resting on the other role. It asked nothing.
   - **What is stable across both runs, and is the finding:** reach **0 of 20**,
     compliance **20 of 20**, controls **8 of 8** in both arms — and `prose`
     answered from a script in 9 of 20 cells while `engine-briefed` never needed
