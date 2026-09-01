@@ -253,6 +253,27 @@ grid unable to answer S1. The argument and the numbers are in
   Python script tying with the engine, not prose tying with it.
   _shipped 2026-08-31._ — `signals.ScriptUse`, `report._counterfactual`,
   `decisions.md` 2026-08-31 (later iii).
+- **A provenance-core pack, and the pilot on it** — three questions whose
+  *answer* is the derivation (`critical-grant`, `minimal-repair`, `access-path`)
+  over `access_control`'s graph, because the repair route to provenance cannot
+  fire on Haiku: its `engine-briefed` arm is 44/44 correct with visible stdout in
+  44/44 transcripts, so there is no empty result to interrogate. **Reach came
+  back 0/10 anyway** — the subject uses the engine and never asks it why, now
+  measured on questions where `?why` answers what was asked. The run's accuracy
+  delta is **void**: `critical-grant`'s wording contradicted its own oracle and
+  the run's only discordant pair was that defect (repaired; the item now answers
+  12/12). _shipped (the pack); the pilot is **partly void and partly unfinished**
+  — **v1**._ — `domains/provenance`, `reference/correct/provenance.dl`,
+  `slates/provenance-20260901.json`, `results/run-20260831T212012Z`,
+  `results/run-20260831T215230Z`, `hypotheses.md` + `decisions.md` 2026-08-31
+  (later ii/iii/iv).
+- **The repaired pilot is 15 cells short** — `run-20260831T215230Z` halted on the
+  account's session limit at 5 of 20 and resumes in place:
+  `harness run --resume results/run-20260831T215230Z --yes`. **Add `--repeats`
+  when it is re-sized**: the API subject flipped a verdict across two runs of one
+  item, so a single-trial cell carries less than the local subject's does.
+  _queued — **v1**, the next session's first move._ — `decisions.md` 2026-08-31
+  (later iv).
 - **The provenance arm, and the gate that stopped it** —
   `engine-briefed-provenance` is `engine-briefed` plus an *instruction* to ask
   `?whynot` when a program prints nothing, aimed at a measured zero: no `?why` or

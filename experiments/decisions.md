@@ -15,6 +15,40 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-08-31 (later iv)** — **The provenance pilot: reach is zero when the
+  answer *is* the derivation, and one of the two runs is partly void — by my own
+  question's wording.** Pre-registered in `hypotheses.md` the same day, n = 12,
+  exploratory, reach read before accuracy.
+  - **Reach 0/10, zero goals run** (`results/run-20260831T212012Z`), and 0/4
+    again on the partial re-run. The zero now covers **a task class built so that
+    `?why` answers the question asked**, not merely one where it would have
+    helped. Compliance was perfect — `answered-from` 10/10 — so this is not the
+    mandate failing to take. **The subject uses the engine and never interrogates
+    it.**
+  - **The accuracy delta of that run is void.** `critical-grant` carried the
+    clause *"and every other user keeps whatever they had"*; under that reading
+    the correct answer is **empty on both rungs** — computed, not supposed —
+    while `truth.py` grades criticality per user. `prose` at d3 read it
+    literally, wrote an empty file, and was graded wrong for being right; it was
+    the run's only discordant pair. Repaired, re-pinned, and the item now answers
+    **12/12 exactly** in the same arm. Same class as `scheduling`'s 2026-08-24
+    repair, and found the same way: by reading the losing transcript.
+  - **The API subject is not deterministic across runs.** `access-path` d3 on
+    `engine-briefed` was correct in the first run and **missing 11 of 33** in the
+    second, same prompt, same arm. `decisions.md` 2026-08-27's *"the subject is
+    deterministic, so `--repeats` buys nothing"* was about the **local** subject
+    at temperature 0.0 and does not carry here: at haiku strength a pilot cell is
+    one trial, and `--repeats` buys reliability it cannot buy locally.
+  - **The engine arm's failure shape here is over-derivation, not silence.**
+    `critical-grant` d3 returned all 12 true rows **plus 2** — the counterfactual
+    needs two separate *some other grant* rules and one of them is easy to miss
+    (`reference/correct/provenance.dl` needed both).
+  - **Cost, stated because the estimate was wrong:** ~$0.20 per cell against the
+    ladder's $0.08, and 109–205s median wall against 40s. The class is ~3x the
+    unit of measurement the ladder priced.
+  - **The re-run halted at 5 of 20 on the account's session limit** and is
+    resumable in place (`run-20260831T215230Z`).
+
 - **2026-08-31 (later iii)** — **Provenance on Haiku had to come through the
   answer, because the repair route has no cells to fire in.** The
   `engine-briefed-provenance` arm asks whether a subject *told* to interrogate an
