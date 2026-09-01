@@ -46,8 +46,21 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
   - **Cost, stated because the estimate was wrong:** ~$0.20 per cell against the
     ladder's $0.08, and 109–205s median wall against 40s. The class is ~3x the
     unit of measurement the ladder priced.
-  - **The re-run halted at 5 of 20 on the account's session limit** and is
-    resumable in place (`run-20260831T215230Z`).
+  - **The re-run halted at 5 of 20 on the account's session limit**, was resumed
+    in the same session window, and **completed**: 20 cells, $2.15, controls 4/4
+    in both arms, compliance 10/10, provenance 0/10, no cap-hits, no truncations.
+  - **And it came out the other way round.** `prose` 6/6, `engine-briefed` 4/6 —
+    **−33 pts [−67, +0], 0 wins / 2 losses, p = 0.500** — where the voided run had
+    the engine arm ahead by one cell on the same six items. Both engine losses are
+    at d3: a **strict subset** (11 of 33 rows missing on `access-path`) and an
+    **over-derivation** (all 12 rows plus 2 on `critical-grant`). **Two runs of
+    one slate with opposite signs is the pre-registered outcome for n = 6**, and
+    it is reported as that: no delta is claimed in either direction.
+  - **What is stable across both runs, and is the finding:** reach **0 of 20**,
+    compliance **20 of 20**, controls **8 of 8** in both arms — and `prose`
+    answered from a script in 9 of 20 cells while `engine-briefed` never needed
+    one. The subject reaches for the engine, uses it correctly, and does not once
+    ask it why.
 
 - **2026-08-31 (later iii)** — **Provenance on Haiku had to come through the
   answer, because the repair route has no cells to fire in.** The

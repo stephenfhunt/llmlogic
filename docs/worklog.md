@@ -45,13 +45,14 @@ the first run's only discordant pair turned out to be a defect in my own questio
   with the plain-Python oracle on all 107 rows, **using neither sigil**. That is
   recorded as the pack's honest limit: it makes provenance *applicable*, not
   necessary.
-- **Two runs, 25 cells, $3.06.** The pilot was pre-registered before either.
+- **Two runs, 40 cells, $4.72**, the second halted by the session limit at 5 and
+  resumed to 20. The pilot was pre-registered before either.
 
 **Decided** (`decisions.md`, two entries; `hypotheses.md` addendum)
-- **Reach 0/10, zero goals run** — and 0/4 again after the repair. Compliance was
-  **10/10 `answered-from`**, so this is not the mandate failing to take. **The
-  subject uses the engine and never interrogates it**, now measured on questions
-  where `?why` answers what was asked.
+- **Reach 0 of 20, zero goals run**, across both runs. Compliance was **20/20
+  `answered-from`** and controls **8/8** in both arms, so this is not the mandate
+  failing to take. **The subject uses the engine and never interrogates it**, now
+  measured on questions where `?why` answers what was asked.
 - **The first run's accuracy delta is void, and the defect was mine.**
   `critical-grant` carried *"and every other user keeps whatever they had"*;
   under that reading the answer is **empty on both rungs** — computed — while
@@ -68,8 +69,9 @@ the first run's only discordant pair turned out to be a defect in my own questio
   voided run stays on disk, as `results/` requires.
 
 **Next up**
-- **Finish the repaired pilot** — `harness run --resume
-  results/run-20260831T215230Z --yes`, and **size the next one with `--repeats`**.
+- **The two runs disagree in sign** — engine +1 cell voided, `prose` +2 cells on
+  the repair — which is what n = 6 against a stochastic subject buys. **Size the
+  next one with `--repeats`** before reading any delta on this class.
 - **Then the question the zero raises**: reach is 0 with the manual, 0 with an
   instruction the local subject never reached, and 0 where provenance *is* the
   question. The next lever is the `SKILL.md` exit-code gap, not a sixth arm.

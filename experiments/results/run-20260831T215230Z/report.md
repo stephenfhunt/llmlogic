@@ -1,23 +1,45 @@
 # run-20260831T215230Z
 
-5 cells · 0.49 USD · 1 errored
+20 cells · 2.15 USD · 0 errored
+
+**Resumed**: 1 cell were run a second time after the first attempt was cut short, and are counted once, at their later attempt. The cost above is everything the run spent, including the attempts that produced nothing. A grid measured across more than one session window is still one grid, but it was not one sitting.
 
 ### S1 — the measured slate (in-context)
 
 | | haiku-4.5 | all | mean F1 |
 |---|---|---|---|
-| **prose** | 2/2 (100%) | 2/2 (100%) [34%, 100%] | 1.00 |
-| **engine-briefed** | 0/2 (0%) | 0/2 (0%) [0%, 66%] | 0.86 |
+| **prose** | 6/6 (100%) | 6/6 (100%) [61%, 100%] | 1.00 |
+| **engine-briefed** | 4/6 (67%) | 4/6 (67%) [30%, 90%] | 0.95 |
 
 | comparison | question | delta | 95% CI | wins/losses | p | paired tasks |
 |---|---|---|---|---|---|---|
-| engine-briefed − prose | and with the engine's manual in hand? | -100 pts | [-100, -100] | 0/2 | 0.500 | 2 |
+| engine-briefed − prose | and with the engine's manual in hand? | -33 pts | [-67, +0] | 0/2 | 0.500 | 6 |
 
 **wins/losses** are the discordant pairs — the tasks the two arms disagreed on, and the only ones carrying information about a difference. `p` is McNemar's exact test. A wide interval around a small delta is *not* a null: it is the slate saying it was too small or too easy to tell.
 
+### By difficulty — the ladder
+
+| rung | items | prose | engine-briefed | engine-briefed − prose | 95% CI | wins/losses | median wall | median USD |
+|---|---|---|---|---|---|---|---|---|
+| **d3** | 3 | 3/3 (100%) [44%, 100%] | 1/3 (33%) [6%, 79%] | -67 pts | [-100, +0] | 0/2 | 70s / 99s | 0.10 / 0.14 |
+| **d5** | 3 | 3/3 (100%) [44%, 100%] | 3/3 (100%) [44%, 100%] | +0 pts | [+0, +0] | 0/0 | 113s / 109s | 0.13 / 0.16 |
+
+**No single rung is testable here.** A rung holds a handful of paired items, so every interval in this table spans zero and then some; what a ladder can say is the **ordering** across rungs, and even that is a direction to aim a powered pass at rather than a result. The rung difficulty is the generator's, and it moves fact-base size and structure **together** — so a turn in the column does not say which of the two caused it.
+
+**Median wall and USD are per cell, in the column order above**, and they are the number that sizes the next grid. A rate measured on one rung is not a rate for the next one: that extrapolation is what made a 42-hour pass look like a 7.5-hour one.
+
 ### Negative controls — the engine is *not* expected to help here
 
-No cells.
+| | haiku-4.5 | all | mean F1 |
+|---|---|---|---|
+| **prose** | 4/4 (100%) | 4/4 (100%) [51%, 100%] | 1.00 |
+| **engine-briefed** | 4/4 (100%) | 4/4 (100%) [51%, 100%] | 1.00 |
+
+| comparison | question | delta | 95% CI | wins/losses | p | paired tasks |
+|---|---|---|---|---|---|---|
+| engine-briefed − prose | and with the engine's manual in hand? | +0 pts | [+0, +0] | 0/0 | 1.000 | 4 |
+
+**wins/losses** are the discordant pairs — the tasks the two arms disagreed on, and the only ones carrying information about a difference. `p` is McNemar's exact test. A wide interval around a small delta is *not* a null: it is the slate saying it was too small or too easy to tell.
 
 A delta on the controls is a warning about the instrument, not a result: these are single-hop lookups and one-step arithmetic.
 
@@ -25,19 +47,20 @@ A delta on the controls is a warning about the instrument, not a result: these a
 
 | domain | class | prose | engine-briefed |
 |---|---|---|---|
-| `provenance` | provenance | 2/2 (100%) | 0/2 (0%) |
+| `controls` | one-step, single-hop | 4/4 (100%) | 4/4 (100%) |
+| `provenance` | provenance | 6/6 (100%) | 4/6 (67%) |
 
 ### By question class
 
 | class | prose | engine-briefed |
 |---|---|---|
-| provenance | 2/2 (100%) | 0/2 (0%) |
+| provenance | 6/6 (100%) | 4/6 (67%) |
 
 ### Reach — did the subject actually use the engine?
 
 | arm | strength | answered-from | invoked | none | unusable |
 |---|---|---|---|---|---|
-| engine-briefed | haiku-4.5 | 2/2 [34%, 100%] | 0 | 0 | 0 |
+| engine-briefed | haiku-4.5 | 10/10 [72%, 100%] | 0 | 0 | 0 |
 
 `invoked` is the middle case: it reached for the engine and no program ran. Only `answered-from` is engine use in the sense S1 means (`decisions.md` 2026-08-25). On the `engine` arm this is a measurement; on the mandated arms it is a **compliance check** — a low number there means the mandate did not take, and the comparison it feeds is void.
 
@@ -47,7 +70,7 @@ A delta on the controls is a warning about the instrument, not a result: these a
 
 | arm | strength | acted-on | asked | none | goals run |
 |---|---|---|---|---|---|
-| engine-briefed | haiku-4.5 | 0/2 [0%, 66%] | 0 | 2 | 0 |
+| engine-briefed | haiku-4.5 | 0/10 [0%, 28%] | 0 | 10 | 0 |
 
 `asked` is the middle case and merges two: a goal written down but never run, and one run on the way out the door. **`goals run` tells them apart** — `asked` with a zero there is the first.
 
@@ -57,18 +80,18 @@ A delta on the controls is a warning about the instrument, not a result: these a
 
 | arm | strength | answered from a script | wrote one | none |
 |---|---|---|---|---|
-| prose | haiku-4.5 | 2/2 [34%, 100%] | 0 | 0 |
-| engine-briefed | haiku-4.5 | 0/2 [0%, 66%] | 0 | 2 |
+| prose | haiku-4.5 | 5/10 [24%, 76%] | 1 | 4 |
+| engine-briefed | haiku-4.5 | 0/10 [0%, 28%] | 0 | 10 |
 
 **Read this table before the accuracy one.** A null delta between an engine arm and `prose` means something different depending on what `prose` did: if it answered from a script, the comparison was script-against-engine and the slate could not have separated them; if it answered from reading, the engine genuinely bought nothing. The accuracy table alone cannot tell those apart.
 
 ### Process signals
 
 - **Answers that would not parse:** none.
-- **Cells that ended at their budget:** engine-briefed 0/2 (0%), prose 0/2 (0%). The arms do not share one budget (`cell.ARM_BUDGET`), so a difference between them is only readable while these are low — a capped cell measures the cap.
+- **Cells that ended at their budget:** engine-briefed 0/10 (0%), prose 0/10 (0%). The arms do not share one budget (`cell.ARM_BUDGET`), so a difference between them is only readable while these are low — a capped cell measures the cap.
 - **Declared the engine unusable:** 0. The subject tried, the engine would not run its program, and it said so instead of looping. Not a correct answer, but a different fact from an empty file — and evidence about the engine rather than a hole.
-- **Completions cut off at the output cap:** engine-briefed 0 in 0/2 cells, prose 0 in 0/2 cells. The whole budget went to reasoning and no action came out, so the turn bought nothing and cost its full decode. `n/a` means the run predates the counter, not that it was zero.
-- **First program captured before feedback:** 2/2.
+- **Completions cut off at the output cap:** engine-briefed 0 in 0/10 cells, prose 0 in 0/10 cells. The whole budget went to reasoning and no action came out, so the turn bought nothing and cost its full decode. `n/a` means the run predates the counter, not that it was zero.
+- **First program captured before feedback:** 10/10.
 - **Switched back to search after using the engine:** 0. This is the silent one — the subject had the engine, tried it, and went back to text.
 - **Answers that were a strict subset of the truth:** 1. Rows dropped, and nothing in the output says so.
 - **Tool calls denied for leaving the workspace:** 0, across 0 cells. A spike here is friction, not an attack — it usually means the prompt or the fixture made leaving look necessary. **A floor, not a count**: only the PreToolUse gate records a denial, and it flags an absolute path that already *exists*, so a write to a new path outside the workspace is stopped by the OS sandbox and never counted (seen on the first pilot). A low number is not evidence the subject stayed put.
