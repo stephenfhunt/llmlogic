@@ -24,6 +24,57 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-08-31 (later ii) — Provenance-core questions, and a reach that is still zero
+
+Asked whether Haiku needs its own provenance test, whether we are set up for one,
+and for a small sample to explore it. Yes; half; and it ran — **twice**, because
+the first run's only discordant pair turned out to be a defect in my own question.
+
+**Done** — **1,660 tests** (+135), ruff clean, the 310-cell offline grid renders
+- **The answer to the question asked.** The repair route to provenance cannot
+  fire on Haiku: its `engine-briefed` arm is **44/44 correct**, ran `datalog`
+  with **visible stdout in 44/44 transcripts**, and never derives nothing. There
+  is no empty result to interrogate, so the only route left is a question whose
+  *answer* is the derivation.
+- **`domains/provenance`** — `critical-grant`, `minimal-repair`, `access-path`
+  over `access_control`'s graph, its own deeper pinned graph, `at-scale` refused
+  with a reason. Its own pack rather than three more `access_control` tasks: a
+  two-level hierarchy answers a derivation question with one role, and the local
+  subject's pre-registration names **the 16 pinned items**.
+- **`reference/correct/provenance.dl`** — the engine answers all three and agrees
+  with the plain-Python oracle on all 107 rows, **using neither sigil**. That is
+  recorded as the pack's honest limit: it makes provenance *applicable*, not
+  necessary.
+- **Two runs, 25 cells, $3.06.** The pilot was pre-registered before either.
+
+**Decided** (`decisions.md`, two entries; `hypotheses.md` addendum)
+- **Reach 0/10, zero goals run** — and 0/4 again after the repair. Compliance was
+  **10/10 `answered-from`**, so this is not the mandate failing to take. **The
+  subject uses the engine and never interrogates it**, now measured on questions
+  where `?why` answers what was asked.
+- **The first run's accuracy delta is void, and the defect was mine.**
+  `critical-grant` carried *"and every other user keeps whatever they had"*;
+  under that reading the answer is **empty on both rungs** — computed — while
+  `truth.py` grades per user. `prose` read it literally and was graded wrong for
+  being right. Repaired, and the item now answers **12/12 exactly**.
+- **The API subject is not deterministic across runs.** One item flipped
+  correct → missing 11 of 33, same prompt, same arm. 2026-08-27's *"`--repeats`
+  buys nothing"* was about the **local** subject and does not carry here.
+- **The class costs ~3x the ladder's unit** — ~$0.20 and 109–205s per cell
+  against $0.08 and 40s.
+
+**Removed**
+- The `critical-grant` clause that contradicted its own oracle. Nothing else: the
+  voided run stays on disk, as `results/` requires.
+
+**Next up**
+- **Finish the repaired pilot** — `harness run --resume
+  results/run-20260831T215230Z --yes`, and **size the next one with `--repeats`**.
+- **Then the question the zero raises**: reach is 0 with the manual, 0 with an
+  instruction the local subject never reached, and 0 where provenance *is* the
+  question. The next lever is the `SKILL.md` exit-code gap, not a sixth arm.
+- Unchanged: `at-scale`, the mandate arm's `invoked` split, `scheduling`.
+
 ## 2026-08-31 (later) — The provenance arm, and a gate that stopped it one step early
 
 Asked to run a local-model experiment on **briefed provenance** — does
@@ -127,58 +178,3 @@ subject.
 - **A `wrote_script` signal before the next run**, not after: transcripts are not
   persisted, so it is unrecoverable for anything on disk.
 - Unchanged: the `SKILL.md` gap, the mandate arm's `invoked` split, `scheduling`.
-
-## 2026-08-28 (later) — A 32-cell A/B, three instrument defects, and a floor that was not one
-
-Asked for a medium A/B of `prose` against `engine-briefed`. Ran it — and getting
-there cost three defects in the harness's own recording, all the same shape: a
-real event the record could not express. Long form:
-`experiments/notes/a-local-subject.md`.
-
-**Done** — 10 commits, **1,480 tests** (+23, one red on trunk before today),
-ruff clean, offline grid renders
-- **The output cap was a stopping rule that recorded nothing.** A completion that
-  spends its budget reasoning returns empty content; the loop called it a
-  *malformed call*, said so — false — and retried into an identical lap at ~150s
-  each. `finish_reason` decides now, `TRUNCATION_LIMIT` stops at two.
-  **`malformed_calls` had been collected and dropped since it was written.**
-- **Mean per-item F1 scored an empty cell 1.0**, flattering whichever arm fails
-  by writing no file: prose read 0.92 against 0.19 on 2/8 against 1/8.
-- **A subject that walks away read as one that finished** — fixed, and the
-  reminder re-aimed. Not only a recording change: the next cell went
-  `no-answer` → `correct`. Amended in place.
-- **`engine_unusable` leaves the compliance ratio**, decided on the rule first.
-- **Three runs**: a controls gate (prose 3/4, compliance 4/4, zero truncations —
-  the counter's first check), sitting 1 (stopped by its gate), the clean 32.
-
-**Decided** (`experiments/decisions.md`, six entries + two amendments;
-`hypotheses.md`, two addenda)
-- **prose 9/16 (56%) against `engine-briefed` 4/16 (25%)** — **−31 pts [−62, +0],
-  1 win / 6 losses**, p = 0.125. Exploratory by pre-registration; reported, not
-  claimed. `briefed − prose` is the recorded **upper bound**, so a negative one
-  says the engine is losing to `grep` *with the manual in hand*. Worst on
-  `recursion`, 0/4.
-- **The pinned slate is not the floor it was written off as**: prose 1/24 on
-  these exact items thinking-off, 9/16 thinking-on. **The missing rung may be a
-  thinking-effort question, not a generator one** — the cheaper answer, and it
-  was never on the table.
-- **The subject is deterministic** (temperature 0.0), so `--repeats` buys
-  neither paired items *nor* reliability. **Sitting 1 failed its own gate and
-  was stopped**: half a run on a patched instrument is two experiments.
-- **Not a `datalog` bug.** The briefed arm's worst cells burn out on the engine's
-  silence, but `spec.md` §14 specifies exit 1 with no output deliberately and
-  anticipates the case. It is a **`SKILL.md`** gap: what exit codes mean without
-  *look at them*, and transitive closure with no worked example and no warning
-  that the reflexive case is unsafe as a bare fact.
-
-**Removed**
-- Sitting 1's cap-hit as a difficulty signal, and the 42h projection's standing
-  as a measurement of the subject — amended, not deleted.
-
-**Next up**
-- **Re-open the missing rung as a thinking-effort question**, before any
-  generator work. The session's cheapest open lead.
-- **A calibration pass is plausible now** — 56% is a band, 14% was not.
-- **The `SKILL.md` gap**, both halves: most likely to move the briefed arm.
-- Unchanged: the mandate arm's `invoked` split, the prompt-blind
-  `resume.fingerprint`, `scheduling`'s own look.
