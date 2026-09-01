@@ -64,6 +64,16 @@ the first run's only discordant pair turned out to be a defect in my own questio
 - **The class costs ~3x the ladder's unit** — ~$0.20 and 109–205s per cell
   against $0.08 and 40s.
 
+**Decided — *added 2026-09-01***
+- **`ScriptUse` over all 558 archived `prose` cells**, not just the ladder's 44:
+  every paired comparison on disk is **18 wins / 38 losses / 382 ties**, and
+  within a subject **scripting does not predict correctness** (haiku 84% with
+  against 88% without). *"Prose is really code"* explains the ladder's mechanism
+  and not the arm's accuracy — the engine's deficit is the **encoding step**.
+  Opens the framing question: four grids of nulls may be bracketing the models'
+  reasoning ceilings rather than testing S1. — `notes/what-prose-is-doing.md`,
+  `decisions.md` 2026-09-01.
+
 **Removed**
 - The `critical-grant` clause that contradicted its own oracle. Nothing else: the
   voided run stays on disk, as `results/` requires.

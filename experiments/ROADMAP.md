@@ -253,6 +253,17 @@ grid unable to answer S1. The argument and the numbers are in
   Python script tying with the engine, not prose tying with it.
   _shipped 2026-08-31._ — `signals.ScriptUse`, `report._counterfactual`,
   `decisions.md` 2026-08-31 (later iii).
+- **Is the grid measuring the engine, or the models' ceilings?** Backfilling
+  `ScriptUse` over **all 558 archived `prose` cells** puts every paired
+  comparison on disk at **18 wins / 38 losses / 382 ties**, and shows that within
+  a subject *scripting does not predict correctness* — so the arm's strength is
+  not the counterfactual's power and the engine's deficit is the encoding step.
+  With haiku ceilinged over d1–d5 and the 14B floored under it, four grids of
+  nulls may be bracketing reasoning ceilings rather than testing S1. **The two
+  places that could still change it are the two untested ones**: `at-scale`, and
+  `scheduling`'s search-shaped questions. _designing — the framing question, and
+  it decides what v1 is for._ — `notes/what-prose-is-doing.md`, `decisions.md`
+  2026-09-01.
 - **A provenance-core pack, and the pilot on it** — three questions whose
   *answer* is the derivation (`critical-grant`, `minimal-repair`, `access-path`)
   over `access_control`'s graph, because the repair route to provenance cannot

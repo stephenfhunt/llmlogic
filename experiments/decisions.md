@@ -15,6 +15,26 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-09-01** — **The counterfactual is not what makes `prose` strong.**
+  `signals.ScriptUse` was backfilled over one run; over **all 558 archived
+  `prose` cells** it does not say what that run's 33/44 suggested. Method, full
+  table and caveats: `notes/what-prose-is-doing.md`.
+  - **Every paired engine-arm-against-`prose` comparison on disk** — 10 subjects,
+    4 arms — is **18 wins, 38 losses, 382 ties**: no subject has an engine arm
+    ahead of its own `prose` arm.
+  - **Within a subject, scripting does not predict correctness** — haiku 84% with
+    against 88% without, opus 72% against 71% — the weak locals barely script and
+    still beat their own engine arms (14B: 56% against 25%), and
+    `qwen2.5-coder-7b` scripted 11 cells and got none right.
+  - **So the engine's cost is the encoding step**, not the counterfactual's
+    power: formalizing is a failure surface `prose` does not have, and both of
+    2026-08-31's engine losses were Datalog bugs, not reasoning errors.
+  - **Held against it:** script use is *subject-chosen*, so this is an
+    observation and not a natural experiment, and every cell is `in-context`.
+  - **Open, not adopted:** that four grids of nulls read less as a statement
+    about the engine than as a **bracketing of these models' reasoning ceilings,
+    with the engine as the probe**. `ROADMAP.md` carries it.
+
 - **2026-08-31 (later iv)** — **The provenance pilot: reach is zero when the
   answer *is* the derivation, and one of the two runs is partly void — by my own
   question's wording.** Pre-registered in `hypotheses.md` the same day, n = 12,
@@ -198,6 +218,9 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
     Python script against the engine, tying.** A much less surprising finding on
     a slate whose every difficulty knob turns deduction, and the strongest
     argument on record that the missing axis is *search* rather than more depth.
+    ***Amended 2026-09-01***: true of this run's mechanism, and it does **not**
+    generalize — over all 558 archived `prose` cells, script use does not predict
+    accuracy within a subject. See 2026-09-01.
   - **Backfilling signals is not rewriting a run.** `results/` is append-only
     for what the instrument *produced*; a value derived from a transcript
     already on disk adds no new claim about what happened, and reports re-render
