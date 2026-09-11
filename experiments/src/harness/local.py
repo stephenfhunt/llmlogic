@@ -252,10 +252,13 @@ def skill_body(skill_dir: Path = arms.DATALOG_SKILL_DIR) -> str:
     """
     text = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
     body = text.split("---", 2)[2].lstrip("\n")
+    # The files the workspace copy carries (`arms.SKILL_SUBDIRS`), not whatever
+    # else the skill directory holds.
     extras = sorted(
         str(path.relative_to(skill_dir))
-        for path in skill_dir.rglob("*")
-        if path.is_file() and path.name != "SKILL.md"
+        for subdir in arms.SKILL_SUBDIRS
+        for path in (skill_dir / subdir).rglob("*")
+        if path.is_file()
     )
     if extras:
         listing = "\n".join(f"- .claude/skills/datalog/{name}" for name in extras)

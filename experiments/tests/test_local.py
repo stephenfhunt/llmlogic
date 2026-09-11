@@ -498,6 +498,21 @@ class TestControlsThatRideOnTheLoop:
             if len(fragment) > 8:
                 assert fragment.strip(",.") in source
 
+    def test_every_file_the_skill_body_lists_is_in_the_workspace(self, tmp_path):
+        """The listing says "in your working directory". The skill directory also
+        holds `tools/ts-facts` — its tests, fixtures and packages — which no cell
+        gets; listing from the directory named thousands of files that were not
+        there. Non-vacuity: the listing is not empty."""
+        workspace = workspace_for("engine", tmp_path)
+        listed = [
+            line.removeprefix("- ")
+            for line in local.skill_body().splitlines()
+            if line.startswith("- .claude/skills/datalog/")
+        ]
+        assert listed, "the skill body lists nothing"
+        for path in listed:
+            assert (workspace.path / path).is_file(), f"listed but absent: {path}"
+
     def test_a_call_that_leaves_the_workspace_is_denied_and_recorded(self, tmp_path):
         workspace = workspace_for("prose", tmp_path)
         result = Tools(workspace).run("Read", {"file_path": "/etc/passwd"})

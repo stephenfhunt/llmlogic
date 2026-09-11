@@ -15,6 +15,19 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-09-11** — **The local subject's skill listing names only what the
+  workspace carries** (`arms.SKILL_SUBDIRS`, read by both `_copy_skill` and
+  `local.skill_body`). The listing was drawn from the whole skill directory, and
+  `datalog/skill/` gained `tools/ts-facts` — its source, tests, fixtures and
+  packages — which no cell gets: the `Skill` tool's answer would have named
+  thousands of files "in your working directory" that were not there.
+  - **It was already one line wrong before that:** `.claude/skills/datalog/datalog`,
+    the build wrapper, listed and never copied. So a local cell's prompt differs
+    from every archived one by that line — the workspace hash already separates
+    them, since `recipes/typescript.md` is new in the same session.
+  - Guard: `test_every_file_the_skill_body_lists_is_in_the_workspace`; restoring
+    the directory-wide listing reddens it.
+
 - **2026-09-01** — **The counterfactual is not what makes `prose` strong.**
   `signals.ScriptUse` was backfilled over one run; over **all 558 archived
   `prose` cells** it does not say what that run's 33/44 suggested. Method, full

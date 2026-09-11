@@ -167,11 +167,18 @@ def _link_binary(destination: Path) -> Path:
     return bin_dir
 
 
+#: What a workspace's skill copy carries beside `SKILL.md`. The one list both
+#: the copy and the local subject's listing of it read: the skill directory also
+#: holds tools (`tools/ts-facts`, with its tests and packages) that no cell gets,
+#: and a listing drawn from the directory would name files the workspace lacks.
+SKILL_SUBDIRS = ("examples", "recipes")
+
+
 def _copy_skill(destination: Path, ablate: str | None = None) -> None:
     skill_root = destination / ".claude" / "skills" / "datalog"
     skill_root.mkdir(parents=True, exist_ok=True)
     shutil.copy2(DATALOG_SKILL_DIR / "SKILL.md", skill_root / "SKILL.md")
-    for subdir in ("examples", "recipes"):
+    for subdir in SKILL_SUBDIRS:
         source = DATALOG_SKILL_DIR / subdir
         if source.is_dir():
             shutil.copytree(source, skill_root / subdir, dirs_exist_ok=True)
