@@ -9,7 +9,8 @@
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "test": "node --test --test-reporter=dot \"test/**/*.test.ts\""
+    "test": "node --test --test-reporter=dot \"test/**/*.test.ts\"",
+    "bench": "node --disable-warning=ExperimentalWarning bench/bench.ts"
   },
   "dependencies": {
     "typescript": "~6.0.3"
