@@ -3,7 +3,7 @@
 %     datalog lib/checks.dl
 %
 % Every rule derives `violation(Check, Subject)` for a fact that contradicts
-% another. Exit 1 (no rows) is a clean fact base; exit 0 prints each violation.
+% another; Subject is always a string (integer ids are cast). Exit 1 (no rows) is a clean fact base; exit 0 prints each violation.
 % A check over a layer that was not extracted derives nothing, and the engine's
 % undefined-predicate warning says so.
 %
@@ -38,5 +38,25 @@ violation("symbol.id is not a key", I) :- symbol(id: I, kind: K1), symbol(id: I,
 violation("symbol.id is not a key", I) :- symbol(id: I, line: L1), symbol(id: I, line: L2), L1 != L2.
 violation("project symbol without a file", I) :- symbol(id: I, origin: project, file: F), F is absent.
 violation("resolved import without a target", F) :- imports(file: F, resolved: true, target_file: T, target_package: P), T is absent, P is absent.
+
+% ── refs ─────────────────────────────────────────────────────────────────
+violation("ref.from", F) :- ref(from: F), not known(F).
+violation("ref.to", T) :- ref(to: T), not known(T).
+violation("call_site.caller", C) :- call_site(caller: C), not known(C).
+violation("call_site.callee", C) :- call_site(callee: C), C is not absent, not known(C).
+violation("resolved call without a callee", S) :- call_site(id: I, dispatch: D, callee: C), D != unresolved, C is absent, S = I as string.
+violation("call_site.id is not a key", S) :- call_site(id: I, line: L1), call_site(id: I, line: L2), L1 != L2, S = I as string.
+violation("extends.child", C) :- extends(child: C), not known(C).
+violation("extends.parent", P) :- extends(parent: P), not known(P).
+violation("implements.class", C) :- implements(class: C), not known(C).
+violation("implements.interface", I) :- implements(interface: I), not known(I).
+violation("overrides.member", M) :- overrides(member: M), not known(M).
+violation("overrides.base", B) :- overrides(base: B), not known(B).
+violation("member_access.member", M) :- member_access(member: M), not known(M).
+violation("member_access.class", C) :- member_access(class: C), not known(C).
+violation("type_ref.to", T) :- type_ref(to: T), not known(T).
+violation("symbol_type.symbol", S) :- symbol_type(symbol: S), not known(S).
+violation("a ref to a local escaped into ref", T) :- ref(to: T), symbol(id: T, kind: local).
+violation("a ref to a local escaped into ref", T) :- ref(to: T), symbol(id: T, kind: parameter).
 
 ?- violation(Check, Subject).

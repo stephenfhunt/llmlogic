@@ -565,7 +565,7 @@ export function declKey(node: ts.Node): string {
   return `${resolvedName(node.getSourceFile())}:${node.pos}:${node.end}:${node.kind}`;
 }
 
-function declSymbol(decl: ts.Node, checker: ts.TypeChecker): ts.Symbol | undefined {
+export function declSymbol(decl: ts.Node, checker: ts.TypeChecker): ts.Symbol | undefined {
   const name = (decl as Named).name;
   if (name !== undefined && (ts.isIdentifier(name) || ts.isPrivateIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name) || ts.isComputedPropertyName(name))) {
     const s = checker.getSymbolAtLocation(ts.isComputedPropertyName(name) ? decl : name) ?? (decl as ts.Node & { symbol?: ts.Symbol }).symbol;

@@ -1,0 +1,40 @@
+% Call graph over resolved call sites — direct edges only (the closure is in
+% callreach.dl: import that only when you need reachability, it is the
+% expensive part).
+%
+%   call_edge(A, B)          A calls B: static calls, plus every virtual call
+%                            expanded to each override of its declared target
+%                            (class-hierarchy analysis — sound, over-approximate)
+%   call_edge_declared(A, B) the same without the expansion: the targets as
+%                            the checker resolved them
+%   call_edge_lexical(A, B)  call_edge, with calls made by anonymous callbacks
+%                            nested in A also counted as A's
+%   called(B)                B is the target of some call edge
+%
+% `indirect` calls (through a function-typed variable, parameter or property)
+% are not here: their target is a value, not a declaration. lib/pointsto.dl
+% resolves them. `unresolved` calls are not here either — count them before
+% believing a negative ("nothing calls X"):
+%     -q 'call_site(dispatch: unresolved, callee_name: N)'
+
+import "../schema/structure.dl".
+import "../schema/refs.dl".
+
+overridden_by(B, M) :- overrides(member: M, base: B).
+overridden_by(B, M) :- overrides(member: X, base: B), overridden_by(X, M).
+
+call_edge_declared(A, B) :- call_site(caller: A, callee: B, dispatch: static).
+call_edge_declared(A, B) :- call_site(caller: A, callee: B, dispatch: virtual).
+
+call_edge(A, B) :- call_edge_declared(A, B).
+call_edge(A, M) :- call_site(caller: A, callee: B, dispatch: virtual), overridden_by(B, M).
+
+anonymous_fn(F) :- symbol(id: F, kind: function, name: "<arrow>").
+anonymous_fn(F) :- symbol(id: F, kind: function, name: "<function>").
+nested_anonymous(P, F) :- anonymous_fn(F), symbol(id: F, parent: P).
+nested_anonymous(P, F) :- nested_anonymous(P, X), nested_anonymous(X, F).
+
+call_edge_lexical(A, B) :- call_edge(A, B).
+call_edge_lexical(A, B) :- nested_anonymous(A, F), call_edge(F, B).
+
+called(B) :- call_edge(_, B).

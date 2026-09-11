@@ -1,0 +1,32 @@
+% Module graph: file-to-file dependencies from imports, and their roll-up to
+% directories and packages.
+%
+%   file_dep(A, B, Kind)     file A imports file B (Kind: imports.kind)
+%   dep(A, B)                any file_dep — type-only imports included
+%   runtime_dep(A, B)        a dependency that survives type erasure
+%   file_reaches(A, B)       a chain of dep leads from A to B
+%   in_cycle(F)              F is on an import cycle
+%   cycle_edge(A, B)         a dep edge that lies on a cycle
+%   unit(F, Depth, Dir)      file F sits in directory Dir at depth Depth
+%                            (a file directly in a shallower directory has no
+%                            unit at that depth)
+%   unit_dep(Depth, UA, UB)  some file in UA depends on some file in UB
+%   package_edge(PA, PB)     a file of package PA depends on one of PB
+%   external_dep(F, Pkg)     file F imports from a package outside the root
+
+import "../schema/structure.dl".
+
+file_dep(A, B, K) :- imports(file: A, target_file: B, kind: K), B is not absent, A != B.
+dep(A, B) :- file_dep(A, B, _).
+runtime_dep(A, B) :- file_dep(A, B, K), K != type_only, K != type_query.
+
+file_reaches(A, B) :- dep(A, B).
+file_reaches(A, C) :- dep(A, B), file_reaches(B, C).
+in_cycle(F) :- file_reaches(F, F).
+cycle_edge(A, B) :- dep(A, B), file_reaches(B, A).
+
+unit(F, D, U) :- file_ancestor(file: F, dir: U, depth: D).
+unit_dep(D, UA, UB) :- dep(A, B), unit(A, D, UA), unit(B, D, UB), UA != UB.
+
+package_edge(PA, PB) :- dep(A, B), file(path: A, package: PA), file(path: B, package: PB), PA != PB.
+external_dep(F, P) :- imports(file: F, target_package: P), P is not absent.

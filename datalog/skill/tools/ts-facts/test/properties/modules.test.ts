@@ -1,4 +1,4 @@
-// P2 — module-graph fidelity: the import, re-export and call facts of a
+// P2 — module-graph fidelity: the import, re-export and call-site facts of a
 // generated project equal the graph it was generated from.
 // P6 — determinism: the order a tsconfig lists its files in changes nothing.
 
@@ -54,6 +54,16 @@ function expectedNames(model: ProjectModel): [string, string, string, string][] 
   return out;
 }
 
+function expectedCalls(model: ProjectModel): [string, string, string][] {
+  const out: [string, string, string][] = [];
+  model.files.forEach((f, i) => {
+    f.calls.forEach((calls, j) => {
+      for (const [k, fn] of calls) out.push([`${f.path}#${fnName(i, j)}`, `${model.files[k]?.path}#${fnName(k, fn)}`, "static"]);
+    });
+  });
+  return out;
+}
+
 test("P2: imports and imported names are exactly the generated module graph", () => {
   let crossFile = 0;
   let throughBarrel = 0;
@@ -63,11 +73,14 @@ test("P2: imports and imported names are exactly the generated module graph", ()
       const dir = tempDir("p2");
       const files = render(model);
       writeProject(dir, files, tsconfig(Object.keys(files)));
-      const { tables } = extract(dir, { layers: [] });
+      const { tables } = extract(dir, { layers: ["refs"] });
       const imports = tables.rows("imports").map((i) => [i.file, i.specifier, i.kind, i.target_file] as [string, string, string, string]);
       assert.deepEqual(sorted(imports), sorted(expectedImports(model)));
       const names = tables.rows("import_name").map((n) => [n.file, n.local, n.imported, n.target] as [string, string, string, string]);
       assert.deepEqual(sorted(names), sorted(expectedNames(model)));
+      // Every call resolves to the declaration it names, through namespaces and barrels.
+      const calls = tables.rows("call_site").map((c) => [c.caller, c.callee, c.dispatch] as [string, string, string]);
+      assert.deepEqual(sorted(calls), sorted(expectedCalls(model)));
       crossFile += imports.length > 0 ? 1 : 0;
       throughBarrel += model.files.some((f) => f.imports.some((i) => i.style === "via")) ? 1 : 0;
       fs.rmSync(dir, { recursive: true, force: true });

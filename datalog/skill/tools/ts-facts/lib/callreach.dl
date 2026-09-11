@@ -1,0 +1,17 @@
+% Call-graph reachability. The closure is quadratic in the worst case: on a
+% 5k-edge graph it derived 173k pairs in ~12 s. Narrow first where you can —
+% seed `reaches` from the functions you care about rather than all of them.
+%
+%   reaches(A, B)   a chain of call_edge leads from A to B
+%   recursive(F)    F can reach itself (direct or mutual recursion)
+%   mutual(A, B)    A and B are distinct and each reaches the other — anchored
+%                   on a direct edge, which is ~10x cheaper than joining the
+%                   closure with itself
+
+import "callgraph.dl".
+
+reaches(A, B) :- call_edge(A, B).
+reaches(A, C) :- call_edge(A, B), reaches(B, C).
+
+recursive(F) :- reaches(F, F).
+mutual(A, B) :- call_edge(A, B), reaches(B, A), A != B.
