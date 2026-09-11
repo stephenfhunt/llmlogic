@@ -68,9 +68,10 @@ what makes the result readable, and a grid of one domain measures one domain.
   `decisions.md` 2026-08-22. **The one pack with no generator**, and
   `domains.NO_GENERATOR` says why: there is nothing to seed.
 - **`code_design` — H-CA1** — three arms (`prose`, `engine` with `code-facts`
-  undocumented, `code-analysis`) over sqlparse and a pinned TypeScript package,
-  design-level questions with independent oracles. _designing_ — pre-registered
-  in `hypotheses.md` 2026-09-11; `decisions.md` 2026-09-11 (later). post-v1.
+  undocumented, `code-analysis`) over sqlparse and VS Code `vs/base`,
+  design-level questions with independent oracles. _designing_ — the build plan
+  is `notes/code-design-pack.md`; pre-registered in `hypotheses.md` 2026-09-11,
+  `decisions.md` 2026-09-11 (later). post-v1.
 - **`controls`** — _shipped._ Four tasks: two single-hop lookups, two one-step.
   Without them a null result is indistinguishable from a broken instrument.
   Generated, but flat: no `at-scale`, and a row ceiling — a control that gets

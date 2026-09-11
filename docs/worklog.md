@@ -27,28 +27,27 @@ raw transcripts (Claude Code auto-saves those under
 ## 2026-09-11 (later) — `code-analysis/`: its own project and skill, and Python
 
 Asked whether a domain skill should package the extractor and the engine and
-guide the exploration. Decided with the user: a new top-level project, a Python
-extractor now, the measurement designed now and built next session. Built so.
+guide the exploration. Decided with the user: a new project, a Python extractor
+now, the measurement designed now and built next session. Built so.
 
 **Done** — **108 tool tests**, experiments **1,661**, every commit gated
 - **`code-analysis/`**: `ts-facts` moved and renamed `code-facts`; the datalog
   skill restored to `7f3e998` byte for byte, so experiment workspaces hash as
   before. The skill is a playbook (extract → `checks.dl` → `orient.dl` → explore
-  by concern → verify → report; architecture rules as exit codes),
-  `reference/typescript.md` and `python.md`; `package.sh` builds the bundle,
-  verified installed.
+  → verify → report, architecture rules as exit codes) with a reference per
+  language; `package.sh` builds the bundle, verified installed.
 - **Python frontend** (stdlib; Node validates its stream against `schema.ts`):
   every layer but dataflow. P1-py–P4-py, mutation-verified; P1-py and P4-py take
   `python3` itself as the oracle.
 - **Found on the way in:** breadth-first MRO; a `match` guard sharing its
   pattern's node; sqlparse's self-importing `__init__` (1,165 unresolved names);
   `x = x.next()` recursing forever; lambdas in decorators never declared;
-  comprehensions in nested defs binding outward. In TypeScript: cognitive
-  complexity under-counted else-if bodies.
-- **Checked against independent answers:** the facts answer `static_analysis`'s
-  four questions exactly as `truth.py`; on `experiments/` (21.6k lines, 4.3 s)
-  1,116 of 1,117 functions' branch counts equal ruff's mccabe. And a finding:
-  `anthropic`, declared in `experiments/pyproject.toml`, is imported nowhere.
+  comprehensions in nested defs binding outward; and, in TypeScript, cognitive
+  complexity under-counting else-if bodies.
+- **Checked independently:** the facts answer `static_analysis`'s four questions
+  exactly as `truth.py`; on `experiments/` (21.6k lines, 4.3 s) 1,116 of 1,117
+  branch counts equal ruff's mccabe; and `anthropic`, declared in its
+  `pyproject.toml`, is imported nowhere.
 - **The unexplained `npm test` failure was P5's heap guard** (32 of 400 runs);
   P2-py had a second (35 of 400). Both reshaped, their rates measured.
 - **H-CA1 pre-registered** — `experiments/hypotheses.md` addendum.
@@ -69,6 +68,9 @@ extractor now, the measurement designed now and built next session. Built so.
 **Next up**
 - **Build the H-CA1 pack**: the TypeScript corpus, oracles, `node`/`python3` on a
   scrubbed PATH; run `harness power` on the real item count before any grid.
+  ***Added later the same day***: VS Code can be the fixture, scoped to
+  `vs/base`, once the library is faster (`coupling.dl` 330 s, `cohesion.dl`
+  404 s on 1.33M facts) — plan in `experiments/notes/code-design-pack.md`.
 - **A test file's process dies now and then** (`'test failed'`, no assertion):
   twice in 25 runs under heavy concurrent load, never in 35 idle ones; and one
   uncaptured failure. Capture every suite run's output until it is named.

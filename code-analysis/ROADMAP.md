@@ -13,6 +13,13 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
   `notes/code-facts.md` § The Python frontend.
 - **H-CA1** — does the domain skill beat the general one? Pre-registered;
   the pack is next. _designing_ — `../experiments/hypotheses.md` 2026-09-11.
+- **The library at a million facts** — `coupling.dl` 330 s, `cohesion.dl` 404 s
+  and `checks.dl` 196 s on VS Code's `vs/base` (1.33M facts, 6.5× tsdl), against
+  a 900 s cell. Blocks H-CA1's TypeScript corpus. _queued_ —
+  `../experiments/notes/code-design-pack.md` step 1.
+- **Asset imports** — `import './x.css'` is resolved with no target, which
+  `checks.dl` rightly calls a contradiction (42 files in `vs/base`). _queued_ —
+  same note, step 2.
 - **Python dataflow layer** (points-to and taint for Python). _parked_ until the
   first Python version has been used.
 - **A TypeScript 7 backend**, when its compiler API stabilizes. _parked._
