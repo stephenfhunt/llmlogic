@@ -1,0 +1,42 @@
+% ts-facts self-checks — run this file directly:
+%
+%     datalog lib/checks.dl
+%
+% Every rule derives `violation(Check, Subject)` for a fact that contradicts
+% another. Exit 1 (no rows) is a clean fact base; exit 0 prints each violation.
+% A check over a layer that was not extracted derives nothing, and the engine's
+% undefined-predicate warning says so.
+%
+% This is "Datalog proposes, source verifies" pointed at the extractor: before
+% believing an analysis, believe the facts it rests on.
+
+import "../schema/all.dl".
+
+known(I) :- symbol(id: I).
+known_file(F) :- file(path: F).
+
+% ── every symbol-valued column names a symbol ────────────────────────────
+violation("symbol.parent", P) :- symbol(parent: P), P is not absent, not known(P).
+violation("param.fn", F) :- param(fn: F), not known(F).
+violation("param.symbol", S) :- param(symbol: S), not known(S).
+violation("import_name.target", T) :- import_name(target: T), T is not absent, not known(T).
+violation("exports.symbol", S) :- exports(symbol: S), S is not absent, not known(S).
+violation("doc.symbol", S) :- doc(symbol: S), not known(S).
+violation("jsdoc_tag.symbol", S) :- jsdoc_tag(symbol: S), not known(S).
+violation("decorator.target", S) :- decorator(target: S), not known(S).
+violation("decorator.decorator", S) :- decorator(decorator: S), S is not absent, not known(S).
+
+% ── every file-valued column names a file ────────────────────────────────
+violation("imports.file", F) :- imports(file: F), not known_file(F).
+violation("imports.target_file", T) :- imports(target_file: T), T is not absent, not known_file(T).
+violation("symbol.file", F) :- symbol(file: F), F is not absent, not known_file(F).
+violation("project_file.file", F) :- project_file(file: F), not known_file(F).
+violation("file_ancestor.dir", D) :- file_ancestor(dir: D), not dir(path: D).
+
+% ── ids are keys ─────────────────────────────────────────────────────────
+violation("symbol.id is not a key", I) :- symbol(id: I, kind: K1), symbol(id: I, kind: K2), K1 != K2.
+violation("symbol.id is not a key", I) :- symbol(id: I, line: L1), symbol(id: I, line: L2), L1 != L2.
+violation("project symbol without a file", I) :- symbol(id: I, origin: project, file: F), F is absent.
+violation("resolved import without a target", F) :- imports(file: F, resolved: true, target_file: T, target_package: P), T is absent, P is absent.
+
+?- violation(Check, Subject).

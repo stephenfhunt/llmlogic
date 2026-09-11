@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# Invocation wrapper for the skill's TypeScript extractor, `tools/ts-facts`:
+# point it at a tsconfig and it writes Datalog fact tables about the project.
+#
+# The extractor is TypeScript run directly by Node (type stripping, no build
+# step), on its own pinned TypeScript compiler — installed here on first use,
+# or already vendored by `cargo package-skill`.
+set -euo pipefail
+
+SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+TOOL="$SKILL_DIR/tools/ts-facts"
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "ts-facts: needs Node.js >= 22.18, and \`node\` is not on PATH" >&2
+  exit 2
+fi
+if ! node -e 'const [a, b] = process.versions.node.split(".").map(Number); process.exit(a > 22 || (a === 22 && b >= 18) ? 0 : 1)'; then
+  echo "ts-facts: needs Node.js >= 22.18 to run TypeScript directly (found $(node --version))" >&2
+  exit 2
+fi
+if [[ ! -d "$TOOL/node_modules/typescript" ]]; then
+  echo "ts-facts: installing its TypeScript compiler (first use)…" >&2
+  npm ci --omit=dev --no-audit --no-fund --prefix "$TOOL" >&2
+fi
+
+exec node --disable-warning=ExperimentalWarning "$TOOL/src/main.ts" "$@"
