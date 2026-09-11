@@ -11,8 +11,8 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
 - **`package.sh`** — the standalone bundle. _shipped._
 - **Python frontend** — all layers but dataflow. _shipped_ — P1-py–P4-py,
   `notes/code-facts.md` § The Python frontend.
-- **H-CA1** — does the domain skill beat the general one? Pre-registration, then
-  an experiments pack. _queued_ — `../experiments/hypotheses.md`.
+- **H-CA1** — does the domain skill beat the general one? Pre-registered;
+  the pack is next. _designing_ — `../experiments/hypotheses.md` 2026-09-11.
 - **Python dataflow layer** (points-to and taint for Python). _parked_ until the
   first Python version has been used.
 - **A TypeScript 7 backend**, when its compiler API stabilizes. _parked._

@@ -454,3 +454,55 @@ conclusion rest on), `minimal-repair` (which single fact would make it hold),
   worded for a failure that does not occur here, so a null on it would have two
   causes. It stays pointed at the local subject, behind the observation blocker
   (`decisions.md` 2026-08-31 later i).
+
+### 2026-09-11 — H-CA1: does a domain skill beat the general one? Designed, not built
+
+`code-analysis/` is a second skill over the same engine: the extractor
+`code-facts` (TypeScript and Python), a rule library, and a `SKILL.md` that is a
+playbook for exploring a codebase's design (`../code-analysis/decisions.md`
+2026-09-11). This addendum registers the question and the design **before any
+pack exists**; the pack is built next session, and nothing here is revised once
+it has produced a number.
+
+> **H-CA1** — on whole-repository design questions, an agent given the
+> `code-analysis` skill answers more accurately than one given the general
+> `datalog` skill with `code-facts` on its `PATH` but undocumented.
+
+- **Arms** — `prose` (neither); `engine` (the datalog skill, `code-facts`
+  runnable, never mentioned — control 3 as it stands: the tool is there, the
+  guidance is not); `code-analysis` (the domain skill, which ships both
+  executables). Same agent, tools and workspace otherwise.
+- **Primary endpoint:** the paired accuracy delta **`code-analysis` − `engine`,
+  at haiku-4.5, by McNemar's exact test** — the worth of the playbook and the
+  documented extractor, holding the engine fixed. Two-sided.
+- **Secondary:** `code-analysis` − `prose` and `engine` − `prose`, with
+  intervals; reach (does `engine` find `code-facts` unprompted, does either arm
+  run `checks.dl`); cost (tokens, wall clock); per-item F1. **Stated in advance:**
+  every engine arm on disk trails its own `prose` (`decisions.md` 2026-09-01), so
+  `code-analysis` beating `engine` while still losing to `prose` is a possible
+  and reportable outcome, not a contradiction.
+- **Corpora:** `sqlparse` 0.6.0, already pinned, and **one pinned TypeScript
+  package** chosen when the pack is built — a tarball like sqlparse's, 5–20k
+  lines, with classes and more than one directory. Package snapshots carry no
+  git history, so v1 asks no change-history question.
+- **Questions — design-level, and each oracle independent:** a plain `truth.py`
+  written from the question's stated definition, never importing or running
+  `code-facts` or `lib/` (control 1: an oracle that calls the function under test
+  agrees with it forever). Candidates: modules in a runtime import cycle (imports
+  under `TYPE_CHECKING` excluded); exports no other module references, with the
+  entry points named; files whose top-level definitions fall into several groups
+  by shared references (module LCOM4 > 1); functions taking an annotated project
+  class and reading one of its attributes; dependencies that break a layer order
+  the question states. **Every definition is spelled out in the question** — the
+  provenance pilot graded a literal reading wrong (`decisions.md` 2026-08-31
+  later iv).
+- **Sizing:** 155 paired items at 80% power for +10 points; one question per
+  corpus is far short, so each is parametrized by target (per module, per
+  class) and `harness power` is run on the real count **before** the grid. If
+  it is short, the run is a pilot under the provenance precedent — descriptive,
+  no p-value, no delta claimed. At haiku a cell is one trial and `--repeats`
+  buys reliability, not items (`decisions.md` 2026-08-31 later iv).
+- **Preconditions, beyond the standing five:** `node` ≥ 22.18 and `python3` ≥
+  3.11 on the cell's scrubbed `PATH`, checked by preflight; `code-facts` on each
+  corpus passes `checks.dl` in the harness's own environment; and the
+  `code-analysis` bundle is the one `package.sh` built, hashed into `run.json`.

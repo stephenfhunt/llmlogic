@@ -15,6 +15,23 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-09-11 (later)** — **H-CA1 is measured by this harness, as a new pack
+  with three arms, and designed before it is built** (`hypotheses.md` addendum
+  of the same date). The alternative — measuring the code-analysis skill inside
+  `code-analysis/` — would need a second harness and would compare against
+  nothing this one has run.
+  - **The `engine` arm gets `code-facts` on its PATH, undocumented.** Without the
+    extractor the comparison is extractor-against-none, which the playbook would
+    win for the wrong reason; with it documented it is two playbooks. Undocumented
+    is control 3 applied to a tool: available, not mentioned.
+  - **Oracles are new `truth.py` functions, never `code-facts`.** The existing
+    `static_analysis` answer key agrees with the Python facts on all four of its
+    questions (`../code-analysis/notes/code-facts.md`), which is evidence for the
+    extractor and the reason the key must stay independent of it.
+  - **Open for the build session:** the TypeScript corpus, whether preflight can
+    see `node` on a scrubbed PATH, and whether per-target parametrization reaches
+    155 items without the questions becoming one question asked 80 times.
+
 - **2026-09-11** — **The local subject's skill listing names only what the
   workspace carries** (`arms.SKILL_SUBDIRS`, read by both `_copy_skill` and
   `local.skill_body`). The listing was drawn from the whole skill directory, and
@@ -25,6 +42,10 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
     the build wrapper, listed and never copied. So a local cell's prompt differs
     from every archived one by that line — the workspace hash already separates
     them, since `recipes/typescript.md` is new in the same session.
+    ***Amended*** (2026-09-11, later): that recipe left with the move to
+    `code-analysis/`, which restored `datalog/skill/`'s `SKILL.md` and `recipes/`
+    to `7f3e998`, so the workspace hash is back to its pre-session value and only
+    the listing line separates a new local cell's prompt from an archived one.
   - Guard: `test_every_file_the_skill_body_lists_is_in_the_workspace`; restoring
     the directory-wide listing reddens it.
 

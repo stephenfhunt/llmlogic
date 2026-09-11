@@ -32,3 +32,10 @@ with the long form in [`notes/code-facts.md`](notes/code-facts.md).
   - *Open:* whether a domain skill beats the general one plus the same tools is
     exactly the experiments' kind of question — pre-registered as H-CA1 in
     `../experiments/hypotheses.md`, to be built as its own pack.
+  - ***Consequences*** (2026-09-11, later): the measurement reason held — the
+    restore was byte-exact and experiments stayed at 1,661 green. The shared
+    schema held for a second language with no change to `lib/` beyond Python's
+    primitive type names and its `_x` content-coupling rule, and the one
+    schema home paid off: every Python row is validated by the TypeScript
+    writer. Not yet known: whether the playbook, rather than the tools, is what
+    helps — H-CA1 is still unbuilt.

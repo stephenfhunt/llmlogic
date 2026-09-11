@@ -24,6 +24,57 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-11 (later) — `code-analysis/`: its own project and skill, and Python
+
+Asked whether a domain skill should package the extractor and the engine and
+guide the exploration. Decided with the user: a new top-level project, a Python
+extractor now, the measurement designed now and built next session. Built so.
+
+**Done** — **108 tool tests**, experiments **1,661**, every commit gated
+- **`code-analysis/`**: `ts-facts` moved and renamed `code-facts`; the datalog
+  skill restored to `7f3e998` byte for byte, so experiment workspaces hash as
+  before. The skill is a playbook (extract → `checks.dl` → `orient.dl` → explore
+  by concern → verify → report; architecture rules as exit codes),
+  `reference/typescript.md` and `python.md`; `package.sh` builds the bundle,
+  verified installed.
+- **Python frontend** (stdlib; Node validates its stream against `schema.ts`):
+  every layer but dataflow. P1-py–P4-py, mutation-verified; P1-py and P4-py take
+  `python3` itself as the oracle.
+- **Found on the way in:** breadth-first MRO; a `match` guard sharing its
+  pattern's node; sqlparse's self-importing `__init__` (1,165 unresolved names);
+  `x = x.next()` recursing forever; lambdas in decorators never declared;
+  comprehensions in nested defs binding outward. In TypeScript: cognitive
+  complexity under-counted else-if bodies.
+- **Checked against independent answers:** the facts answer `static_analysis`'s
+  four questions exactly as `truth.py`; on `experiments/` (21.6k lines, 4.3 s)
+  1,116 of 1,117 functions' branch counts equal ruff's mccabe. And a finding:
+  `anthropic`, declared in `experiments/pyproject.toml`, is imported nowhere.
+- **The unexplained `npm test` failure was P5's heap guard** (32 of 400 runs);
+  P2-py had a second (35 of 400). Both reshaped, their rates measured.
+- **H-CA1 pre-registered** — `experiments/hypotheses.md` addendum.
+
+**Decided** (`code-analysis/decisions.md`; experiments `decisions.md` 2026-09-11 later)
+- **One schema for both languages**; a Python writer would be a second home.
+- **Python cyclomatic counts like ESLint**, for parity; mccabe's difference is
+  documented and measured, not hidden.
+- **A guard that needs a shape once is sized from its measured rate.**
+- **H-CA1's `engine` arm gets `code-facts` undocumented**; the primary endpoint
+  is `code-analysis` − `engine` at haiku.
+
+**Removed**
+- From the datalog skill: `ts-facts`, `tools/`, `recipes/typescript.md`. From the
+  frontend: its breadth-first `mro()`, its unscoped binding walk, the silent
+  fallback when `py_flow` failed to import.
+
+**Next up**
+- **Build the H-CA1 pack**: the TypeScript corpus, oracles, `node`/`python3` on a
+  scrubbed PATH; run `harness power` on the real item count before any grid.
+- **A test file's process dies now and then** (`'test failed'`, no assertion):
+  twice in 25 runs under heavy concurrent load, never in 35 idle ones; and one
+  uncaptured failure. Capture every suite run's output until it is named.
+- Parked: a Python dataflow layer; a name-tier helper in `lib/` for Python's
+  unresolved calls.
+
 ## 2026-09-11 — ts-facts at module scale: cohesion, coupling kinds, package hygiene
 
 Asked, after a brainstorm on what the facts make derivable, for the
@@ -113,66 +164,3 @@ and clippy clean, experiments **1,661** green
   method values in the dataflow layer.
 - Unchanged from before: size the provenance run with `--repeats`; the
   `SKILL.md` exit-code gap.
-
-## 2026-08-31 (later ii) — Provenance-core questions, and a reach that is still zero
-
-Asked whether Haiku needs its own provenance test, whether we are set up for one,
-and for a small sample to explore it. Yes; half; and it ran — **twice**, because
-the first run's only discordant pair turned out to be a defect in my own question.
-
-**Done** — **1,660 tests** (+135), ruff clean, the 310-cell offline grid renders
-- **The answer to the question asked.** The repair route to provenance cannot
-  fire on Haiku: its `engine-briefed` arm is **44/44 correct**, ran `datalog`
-  with **visible stdout in 44/44 transcripts**, and never derives nothing. There
-  is no empty result to interrogate, so the only route left is a question whose
-  *answer* is the derivation.
-- **`domains/provenance`** — `critical-grant`, `minimal-repair`, `access-path`
-  over `access_control`'s graph, its own deeper pinned graph, `at-scale` refused
-  with a reason. Its own pack rather than three more `access_control` tasks: a
-  two-level hierarchy answers a derivation question with one role, and the local
-  subject's pre-registration names **the 16 pinned items**.
-- **`reference/correct/provenance.dl`** — the engine answers all three and agrees
-  with the plain-Python oracle on all 107 rows, **using neither sigil**. That is
-  recorded as the pack's honest limit: it makes provenance *applicable*, not
-  necessary.
-- **Two runs, 40 cells, $4.72**, the second halted by the session limit at 5 and
-  resumed to 20. The pilot was pre-registered before either.
-
-**Decided** (`decisions.md`, two entries; `hypotheses.md` addendum)
-- **Reach 0 of 20, zero goals run**, across both runs. Compliance was **20/20
-  `answered-from`** and controls **8/8** in both arms, so this is not the mandate
-  failing to take. **The subject uses the engine and never interrogates it**, now
-  measured on questions where `?why` answers what was asked.
-- **The first run's accuracy delta is void, and the defect was mine.**
-  `critical-grant` carried *"and every other user keeps whatever they had"*;
-  under that reading the answer is **empty on both rungs** — computed — while
-  `truth.py` grades per user. `prose` read it literally and was graded wrong for
-  being right. Repaired, and the item now answers **12/12 exactly**.
-- **The API subject is not deterministic across runs.** One item flipped
-  correct → missing 11 of 33, same prompt, same arm. 2026-08-27's *"`--repeats`
-  buys nothing"* was about the **local** subject and does not carry here.
-- **The class costs ~3x the ladder's unit** — ~$0.20 and 109–205s per cell
-  against $0.08 and 40s.
-
-**Decided — *added 2026-09-01***
-- **`ScriptUse` over all 558 archived `prose` cells**, not just the ladder's 44:
-  every paired comparison on disk is **18 wins / 38 losses / 382 ties**, and
-  within a subject **scripting does not predict correctness** (haiku 84% with
-  against 88% without). *"Prose is really code"* explains the ladder's mechanism
-  and not the arm's accuracy — the engine's deficit is the **encoding step**.
-  Opens the framing question: four grids of nulls may be bracketing the models'
-  reasoning ceilings rather than testing S1. — `notes/what-prose-is-doing.md`,
-  `decisions.md` 2026-09-01.
-
-**Removed**
-- The `critical-grant` clause that contradicted its own oracle. Nothing else: the
-  voided run stays on disk, as `results/` requires.
-
-**Next up**
-- **The two runs disagree in sign** — engine +1 cell voided, `prose` +2 cells on
-  the repair — which is what n = 6 against a stochastic subject buys. **Size the
-  next one with `--repeats`** before reading any delta on this class.
-- **Then the question the zero raises**: reach is 0 with the manual, 0 with an
-  instruction the local subject never reached, and 0 where provenance *is* the
-  question. The next lever is the `SKILL.md` exit-code gap, not a sixth arm.
-- Unchanged: `at-scale`, the mandate arm's `invoked` split, `scheduling`.
