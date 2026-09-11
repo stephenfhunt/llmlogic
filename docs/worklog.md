@@ -24,6 +24,43 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-11 — ts-facts at module scale: cohesion, coupling kinds, package hygiene
+
+Asked, after a brainstorm on what the facts make derivable, for the
+`member_access` fix and three library additions. All four shipped; the
+brainstorm's other threads are below.
+
+**Done** — **79 tool tests**, each commit gated on the suite
+- **`member_access`** covers object type aliases and inline object types
+  (`class` → `owner`): tsdl 2,757 → 3,281 rows. The refs layer resolves
+  `obj["secret"]`, which is how TypeScript code reaches a `private`.
+- **`cohesion.dl`: `module_lcom4`** — a file's exports grouped by what they
+  share. tsdl: `test/support.ts` is 9 groups; `lexer.ts`'s second is
+  `CONTEXTUAL_KEYWORDS`, exported and used by nothing in `src`.
+- **`coupling_kinds.dl`** — Myers' scale per file pair. tsdl's `external`
+  coupling is real: Datalog tokens (`":-"`, `"?why"`) spelled in several modules.
+- **`packages.dl`** — undeclared, unused, dev-in-production, test-only and
+  types-only dependencies; `imports.builtin` and `package_dep.types_for` added.
+- New `design` fixture, expectations worked by hand; recipe, note updated.
+
+**Decided**
+- **Classify by fact, not by count:** each coupling kind names the member,
+  variable, literal or parameter that makes it so.
+- **Text-typed heuristics stay in the lib, stated** — "primitive" is printed
+  `symbol_type.text`; changing them is editing one rule.
+
+**Removed**
+- `member_access.class` (renamed). Nothing else.
+
+**Next up**
+- **`SKILL.md`'s description** never mentions codebases or `./ts-facts`; the
+  user's call, since it loads every session and the experiments measure it.
+- From the brainstorm, unbuilt: architecture rules as exit-code checks with
+  `?why` for the offending chain; `--tag` name classification at extraction;
+  purity and escape analysis; Lakos levelization (collapse cycles first).
+- **Two broken intermediate commits** (`bb41e57`, `feb9741`: a fixture file the
+  npm glob ran as a test), fixed forward in `244620e`.
+
 ## 2026-09-10 — `ts-facts`: a TypeScript project, extracted for the skill
 
 Asked for a maximalist tool in the skill's static-analysis section: point it at a
@@ -138,54 +175,4 @@ the first run's only discordant pair turned out to be a defect in my own questio
 - **Then the question the zero raises**: reach is 0 with the manual, 0 with an
   instruction the local subject never reached, and 0 where provenance *is* the
   question. The next lever is the `SKILL.md` exit-code gap, not a sixth arm.
-- Unchanged: `at-scale`, the mandate arm's `invoked` split, `scheduling`.
-
-## 2026-08-31 (later) — The provenance arm, and a gate that stopped it one step early
-
-Asked to run a local-model experiment on **briefed provenance** — does
-*instructing* the subject to interrogate its own failures convert them — and to
-build cases where provenance is core rather than incidental. **The gate stopped
-the run, and the reason is more useful than the run would have been.**
-
-**Done** — **1,525 tests** (+17), ruff clean, the 280-cell offline grid renders
-- **The zero, measured twice**: **no `?why` / `?whynot` in 1,812 transcripts,
-  23,430 tool calls** — every real run on disk — by `grep` and by the parser.
-- **Triaged the 12 failing briefed cells first**: **nine derived nothing at all**
-  (`missing == truth_size`), the exact `?whynot` case, burned over 35 and 28
-  turns rewriting the program instead.
-- **`engine-briefed-provenance`** — a fifth arm, an *instruction* not more
-  documentation, appended after the briefing so briefed stays a strict prefix.
-  Pre-registered with its endpoint, prediction, and the rule that then fired.
-- **`signals.ScriptUse`**, and **`ROADMAP.md` was wrong that it could not be
-  backfilled** — transcripts *are* persisted, so it was, over the ladder.
-- **Two defects, opposite directions** — a one-call `datalog … > answer.txt`
-  read as *non-compliance* (`>` wanted `>=`; `classify_script` had it worse, 11
-  of 14 cells); and `ran_engine`'s comment asserting an invariant the code never
-  had, which makes 188 legitimate records look broken.
-
-**Decided** (`decisions.md`, three entries; `hypotheses.md` addendum)
-- **The gate: provenance reach 0/2, zero goals.** Stopped, per the rule.
-- **But not because the instruction was ignored.** Both cells complied fully and
-  **both piped `datalog … | sed … > answer.txt` in one command**; the second ran
-  the identical command twice and stopped. **The subject never sees the output**,
-  so it cannot notice the answer is empty, so the block's opening condition is
-  never evaluated. Provenance is untested, not refuted.
-- **Observation is upstream of provenance**, as reach is upstream of capability.
-  The `SKILL.md` exit-code gap now *blocks a feature* rather than costing rounds,
-  and needs its own block and arm or the delta gets two causes.
-- **The ladder's `+0 at every rung` decomposes**: `prose` answered from a script
-  **33/44**, `engine-briefed` **0/44**. It was never prose against the engine.
-
-**Removed**
-- The "transcripts are not persisted" claim, load-bearing twice in `ROADMAP.md`.
-  The gate keeps its `engine_use` **as recorded**: backfilling a field a run
-  never had is additive, correcting one it did record is not.
-
-**Next up**
-- **Teach the subject to read its own output** — its own block, its own arm, and
-  now the blocker; nothing downstream of it is measurable.
-- **Then re-run the provenance gate**, 2 cells, which settles the question the
-  pre-registration actually asked.
-- **Part 2 unstarted**: provenance-core tasks (`critical-grant`,
-  `minimal-repair`, `access-path`), keeping the set-equality answer contract.
 - Unchanged: `at-scale`, the mandate arm's `invoked` split, `scheduling`.

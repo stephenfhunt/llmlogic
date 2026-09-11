@@ -41,7 +41,7 @@ Write your analysis as a file next to them (`/tmp/facts/q.dl`) that starts
 | layer | the relations you will use most |
 |---|---|
 | structure | `file` (path, dir, package, is_test, loc), `symbol` (id, kind, file, parent, exported, …), `imports` (file → target_file / target_package, kind, and whether it survives to `runtime`), `exports`, `file_ancestor` (every enclosing dir, with depth) |
-| refs | `ref(from, to, kind)` — every resolved reference between declarations; `call_site` (caller, callee, **dispatch**); `extends`, `implements`, `overrides`; `member_access` (for cohesion); `type_ref` (with position: param, return, …) |
+| refs | `ref(from, to, kind)` — every resolved reference between declarations; `call_site` (caller, callee, **dispatch**); `extends`, `implements`, `overrides`; `member_access` (class, interface and object-type members — for cohesion and stamp coupling); `type_ref` (with position: param, return, …) |
 | flow | `fn` (one per function body, with cyclomatic, cognitive, nesting, Halstead); `flow_node`/`flow_edge` (a CFG per function); `def`/`use`; `closure`; `call_at` |
 | dataflow | `assign`, `alloc`, `load`, `store`, `formal`/`actual` — value flow in three-address form |
 | quality | `diagnostic`, `any_site`, `assertion`, `literal`, `floating_promise`, `ts_directive`, `lint_directive`, `comment_marker`, `throw_site`, `catch_site` |
@@ -70,13 +70,22 @@ above (205k facts), including the import.
 | `callgraph.dl` | `call_edge` (virtual calls expanded to every override), `call_edge_lexical` (a callback's calls counted as its enclosing function's), `called` | 0.9 s |
 | `callreach.dl` | `reaches`, `recursive`, `mutual` | 1.8 s |
 | `coupling.dl` | per component: `efferent`, `afferent`, `instability`, `abstractness`, `distance`, `sdp_violation`, `comp_edge_weight`; per type: `cbo` | 3.3 s |
-| `cohesion.dl` | per class: `lcom4`, `tcc`, `lcom_hs`; per component: `relational_cohesion` | 1.1 s |
+| `cohesion.dl` | per class: `lcom4`, `tcc`, `lcom_hs`; per file: `module_lcom4`, `module_component`; per component: `relational_cohesion` | 6.2 s |
+| `coupling_kinds.dl` | Myers' scale: `content_access`, `common_state`, `shared_literal`, `control_param`, `stamp_param`, `data_call`; per file pair `module_coupling`, `worst_coupling` | 12 s |
+| `packages.dl` | against package.json: `undeclared`, `unused`, `dev_in_production`, `only_in_tests`, `types_only` | 0.3 s |
 | `metrics.dl` | `dit`, `noc`, `wmc`, `rfc`, `fan_in`, `fan_out` | 1.7 s |
 | `flow.dl` | `reachable`, `unreachable`, `reaches_def`, `def_use`, `undefined_use`, `live_out`, `dead_store` | 8–9 s |
 | `dominators.dl` | `dominates`, `back_edge`, `loop_header` | 4.3 s |
 | `pointsto.dl` | `pts`, `heap`, `target`, `call_edge_pt` (indirect and structural calls resolved), `call_edge_pt_lexical`, `unresolved_call` | 3.3 s |
 | `taint.dl` | `tainted`, `tainted_sink` — you supply `source/1` and `sink/1` | pointsto + |
 | `cochange.dl` | `revisions`, `cochange`, `confidence`, `hidden_coupling`, `churn`, `author_commits`, `main_author`, `first_change`, `last_change` | 2.3 s |
+
+**No classes? Use the module versions.** Much TypeScript has none — the project
+above has 0 classes and 94 exported functions — so `lcom4`, `wmc`, `dit` and
+`cbo` come back empty there. The module is the unit of design instead:
+`module_lcom4` groups a file's exports by what they share (N > 1 is N modules in
+one file), `coupling_kinds.dl` classifies how two files are coupled, and
+`coupling.dl`'s component rules already work per file.
 
 **Components** (coupling, cohesion) are `(G, C)` pairs: `G = -1` files, `-2`
 packages, `N ≥ 0` directories at depth N. `instability(1, C, I)` is instability
@@ -92,6 +101,10 @@ cheap to ask, each a few rules. All ran on the project above.
 | what changes together but shares no code? | `hidden_coupling(A, B, N), N >= 3` — co-change with no import or reference either way |
 | which modules break the Stable Dependencies Principle? | `sdp_violation(G, A, B)` |
 | which classes want to be two? | `lcom4(C, N), N > 1` |
+| which files are several modules sharing a name? | `module_lcom4(F, N), N > 1`, then `module_component(F, R, E)` for the groups |
+| how are two modules coupled — not how much, but how? | `worst_coupling(FA, FB, K)`; `content` and `common` first |
+| which functions take a whole record and read one field? (stamp coupling, ISP) | `stamp_param(F, T, Used, Total)`, lowest `Used` against `Total` |
+| is package.json telling the truth? | `packages.dl`: `undeclared`, `unused`, `dev_in_production`, `types_only` |
 | which exports does nothing else use? | `dead_export` below — exclude your entry points |
 | what does no test reach? | `untested` below — over `call_edge_pt_lexical` |
 | where do internal types leak through the public API? | `type_ref(from: F, to: T), symbol(id: F, exported: true), symbol(id: T, origin: project, exported: false)` |

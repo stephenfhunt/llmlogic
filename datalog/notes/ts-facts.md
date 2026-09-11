@@ -98,6 +98,19 @@ through imports with no extra fact; one `this` variable per class. Not modelled:
 accessor calls hidden in property reads, object spread, method values read off
 instances (reached through `call_site` instead), generator resumption.
 
+**Module analogues, and coupling by kind** (added 2026-09-11). A class-less
+codebase — tsdl has 0 classes — leaves the class rules empty, so `cohesion.dl`
+gained `module_lcom4` (a file's exports grouped by what they share) and
+`coupling_kinds.dl` classifies file pairs on Myers' scale, content to data, from
+facts rather than counts; `packages.dl` checks package.json against imports.
+Three extractor additions carry them: `member_access` covers object type
+aliases and inline object types (column `class` renamed `owner`; tsdl 2,757 →
+3,281 rows), the refs layer resolves a member named in brackets
+(`obj["secret"]`, the way TypeScript lets code reach a `private`), and
+`imports.builtin` / `package_dep.types_for` do the string work the engine
+cannot. The coupling kinds lean on printed type text ("primitive" is exactly
+`number`, `string`, …) — a heuristic, stated in the rule file's header.
+
 **The rule library is split by cost** (the recipe's 35× lesson): `units.dl` and
 `types.dl` are shared and small; `callreach.dl` is apart from `callgraph.dl`;
 `dominators.dl` apart from `flow.dl`. The extractor *emits* and the library
@@ -143,6 +156,9 @@ both tsconfigs, 16-thread desktop:
 | `dominators.dl` | 4.3 s |
 | `pointsto.dl` | 3.3 s |
 | `cochange.dl` | 2.3 s |
+| `cohesion.dl` with `module_lcom4` | 6.2 s |
+| `coupling_kinds.dl` | 12 s, 667 MB |
+| `packages.dl` | 0.3 s |
 
 Findings, each verified against the source: `answer.ts ↔ eval.ts` is an import
 cycle, but through `import type` on both sides (so `runtime_dep` has none);
