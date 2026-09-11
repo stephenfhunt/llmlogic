@@ -1,0 +1,18 @@
+% A projection that puts a join key first.
+%
+% The engine's only index is the relation's own column order: an atom's bound
+% columns are sought as a *leading* prefix, and the seek stops at the first
+% unbound one (`datalog/spec.md` §17, 2026-08-21). So a rule that binds a column
+% the relation does not lead with scans the whole relation once per outer row.
+% `symbol` leads with `id`, so "the children of P" — `symbol(id: S, parent: P)`
+% with only P known — is a full scan of every symbol, and at a million facts
+% that is the difference between seconds and minutes.
+%
+%   child(Parent, Id)   symbol Id's parent is Parent
+%
+% Re-key a relation this way wherever a rule joins on something other than its
+% leading column; `lib/units.dl`'s `file_member` is the same move for `member`.
+
+import "../schema/structure.dl".
+
+child(P, S) :- symbol(id: S, parent: P).

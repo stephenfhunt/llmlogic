@@ -1,0 +1,19 @@
+% Call-graph reachability from functions you name — `callreach.dl`'s closure
+% grown only from a seed, for a project where the whole-project closure costs
+% more than the question is worth (see that file for the numbers). Define the
+% seed in your own program, then ask:
+%
+%     import "lib/callreach_seeded.dl".
+%     seed(F) :- symbol(id: F, name: "dispose", kind: method).
+%     ?- reaches_from(A, B).
+%
+%   seed(F)              you supply this: the functions to grow the closure from
+%   reaches_from(A, B)   a chain of call_edge leads from a seeded A to B
+%
+% `recursive` and `mutual` have no seeded form — both are questions about every
+% function, so they are `callreach.dl`'s and cost what it costs.
+
+import "callgraph.dl".
+
+reaches_from(A, B) :- seed(A), call_edge(A, B).
+reaches_from(A, C) :- reaches_from(A, B), call_edge(B, C).

@@ -13,6 +13,7 @@
 %                            handed to a library (map, then, forEach): the
 %                            library calls it, so no call_edge reaches it
 %   called(B)                B is the target of some call edge
+%   called_by(B, A)          call_edge keyed by the callee
 %
 % `indirect` calls (through a function-typed variable, parameter or property)
 % are not here: their target is a value, not a declaration. lib/pointsto.dl
@@ -48,3 +49,5 @@ call_edge_lexical(A, B) :- call_edge(A, B).
 call_edge_lexical(A, B) :- nested_anonymous(A, F), call_edge(F, B).
 
 called(B) :- call_edge(_, B).
+% `call_edge` keyed by the callee, for the rules that count callers (keys.dl).
+called_by(B, A) :- call_edge(A, B).

@@ -67,7 +67,8 @@ violation("flow_edge.from", S) :- flow_edge(from: A), not flow_node(id: A), S = 
 violation("flow_edge.to", S) :- flow_edge(to: B), not flow_node(id: B), S = B as string.
 violation("edge between two functions", S) :-
   flow_edge(from: A, to: B), flow_node(id: A, fn: F), flow_node(id: B, fn: G), F != G, S = A as string.
-violation("fn without exactly one entry", F) :- fn(id: F), N = count { E | flow_node(id: E, fn: F, kind: entry) }, N != 1.
+entry_node(F, E) :- flow_node(id: E, fn: F, kind: entry).
+violation("fn without exactly one entry", F) :- fn(id: F), N = count { E | entry_node(F, E) }, N != 1.
 violation("an exit with a successor", S) :- flow_edge(from: A), flow_node(id: A, kind: exit), S = A as string.
 violation("def.var", V) :- def(var: V), not known(V).
 violation("use.var", V) :- use(var: V), not known(V).
@@ -89,7 +90,8 @@ violation("formal.fn", F) :- formal(fn: F), not fn(id: F).
 violation("formal_ret.fn", F) :- formal_ret(fn: F), not fn(id: F).
 violation("this_var.fn", F) :- this_var(fn: F), not fn(id: F).
 violation("actual.call_site", S) :- extracted(refs), actual(call_site: C), not call_site(id: C), S = C as string.
-violation("alloc.site is not a key", S) :- alloc(site: O, var: A), alloc(site: O, var: B), A != B, S = O as string.
+alloc_of(O, V) :- alloc(var: V, site: O).
+violation("alloc.site is not a key", S) :- alloc_of(O, A), alloc_of(O, B), A != B, S = O as string.
 
 % ── quality ──────────────────────────────────────────────────────────────
 violation("any_site.fn", F) :- any_site(fn: F), not known(F).

@@ -7,6 +7,7 @@
 %   type_dep(A, B)    something inside type A references something inside type B (A ≠ B)
 
 import "../schema/structure.dl".
+import "keys.dl".
 import "../schema/refs.dl".
 
 is_type(T) :- symbol(id: T, kind: class, origin: project).
@@ -15,6 +16,6 @@ is_type(T) :- symbol(id: T, kind: enum, origin: project).
 is_type(T) :- symbol(id: T, kind: type_alias, origin: project).
 
 in_type(T, T) :- is_type(T).
-in_type(S, T) :- symbol(id: S, parent: P), in_type(P, T).
+in_type(S, T) :- in_type(P, T), child(P, S).
 
 type_dep(A, B) :- ref(from: S, to: X), in_type(S, A), in_type(X, B), A != B.

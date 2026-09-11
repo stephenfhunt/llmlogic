@@ -9,6 +9,7 @@
 % directory belongs to no component at a deeper N.
 %
 %   member(G, C, File)   File belongs to component C
+%   file_member(File, G, C)  the same, keyed by the file
 %   comp(G, C)           C is a component at granularity G
 
 import "../schema/structure.dl".
@@ -17,3 +18,5 @@ member(-1, F, F) :- file(path: F).
 member(-2, P, F) :- file(path: F, package: P), P is not absent.
 member(D, U, F) :- file_ancestor(file: F, dir: U, depth: D).
 comp(G, C) :- member(G, C, _).
+% `member` keyed by the file, for the rules that join on one — see keys.dl.
+file_member(F, G, C) :- member(G, C, F).

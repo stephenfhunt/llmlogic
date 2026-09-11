@@ -13,15 +13,17 @@
 
 import "../schema/flow.dl".
 import "callgraph.dl".
+import "keys.dl".
 
 project_class(C) :- symbol(id: C, kind: class, origin: project).
 
 class_ancestor(C, A) :- project_class(C), extends(child: C, parent: A).
 class_ancestor(C, A) :- class_ancestor(C, P), extends(child: P, parent: A).
 dit(C, N) :- project_class(C), N = count { A | class_ancestor(C, A) }.
-noc(C, N) :- project_class(C), N = count { D | extends(child: D, parent: C) }.
+extended_by(P, D) :- extends(child: D, parent: P).
+noc(C, N) :- project_class(C), N = count { D | extended_by(C, D) }.
 
-class_body(C, M) :- project_class(C), symbol(id: M, parent: C), fn(id: M).
+class_body(C, M) :- project_class(C), child(C, M), fn(id: M).
 wmc(C, W) :- project_class(C), W = sum { X | class_body(C, M), fn(id: M, cyclomatic: X) }.
 
 response(C, M) :- class_body(C, M).
@@ -29,4 +31,4 @@ response(C, X) :- class_body(C, M), call_edge(M, X).
 rfc(C, N) :- project_class(C), N = count { X | response(C, X) }.
 
 fan_out(F, N) :- fn(id: F), N = count { B | call_edge(F, B) }.
-fan_in(F, N) :- fn(id: F), N = count { A | call_edge(A, F) }.
+fan_in(F, N) :- fn(id: F), N = count { A | called_by(F, A) }.

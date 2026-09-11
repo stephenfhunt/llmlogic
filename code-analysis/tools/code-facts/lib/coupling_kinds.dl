@@ -38,6 +38,7 @@
 % Needs the refs, flow, dataflow and quality layers.
 
 import "callgraph.dl".
+import "keys.dl".
 import "../schema/flow.dl".
 import "../schema/dataflow.dl".
 import "../schema/quality.dl".
@@ -47,7 +48,9 @@ level_rank(control, 3). level_rank(stamp, 2). level_rank(data, 1).
 
 in_file(S, F) :- symbol(id: S, file: F).
 inside(S, S) :- symbol(id: S).
-inside(S, A) :- symbol(id: S, parent: P), inside(P, A).
+inside(S, A) :- inside(P, A), child(P, S).
+% `inside` keyed by the ancestor, for the rules that join on one.
+contains(A, S) :- inside(S, A).
 
 % ── content ──────────────────────────────────────────────────────────────
 private_member(M) :- symbol(id: M, visibility: private).
@@ -58,7 +61,7 @@ content_access(A, M, C) :- member_access(fn: A, member: M, owner: C), private_me
 py_protected(M) :- symbol(id: M, visibility: protected, file: F), file(path: F, lang: py).
 descends(D, C) :- extends(child: D, parent: C).
 descends(D, C) :- extends(child: D, parent: X), descends(X, C).
-in_subclass(A, C) :- descends(D, C), inside(A, D).
+in_subclass(A, C) :- descends(D, C), contains(D, A).
 content_access(A, M, C) :- member_access(fn: A, member: M, owner: C), py_protected(M), not inside(A, C), not in_subclass(A, C).
 
 % ── common ───────────────────────────────────────────────────────────────
@@ -69,7 +72,8 @@ touches(A, V) :- writes(A, V).
 touches(A, V) :- load(base: V, fn: A), module_variable(V).
 touches(A, V) :- use(node: N, var: V), flow_node(id: N, fn: A), module_variable(V).
 mutable_state(V) :- writes(_, V).
-common_state(A, B, V) :- mutable_state(V), touches(A, V), touches(B, V), A < B, in_file(A, FA), in_file(B, FB), FA != FB.
+touched_by(V, A) :- touches(A, V).
+common_state(A, B, V) :- mutable_state(V), touched_by(V, A), touched_by(V, B), A < B, in_file(A, FA), in_file(B, FB), FA != FB.
 
 % ── external ─────────────────────────────────────────────────────────────
 literal_spread_limit(5).
@@ -82,18 +86,22 @@ shared_literal(FA, FB, V) :- string_in(V, FA), string_in(V, FB), FA < FB, spread
 boolean_text("boolean"). boolean_text("boolean | undefined").
 boolean_text("bool"). boolean_text("bool | None"). boolean_text("Optional[bool]").
 branch_node(cond). branch_node(loop_head).
+% `use` keyed by the variable, for the rules that know it and not the node.
+used_at(V, N) :- use(node: N, var: V).
 control_param(F, P) :-
   param(fn: F, symbol: P), symbol_type(symbol: P, text: T), boolean_text(T),
-  use(node: N, var: P), flow_node(id: N, fn: F, kind: K), branch_node(K).
-control_param(F, P) :- param(fn: F, symbol: P), use(node: N, var: P), flow_node(id: N, fn: F, kind: switch).
+  used_at(P, N), flow_node(id: N, fn: F, kind: K), branch_node(K).
+control_param(F, P) :- param(fn: F, symbol: P), used_at(P, N), flow_node(id: N, fn: F, kind: switch).
 control_call(A, B, P) :- call_edge(A, B), control_param(B, P).
 
 % ── stamp ────────────────────────────────────────────────────────────────
 record_kind(class). record_kind(interface). record_kind(type_alias).
 member_kind(property). member_kind(method). member_kind(getter). member_kind(setter).
-member_of(T, M) :- symbol(id: M, parent: T, kind: K), member_kind(K).
+member_of(T, M) :- child(T, M), symbol(id: M, kind: K), member_kind(K).
+% `member_access` keyed by the owner, for the rules that know it and not the fn.
+access_of(Owner, Fn, M) :- member_access(fn: Fn, member: M, owner: Owner).
 takes(F, T) :- type_ref(from: F, to: T, position: param), symbol(id: T, kind: K, origin: project), record_kind(K), fn(id: F).
-touched(F, T, M) :- takes(F, T), member_access(fn: X, member: M, owner: T), inside(X, F).
+touched(F, T, M) :- takes(F, T), access_of(T, X, M), inside(X, F).
 stamp_param(F, T, U, N) :-
   takes(F, T), N = count { M | member_of(T, M) },
   U = count { M | touched(F, T, M) }, U < N.

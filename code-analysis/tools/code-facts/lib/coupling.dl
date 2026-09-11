@@ -22,25 +22,26 @@
 % coupling, restrict `file_ref` by Kind in a rule of your own.
 
 import "units.dl".
+import "keys.dl".
 import "types.dl".
 
 file_ref(FA, FB, K) :- ref(from: S, to: T, kind: K), symbol(id: S, file: FA), symbol(id: T, file: FB), FA != FB.
 
-comp_edge(G, A, B) :- file_ref(FA, FB, _), member(G, A, FA), member(G, B, FB), A != B.
+comp_edge(G, A, B) :- file_ref(FA, FB, _), file_member(FA, G, A), file_member(FB, G, B), A != B.
 
 crossing(G, A, B, S, T, K, L) :-
   ref(from: S, to: T, kind: K, line: L), symbol(id: S, file: FA), symbol(id: T, file: FB),
-  member(G, A, FA), member(G, B, FB), A != B.
+  file_member(FA, G, A), file_member(FB, G, B), A != B.
 comp_edge_weight(G, A, B, N) :- comp_edge(G, A, B), N = count { S | crossing(G, A, B, S, T, K, L) }.
 
 efferent(G, C, N) :- comp(G, C), N = count { B | comp_edge(G, C, B) }.
 afferent(G, C, N) :- comp(G, C), N = count { A | comp_edge(G, A, C) }.
 instability(G, C, I) :- efferent(G, C, E), afferent(G, C, A), T = A + E, T > 0, I = E as float / T as float.
 
-concrete_or_abstract(G, C, T) :- symbol(id: T, kind: class, origin: project, file: F), member(G, C, F).
-concrete_or_abstract(G, C, T) :- symbol(id: T, kind: interface, origin: project, file: F), member(G, C, F).
-abstract_type(G, C, T) :- symbol(id: T, kind: interface, origin: project, file: F), member(G, C, F).
-abstract_type(G, C, T) :- symbol(id: T, kind: class, is_abstract: true, origin: project, file: F), member(G, C, F).
+concrete_or_abstract(G, C, T) :- symbol(id: T, kind: class, origin: project, file: F), file_member(F, G, C).
+concrete_or_abstract(G, C, T) :- symbol(id: T, kind: interface, origin: project, file: F), file_member(F, G, C).
+abstract_type(G, C, T) :- symbol(id: T, kind: interface, origin: project, file: F), file_member(F, G, C).
+abstract_type(G, C, T) :- symbol(id: T, kind: class, is_abstract: true, origin: project, file: F), file_member(F, G, C).
 abstractness(G, C, A) :-
   comp(G, C), N = count { T | concrete_or_abstract(G, C, T) }, N > 0,
   M = count { T | abstract_type(G, C, T) }, A = M as float / N as float.

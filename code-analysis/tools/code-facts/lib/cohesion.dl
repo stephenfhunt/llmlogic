@@ -33,16 +33,17 @@
 %                                  — H below ~1.5 suggests types that do not belong together
 
 import "units.dl".
+import "keys.dl".
 import "types.dl".
 
 is_class(C) :- symbol(id: C, kind: class, origin: project).
-method(C, M) :- is_class(C), symbol(id: M, parent: C, kind: method, is_static: false).
-method(C, M) :- is_class(C), symbol(id: M, parent: C, kind: getter, is_static: false).
-method(C, M) :- is_class(C), symbol(id: M, parent: C, kind: setter, is_static: false).
-field(C, F) :- is_class(C), symbol(id: F, parent: C, kind: property, is_static: false).
+method(C, M) :- is_class(C), child(C, M), symbol(id: M, kind: method, is_static: false).
+method(C, M) :- is_class(C), child(C, M), symbol(id: M, kind: getter, is_static: false).
+method(C, M) :- is_class(C), child(C, M), symbol(id: M, kind: setter, is_static: false).
+field(C, F) :- is_class(C), child(C, F), symbol(id: F, kind: property, is_static: false).
 
 within(M, M) :- method(_, M).
-within(F, M) :- symbol(id: F, parent: P), within(P, M).
+within(F, M) :- within(P, M), child(P, F).
 
 uses(C, M, X) :- member_access(fn: F, member: X, owner: C, via_this: true), within(F, M), method(C, M), field(C, X).
 % Any touch of a sibling method counts — reading a getter is calling it, and a
@@ -71,20 +72,22 @@ lcom_hs(C, L) :-
   S = sum { K | users_of(C, X, K) },
   Mean = S as float / NF as float, L = (Mean - NM as float) / (1.0 - NM as float).
 
-type_member(G, U, T) :- is_type(T), symbol(id: T, file: F), member(G, U, F).
-internal_type_dep(G, U, A, B) :- type_dep(A, B), type_member(G, U, A), type_member(G, U, B).
+type_member(G, U, T) :- is_type(T), symbol(id: T, file: F), file_member(F, G, U).
+type_member_of(T, G, U) :- type_member(G, U, T).
+internal_type_dep(G, U, A, B) :- type_dep(A, B), type_member_of(A, G, U), type_member(G, U, B).
 relational_cohesion(G, U, H) :-
   comp(G, U), N = count { T | type_member(G, U, T) }, N > 0,
   R = count { A | internal_type_dep(G, U, A, B) }, H = (R + 1) as float / N as float.
 
-top_level(F, D) :- symbol(id: D, parent: M, file: F), symbol(id: M, kind: module).
+top_level(F, D) :- symbol(id: M, kind: module), child(M, D), symbol(id: D, file: F).
+decl_file(D, F) :- top_level(F, D).
 within_top(D, D) :- top_level(_, D).
-within_top(S, D) :- symbol(id: S, parent: P), within_top(P, D).
+within_top(S, D) :- within_top(P, D), child(P, S).
 
 operation_kind(function). operation_kind(class). operation_kind(variable). operation_kind(enum).
 operation(F, E) :- top_level(F, E), symbol(id: E, exported: true, kind: K), operation_kind(K).
 
-module_link(A, B) :- ref(from: S, to: T), within_top(S, A), within_top(T, B), A != B, top_level(F, A), top_level(F, B).
+module_link(A, B) :- ref(from: S, to: T), within_top(S, A), within_top(T, B), A != B, decl_file(A, F), decl_file(B, F).
 module_link(A, B) :- module_link(B, A).
 module_reach(A, A) :- top_level(_, A).
 module_reach(A, C) :- module_reach(A, B), module_link(B, C).

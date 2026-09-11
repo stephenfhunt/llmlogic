@@ -1,6 +1,10 @@
-% Call-graph reachability. The closure is quadratic in the worst case: on a
-% 5k-edge graph it derived 173k pairs in ~12 s. Narrow first where you can —
-% seed `reaches` from the functions you care about rather than all of them.
+% Call-graph reachability, whole project. The closure is quadratic and the
+% constant is the call graph's own density: tsdl's 5k edges derived 173k pairs
+% in ~12 s, and VS Code's `vs/base` — 14k functions, 178k edges — takes **38 s
+% and 4.1 GB**, which is the most expensive thing in this library by both
+% measures. **Ask `orient.dl` for the call-site count first**; at tens of
+% thousands, import `callreach_seeded.dl` instead and name the functions the
+% question is about.
 %
 %   reaches(A, B)   a chain of call_edge leads from A to B
 %   recursive(F)    F can reach itself (direct or mutual recursion)
