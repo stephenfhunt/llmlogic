@@ -14,6 +14,20 @@
 %                         every field, towards 1 as they share none (float;
 %                         classes with ≥ 2 methods and ≥ 1 field)
 %
+% Per module (file) — LCOM4 asked of a file instead of a class, for code where
+% the module is the unit of design (a class-less codebase has nothing else):
+%   operation(F, E)          an exported top-level function, class, variable or
+%                            enum of F — what the module offers
+%   module_link(A, B)        top-level declarations A and B of one file, where
+%                            either mentions the other (or anything inside it)
+%   module_component(F, R, E)  operation E of F is in the group named after R,
+%                            its alphabetically first operation. Groups join
+%                            through anything in the file — a private helper,
+%                            module state, a type both use
+%   module_lcom4(F, N)       how many groups F's operations fall into: N > 1 is
+%                            N modules sharing a file (0: no operations — a barrel,
+%                            or types only)
+%
 % Per component:
 %   relational_cohesion(G, C, H)   (internal type-to-type references + 1) / types
 %                                  — H below ~1.5 suggests types that do not belong together
@@ -62,3 +76,18 @@ internal_type_dep(G, U, A, B) :- type_dep(A, B), type_member(G, U, A), type_memb
 relational_cohesion(G, U, H) :-
   comp(G, U), N = count { T | type_member(G, U, T) }, N > 0,
   R = count { A | internal_type_dep(G, U, A, B) }, H = (R + 1) as float / N as float.
+
+top_level(F, D) :- symbol(id: D, parent: M, file: F), symbol(id: M, kind: module).
+within_top(D, D) :- top_level(_, D).
+within_top(S, D) :- symbol(id: S, parent: P), within_top(P, D).
+
+operation_kind(function). operation_kind(class). operation_kind(variable). operation_kind(enum).
+operation(F, E) :- top_level(F, E), symbol(id: E, exported: true, kind: K), operation_kind(K).
+
+module_link(A, B) :- ref(from: S, to: T), within_top(S, A), within_top(T, B), A != B, top_level(F, A), top_level(F, B).
+module_link(A, B) :- module_link(B, A).
+module_reach(A, A) :- top_level(_, A).
+module_reach(A, C) :- module_reach(A, B), module_link(B, C).
+module_component(F, R, E) :- operation(F, E), R = min { X | module_reach(E, X), operation(F, X) }.
+module_group(F, R) :- module_component(F, R, _).
+module_lcom4(F, N) :- file(path: F, is_decl: false), N = count { R | module_group(F, R) }.
