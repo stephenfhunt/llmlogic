@@ -1,0 +1,33 @@
+% Value flow for taint-style questions: does data from here reach there?
+% Define the two ends in your own program, then ask:
+%
+%     import "lib/taint.dl".
+%     source(V) :- actual_ret(call_site: CS, var: V), call_site(id: CS, callee_name: "readFile").
+%     sink(V)   :- actual(call_site: CS, var: V), call_site(id: CS, callee_name: "exec").
+%     ?- tainted_sink(V).
+%
+%   step(A, B)          a value in A (or computed from it) moves into B: copies,
+%                       arithmetic and templates (`derive`), fields through the
+%                       heap, arguments into parameters, returns into results
+%   tainted(V)          V may carry data from a source
+%   tainted_sink(V)     a sink variable that does
+%
+% A call whose target is unknown (an external library, an unresolved callee)
+% is assumed to pass its arguments through to its result — conservative, so a
+% negative answer means something. Without `source`/`sink` rules the engine
+% warns they are undefined and nothing is tainted.
+
+import "pointsto.dl".
+
+step(A, B) :- assign(from: A, to: B).
+step(V, To) :- store(base: B, field: F, from: V), pts(B, O), load(to: To, base: B2, field: F), pts(B2, O).
+step(A, P) :- target(CS, F), actual(call_site: CS, index: I, var: A), formal(fn: F, index: I, var: P).
+step(FR, R) :- target(CS, F), formal_ret(fn: F, var: FR), actual_ret(call_site: CS, var: R).
+opaque(CS) :- call_site(id: CS), not has_target(CS).
+opaque(CS) :- call_site(id: CS, callee: F), symbol(id: F, origin: lib).
+opaque(CS) :- call_site(id: CS, callee: F), symbol(id: F, origin: external).
+step(A, R) :- opaque(CS), actual(call_site: CS, var: A), actual_ret(call_site: CS, var: R).
+
+tainted(V) :- source(V).
+tainted(B) :- tainted(A), step(A, B).
+tainted_sink(V) :- sink(V), tainted(V).

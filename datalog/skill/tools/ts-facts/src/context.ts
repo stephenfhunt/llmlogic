@@ -514,6 +514,17 @@ export class Context {
     return this.symbolRows.get(id);
   }
 
+  private readonly vars = new Map<string, { fn: string; kind: string }>();
+
+  /** Registers a dataflow variable; the first registration's owner and kind stand. */
+  declareVar(id: string, fn: string, kind: string): void {
+    if (!this.vars.has(id)) this.vars.set(id, { fn, kind });
+  }
+
+  flushVars(): void {
+    for (const [id, v] of this.vars) this.tables.add("var", { id, fn: v.fn, kind: v.kind });
+  }
+
   /** Emits `symbol` — last, since every layer can register external symbols. */
   flushSymbols(): void {
     for (const row of this.symbolRows.values()) this.tables.add("symbol", { ...row });

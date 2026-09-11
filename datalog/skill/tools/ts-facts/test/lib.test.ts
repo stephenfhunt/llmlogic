@@ -2,6 +2,7 @@
 // from the fixture source.
 
 import assert from "node:assert/strict";
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { test } from "node:test";
 import { datalog, engineAvailable, extract, fixture, tempDir } from "./helpers.ts";
@@ -136,4 +137,35 @@ test("metrics: DIT, NOC, WMC, RFC, fan-in and fan-out", { skip }, () => {
   // …plus Base (the super call's target) in its response set.
   assert.ok(ask(out, "metrics.dl", "rfc(C, N)").includes('rfc("src/shapes.ts#Circle", 4).'));
   assert.ok(ask(out, "metrics.dl", "fan_in(F, N)").includes('fan_in("src/use.ts#total", 1).'));
+});
+
+test("pointsto: an indirect call resolves to the callback passed in", { skip }, () => {
+  const out = outOf("refs");
+  // total(shapes, each) calls each(s); main passes an arrow — the only target.
+  assert.deepEqual(ask(out, "pointsto.dl", 'e(F) :- call_edge_pt("src/use.ts#total", F)'), ['e("src/use.ts#main.<arrow@32:14>").']);
+  assert.deepEqual(ask(out, "pointsto.dl", "unresolved_call(CS)"), []);
+  // The Circle made in main reaches Registry.add's parameter through r.add(c).
+  assert.deepEqual(
+    ask(out, "pointsto.dl", 't(T) :- pts("src/use.ts#Registry.add.s", O), alloc(site: O, type: T)'),
+    ['t("src/shapes.ts#Circle").'],
+  );
+});
+
+test("taint: a value followed from a source through calls and fields to a sink", { skip }, () => {
+  const out = outOf("refs");
+  const q = path.join(out, "taint-q.dl");
+  // Source: the radius main passes to new Circle(2)'s argument slot is not a
+  // variable, so seed from the Circle object itself: `c` in main.
+  fs.writeFileSync(
+    q,
+    [
+      'import "lib/taint.dl".',
+      'source("src/use.ts#main.c").',
+      'sink(V) :- formal(fn: "src/use.ts#Registry.add", index: 0, var: V).',
+      "",
+    ].join("\n"),
+  );
+  const r = datalog(q, ["tainted_sink(V)"]);
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(r.stdout.trim(), 'tainted_sink("src/use.ts#Registry.add.s").');
 });

@@ -1,0 +1,47 @@
+% Points-to analysis over the dataflow layer: Andersen-style (inclusion-based),
+% context-insensitive, field-based by name, with the call graph built on the
+% fly — an indirect call's targets are whatever functions its callee value can
+% point to. Sound for the modelled subset (see the dataflow layer's notes);
+% imprecise by design, so read `pts` as "may point to".
+%
+% Cost: this is the heaviest library here. It is a fixpoint over every
+% variable in the program; expect seconds on a small project and much more on
+% a large one. Query narrowly (`pts("…#x", O)`) and time it before relying on it.
+%
+%   pts(V, Site)          variable V may hold the object allocated at Site
+%   heap(Site, F, Site2)  field F of the Site object may hold the Site2 object
+%   target(CS, Fn)        call site CS may invoke function Fn — static and
+%                         virtual (CHA) targets, plus every function its callee
+%                         value points to
+%   call_edge_pt(A, Fn)   the call graph with indirect calls resolved
+%   unresolved_call(CS)   an indirect call whose callee points to nothing known
+%   alloc_fn(Site, Fn)    Site is the function (or class) value Fn
+
+import "callgraph.dl".
+import "../schema/dataflow.dl".
+
+pts(V, O) :- alloc(var: V, site: O).
+pts(To, O) :- assign(to: To, from: From, kind: copy), pts(From, O).
+heap(O, F, O2) :- store(base: B, field: F, from: V), pts(B, O), pts(V, O2).
+pts(To, O2) :- load(to: To, base: B, field: F), pts(B, O), heap(O, F, O2).
+
+% An instance of C (or of a subclass) is `this` in C's instance members.
+subclass_or_self(C, C) :- symbol(id: C, kind: class).
+subclass_or_self(S, C) :- extends(child: S, parent: P), subclass_or_self(P, C).
+pts(T, O) :- alloc(site: O, kind: instance, type: S), subclass_or_self(S, C), var(id: T, fn: C, kind: this).
+
+alloc_fn(O, F) :- alloc(site: O, kind: function, fn_target: F).
+alloc_fn(O, F) :- alloc(site: O, kind: class, fn_target: F).
+
+target(CS, F) :- call_site(id: CS, callee: F, dispatch: static).
+target(CS, F) :- call_site(id: CS, callee: F, dispatch: virtual).
+target(CS, M) :- call_site(id: CS, callee: B, dispatch: virtual), overridden_by(B, M).
+target(CS, F) :- callee_var(call_site: CS, var: V), pts(V, O), alloc_fn(O, F).
+
+pts(P, O) :- target(CS, F), actual(call_site: CS, index: I, var: A), formal(fn: F, index: I, var: P), pts(A, O).
+pts(R, O) :- target(CS, F), formal_ret(fn: F, var: FR), actual_ret(call_site: CS, var: R), pts(FR, O).
+pts(T, O) :- target(CS, F), this_var(fn: F, var: T), receiver(call_site: CS, var: R), pts(R, O).
+
+call_edge_pt(A, F) :- call_site(id: CS, caller: A), target(CS, F).
+has_target(CS) :- target(CS, _).
+unresolved_call(CS) :- call_site(id: CS, dispatch: indirect), not has_target(CS).

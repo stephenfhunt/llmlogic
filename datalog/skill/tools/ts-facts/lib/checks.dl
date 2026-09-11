@@ -75,4 +75,20 @@ violation("captures.var", V) :- captures(var: V), not known(V).
 violation("closure.fn", F) :- closure(fn: F), not fn(id: F).
 violation("call_at.call_site", S) :- extracted(refs), call_at(call_site: C), not call_site(id: C), S = C as string.
 
+% ── dataflow ─────────────────────────────────────────────────────────────
+known_var(V) :- var(id: V).
+violation("assign.to", V) :- assign(to: V), not known_var(V).
+violation("assign.from", V) :- assign(from: V), not known_var(V).
+violation("load.to", V) :- load(to: V), not known_var(V).
+violation("load.base", V) :- load(base: V), not known_var(V).
+violation("store.base", V) :- store(base: V), not known_var(V).
+violation("store.from", V) :- store(from: V), not known_var(V).
+violation("alloc.var", V) :- alloc(var: V), not known_var(V).
+violation("alloc.fn_target", F) :- alloc(fn_target: F), F is not absent, not known(F).
+violation("formal.fn", F) :- formal(fn: F), not fn(id: F).
+violation("formal_ret.fn", F) :- formal_ret(fn: F), not fn(id: F).
+violation("this_var.fn", F) :- this_var(fn: F), not fn(id: F).
+violation("actual.call_site", S) :- extracted(refs), actual(call_site: C), not call_site(id: C), S = C as string.
+violation("alloc.site is not a key", S) :- alloc(site: O, var: A), alloc(site: O, var: B), A != B, S = O as string.
+
 ?- violation(Check, Subject).
