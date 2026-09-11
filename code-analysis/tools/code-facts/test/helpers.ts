@@ -31,6 +31,27 @@ export function extract(dir: string, opts: { out?: string; layers?: Layer[]; tsc
   });
 }
 
+/** Extract a Python source root with the root pinned to it. */
+export function extractPython(dir: string, opts: { out?: string; layers?: Layer[] } = {}): Result {
+  return run({
+    tsconfigs: [],
+    python: [dir],
+    root: dir,
+    out: opts.out,
+    layers: opts.layers !== undefined ? new Set<Layer>(["meta", "structure", ...opts.layers]) : undefined,
+    time: FIXED_TIME,
+  });
+}
+
+/** Write files under `dir`: `files` maps relative paths to contents. */
+export function writeFiles(dir: string, files: Record<string, string>): void {
+  for (const [rel, text] of Object.entries(files)) {
+    const abs = path.join(dir, rel);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, text);
+  }
+}
+
 export function fixture(name: string): string {
   return path.join(FIXTURES, name);
 }
@@ -70,11 +91,7 @@ export function writeProject(dir: string, files: Record<string, string>, tsconfi
   };
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "tsconfig.json"), JSON.stringify(config, null, 2));
-  for (const [rel, text] of Object.entries(files)) {
-    const abs = path.join(dir, rel);
-    fs.mkdirSync(path.dirname(abs), { recursive: true });
-    fs.writeFileSync(abs, text);
-  }
+  writeFiles(dir, files);
 }
 
 /** Every file under `dir`, relative, sorted, with contents — for byte-identity checks. */

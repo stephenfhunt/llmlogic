@@ -17,9 +17,9 @@ its mutation.
 Added 2026-09-10 with the tool (`notes/code-facts.md`), in `datalog/testing.md` until
 the tool moved here 2026-09-11. fast-check generators in
 `test/properties/`; `../datalog/testing.md`'s four rules apply as they do to the engine. P1 and P5 are
-**independent** oracles — Node executes the generated program — and P2 and P4
-restate the language (module resolution, member lookup) rather than calling the
-checker. Run counts: `CODE_FACTS_RUNS` (P1/P3 default 200, the rest 25–40).
+**independent** oracles — Node executes the generated program — as is P4-py,
+where Python does; P2 and P4 restate the language (module resolution, member
+lookup) rather than calling the checker. Run counts: `CODE_FACTS_RUNS` (P1/P3 default 200, the rest 25–40).
 
 - [x] **P1** CFG soundness against execution: every consecutive pair of probes in
   a real trace is a path through probe-free nodes of the extracted graph; guard:
@@ -54,5 +54,24 @@ checker. Run counts: `CODE_FACTS_RUNS` (P1/P3 default 200, the rest 25–40).
   binding is used as a value), keeps the statement; guard: a plain import elided,
   one kept, one kept by `verbatimModuleSyntax`, and an `import type`.
   *Mutation:* `runtime` from syntax (`kind != type_only`) → red.
+- [x] **P2-py** Module-graph fidelity for Python, over P2's model rendered as
+  packages: `imports`, `import_name` and `call_site` equal the graph, with
+  imports spelled absolute or relative, a namespace import as `import a.b as ns`,
+  `from a import b as ns` or plain `import a.b`, a barrel via `__all__`, and
+  sometimes each `__init__` importing its own submodules; guard: each spelling
+  occurs, and a `from pkg import m` through an `__init__` that imports `m`.
+  *Mutations:* the `__init__` self-import row kept → red; no fall-through to the
+  submodule when a package's binding cycles → red; relative levels above one
+  ignored → red; plain `import a.b` binding `a.b` rather than `a` → red.
+- [x] **P4-py** Hierarchies for Python, with multiple inheritance: `extends` and
+  `overrides` equal what **`python3` reports** — `__bases__`, and the class each
+  direct base's `__mro__` finds a member on — an independent oracle; guard:
+  overrides, multiple inheritance, and a lookup where C3 and breadth-first
+  disagree (the generator is shaped for it: 54 of 200 runs). *Mutations:*
+  breadth-first MRO (the frontend's first version) → red; depth-first → red;
+  overrides against the first base only → red; no attribute through a module
+  (`mod.Base`) → red.
 - [x] `lib/checks.dl` finds no violation on every fixture, on code-facts itself,
-  and on `~/code/tsdl` when present.
+  on `~/code/tsdl` when present, and on sqlparse when the experiments harness has
+  cached it. On sqlparse the four `static_analysis` answers computed from the
+  facts also equal `truth.py`'s (checked by hand 2026-09-11, not in the suite).

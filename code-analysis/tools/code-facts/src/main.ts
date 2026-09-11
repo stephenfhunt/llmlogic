@@ -6,6 +6,8 @@
 // `run()` is the whole pipeline and is what the tests call; the CLI below only
 // parses arguments and prints the summary.
 
+import { spawnSync } from "node:child_process";
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
@@ -15,17 +17,21 @@ import { extractFlow } from "./layers/flow.ts";
 import { extractGit, gitHead } from "./layers/git.ts";
 import { extractQuality } from "./layers/quality.ts";
 import { extractRefs } from "./layers/refs.ts";
-import { extractStructure, Packages } from "./layers/structure.ts";
-import { globToRegExp, load, relTo } from "./program.ts";
+import { emitDirectories, extractStructure, Packages } from "./layers/structure.ts";
+import { findRoot, globToRegExp, load, relTo } from "./program.ts";
 import { type Layer, LAYERS, OPTIONAL_LAYERS } from "./schema.ts";
 import { Tables } from "./writer.ts";
 
 export const TOOL_VERSION = "0.1.0";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const LIB_DIR = path.join(HERE, "..", "lib");
+const PY_FRONTEND = path.join(HERE, "frontends", "python", "py_facts.py");
 
 export interface Options {
+  /** TypeScript: tsconfig files (or directories holding one). */
   tsconfigs: string[];
+  /** Python: source roots (directories, or a pyproject.toml). */
+  python?: string[] | undefined;
   out?: string | undefined;
   root?: string | undefined;
   layers?: ReadonlySet<Layer> | undefined;
@@ -57,41 +63,108 @@ export function run(opts: Options): Result {
     return v;
   };
 
-  const loaded = timed("load", () => load(opts.tsconfigs, opts.root, (opts.exclude ?? []).map(globToRegExp)));
+  const python = opts.python ?? [];
+  const exclude = (opts.exclude ?? []).map(globToRegExp);
+  // A Python root is a directory; findRoot reads each target's directory.
+  const anchors = [...opts.tsconfigs, ...python.map((p) => (fs.existsSync(p) && fs.statSync(p).isDirectory() ? path.join(p, "__target__") : p))];
+  const root = opts.root !== undefined ? path.resolve(opts.root) : findRoot(anchors);
   const tables = new Tables();
-  const packages = new Packages(loaded.root);
-  const ctx = new Context(loaded, tables, (f) => packages.nameOf(f));
+  let callSites = 1;
+  let flowNodes = 1;
 
-  timed("ids", () => ctx.prepass());
-  timed("structure", () => extractStructure(ctx, packages));
-  if (layers.has("refs")) timed("refs", () => extractRefs(ctx));
-  if (layers.has("flow")) timed("flow", () => extractFlow(ctx));
-  if (layers.has("dataflow")) timed("dataflow", () => extractDataflow(ctx));
-  if (layers.has("quality")) timed("quality", () => extractQuality(ctx));
-  if (layers.has("git")) {
-    timed("git", () => extractGit(ctx, { since: opts.gitSince, maxCommits: opts.gitMaxCommits ?? 20000 }));
+  if (opts.tsconfigs.length > 0) {
+    const loaded = timed("load", () => load(opts.tsconfigs, root, exclude));
+    const packages = new Packages(loaded.root);
+    const ctx = new Context(loaded, tables, (f) => packages.nameOf(f));
+    timed("ids", () => ctx.prepass());
+    timed("structure", () => extractStructure(ctx, packages));
+    if (layers.has("refs")) timed("refs", () => extractRefs(ctx));
+    if (layers.has("flow")) timed("flow", () => extractFlow(ctx));
+    if (layers.has("dataflow")) timed("dataflow", () => extractDataflow(ctx));
+    if (layers.has("quality")) timed("quality", () => extractQuality(ctx));
+    ctx.flushSymbols();
+    callSites = ctx.callSitesUsed;
+    flowNodes = ctx.nextFlowNode;
   }
-  ctx.flushSymbols();
+  let pythonVersion: string | null = null;
+  if (python.length > 0) {
+    pythonVersion = timed("python", () => runPython(python, root, layers, exclude, callSites, flowNodes, tables));
+  }
+  emitDirectories(tables);
+  if (layers.has("git")) {
+    timed("git", () => extractGit({ root, tables }, { since: opts.gitSince, maxCommits: opts.gitMaxCommits ?? 20000 }));
+  }
 
   const time = (opts.time ?? new Date()).toISOString().slice(0, 19);
   tables.add("extraction", {
     tool_version: TOOL_VERSION,
     typescript_version: ts.version,
+    python_version: pythonVersion,
     node_version: process.versions.node,
-    root: loaded.root,
-    tsconfigs: opts.tsconfigs.map((c) => relTo(loaded.root, path.resolve(c))).join(","),
+    root,
+    targets: [...opts.tsconfigs, ...python].map((c) => relTo(root, path.resolve(c))).join(","),
     layers: LAYERS.filter((l) => layers.has(l)).join(","),
     time,
-    git_head: gitHead(loaded.root),
+    git_head: gitHead(root),
   });
   tables.dedupe();
   if (opts.out !== undefined) timed("write", () => tables.write(opts.out as string, layers, LIB_DIR));
-  return { tables, root: loaded.root, layers, timings };
+  return { tables, root, layers, timings };
+}
+
+/**
+ * The Python frontend, `frontends/python/py_facts.py`: it streams rows as JSON
+ * lines, and each one is validated here against schema.ts like any other. Its
+ * call-site and flow-node ids continue from the TypeScript side's.
+ */
+function runPython(
+  targets: string[],
+  root: string,
+  layers: ReadonlySet<Layer>,
+  exclude: RegExp[],
+  firstCallSite: number,
+  firstFlowNode: number,
+  tables: Tables,
+): string {
+  const args = [
+    PY_FRONTEND,
+    "--root",
+    root,
+    "--layers",
+    [...layers].join(","),
+    "--first-call-site",
+    String(firstCallSite),
+    "--first-flow-node",
+    String(firstFlowNode),
+    ...exclude.flatMap((re) => ["--exclude", re.source]),
+    ...targets.map((t) => path.resolve(t)),
+  ];
+  const python = process.env.CODE_FACTS_PYTHON ?? "python3";
+  const r = spawnSync(python, args, { encoding: "utf8", maxBuffer: 1 << 30 });
+  if (r.error !== undefined) throw new Error(`code-facts: cannot run ${python} for the Python frontend: ${r.error.message}`);
+  if (r.status !== 0) throw new Error(`code-facts: the Python frontend failed (exit ${r.status}):\n${r.stderr}`);
+  for (const line of r.stdout.split("\n")) {
+    if (line === "") continue;
+    const { relation, row } = JSON.parse(line) as { relation: string; row: Record<string, string | number | boolean | null> };
+    if (relation === "__counters__") continue;
+    tables.add(relation, row);
+  }
+  const v = spawnSync(python, ["-c", "import sys; print('.'.join(map(str, sys.version_info[:3])))"], { encoding: "utf8" });
+  return v.stdout.trim();
+}
+
+/** A pyproject.toml, or a directory with no tsconfig.json in it. */
+function isPythonTarget(a: string): boolean {
+  if (path.basename(a) === "pyproject.toml") return true;
+  return fs.existsSync(a) && fs.statSync(a).isDirectory() && !fs.existsSync(path.join(a, "tsconfig.json"));
 }
 
 function usage(): string {
   return [
-    "usage: code-facts <tsconfig.json | dir>... [options]",
+    "usage: code-facts <tsconfig.json | python-root | pyproject.toml>... [options]",
+    "",
+    "  A tsconfig (or a directory holding one) is read as TypeScript; any other",
+    "  directory, or a pyproject.toml, as a Python source root. Both may be given.",
     "",
     "  -o, --out DIR          output directory (default ./code-facts-out)",
     "  --root DIR             root every path is relative to (default: the git top-level)",
@@ -107,6 +180,7 @@ function usage(): string {
 
 function parseArgs(argv: string[]): Options {
   const tsconfigs: string[] = [];
+  const python: string[] = [];
   const exclude: string[] = [];
   let out = "code-facts-out";
   let root: string | undefined;
@@ -141,10 +215,11 @@ function parseArgs(argv: string[]): Options {
       }
       layers = new Set<Layer>(["meta", "structure", ...(wanted.filter((w) => w !== "structure") as Layer[])]);
     } else if (a.startsWith("-")) throw new Error(`code-facts: unknown option ${a}\n\n${usage()}`);
+    else if (isPythonTarget(a)) python.push(a);
     else tsconfigs.push(a);
   }
-  if (tsconfigs.length === 0) throw new Error(`code-facts: give at least one tsconfig\n\n${usage()}`);
-  return { tsconfigs, out, root, layers, exclude, gitSince, gitMaxCommits };
+  if (tsconfigs.length + python.length === 0) throw new Error(`code-facts: give a tsconfig or a Python root\n\n${usage()}`);
+  return { tsconfigs, python, out, root, layers, exclude, gitSince, gitMaxCommits };
 }
 
 function main(): void {

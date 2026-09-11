@@ -70,6 +70,7 @@ export const SYMBOL_KINDS = [
   "object",
   "type_literal",
   "static_block",
+  "unknown",
 ] as const;
 export type SymbolKind = (typeof SYMBOL_KINDS)[number];
 
@@ -82,6 +83,7 @@ export const FN_KINDS = [
   "arrow",
   "function_expression",
   "static_block",
+  "lambda",
   "module",
 ] as const;
 export type FnKind = (typeof FN_KINDS)[number];
@@ -151,10 +153,11 @@ export const RELATIONS: readonly Relation[] = [
     doc: "One row describing the run that produced these facts.",
     columns: [
       col("tool_version", "string", "code-facts version"),
-      col("typescript_version", "string", "the TypeScript compiler that read the project"),
+      col("typescript_version", "string", "the TypeScript compiler code-facts carries"),
+      opt("python_version", "string", "the Python that read the Python sources, if any were read"),
       col("node_version", "string", "the Node.js that ran the extractor"),
       col("root", "string", "absolute path every `file` column is relative to"),
-      col("tsconfigs", "string", "the tsconfig files given, comma-separated, repo-relative"),
+      col("targets", "string", "what was extracted — tsconfigs and Python roots — comma-separated, repo-relative"),
       col("layers", "string", "the layers extracted, comma-separated"),
       col("time", "timestamp", "when the extraction ran (UTC)"),
       opt("git_head", "string", "HEAD commit of the repository, if it is one"),
@@ -199,7 +202,7 @@ export const RELATIONS: readonly Relation[] = [
       col("path", "string", FILE),
       col("dir", "string", "its directory (`.` for the root)"),
       opt("package", "string", "name in the nearest enclosing package.json"),
-      oneOf("lang", ["ts", "tsx", "mts", "cts", "dts", "js", "jsx", "mjs", "cjs"], "file flavour"),
+      oneOf("lang", ["ts", "tsx", "mts", "cts", "dts", "js", "jsx", "mjs", "cjs", "py", "pyi"], "file flavour"),
       col("loc", "int", "lines"),
       col("sloc", "int", "lines carrying at least one token (not blank, not only comments)"),
       col("is_test", "bool", "a test file (`*.test.*`, `*.spec.*`, `__tests__/`, `test(s)/`, or only in a test tsconfig)"),
@@ -760,7 +763,7 @@ export const RELATIONS: readonly Relation[] = [
     columns: [
       col("file", "string", FILE),
       col("line", "int", LINE),
-      oneOf("tool", ["eslint", "biome", "prettier", "tslint", "istanbul", "c8"], "which tool"),
+      oneOf("tool", ["eslint", "biome", "prettier", "tslint", "istanbul", "c8", "noqa", "pylint", "mypy", "pyright", "coverage"], "which tool"),
       col("directive", "string", "e.g. `disable-next-line`, `ignore`"),
       opt("rules", "string", "the rules named, as written"),
     ],

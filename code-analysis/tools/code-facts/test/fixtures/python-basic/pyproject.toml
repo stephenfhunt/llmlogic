@@ -1,0 +1,7 @@
+[project]
+name = "shapes-demo"
+version = "0.1.0"
+dependencies = ["requests>=2", "PyYAML"]
+
+[dependency-groups]
+dev = ["pytest"]

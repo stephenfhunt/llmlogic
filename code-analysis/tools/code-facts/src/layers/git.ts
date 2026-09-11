@@ -5,8 +5,9 @@
 
 import { execFileSync } from "node:child_process";
 import * as path from "node:path";
-import { truncate, type Context } from "../context.ts";
+import { truncate } from "../context.ts";
 import { relTo } from "../program.ts";
+import type { Tables } from "../writer.ts";
 
 const MAX_BUFFER = 1 << 30;
 
@@ -58,7 +59,7 @@ export interface GitOptions {
   maxCommits: number;
 }
 
-export function extractGit(ctx: Context, opts: GitOptions): void {
+export function extractGit(ctx: { root: string; tables: Tables }, opts: GitOptions): void {
   const top = git(ctx.root, ["rev-parse", "--show-toplevel"])?.trim();
   if (top === undefined || top === "") return;
   const toRoot = (p: string) => relTo(ctx.root, path.join(top, p));

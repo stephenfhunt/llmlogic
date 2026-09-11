@@ -267,6 +267,11 @@ export class Context {
     }
   }
 
+  /** The next call-site id — where a second frontend's ids start. */
+  get callSitesUsed(): number {
+    return this.nextCallSite;
+  }
+
   callSiteId(node: ts.Node): number {
     const key = declKey(node);
     let id = this.callSites.get(key);

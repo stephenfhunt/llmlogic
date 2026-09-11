@@ -8,6 +8,7 @@ import * as path from "node:path";
 import ts from "typescript";
 import { type Context, isFunctionLike, lineOf, nameText, packageFromPath, packageOfSpecifier, truncate } from "../context.ts";
 import { isTestConfig, relTo, type SourceInfo } from "../program.ts";
+import type { Tables } from "../writer.ts";
 
 const TEST_PATH = /(^|\/)(__tests__|__mocks__|tests?|spec|e2e)\/|\.(test|spec|e2e)\.[cm]?[jt]sx?$/;
 const GENERATED = /@generated|auto-?generated|do not edit/i;
@@ -111,7 +112,6 @@ export function extractStructure(ctx: Context, packages: Packages): void {
     }
   }
 
-  const dirs = new Set<string>();
   for (const info of ctx.loaded.sources) {
     const p = info.path;
     const dir = parentDir(p);
@@ -128,14 +128,6 @@ export function extractStructure(ctx: Context, packages: Packages): void {
       is_decl: info.sf.isDeclarationFile,
       is_generated: GENERATED.test(head),
     });
-    for (let d = dir; ; d = parentDir(d)) {
-      dirs.add(d);
-      t.add("file_ancestor", { file: p, dir: d, depth: depthOf(d) });
-      if (d === ".") break;
-    }
-  }
-  for (const d of [...dirs].sort()) {
-    t.add("dir", { path: d, parent: d === "." ? null : parentDir(d), name: d === "." ? "." : path.posix.basename(d), depth: depthOf(d) });
   }
 
   for (const p of packages.all()) {
@@ -172,6 +164,22 @@ function typesFor(dep: string): string | null {
   if (!dep.startsWith("@types/")) return null;
   const typed = dep.slice("@types/".length);
   return typed.includes("__") ? `@${typed.replace("__", "/")}` : typed;
+}
+
+/** `dir` and `file_ancestor`, from every `file` row whichever frontend wrote it. */
+export function emitDirectories(t: Tables): void {
+  const dirs = new Set<string>();
+  for (const f of t.rows("file")) {
+    const p = f.path as string;
+    for (let d = parentDir(p); ; d = parentDir(d)) {
+      dirs.add(d);
+      t.add("file_ancestor", { file: p, dir: d, depth: depthOf(d) });
+      if (d === ".") break;
+    }
+  }
+  for (const d of [...dirs].sort()) {
+    t.add("dir", { path: d, parent: d === "." ? null : parentDir(d), name: d === "." ? "." : path.posix.basename(d), depth: depthOf(d) });
+  }
 }
 
 function depthOf(dir: string): number {
