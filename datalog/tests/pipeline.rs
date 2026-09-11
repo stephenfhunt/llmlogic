@@ -361,6 +361,26 @@ fn a_variable_type_clash_names_types_without_borrowing_a_literal() {
     );
 }
 
+/// A variable-form clash names the two slots being unified — here rule 1's head
+/// variable `I` and the column it is bound to — and never a slot their classes
+/// merely share. `bugs/resolved/011`: it named rule 0's wildcard, which sits in
+/// neither the rule at fault nor its head.
+#[test]
+fn a_variable_type_clash_names_the_slots_that_clash() {
+    let program = "cs(1, \"x\", \"y\").\n\
+                   v(\"b\", C) :- cs(_, C, _).\n\
+                   v(\"c\", I) :- cs(I, _, C), C = \"y\".\n\
+                   ?- v(K, S).\n";
+    let errors = datalog::run(program).expect_err("column 1 of v is string and int");
+    let rendered = errors
+        .iter()
+        .find(|e| e.code == ErrorCode::TypeClash)
+        .expect("a type clash")
+        .to_string();
+    assert!(rendered.contains("variable `I` in rule 1"), "{rendered}");
+    assert!(!rendered.contains("`_`"), "named a wildcard: {rendered}");
+}
+
 /// `bugs/009` — a column-level type clash must name **both** occurrences.
 ///
 /// The variable form already does (`variable Q ... but variable W ...`); the
@@ -398,9 +418,10 @@ fn a_column_type_clash_names_both_occurrences() {
 ///
 /// Filed with the bug rather than after it, per `bugs/README.md` — `001` was
 /// still reachable by a second spelling because its property was named and never
-/// written. The variable form satisfies this today only because `union` happens
-/// to hold two labelled slots, and nothing pins that; the column form fails, and
-/// the two-fact case below carries no span at all.
+/// written. The variable form satisfies this today because `union` holds two
+/// labelled slots, and `a_variable_type_clash_names_the_slots_that_clash` pins
+/// that it names those two; the column form fails, and the two-fact case below
+/// carries no span at all.
 #[test]
 #[ignore = "bugs/009: the column form locates at most one side"]
 fn every_type_clash_locates_both_sides() {

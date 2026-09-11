@@ -381,11 +381,15 @@ impl<'a> TypeChecker<'a> {
                 // apt in `set_type_from`, where the incoming side **is** the
                 // term being typed; provenance for an inherited type is the
                 // secondary-span question (`bugs/009`), not this one.
+                // The two slots being unified, not their classes' roots: a root
+                // is whichever slot the class happened to grow from — a
+                // wildcard in another rule, as often as not — and names neither
+                // participant (`bugs/resolved/011`).
                 let message = format!(
                     "{} has type {} but {} has type {}",
-                    self.label[ra],
+                    self.label[a],
                     type_label(x.ty),
-                    self.label[rb],
+                    self.label[b],
                     type_label(y.ty),
                 );
                 self.raise(ErrorCode::TypeClash, message);
