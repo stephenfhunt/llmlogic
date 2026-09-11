@@ -24,7 +24,8 @@ type Op =
   | { t: "fnval"; dst: number; fn: number }
   | { t: "callvar"; dst: number; via: number; a: number; b: number }
   | { t: "probe"; v: number }
-  | { t: "roundtrip"; base: number; src: number; dst: number; field: number };
+  | { t: "roundtrip"; base: number; src: number; dst: number; field: number }
+  | { t: "heap"; base: number; src: number; field: number };
 
 // Operands index v0..v4 then the parameters p0, p1.
 const operand = fc.nat(VARS + 1);
@@ -39,12 +40,21 @@ const arbOp: fc.Arbitrary<Op> = fc.oneof(
   fc.record({ t: fc.constant("probe" as const), v: operand }),
   fc.record({ t: fc.constant("roundtrip" as const), base: operand, src: operand, dst: fc.nat(VARS - 1), field: fc.nat(1) }),
 );
-const arbProgram = fc.array(fc.record({ ops: fc.array(arbOp, { minLength: 2, maxLength: 12 }), ret: operand }), {
-  minLength: 1,
-  maxLength: 4,
-});
+// `heap`: one round trip through a field into `h`, a variable nothing else
+// writes, at a random point — so whatever `h` holds came through the heap. Left
+// to chance (a variable the random ops happen to write only by loads), that case
+// occurred in 32 of 400 runs and the guard on it missed about one suite in 30.
+const arbProgram = fc.array(
+  fc.record({
+    ops: fc.array(arbOp, { minLength: 2, maxLength: 12 }),
+    ret: operand,
+    // the base is v0 or v1, the two objects every function starts with (unless an op has overwritten it by then)
+    heap: fc.record({ at: fc.nat(12), base: fc.nat(1), src: operand, field: fc.nat(1) }),
+  }),
+  { minLength: 1, maxLength: 4 },
+);
 
-const name = (i: number) => (i < VARS ? `v${i}` : `p${i - VARS}`);
+const name = (i: number) => (i < 0 ? "h" : i < VARS ? `v${i}` : `p${i - VARS}`);
 
 /** Variables of each function assigned only by field loads: whatever they hold came through the heap. */
 function heapOnly(ops: Op[]): Set<string> {
@@ -57,7 +67,7 @@ function heapOnly(ops: Op[]): Set<string> {
   return out;
 }
 
-function render(program: { ops: Op[]; ret: number }[], typed: boolean): { text: string; probes: number; viaHeap: Set<number> } {
+function render(program: { ops: Op[]; ret: number; heap: { at: number; base: number; src: number; field: number } }[], typed: boolean): { text: string; probes: number; viaHeap: Set<number> } {
   let label = 0;
   let probe = 0;
   const viaHeap = new Set<number>();
@@ -66,11 +76,22 @@ function render(program: { ops: Op[]; ret: number }[], typed: boolean): { text: 
   program.forEach((f, i) => {
     const earlier = (j: number) => (i === 0 ? undefined : j % i);
     lines.push(`${typed ? "export " : ""}function f${i}(p0${any}, p1${any})${any} {`);
-    lines.push(`  let ${[...Array(VARS).keys()].map((k) => `v${k}${any} = null`).join(", ")};`);
+    lines.push(`  let ${[...Array(VARS).keys()].map((k) => `v${k}${any} = null`).join(", ")}, h${any} = null;`);
     // Two objects to start from, and every variable probed on the way out, so
     // that most runs observe something.
-    const ops: Op[] = [{ t: "alloc", dst: 0 }, { t: "alloc", dst: 1 }, ...f.ops, ...[...Array(VARS + 2).keys()].map((v) => ({ t: "probe" as const, v }))];
+    const at = f.heap.at % (f.ops.length + 1);
+    const heap: Op = { t: "heap", base: f.heap.base, src: f.heap.src, field: f.heap.field };
+    const ops: Op[] = [
+      { t: "alloc", dst: 0 },
+      { t: "alloc", dst: 1 },
+      ...f.ops.slice(0, at),
+      heap,
+      ...f.ops.slice(at),
+      ...[...Array(VARS + 2).keys()].map((v) => ({ t: "probe" as const, v })),
+      { t: "probe" as const, v: -1 },
+    ];
     const loadedOnly = heapOnly(f.ops);
+    loadedOnly.add("h");
     for (const op of ops) {
       switch (op.t) {
         case "alloc":
@@ -102,6 +123,12 @@ function render(program: { ops: Op[]; ret: number }[], typed: boolean): { text: 
           lines.push(`  probe(${++probe}, ${name(op.v)});`);
           if (loadedOnly.has(name(op.v))) viaHeap.add(probe);
           break;
+        case "heap": {
+          const b = name(op.base);
+          lines.push(`  if (${b} !== null && typeof ${b} === "object") ${b}.f${op.field} = ${name(op.src)};`);
+          lines.push(`  h = ${b} !== null && typeof ${b} === "object" ? ${b}.f${op.field} : null;`);
+          break;
+        }
         case "roundtrip": {
           const b = name(op.base);
           lines.push(`  if (${b} !== null && typeof ${b} === "object") ${b}.f${op.field} = ${name(op.src)};`);
