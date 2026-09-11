@@ -140,7 +140,8 @@ function runPython(
     ...targets.map((t) => path.resolve(t)),
   ];
   const python = process.env.CODE_FACTS_PYTHON ?? "python3";
-  const r = spawnSync(python, args, { encoding: "utf8", maxBuffer: 1 << 30 });
+  // No __pycache__ written beside the frontend: it may live in an installed skill.
+  const r = spawnSync(python, args, { encoding: "utf8", maxBuffer: 1 << 30, env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" } });
   if (r.error !== undefined) throw new Error(`code-facts: cannot run ${python} for the Python frontend: ${r.error.message}`);
   if (r.status !== 0) throw new Error(`code-facts: the Python frontend failed (exit ${r.status}):\n${r.stderr}`);
   for (const line of r.stdout.split("\n")) {

@@ -172,11 +172,36 @@ left are callbacks a library invokes (a Promise's `resolve`, fast-check's `tie`)
 
 ts-facts itself (6.5k lines): 87.6k facts in 2.4 s.
 
+## The Python frontend
+
+`src/frontends/python/` — `py_facts.py` (structure, refs) and `py_flow.py` (flow,
+quality), standard library only. Node spawns it and validates every streamed row
+against `schema.ts`, so there is still one schema, one writer, one git layer and
+one `lib/`; the rejected alternative, a Python writer, was a second schema home.
+There is no type checker behind it: names resolve by LEGB and through imports,
+attributes only on receivers whose type is known (module, class, `self`,
+`super()`, an annotation, a constructor call), member lookup by C3. What a user
+needs to know is `../skill/reference/python.md`.
+
+What the tests found (`../testing.md`): P4-py, whose oracle is `python3`'s own
+`__mro__`, caught a breadth-first MRO; P1-py caught a `match` guard sharing its
+pattern's node, so a failed pattern "evaluated" the guard. Real code found the
+rest: sqlparse's `__init__` importing its own submodules sent `from pkg import
+sub` round a cycle to nothing (1,165 unresolved names), a local rebound from
+itself (`x = x.next()`) recursed without end, and the experiments harness had a
+lambda in a decorator's arguments that was never declared.
+
+Calibration: sqlparse (5.6k lines) extracts in 0.7 s; the facts answer the
+experiments' four `static_analysis` questions exactly as `truth.py` does.
+`experiments/` (21.6k lines, 103 files): 4.3 s to 93k facts; `checks.dl` 4.0 s,
+clean; with nested definitions set aside, 1116 of 1117 functions' branch counts
+equal ruff's mccabe.
+
 ## Open
 
-- One full `npm test` run showed a failure that 25 further runs and 30 runs of
-  each property file did not reproduce. Unexplained; the next one should be
-  captured with the default reporter rather than `dot`.
+- The intermittent `npm test` failure once listed here was P5's heap guard
+  missing about one suite in 30 (fixed 2026-09-11, `../testing.md` P5), found
+  by running the suite 20 times with the spec reporter. P2-py had a second.
 - TypeScript 7's API, when it stabilizes: a second backend, behind P1–P8.
 - Accessors, spread and instance method values in the dataflow layer — each a
   known under-approximation of `pts`, listed above.

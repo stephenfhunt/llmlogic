@@ -2,12 +2,12 @@
 name: code-analysis
 description: >-
   Analyze a codebase's design with a logic engine instead of reading it file by
-  file. Extracts facts from TypeScript source and git history, then answers what
-  depends on what, where the cycles and layering violations are, how modules are
-  coupled and how cohesive they are, what is dead or untested, what changes
-  together, and whether package manifests match the code. Use for architecture
-  reviews, refactoring and impact questions, and code-health audits over a whole
-  repository.
+  file. Extracts facts from TypeScript or Python source and git history, then
+  answers what depends on what, where the cycles and layering violations are,
+  how modules are coupled and how cohesive they are, what is dead or untested,
+  what changes together, and whether package manifests match the code. Use for
+  architecture reviews, refactoring and impact questions, and code-health audits
+  over a whole repository.
 ---
 
 # code-analysis — a codebase's design, asked of a logic engine
@@ -25,12 +25,17 @@ Two executables sit in this skill's directory: `code-facts` (the extractor) and
 
 ## The method
 
-1. **Extract.** Give every tsconfig the project uses — tests often have their own:
+1. **Extract.** For TypeScript, give every tsconfig the project uses — tests
+   often have their own; for Python, the project's directory (or its
+   `pyproject.toml`); for a mixed repository, both:
    ```sh
    <skill>/code-facts tsconfig.json tsconfig.test.json -o /tmp/facts
+   <skill>/code-facts path/to/python-project -o /tmp/facts
    ```
-   Git history comes along when the project is a repository. A 24k-line project
-   takes about 6 s. For a language code-facts does not read, see
+   Git history comes along when the project is a repository. A 20k-line project
+   takes about 5 s. Then read `reference/typescript.md` or `reference/python.md`
+   — what the facts can and cannot say differs by language, and most sharply
+   for Python, which has no type checker behind it. For another language, see
    `reference/bring-your-own.md`.
 2. **Check the facts.** `<skill>/datalog /tmp/facts/lib/checks.dl` exits **1**
    when the facts are consistent. Exit 0 prints violations — stop and read them
@@ -43,8 +48,8 @@ Two executables sit in this skill's directory: `code-facts` (the extractor) and
    the facts — `import "lib/<library>.dl".` then rules — and ask it with `-q`.
 5. **Verify.** Open the source for every finding you intend to report. The
    engine is exact about the facts; whether the facts say what you think is the
-   open question, and every trap in `reference/typescript.md` §5 was found by
-   opening a file.
+   open question, and every trap in the language references' trap lists was
+   found by opening a file.
 6. **Report** each finding with its evidence (below).
 
 ## What to explore
@@ -132,6 +137,8 @@ toolkit makes easy.
 
 - `reference/typescript.md` — the facts: layers and relations, ids, the library
   with measured costs, the questions worth asking, and ten traps.
+- `reference/python.md` — what differs for Python: what resolves without a type
+  checker, what the library can and cannot compute, and seven traps.
 - `reference/datalog.md` — the Datalog language: syntax, negation, aggregation,
   imports, `?why` / `?whynot`, exit codes.
 - `reference/bring-your-own.md` — extracting facts for another language yourself.

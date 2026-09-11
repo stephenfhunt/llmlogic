@@ -6,11 +6,11 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
 
 - **The project and the move** — `code-facts` (was `ts-facts`) and its library
   out of the datalog skill. _shipped_ — `decisions.md` 2026-09-11.
-- **The playbook** (`skill/SKILL.md`) and `skill/reference/`. _shipped_; Python
-  still to be added to both.
+- **The playbook** (`skill/SKILL.md`) and `skill/reference/`, TypeScript and
+  Python. _shipped._
 - **`package.sh`** — the standalone bundle. _shipped._
-- **Python frontend** — structure and refs _shipped_ (P2-py, P4-py; sqlparse
-  matches `static_analysis`'s `truth.py`); flow and quality _building_.
+- **Python frontend** — all layers but dataflow. _shipped_ — P1-py–P4-py,
+  `notes/code-facts.md` § The Python frontend.
 - **H-CA1** — does the domain skill beat the general one? Pre-registration, then
   an experiments pack. _queued_ — `../experiments/hypotheses.md`.
 - **Python dataflow layer** (points-to and taint for Python). _parked_ until the
