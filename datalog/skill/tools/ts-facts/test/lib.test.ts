@@ -104,3 +104,36 @@ test("cohesion: LCOM4, TCC, LCOM-HS and relational cohesion", { skip }, () => {
   // shapes.ts: 4 types, 3 internal type references → (3 + 1) / 4.
   assert.ok(ask(out, "cohesion.dl", "relational_cohesion(-1, U, H)").includes('relational_cohesion(-1, "src/shapes.ts", 1.0).'));
 });
+
+test("flow: dead code, dead stores, def-use chains, loops", { skip }, () => {
+  const out = outOf("flow");
+  assert.deepEqual(ask(out, "flow.dl", "u(F, L) :- unreachable(F, N, L)"), ['u("src/flow.ts#dead", 74).']);
+  // branches: `let x = 0` is overwritten on every path; stores: `a = 1` likewise;
+  // guarded: the catch binding is never read.
+  assert.deepEqual(ask(out, "flow.dl", "d(V, L) :- dead_store(D, V, L)"), [
+    'd("src/flow.ts#branches.x", 2).',
+    'd("src/flow.ts#guarded.e", 46).',
+    'd("src/flow.ts#stores.a", 78).',
+  ]);
+  assert.deepEqual(ask(out, "flow.dl", "undefined_use(N, V)"), []);
+  // `return b` in stores is reached by both branch assignments.
+  assert.deepEqual(ask(out, "flow.dl", 'r(L) :- def_use(D, N, "src/flow.ts#stores.b"), flow_node(id: D, line: L)'), ["r(81).", "r(82)."]);
+  assert.deepEqual(ask(out, "dominators.dl", 'h(L) :- loop_header("src/flow.ts#loops", H), flow_node(id: H, line: L)'), [
+    "h(15).",
+    "h(19).",
+    "h(23).",
+    "h(24).",
+  ]);
+});
+
+test("metrics: DIT, NOC, WMC, RFC, fan-in and fan-out", { skip }, () => {
+  const out = outOf("refs");
+  assert.ok(ask(out, "metrics.dl", "dit(C, N)").includes('dit("src/shapes.ts#Circle", 1).'));
+  assert.ok(ask(out, "metrics.dl", "dit(C, N)").includes('dit("src/shapes.ts#Base", 0).'));
+  assert.ok(ask(out, "metrics.dl", "noc(C, N)").includes('noc("src/shapes.ts#Base", 1).'));
+  // Circle: constructor, area and grow, each cyclomatic 1.
+  assert.ok(ask(out, "metrics.dl", "wmc(C, W)").includes('wmc("src/shapes.ts#Circle", 3).'));
+  // …plus Base (the super call's target) in its response set.
+  assert.ok(ask(out, "metrics.dl", "rfc(C, N)").includes('rfc("src/shapes.ts#Circle", 4).'));
+  assert.ok(ask(out, "metrics.dl", "fan_in(F, N)").includes('fan_in("src/use.ts#total", 1).'));
+});

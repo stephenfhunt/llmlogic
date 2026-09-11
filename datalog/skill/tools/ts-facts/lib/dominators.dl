@@ -1,0 +1,27 @@
+% Dominators and natural loops. Quadratic in a function's size: every node
+% floods its function once. Fine for ordinary functions; a file's `<module>`
+% graph with thousands of top-level statements is where it gets slow —
+% restrict `candidate` to the functions you care about for those.
+%
+%   dominates(A, B)     every path from the entry to B passes through A
+%                       (reflexive: a node dominates itself)
+%   idom-free helpers:
+%   back_edge(N, H)     an edge N → H where H dominates N: H heads a natural loop
+%   loop_header(F, H)   H heads a loop in F
+
+import "../schema/flow.dl".
+
+candidate(F, N) :- flow_node(id: N, fn: F).
+entry_of(F, E) :- flow_node(id: E, fn: F, kind: entry).
+
+% avoid(A, M): M is reachable from the entry without passing through A.
+avoid(A, E) :- candidate(F, A), entry_of(F, E), A != E.
+avoid(A, M) :- avoid(A, N), flow_edge(from: N, to: M), M != A.
+
+on_path(N) :- flow_node(id: N, kind: entry).
+on_path(M) :- on_path(N), flow_edge(from: N, to: M).
+
+dominates(A, B) :- candidate(F, A), candidate(F, B), on_path(B), not avoid(A, B).
+
+back_edge(N, H) :- flow_edge(from: N, to: H), dominates(H, N).
+loop_header(F, H) :- back_edge(_, H), flow_node(id: H, fn: F).

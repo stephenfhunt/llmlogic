@@ -1,0 +1,54 @@
+% Intraprocedural analyses over the control-flow graph (one graph per `fn`).
+%
+%   succ(A, B)              an edge A → B, whatever its kind
+%   reachable(N)            some path from its function's entry reaches N
+%   unreachable(F, N, Line) a statement-level node of F that no path reaches:
+%                           dead code
+%   reaches_def(N, V, D)    the definition of V at node D reaches node N
+%                           (classic reaching definitions)
+%   def_use(D, N, V)        ...and N reads V: a def-use chain
+%   undefined_use(N, V)     N reads its own function's local V and no definition
+%                           of it reaches N (declared without a value, or read
+%                           before assignment; a captured variable is not its own)
+%   live_out(N, V)          V's value leaving N is read on some later path
+%   dead_store(D, V, Line)  a local's definition that nothing ever reads
+%                           (captured variables excluded — a closure may read it)
+%
+% Exceptions are over-approximated (see the flow layer's notes), so a path
+% through a `throw` edge is a path; `reachable` is therefore sound for dead code
+% — a node it calls unreachable really is — and conservative for everything else.
+% Variables are symbol ids: a module-level variable written in one function and
+% read in another is not a def-use chain here; lib/pointsto.dl follows values
+% between functions.
+
+import "../schema/structure.dl".
+import "../schema/flow.dl".
+
+succ(A, B) :- flow_edge(from: A, to: B).
+
+reachable(N) :- flow_node(id: N, kind: entry).
+reachable(B) :- reachable(A), succ(A, B).
+
+statement_kind(stmt). statement_kind(cond). statement_kind(loop_head). statement_kind(switch).
+statement_kind(case_test). statement_kind(return). statement_kind(throw). statement_kind(break).
+statement_kind(continue).
+unreachable(F, N, L) :- flow_node(id: N, fn: F, kind: K, line: L), statement_kind(K), not reachable(N).
+
+kills(N, V) :- def(node: N, var: V).
+rd_out(D, D, V) :- def(node: D, var: V).
+rd_in(N, D, V) :- rd_out(P, D, V), succ(P, N).
+rd_out(N, D, V) :- rd_in(N, D, V), not kills(N, V).
+reaches_def(N, V, D) :- rd_in(N, D, V).
+def_use(D, N, V) :- rd_in(N, D, V), use(node: N, var: V).
+
+local_var(V) :- symbol(id: V, kind: local).
+own_local(N, V) :- use(node: N, var: V), flow_node(id: N, fn: F), symbol(id: V, kind: local, parent: F).
+some_def_reaches(N, V) :- rd_in(N, _, V).
+undefined_use(N, V) :- own_local(N, V), reachable(N), not some_def_reaches(N, V).
+
+live_in(N, V) :- use(node: N, var: V).
+live_in(N, V) :- live_out(N, V), not kills(N, V).
+live_out(N, V) :- succ(N, M), live_in(M, V).
+
+captured(V) :- captures(var: V).
+dead_store(D, V, L) :- def(node: D, var: V), local_var(V), not captured(V), not live_out(D, V), flow_node(id: D, line: L).

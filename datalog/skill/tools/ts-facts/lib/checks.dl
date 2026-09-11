@@ -59,4 +59,20 @@ violation("symbol_type.symbol", S) :- symbol_type(symbol: S), not known(S).
 violation("a ref to a local escaped into ref", T) :- ref(to: T), symbol(id: T, kind: local).
 violation("a ref to a local escaped into ref", T) :- ref(to: T), symbol(id: T, kind: parameter).
 
+% ── flow ─────────────────────────────────────────────────────────────────
+extracted(L) :- relation_rows(layer: L).
+violation("fn.id", F) :- fn(id: F), not known(F).
+violation("flow_node.fn", F) :- flow_node(fn: F), not fn(id: F).
+violation("flow_edge.from", S) :- flow_edge(from: A), not flow_node(id: A), S = A as string.
+violation("flow_edge.to", S) :- flow_edge(to: B), not flow_node(id: B), S = B as string.
+violation("edge between two functions", S) :-
+  flow_edge(from: A, to: B), flow_node(id: A, fn: F), flow_node(id: B, fn: G), F != G, S = A as string.
+violation("fn without exactly one entry", F) :- fn(id: F), N = count { E | flow_node(id: E, fn: F, kind: entry) }, N != 1.
+violation("an exit with a successor", S) :- flow_edge(from: A), flow_node(id: A, kind: exit), S = A as string.
+violation("def.var", V) :- def(var: V), not known(V).
+violation("use.var", V) :- use(var: V), not known(V).
+violation("captures.var", V) :- captures(var: V), not known(V).
+violation("closure.fn", F) :- closure(fn: F), not fn(id: F).
+violation("call_at.call_site", S) :- extracted(refs), call_at(call_site: C), not call_site(id: C), S = C as string.
+
 ?- violation(Check, Subject).

@@ -1,0 +1,32 @@
+% Classic per-function and per-class metrics. Needs the flow layer (for `fn`).
+%
+%   dit(C, N)        depth of inheritance: C's ancestor classes along extends
+%   noc(C, N)        number of children: classes directly extending C
+%   wmc(C, W)        weighted methods per class: the sum of its methods'
+%                    cyclomatic complexity (absent for a class with no bodies)
+%   rfc(C, N)        response for a class: its methods plus everything they call
+%   fan_out(F, N)    distinct functions F calls (call_edge)
+%   fan_in(F, N)     distinct functions calling F
+%
+% Per-function size and complexity are columns of `fn` already: loc,
+% statements, params, max_nesting, cyclomatic, cognitive, halstead_*.
+
+import "../schema/flow.dl".
+import "callgraph.dl".
+
+project_class(C) :- symbol(id: C, kind: class, origin: project).
+
+class_ancestor(C, A) :- project_class(C), extends(child: C, parent: A).
+class_ancestor(C, A) :- class_ancestor(C, P), extends(child: P, parent: A).
+dit(C, N) :- project_class(C), N = count { A | class_ancestor(C, A) }.
+noc(C, N) :- project_class(C), N = count { D | extends(child: D, parent: C) }.
+
+class_body(C, M) :- project_class(C), symbol(id: M, parent: C), fn(id: M).
+wmc(C, W) :- project_class(C), W = sum { X | class_body(C, M), fn(id: M, cyclomatic: X) }.
+
+response(C, M) :- class_body(C, M).
+response(C, X) :- class_body(C, M), call_edge(M, X).
+rfc(C, N) :- project_class(C), N = count { X | response(C, X) }.
+
+fan_out(F, N) :- fn(id: F), N = count { B | call_edge(F, B) }.
+fan_in(F, N) :- fn(id: F), N = count { A | call_edge(A, F) }.
