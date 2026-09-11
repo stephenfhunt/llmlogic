@@ -60,6 +60,18 @@ as the fallback if step 1 does not land.
 
 ## Step 1 — the library at 1.3M facts (`code-analysis/`, maybe `datalog/`)
 
+> **Done 2026-09-11.** Every library the playbook names for module and design
+> questions is under 30 s on `vs/base` and under 4 GB; `checks.dl` 196 → 9.3 s,
+> `coupling.dl` 330 → 27.2, `cohesion.dl` 404 → 28.2. **The suspects below were
+> wrong**: it was not the aggregates but the engine's leading-prefix seek, and
+> the fix was one projection rule per re-keyed join, not an index. Four
+> libraries stay expensive by construction — `callreach` 38 s, `dominators`
+> 51 s, `flow` 104 s, and `pointsto`, which does not fit — so the questions in
+> step 4 must not need them. Table and audit:
+> `../../code-analysis/notes/code-facts.md` § At a million facts; decisions in
+> `../../datalog/spec.md` §17 and `../../code-analysis/decisions.md`, both
+> 2026-09-11.
+
 **Target: every library the playbook sends an agent to runs in under ~30 s on
 `vs/base`**, so a cell can afford several. Do this first: with `cohesion.dl` at
 404 s the `code-analysis` arm — the one whose playbook *names* it — would time
