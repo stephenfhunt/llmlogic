@@ -76,6 +76,23 @@ pub enum Provenance {
     /// Derivations, base membership and first-appearance rounds are stored;
     /// [`crate::provenance::ProofTree::explain`] can answer.
     Recorded,
+    /// Only the derivations §9's skip count and §12's malformed count are read
+    /// out of — those whose premises actually skipped an `absent` input or lost
+    /// a conversion ([`Derivation::reports`]). Base membership and rounds are
+    /// not stored, and no proof can be extracted.
+    ///
+    /// It exists because "skip but **report**" provisions the recorder for a
+    /// program that asks nothing: an aggregate or a cast anywhere in a rule body
+    /// makes [`crate::ir::Program::reports_through_provenance`] true, and the
+    /// whole program then pays a fact-keyed store of every derivation to carry a
+    /// handful of counts. Measured 2026-09-11 on `code-analysis`'s `checks.dl`
+    /// over 1.33M facts: one cast rule, whose own work is one row per file,
+    /// cost **+4.6 s and +1.36 GB** by turning the store on for the other 60
+    /// rules. Storing only the reporting derivations keeps the counts exact —
+    /// the deduplication key is still (fact, [`Derivation`]), so a rule instance
+    /// rediscovered in a later round still collapses to one record — and pays
+    /// for the skips that happen rather than the facts that do not skip.
+    Reports,
     /// Nothing provenance-only is stored. A proof is not *absent*, it was never
     /// recorded — a distinction [`Model::provenance`] preserves so that
     /// "no proof" is never silently read as "does not hold".
@@ -121,8 +138,10 @@ impl Model {
     ///
     /// Check it before reading [`derivations_of`](Self::derivations_of),
     /// [`is_base`](Self::is_base) or [`first_round`](Self::first_round): under
-    /// [`Provenance::Unrecorded`] all three answer *empty*, which is not the
-    /// same claim as *nothing derived this fact*.
+    /// [`Provenance::Unrecorded`] all three answer *empty*, and under
+    /// [`Provenance::Reports`] the first answers empty for every fact whose
+    /// derivations skipped nothing — neither is the same claim as *nothing
+    /// derived this fact*. Only [`Provenance::Recorded`] supports a proof.
     pub fn provenance(&self) -> Provenance {
         self.provenance
     }
@@ -257,7 +276,20 @@ impl Model {
     /// store, which is what lets the store be skipped without changing the
     /// delta the fixpoint iterates on (`testing.md` E9).
     fn insert_derived(&mut self, fact: Fact, derivation: Derivation, round: u32) -> bool {
-        if self.provenance == Provenance::Recorded {
+        let store = match self.provenance {
+            Provenance::Recorded => true,
+            // The reporting surfaces read `skipped` and `lost` off the premises
+            // and nothing else, so a derivation that reports neither is a
+            // derivation no warning will ever look at. The walk is a handful of
+            // discriminant checks: gating it on a per-rule "can this report at
+            // all", which is static, was built and **measured as noise**
+            // (9.4 s → 9.3 s on 1.33M facts) and removed — §17 2026-09-11, and
+            // the same call `notes/profile-2026-08-20.md` made about hoisting
+            // `literal_order`.
+            Provenance::Reports => derivation.reports(),
+            Provenance::Unrecorded => false,
+        };
+        if store {
             self.derivations
                 .entry(fact.clone())
                 .or_default()
@@ -5413,7 +5445,7 @@ mod tests {
             }
 
             /// E9 — provisioning provenance changes nothing an answer can see,
-            /// and an unprovisioned model says so.
+            /// and a model that did not record says so.
             ///
             /// The guard on demand-provisioned recording (§17, 2026-08-21).
             /// Its first half is the profile's own answer guard
@@ -5428,34 +5460,76 @@ mod tests {
             /// arms: an unrecorded model must answer **`Unrecorded`** about a
             /// fact that holds, never `DoesNotHold`. Collapsing those is a
             /// wrong answer, not a missing one.
+            ///
+            /// It is checked over **all three** modes (§17, 2026-09-11).
+            /// [`Provenance::Reports`] is the one that could be wrong in a way
+            /// the first two cannot: it keeps *some* derivations, so "the
+            /// answers are the same" no longer implies "the warnings are the
+            /// same". So the last claim is over the **warnings themselves**,
+            /// through `absent_skip_warnings` — the real reporting path — and
+            /// not over what `Derivation::reports` says should have been kept.
+            /// An oracle built from the predicate under test agrees with it
+            /// forever (`testing.md`'s corollary): mutating `reports` to `false`
+            /// leaves such a claim green, and was measured doing so.
+            ///
+            /// Most generated programs skip nothing, so this half is often
+            /// vacuous here; `api::tests::the_reporting_store_carries_every_
+            /// warning_the_full_one_does` is the non-vacuous case, with counts.
             #[test]
             fn e9_provisioning_does_not_change_the_answers(
                 program in arb_program_with_edb(),
             ) {
                 let recorded = eval_with(&program, Provenance::Recorded).unwrap();
                 let unrecorded = eval_with(&program, Provenance::Unrecorded).unwrap();
+                let reports = eval_with(&program, Provenance::Reports).unwrap();
 
                 let want: Vec<Fact> = recorded.facts().collect();
-                let got: Vec<Fact> = unrecorded.facts().collect();
-                prop_assert_eq!(&got, &want, "provisioning changed the model");
+                for (mode, model) in [("unrecorded", &unrecorded), ("reports", &reports)] {
+                    let got: Vec<Fact> = model.facts().collect();
+                    prop_assert_eq!(&got, &want, "{} provisioning changed the model", mode);
 
-                for query in &program.queries {
-                    prop_assert_eq!(
-                        unrecorded.answer(query).unwrap(),
-                        recorded.answer(query).unwrap(),
-                        "provisioning changed a query's answer"
-                    );
+                    for query in &program.queries {
+                        prop_assert_eq!(
+                            model.answer(query).unwrap(),
+                            recorded.answer(query).unwrap(),
+                            "{} provisioning changed a query's answer",
+                            mode
+                        );
+                    }
+
+                    for fact in model.facts() {
+                        prop_assert!(!model.is_base(&fact));
+                        prop_assert_eq!(model.first_round(&fact), None);
+                        prop_assert_eq!(
+                            ProofTree::explain(model, &fact),
+                            crate::provenance::Explained::Unrecorded,
+                            "{} model reported a held fact as underivable",
+                            mode
+                        );
+                    }
                 }
 
                 for fact in unrecorded.facts() {
                     prop_assert!(unrecorded.derivations_of(&fact).next().is_none());
-                    prop_assert!(!unrecorded.is_base(&fact));
-                    prop_assert_eq!(unrecorded.first_round(&fact), None);
-                    prop_assert_eq!(
-                        ProofTree::explain(&unrecorded, &fact),
-                        crate::provenance::Explained::Unrecorded,
-                        "an unrecorded model reported a held fact as underivable"
-                    );
+                }
+
+                prop_assert_eq!(
+                    crate::api::absent_skip_warnings(&reports, &program),
+                    crate::api::absent_skip_warnings(&recorded, &program),
+                    "the reporting store changed a §9/§12 warning"
+                );
+
+                // And it kept nothing the full store did not: a subset claim,
+                // which needs no predicate of its own to state.
+                for fact in reports.facts() {
+                    let full: Vec<&Derivation> = recorded.derivations_of(&fact).collect();
+                    for derivation in reports.derivations_of(&fact) {
+                        prop_assert!(
+                            full.contains(&derivation),
+                            "the reporting store invented a derivation of {:?}",
+                            fact
+                        );
+                    }
                 }
             }
 

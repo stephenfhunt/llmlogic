@@ -131,6 +131,24 @@ pub struct Derivation {
     pub premises: Vec<Premise>,
 }
 
+impl Derivation {
+    /// Does this instance carry something a §9 or §12 warning reads?
+    ///
+    /// The two reporting surfaces — an aggregate that skipped `absent` inputs,
+    /// and a conversion that lost values on data — are counted by walking the
+    /// recorded premises and deduplicating by rule instance
+    /// (`crate::api::absent_skip_warnings`). This names the derivations that
+    /// walk looks at, so [`crate::engine::Provenance::Reports`] can keep those
+    /// and drop the rest without changing a single count.
+    pub fn reports(&self) -> bool {
+        self.premises.iter().any(|premise| match premise {
+            Premise::Aggregate { skipped, .. } => *skipped > 0,
+            Premise::Builtin { lost, .. } => lost.is_some(),
+            Premise::Fact(_) | Premise::NoMatch(_) | Premise::Presence { .. } => false,
+        })
+    }
+}
+
 /// The answer to a goal that does **not** hold (§11): why not, per rule.
 ///
 /// The explanation of a missing answer is a *failure trace* — the third of the
@@ -290,7 +308,10 @@ impl ProofTree {
     /// call site because collapsing *unrecorded* into *does not hold* is a
     /// wrong answer, not a missing one.
     pub fn explain(model: &Model, fact: &Fact) -> Explained {
-        if model.provenance() == Provenance::Unrecorded {
+        // Anything but `Recorded` is a partial store or none at all: under
+        // `Reports` the derivations that skipped nothing were never kept, so a
+        // proof built from what is there would be a proof of the wrong thing.
+        if model.provenance() != Provenance::Recorded {
             return Explained::Unrecorded;
         }
         if !model.contains(fact) {

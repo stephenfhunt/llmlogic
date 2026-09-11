@@ -416,13 +416,20 @@ impl Program {
     /// none. The cross case — `?whynot` over a fact that turns out to hold — is
     /// *not* provisioned for here, because whether it holds is not known until
     /// the fixpoint has run: that case re-evaluates instead.
+    ///
+    /// A program that only *reports* through provenance gets
+    /// [`Provenance::Reports`](crate::engine::Provenance::Reports), not the full
+    /// store: the §9/§12 counts are read off the premises that skipped, and
+    /// nothing asked for a proof (§17, 2026-09-11).
     pub fn provenance(&self) -> crate::engine::Provenance {
         let asked = self
             .explanations
             .iter()
             .any(|explanation| explanation.sigil == crate::ast::Sigil::Why);
-        if asked || self.reports_through_provenance() {
+        if asked {
             crate::engine::Provenance::Recorded
+        } else if self.reports_through_provenance() {
+            crate::engine::Provenance::Reports
         } else {
             crate::engine::Provenance::Unrecorded
         }
@@ -436,12 +443,21 @@ impl Program {
     /// counter beside the fixpoint would count a rediscovered instance twice
     /// (§17, 2026-07-24 and 2026-08-16). "Skip but **report**" is a provenance
     /// surface that predates the asking form, so a program with an aggregate in
-    /// a rule provisions the recorder whether or not it asks anything.
+    /// a rule provisions a recorder whether or not it asks anything — the
+    /// reporting one ([`Provenance::Reports`](crate::engine::Provenance::Reports)),
+    /// which keeps only the derivations those counts are read from.
     ///
     /// A *query*'s aggregate needs nothing here: `Model::answer_reporting`
     /// hands its premises straight to the caller and the model never stores
     /// them (§14).
     pub fn reports_through_provenance(&self) -> bool {
+        self.rules
+            .iter()
+            .any(|rule| rule.body.iter().any(Self::literal_reports))
+    }
+
+    /// Can this body literal produce a premise a §9 or §12 warning reads?
+    fn literal_reports(literal: &BodyLiteral) -> bool {
         fn casts(expr: &Expr) -> bool {
             match expr {
                 Expr::Cast { .. } => true,
@@ -450,13 +466,11 @@ impl Program {
                 Expr::Term(_) => false,
             }
         }
-        self.rules.iter().any(|rule| {
-            rule.body.iter().any(|literal| match &literal.kind {
-                BodyLiteralKind::Aggregate { .. } => true,
-                BodyLiteralKind::Compare { lhs, rhs, .. } => casts(lhs) || casts(rhs),
-                _ => false,
-            })
-        })
+        match &literal.kind {
+            BodyLiteralKind::Aggregate { .. } => true,
+            BodyLiteralKind::Compare { lhs, rhs, .. } => casts(lhs) || casts(rhs),
+            _ => false,
+        }
     }
 }
 

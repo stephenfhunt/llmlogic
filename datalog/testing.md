@@ -209,7 +209,7 @@ it. A future audit starts here.
 | Closure at the program level (§14) | `arb_closure_program` | **D5**; D1 is the fact-set half |
 | The rendered proof's structure (§11) | `arb_program_with_edb`, every derived fact explained and printed | **E7** (every line is a comment — E5's lexical precondition) and **E8** (the declared depth is the node's); a guard pins the generator reaches a proof deeper than one node |
 | Explanations against the fact stream (§11/§14) | `arb_closure_program` plus both sigils over a fact the run answered and one it did not | **E5** — stripping the comments leaves the run without its goals, byte for byte; also the printed half of E9 |
-| Demand-provisioned provenance (§11/§15) | `arb_program_with_edb`, evaluated both ways | **E9** — identical model and answers, and an unrecorded model says `Unrecorded` rather than `DoesNotHold` |
+| Demand-provisioned provenance (§11/§15) | `arb_program_with_edb`, evaluated all three ways | **E9** — identical model, answers and §9/§12 warnings, and a model that did not record says `Unrecorded` rather than `DoesNotHold` |
 | The failure trace (§11) | `arb_program_with_edb`, goals built from the model's own value pool that do **not** hold | **E10** — five claims about a near-miss, including *a repair must repair*, which found `Repair::AbsentKey` |
 | §10's std-builtin exemption | `ArithShape::StdBuiltin` | **C10**'s guard — the mutation lands on the classification, not the fixpoint |
 | Diagnostics as a branchable surface (§12) | `arb_corrupted_program_text` — the first generator that makes programs **fail** | **C16**, with `c16_generator_rejects_and_reaches_several_families`; the pinned set itself is `every_code_is_pinned_and_belongs_to_its_category` |
@@ -1158,22 +1158,35 @@ and the asking form, which is also what unblocked E5.
   nothing to explain.
 - [x] **E9** **Provisioning provenance changes nothing an answer can see.** The
   recorder is provisioned by the run (§17, 2026-08-21), so the same program under
-  `Provenance::Recorded` and `Provenance::Unrecorded` must produce the identical
-  model and the identical answer to every query — which is the claim that the
-  three provenance-only maps (`derivations`, `base`, `first_round`) never feed the
-  fixpoint. This is the profile's own answer guard promoted to a property: it was
-  a stdout digest over 26 programs run from a scratch build
-  (`notes/profile-2026-08-20.md`) that was then thrown away, and as a property it
-  outlives the build and the corpus both.
+  `Provenance::Recorded`, `Provenance::Reports` and `Provenance::Unrecorded` must
+  produce the identical model and the identical answer to every query — which is
+  the claim that the three provenance-only maps (`derivations`, `base`,
+  `first_round`) never feed the fixpoint. This is the profile's own answer guard
+  promoted to a property: it was a stdout digest over 26 programs run from a
+  scratch build (`notes/profile-2026-08-20.md`) that was then thrown away, and as
+  a property it outlives the build and the corpus both.
+  - **`Reports` needs a third claim, and it must not be stated with
+    `Derivation::reports`.** That mode keeps *some* derivations (§17,
+    2026-09-11), so identical answers no longer imply identical warnings — and an
+    oracle that asks `reports()` which derivations should have been kept agrees
+    with `reports()` forever. The claim is therefore over the **warnings**,
+    through `api::absent_skip_warnings`, plus a subset claim that needs no
+    predicate of its own. Most generated programs skip nothing, so that half is
+    usually vacuous here;
+    `api::tests::the_reporting_store_carries_every_warning_the_full_one_does` is
+    the non-vacuous case, and asserts the counts.
   - **Its second half is the one that had to exist.** An unrecorded model must
     answer `Explained::Unrecorded` about a fact that *holds* — never
     `DoesNotHold`, which would be a wrong answer rather than a missing one, and
     is exactly what a two-valued `Option` return would have made unavoidable.
-  - *Mutations (both killed):* collapse `Unrecorded` into `DoesNotHold` in
+  - *Mutations (all killed):* collapse `Unrecorded` into `DoesNotHold` in
     `ProofTree::explain` — the second half reddens; invert the gate in
     `insert_derived` so an unrecorded run records — the emptiness assertion
-    reddens. Non-vacuity: a guard pins that the generator reaches a program with
-    a derived fact *and* a query, both halves holding trivially over an EDB.
+    reddens; make `Derivation::reports` return `false` so the reporting store
+    keeps nothing — the api-level warning test reddens (E9 itself does **not**,
+    measured 2026-09-11, which is why the third claim was rewritten off that
+    predicate). Non-vacuity: a guard pins that the generator reaches a program
+    with a derived fact *and* a query, both halves holding trivially over an EDB.
 - [x] **E10** **A near-miss holds against the model.** `?whynot`'s guard: for a
   goal that does not hold, `trace_failure` re-solves each candidate rule through
   the scheduler the fixpoint uses, so everything it reports must be true of the

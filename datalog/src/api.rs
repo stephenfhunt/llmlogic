@@ -215,7 +215,7 @@ pub fn run_at_reporting(
     // ever run: `?whynot` over a fact that turns out to hold wants a proof, and
     // its own sigil provisioned no recorder. Re-evaluating reuses the lowered
     // program, so it costs the fixpoint and not the parse or the imports.
-    let needs_recorded = model.provenance() == Provenance::Unrecorded
+    let needs_recorded = model.provenance() != Provenance::Recorded
         && program
             .explanations
             .iter()
@@ -395,7 +395,7 @@ pub fn run_with_queries_at_reporting(
 /// Aggregates written in a **query** are covered by
 /// [`query_skip_warnings`], which reads the premises `Model::answer` builds and
 /// used to discard; a query records no derivations, so this scan cannot see it.
-fn absent_skip_warnings(model: &Model, program: &ir::Program) -> Vec<Warning> {
+pub(crate) fn absent_skip_warnings(model: &Model, program: &ir::Program) -> Vec<Warning> {
     // Only a program that aggregates or converts has anything to report here;
     // skipping the derivation scan keeps this free for everything else. It is
     // the same predicate that provisions the recorder, shared so the two cannot
@@ -404,9 +404,11 @@ fn absent_skip_warnings(model: &Model, program: &ir::Program) -> Vec<Warning> {
     if !program.reports_through_provenance() {
         return Vec::new();
     }
-    debug_assert_eq!(
-        model.provenance(),
-        crate::engine::Provenance::Recorded,
+    debug_assert!(
+        matches!(
+            model.provenance(),
+            crate::engine::Provenance::Recorded | crate::engine::Provenance::Reports
+        ),
         "a program whose warnings are read out of derivations must provision them"
     );
 
@@ -738,6 +740,109 @@ banned(\"carol\").
                 msg.contains("negated atom") && msg.contains("`Y`")
             }),
             "unexpected errors: {errors:?}"
+        );
+    }
+
+    // --- What the reporting recorder has to keep (§17, 2026-09-11) ---
+
+    /// An aggregate that skips an `absent` input, and a conversion that loses a
+    /// value on data — one of each, in *rules*, which is what provisions the
+    /// recorder at all. Two rows per rule so a warning can count more than one.
+    const REPORTING: &str = "\
+m(\"a\", 5).
+m(\"b\", absent).
+m(\"c\", 7).
+m(\"d\", absent).
+raw(\"a\", \"12\").
+raw(\"b\", \"oops\").
+raw(\"c\", \"nope\").
+group(\"g\").
+total(G, N) :- group(G), N = sum { A | m(_, A) }.
+parsed(K, V) :- raw(K, S), V = S as int.
+?- total(G, N).
+?- parsed(K, V).
+";
+
+    /// [`REPORTING`], lowered — the same pipeline `run` puts a program through,
+    /// stopping where the provenance mode is chosen.
+    fn reporting_program() -> ir::Program {
+        let ast = parse(REPORTING).expect("parses");
+        let resolved = resolve_modules(ast, None).expect("resolves");
+        let tables = load_imports(&resolved.program).expect("no imports to load");
+        let program = lower_with_sources(&resolved.program, &tables).expect("lowers");
+        typecheck(&program).expect("typechecks");
+        program
+    }
+
+    /// `Provenance::Reports` keeps a *subset* of the derivations, so unlike the
+    /// other two modes "the answers match" is not enough — the §9 skip count and
+    /// §12 malformed count are read out of that store, and a derivation dropped
+    /// too eagerly makes a warning quietly smaller. This asserts the counts
+    /// themselves, against the full store, on a program that produces both.
+    ///
+    /// Mutation-verified: `Derivation::reports` returning `false` reddens it
+    /// (both warnings vanish), and returning `true` leaves it green while
+    /// giving up every byte the mode saves — which is why the bytes are the
+    /// engine bench's business and the counts are this test's.
+    #[test]
+    fn the_reporting_store_carries_every_warning_the_full_one_does() {
+        let program = reporting_program();
+        assert_eq!(
+            program.provenance(),
+            Provenance::Reports,
+            "a program with an aggregate and a cast in rules provisions the reporting store"
+        );
+
+        let recorded = eval_with(&program, Provenance::Recorded).expect("evaluates");
+        let reports = eval_with(&program, Provenance::Reports).expect("evaluates");
+        assert_eq!(
+            absent_skip_warnings(&reports, &program),
+            absent_skip_warnings(&recorded, &program),
+            "the reporting store lost a warning the full store reports"
+        );
+
+        // Non-vacuity: a test that compares two empty lists proves nothing.
+        let warnings = absent_skip_warnings(&reports, &program);
+        assert_eq!(warnings.len(), 2, "expected both warnings: {warnings:?}");
+        assert!(
+            warnings
+                .iter()
+                .any(|w| matches!(w, Warning::AbsentSkippedInAggregate { skipped: 2, .. })),
+            "expected the aggregate to report 2 skipped absents: {warnings:?}"
+        );
+        assert!(
+            warnings
+                .iter()
+                .any(|w| matches!(w, Warning::ConversionFailedOnData { failed: 2, .. })),
+            "expected the conversion to report 2 lost values: {warnings:?}"
+        );
+    }
+
+    /// And the store really is smaller — the claim the mode exists for. Every
+    /// derivation it keeps reports something, and the full store keeps more.
+    #[test]
+    fn the_reporting_store_keeps_only_the_derivations_that_report() {
+        let program = reporting_program();
+        let recorded = eval_with(&program, Provenance::Recorded).expect("evaluates");
+        let reports = eval_with(&program, Provenance::Reports).expect("evaluates");
+
+        let count = |model: &Model| -> usize {
+            model
+                .facts()
+                .map(|fact| model.derivations_of(&fact).count())
+                .sum()
+        };
+        for fact in reports.facts() {
+            for derivation in reports.derivations_of(&fact) {
+                assert!(
+                    derivation.reports(),
+                    "kept a derivation that reports nothing: {derivation:?}"
+                );
+            }
+        }
+        assert!(
+            count(&reports) < count(&recorded),
+            "the reporting store kept as much as the full one"
         );
     }
 
