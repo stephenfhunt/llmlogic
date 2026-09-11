@@ -140,6 +140,23 @@ fn arrange(
     source: &str,
 ) -> Result<Arranged, Vec<Error>> {
     match (raw.columns, schema) {
+        // A self-describing source with no records (an empty JSONL file) has no
+        // keys to bind by name. Under an explicit schema it is exactly the empty
+        // relation; without one nothing names its fields — the empty-CSV rule.
+        (Some(columns), schema) if columns.is_empty() && raw.rows.is_empty() => match schema {
+            Some(schema) => {
+                let fields: Vec<String> = schema.iter().map(|f| f.name.name.clone()).collect();
+                validate_field_names(&fields, source)?;
+                Ok((fields, Vec::new(), 1))
+            }
+            None => Err(vec![Error::new(
+                ErrorCode::SourceSchemaMismatch,
+                format!(
+                    "in `{source}`: the source has no records, so nothing names its fields; \
+                 an explicit schema is required"
+                ),
+            )]),
+        },
         // Self-describing source, inferred schema: the source's names win.
         (Some(columns), None) => {
             validate_field_names(&columns, source)?;
@@ -813,6 +830,23 @@ mod tests {
         let table = ok(csv(&[]), Some(&schema));
         assert!(table.rows.is_empty());
         assert_eq!(table.fields, ["a"]);
+    }
+
+    #[test]
+    fn a_self_describing_source_with_no_records_needs_a_schema() {
+        let empty = || RawTable {
+            columns: Some(Vec::new()),
+            rows: Vec::new(),
+        };
+        let errors = err(empty(), None);
+        assert!(
+            errors[0].to_string().contains("no records"),
+            "got: {errors:?}"
+        );
+        let schema = [field("a", Some(TypeName::Int)), field("b", None)];
+        let table = ok(empty(), Some(&schema));
+        assert!(table.rows.is_empty());
+        assert_eq!(table.fields, ["a", "b"]);
     }
 
     #[test]

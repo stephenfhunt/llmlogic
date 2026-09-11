@@ -1638,7 +1638,7 @@ import "data/parents.csv" as parent.
   | source | notes |
   |---|---|
   | `*.csv` | untyped text; header + literal-grammar inference above |
-  | `*.jsonl`, `*.ndjson` | one object per non-blank line; field order = the first record's key order; every record must supply the same key set; scalar values only |
+  | `*.jsonl`, `*.ndjson` | one object per non-blank line; field order = the first record's key order, later-only keys appended; a key a record lacks is absent; scalar values only; a file with no records is the empty relation under an explicit schema, and an error without one (nothing names its fields) |
   | `*.parquet` | natively typed |
   | `http(s)://…` | fetched via DuckDB httpfs, then treated per its extension |
   | `*.duckdb`, `*.db`, `*.sqlite*` + `table "…"` | **syntax reserved, loading deferred** — `import "analytics.duckdb" table "orders" as order.` |

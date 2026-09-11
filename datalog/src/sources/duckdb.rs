@@ -235,9 +235,14 @@ fn read_jsonl(conn: &Connection, path: &str) -> Result<RawTable, Error> {
         sql_string(path)
     );
     let columns = describe_column_names(conn, &describe, path)?;
-    if columns.is_empty() {
+    // A file with no records (empty, or blank lines only) has no keys, and DuckDB
+    // describes it as one `json` column rather than none. A lone `json` key is
+    // legal data too, so the count decides which this is.
+    let no_records = columns.is_empty()
+        || (columns.len() == 1 && columns[0] == "json" && jsonl_record_count(conn, path)? == 0);
+    if no_records {
         return Ok(RawTable {
-            columns: Some(columns),
+            columns: Some(Vec::new()),
             rows: Vec::new(),
         });
     }
@@ -282,6 +287,15 @@ fn read_jsonl(conn: &Connection, path: &str) -> Result<RawTable, Error> {
         columns: Some(columns),
         rows: out,
     })
+}
+
+fn jsonl_record_count(conn: &Connection, path: &str) -> Result<u64, Error> {
+    let sql = format!(
+        "SELECT count(*) FROM read_json({}, format='newline_delimited', columns={{'json': 'JSON'}})",
+        sql_string(path)
+    );
+    conn.query_row(&sql, [], |row| row.get::<_, u64>(0))
+        .map_err(|e| source_error(path, e))
 }
 
 /// Classifies one raw JSON value text per §13: strings stay strings (never

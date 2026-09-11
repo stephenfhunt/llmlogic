@@ -378,7 +378,9 @@ proptest! {
     /// set semantics.
     #[test]
     fn f4_jsonl_round_trip(
-        (keys, rows) in (1usize..4, 0usize..8).prop_flat_map(|(width, height)| {
+        // At least one record: a record-less file names no fields, and its two
+        // outcomes are pinned by `a_jsonl_file_with_no_records_…` below.
+        (keys, rows) in (1usize..4, 1usize..8).prop_flat_map(|(width, height)| {
             let keys: Vec<String> = (0..width).map(|i| format!("k{i}")).collect();
             let columns: Vec<BoxedStrategy<Vec<Value>>> =
                 (0..width).map(|_| arb_typed_column(height)).collect();
@@ -471,6 +473,38 @@ fn jsonl_missing_key_becomes_absent() {
             vec![Value::Int(3), Value::Absent],
         ]
     );
+}
+
+/// A JSONL file with no records — empty, or blank lines only — has no keys to
+/// name its fields. Under an explicit schema it is exactly the empty relation;
+/// without one it is an error, as an empty CSV is (§13). Both halves, since a
+/// reader that rejected every such file would satisfy the second alone.
+#[test]
+fn a_jsonl_file_with_no_records_is_empty_under_a_schema_and_an_error_without() {
+    let schema = [
+        field("id", Some(TypeName::String)),
+        field("n", Some(TypeName::Int)),
+    ];
+    for text in ["", "\n", "  \n\n"] {
+        let path = scratch_dir().join("t.jsonl");
+        std::fs::write(&path, text).expect("write");
+        let path = path.to_str().unwrap();
+        let loaded = load_table(path, None, Some(&schema))
+            .unwrap_or_else(|e| panic!("{text:?} under a schema: {e:?}"));
+        assert_eq!(loaded.fields, ["id", "n"], "{text:?}");
+        assert!(loaded.rows.is_empty(), "{text:?}");
+        let errors = load_table(path, None, None).expect_err("no schema names no fields");
+        assert!(
+            errors[0].to_string().contains("explicit schema"),
+            "{text:?}: {errors:?}"
+        );
+    }
+    // A lone key named `json` is data, not the reader's empty-file stand-in.
+    let path = scratch_dir().join("t.jsonl");
+    std::fs::write(&path, "{\"json\": 1}\n").expect("write");
+    let loaded = load_table(path.to_str().unwrap(), None, None).expect("loads");
+    assert_eq!(loaded.fields, ["json"]);
+    assert_eq!(loaded.rows, vec![vec![Value::Int(1)]]);
 }
 
 /// An explicit JSON `null` is absent too (§4/§13) — same as a missing key.
