@@ -120,3 +120,24 @@ them on the way into the bundle and the harness strips them on the way into a
 workspace. Adding or renaming a block is therefore free here and only ever
 changes what an ablation can name — but *deleting* one silently un-measures it,
 so delete the marker only along with the paragraph.
+
+### `ts-facts`, the skill's TypeScript extractor
+
+`skill/tools/ts-facts` (run as `skill/ts-facts`) is a Node program inside the
+skill: TypeScript source run by Node's type stripping (**Node ≥ 22.18**), on its
+own pinned TypeScript 6.0. Design and rationale: [`notes/ts-facts.md`](notes/ts-facts.md);
+agent guide: `skill/recipes/typescript.md`.
+
+```sh
+cd skill/tools/ts-facts
+npm ci                     # typescript + fast-check (dev)
+npm run typecheck          # tsc over src/ and test/
+npm test                   # node:test; fixtures, properties P1–P7, checks.dl on tsdl if present
+TS_FACTS_RUNS=500 npm test # more cases per property
+```
+
+Tests find the engine at `DATALOG_BIN` or `../../../target/release/datalog` —
+build it first (`cargo build --release --offline`). **`src/schema.ts` is the one
+home of the fact schema**: change a relation there and `schema/*.dl` and
+`SCHEMA.md` follow. A new layer or relation is also a new half of
+`lib/checks.dl`. Its property catalog is in `testing.md`, *ts-facts*.

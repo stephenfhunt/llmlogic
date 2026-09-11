@@ -2553,6 +2553,24 @@ never say.
 
 ### Decisions
 
+- **2026-09-10** — **The skill extracts TypeScript itself: `ts-facts`, on a pinned
+  TypeScript 6.0, emitting primitives and leaving the measures to Datalog**
+  (skill; `recipes/typescript.md`). The source-analysis dogfood found every wrong
+  answer in extraction; for TypeScript the checker resolves names, so the skill
+  ships a resolved extractor rather than a method. Long form, alternatives and
+  calibration in [`notes/ts-facts.md`](notes/ts-facts.md).
+  - **TypeScript 6.0 in-process**, because 7.0 has only an unstable IPC API; the
+    tool carries its own copy and reads projects written for 7.
+  - **`src/schema.ts` is the one home of the schema**; the writer validates
+    every row against it and generates `schema/*.dl` and `SCHEMA.md`.
+  - **Ids are keyed by declaration position, in path order**, so one id-space
+    spans every relation and every tsconfig — trap 2 cannot happen by construction.
+  - **Primitives, not verdicts**: dispatch kinds rather than a call graph,
+    Doop-style value flow rather than points-to; `lib/` derives the rest, split
+    by cost. The property layer (`testing.md`, *ts-facts*) found three extractor
+    defects on its way in; real code found two more, and two engine defects
+    (`bugs/resolved/010`, `011`).
+
 - **2026-08-25** — **A diagnostic carries a stable code, and the code exists
   where the *fix* differs in kind** (§12; `ROADMAP.md`, *Machine-readable error
   taxonomy*). The last piece of S3: an agent had four things to branch on, and

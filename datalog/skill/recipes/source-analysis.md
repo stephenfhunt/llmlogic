@@ -16,6 +16,9 @@ measured from that run, not estimated.
 
 ## 1. Extract with a parser, not a regex
 
+**For TypeScript, don't write one:** `./ts-facts` extracts a project for you,
+names resolved by the type checker — `recipes/typescript.md`.
+
 Use the language's own parser and emit one JSONL file per relation: `syn` for
 Rust, the `tsc` compiler API for TypeScript, `ast` for Python, `tree-sitter` for
 anything. Regex extraction was tried first (2026-07-23) and every false finding

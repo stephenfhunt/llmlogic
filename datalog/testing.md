@@ -1221,7 +1221,10 @@ scratch-dir helper in tests (`std::env::temp_dir()` + pid + counter — no
   table, imported, evaluates to the same model and answers as the same facts
   written as in-program literals — the full pipeline run twice.
 - [x] **F4** JSONL round-trip: generated typed records → test-side writer →
-  import ≡ the original values (JSON strings never re-inferred).
+  import ≡ the original values (JSON strings never re-inferred). At least one
+  record: a record-less file names no fields, and both of its outcomes are pinned
+  by `a_jsonl_file_with_no_records_is_empty_under_a_schema_and_an_error_without`
+  (`bugs/resolved/010`).
 - [x] **F5** Module diamond: root→{a,b}, a→c, b→c import graphs evaluate
   identically to the flat concatenation of the four files (once-only splice).
 - [x] **F6** Module cycles: mutually-importing files terminate and equal the
@@ -1345,3 +1348,41 @@ implementation.
   in the wild that the pinned set does not list. The guard stays **green** under
   it, which is the contrast: the guard counts families and the property checks
   membership, and neither substitutes for the other.
+
+### ts-facts — the TypeScript extractor (`skill/tools/ts-facts`, `npm test`)
+
+Added 2026-09-10 with the tool (`notes/ts-facts.md`). fast-check generators in
+`test/properties/`; the four rules apply as they do to the engine. P1 and P5 are
+**independent** oracles — Node executes the generated program — and P2 and P4
+restate the language (module resolution, member lookup) rather than calling the
+checker. Run counts: `TS_FACTS_RUNS` (P1/P3 default 200, the rest 25–40).
+
+- [x] **P1** CFG soundness against execution: every consecutive pair of probes in
+  a real trace is a path through probe-free nodes of the extracted graph; guard:
+  back, break, continue, throw, catch, finally, case and default edges all
+  exercised. *Mutation:* `implicitThrow` a no-op → red. Found, on its way in, a
+  `for…of` head that re-evaluated its iterable.
+- [x] **P2** Module-graph fidelity: `imports`, `import_name` (through namespaces
+  and barrels) and `call_site` equal the generated graph; guard: cross-file
+  imports, and a barrel. *Mutations:* no alias resolution → red; module-level
+  functions dispatched `virtual` → red.
+- [x] **P3** Cyclomatic two ways: `fn.cyclomatic` = E − N + 2 on exception- and
+  short-circuit-free programs; guard: if, while, do, for, for-of and case all
+  occur. *Mutation:* `case` decisions uncounted → red. Found parallel branch edges
+  collapsing under relabelling.
+- [x] **P4** Hierarchies: `extends`, `implements`, `overrides` equal the model,
+  whose oracle is TypeScript's member lookup restated; guard: overrides occur,
+  including of an interface member. *Mutation:* `implements` bases skipped → red.
+- [x] **P5** Points-to soundness against execution: every object or function a
+  probed variable holds at run time is in its `pts`; guard: cross-function
+  observations, function values, and values that can only have come through a
+  field. *Mutations:* the heap-load rule removed → red (**green** before the heap
+  guard and round-trip op existed — the first guard certified nothing about the
+  heap); the parameter rule removed → red.
+- [x] **P6** Determinism: permuting a tsconfig's `files` changes no output byte;
+  guard: most runs actually reorder. *Mutation:* sources unsorted → red. Found
+  `project_file` in compiler order.
+- [x] **P7** Schema: the writer rejects malformed rows; every table imports, and
+  the engine's row count of each equals `relation_rows`.
+- [x] `lib/checks.dl` finds no violation on every fixture, on ts-facts itself,
+  and on `~/code/tsdl` when present.
