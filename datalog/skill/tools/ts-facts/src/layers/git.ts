@@ -65,6 +65,9 @@ export function extractGit(ctx: Context, opts: GitOptions): void {
   const range: string[] = [];
   if (opts.maxCommits > 0) range.push(`-n${opts.maxCommits}`);
   if (opts.since !== undefined) range.push(`--since=${opts.since}`);
+  // A root below the repository's top level means that subtree's history only.
+  const sub = relTo(top, ctx.root);
+  if (sub !== ".") range.push("--", sub);
 
   const statusOut = git(top, ["log", "-z", "-M", "--name-status", "--format=%x01%H%x02%an%x02%ae%x02%at%x02%P%x02%s", ...range]);
   if (statusOut === undefined) return;
@@ -116,7 +119,7 @@ export function extractGit(ctx: Context, opts: GitOptions): void {
 
   // Walk newest → oldest, carrying each historical path forward to today's.
   const now = new Map<string, string | null>();
-  for (const p of (git(top, ["ls-files", "-z"]) ?? "").split("\0")) if (p !== "") now.set(p, p);
+  for (const p of (git(top, ["ls-files", "-z", ...(sub !== "." ? ["--", sub] : [])]) ?? "").split("\0")) if (p !== "") now.set(p, p);
   const nowOf = (p: string) => now.get(p) ?? null;
   const change: Record<string, string> = { A: "added", M: "modified", D: "deleted", R: "renamed", C: "copied", T: "type_changed" };
 

@@ -844,7 +844,7 @@ export const RELATIONS: readonly Relation[] = [
   {
     name: "commit",
     layer: "git",
-    doc: "A commit reachable from HEAD.",
+    doc: "A commit reachable from HEAD that touched the root (its subtree, when the root is below the repository's top level).",
     columns: [
       col("sha", "string", "full hash"),
       col("author", "string", "author name"),
