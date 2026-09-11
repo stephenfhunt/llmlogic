@@ -73,6 +73,7 @@ shared_literal(FA, FB, V) :- string_in(V, FA), string_in(V, FB), FA < FB, spread
 
 % ── control ──────────────────────────────────────────────────────────────
 boolean_text("boolean"). boolean_text("boolean | undefined").
+boolean_text("bool"). boolean_text("bool | None"). boolean_text("Optional[bool]").
 branch_node(cond). branch_node(loop_head).
 control_param(F, P) :-
   param(fn: F, symbol: P), symbol_type(symbol: P, text: T), boolean_text(T),
@@ -95,6 +96,12 @@ stamp_call(A, B, T) :- call_edge(A, B), stamp_param(B, T, _, _).
 primitive_text("number"). primitive_text("string"). primitive_text("boolean"). primitive_text("bigint").
 primitive_text("number | undefined"). primitive_text("string | undefined").
 primitive_text("boolean | undefined"). primitive_text("bigint | undefined").
+% Python, as annotated
+primitive_text("int"). primitive_text("float"). primitive_text("str"). primitive_text("bool"). primitive_text("bytes").
+primitive_text("int | None"). primitive_text("float | None"). primitive_text("str | None").
+primitive_text("bool | None"). primitive_text("bytes | None").
+primitive_text("Optional[int]"). primitive_text("Optional[float]"). primitive_text("Optional[str]").
+primitive_text("Optional[bool]"). primitive_text("Optional[bytes]").
 primitive_param(P) :- symbol_type(symbol: P, text: T), primitive_text(T).
 structured_param(B) :- param(fn: B, symbol: P), not primitive_param(P).
 data_call(A, B) :- call_edge(A, B), symbol(id: B, origin: project), not structured_param(B).

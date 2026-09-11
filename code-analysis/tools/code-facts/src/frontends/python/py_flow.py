@@ -567,7 +567,7 @@ class FlowExtractor:
                 line, end = node.lineno, node.end_lineno
             h = halstead(tokens, node, kind == "module", pos)
             params = getattr(decl, "params", [])
-            bound = decl.is_method and params and "staticmethod" not in getattr(decl, "decorators", []) and kind != "lambda"
+            bound = kind != "lambda" and self.api.bound_first(decl)
             self.emit("fn", id=decl.id, kind=kind, file=src.path, line=line, end_line=end, loc=end - line + 1,
                       statements=m["statements"], params=len(params) - (1 if bound else 0), max_nesting=m["max_nesting"],
                       cyclomatic=1 + b.decisions, cognitive=m["cognitive"], returns=m["returns"], awaits=m["awaits"],
@@ -691,7 +691,7 @@ class QualityWalker:
 
     def implicit_any(self, d) -> None:
         params = getattr(d, "params", [])
-        bound = d.is_method and "staticmethod" not in getattr(d, "decorators", [])
+        bound = self.api.bound_first(d)
         for i, (p, _, _) in enumerate(params):
             if p.annotation is None and not (bound and i == 0):
                 self.emit("any_site", fn=d.id, file=self.src.path, line=p.line, kind="implicit_param")

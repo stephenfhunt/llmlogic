@@ -95,6 +95,13 @@ test("symbol kinds: constructor, getter, static method, lambda-bound function, n
   assert.equal(symbol("shapes/util.py#make_counter.bump").parent, "shapes/util.py#make_counter");
 });
 
+test("param rows: a method's bound self is not a parameter; an assigned lambda's are", () => {
+  const params = (fn: string) => rows("param").filter((p) => p.fn === fn).map((p) => [p.index, p.name]);
+  assert.deepEqual(params("shapes/circle.py#Circle.register"), [[0, "registry"]]);
+  assert.deepEqual(params("shapes/base.py#Shape.unit"), [], "a staticmethod binds nothing, and has no parameters");
+  assert.deepEqual(params("shapes/util.py#square"), [[0, "x"]]);
+});
+
 test("members: `self.x = …` declares a property; visibility follows the underscore convention", () => {
   assert.deepEqual([symbol("shapes/base.py#Shape.name").kind, symbol("shapes/base.py#Shape.name").parent], ["property", "shapes/base.py#Shape"]);
   assert.equal(symbol("shapes/base.py#Shape.sides").visibility, "public");
@@ -257,5 +264,36 @@ test("flow and quality: decisions, metrics, and what the authors suppressed or d
   const implicit = rows("any_site").filter((a) => a.kind === "implicit_param").map((a) => a.fn);
   // `a` and `*rest` share a line, so their rows are one fact
   assert.deepEqual(implicit.sort(), ["q.py#K.m", "q.py#fetch", "q.py#work"]);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("lambdas: in a decorator's arguments, nested in a lambda, each resolves its own parameters", () => {
+  const dir = tempDir("py-lambdas");
+  writeFiles(dir, {
+    "l.py": [
+      "def deco(key):",
+      "    return lambda f: f",
+      "",
+      "@deco(key=lambda e: e.name)",
+      "def g():",
+      "    return 1",
+      "",
+      "adder = lambda x: lambda y: x + y",
+      "",
+      "def outer(flag):",
+      "    if flag:",
+      "        def inner(items):",
+      "            return [z for z in items]",
+      "        return inner",
+    ].join("\n"),
+  });
+  const r = extractPython(dir, { layers: ["refs", "flow"] });
+  assert.deepEqual(r.tables.rows("unresolved_ref"), []);
+  const ids = r.tables.rows("symbol").map((s) => s.id);
+  assert.ok(ids.includes("l.py#<lambda@4:11>.e"), "the decorator's lambda is declared, with its parameter");
+  assert.ok(ids.includes("l.py#adder.<lambda@8:19>.y"), "a lambda in a lambda nests in it");
+  assert.deepEqual(r.tables.rows("captures").map((c) => [c.fn, c.var]), [["l.py#adder.<lambda@8:19>", "l.py#adder.x"]]);
+  assert.ok(ids.includes("l.py#outer.inner.z"));
+  assert.ok(!ids.includes("l.py#outer.z"), "a comprehension in a nested def binds there, not in the enclosing function");
   fs.rmSync(dir, { recursive: true, force: true });
 });

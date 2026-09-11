@@ -400,15 +400,38 @@ class Frontend:
             owner.globals.update(stmt.names)
         elif isinstance(stmt, ast.Nonlocal):
             owner.nonlocals.update(stmt.names)
-        # Walrus targets and comprehension variables bind in the enclosing
-        # function (comprehension scopes are folded into it — an approximation).
-        for n in ast.walk(stmt) if not isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) else ():
+        self.scan(src, owner, scope, stmt)
+
+    def scan(self, src: Source, owner: Decl, scope: str, stmt: ast.stmt) -> None:
+        """What a statement's own expressions bind: walrus targets and
+        comprehension variables, in `owner` (comprehension scopes are folded into
+        the enclosing one — an approximation), and lambdas, each a scope of its
+        own. Nested statements are bound by their own bind_stmt; of a def or a
+        class, only the header runs here — decorators, defaults, bases."""
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            roots = [*stmt.decorator_list, *stmt.args.defaults, *[d for d in stmt.args.kw_defaults if d is not None]]
+        elif isinstance(stmt, ast.ClassDef):
+            roots = [*stmt.decorator_list, *stmt.bases, *[k.value for k in stmt.keywords]]
+        else:
+            roots = [c for c in ast.iter_child_nodes(stmt) if not isinstance(c, ast.stmt)]
+        stack = [(r, owner, scope) for r in roots]
+        while stack:
+            n, own, sc = stack.pop()
+            if isinstance(n, ast.stmt):
+                continue  # an except clause's or a case's body: bound on its own
+            if isinstance(n, ast.Lambda):
+                d = self.decl_of.get(id(n))
+                if d is None:
+                    self.lambda_(src, own, n)
+                    d = self.decl_of[id(n)]
+                stack.extend((x, own, sc) for x in [*n.args.defaults, *[k for k in n.args.kw_defaults if k is not None]])
+                stack.append((n.body, d, "function"))
+                continue
             if isinstance(n, ast.NamedExpr):
-                self.bind_target(src, owner, scope if scope != "class" else "class", n.target, n.value)
+                self.bind_target(src, own, sc, n.target, n.value)
             elif isinstance(n, ast.comprehension):
-                self.bind_target(src, owner, "function" if scope == "function" else scope if scope != "class" else "class", n.target)
-            elif isinstance(n, ast.Lambda) and id(n) not in self.decl_of:
-                self.lambda_(src, owner, n)
+                self.bind_target(src, own, sc, n.target)
+            stack.extend((c, own, sc) for c in ast.iter_child_nodes(n))
 
     def absolute(self, src: Source, level: int, module: str | None) -> str:
         if level == 0:
@@ -828,8 +851,11 @@ class Frontend:
             d = self.decl_of.get(id(node))
             if d is None or d.file is not src:
                 continue
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)) and d.node is node:
-                for i, (p, has_default, rest) in enumerate(getattr(d, "params", [])):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)) and (d.node is node or isinstance(node, ast.Lambda)):
+                # A method's bound first parameter (self, cls) is not one a caller passes,
+                # as a TypeScript method has none: no row, and positions count from the next.
+                params = getattr(d, "params", [])[1:] if bound_first(d) else getattr(d, "params", [])
+                for i, (p, has_default, rest) in enumerate(params):
                     emit("param", fn=d.id, index=i, symbol=p.id, name=p.name, optional=has_default, rest=rest, has_default=has_default)
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and d.node is node:
                 parent_kind = d.parent.kind if d.parent else "module"
@@ -1195,6 +1221,11 @@ class RefWalker(ast.NodeVisitor):
 
 
 # ── helpers ───────────────────────────────────────────────────────────────
+
+
+def bound_first(d: Decl) -> bool:
+    """A method whose first parameter is bound by the call (self, or cls)."""
+    return d.is_method and bool(getattr(d, "params", None)) and "staticmethod" not in getattr(d, "decorators", [])
 
 
 def walk_own(node: ast.AST):
