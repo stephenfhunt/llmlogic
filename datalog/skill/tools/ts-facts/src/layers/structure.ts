@@ -203,11 +203,48 @@ function resolveSpecifier(
   return { target_file: null, target_package: bare ? packageOfSpecifier(spec) : null, resolved: false };
 }
 
+/**
+ * The import and export declarations of `sf` that survive into the emitted
+ * JavaScript, or undefined when the emitter would not run. TypeScript elides an
+ * import whose bindings are only used as types — and keeps one written without
+ * `type` under `verbatimModuleSyntax`, keeps one a JSX factory or decorator
+ * metadata needs — so rather than restate those rules, ask the emitter: an
+ * after-transformer sees the final tree, and every surviving statement (an
+ * `import`, or the `require` CommonJS made of it) points back to its source
+ * declaration through `ts.getOriginalNode`.
+ */
+function emittedDeclarations(info: SourceInfo): Set<ts.Node> | undefined {
+  if (info.sf.isDeclarationFile) return new Set();
+  const kept = new Set<ts.Node>();
+  const collect: ts.TransformerFactory<ts.SourceFile> = () => (out) => {
+    const visit = (n: ts.Node): void => {
+      const o = ts.getOriginalNode(n);
+      if (o.getSourceFile() === info.sf && (ts.isImportDeclaration(o) || ts.isExportDeclaration(o) || ts.isImportEqualsDeclaration(o))) {
+        kept.add(o);
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(out);
+    return out;
+  };
+  try {
+    const result = info.project.program.emit(info.sf, () => {}, undefined, false, { after: [collect] });
+    return result.emitSkipped ? undefined : kept;
+  } catch {
+    return undefined;
+  }
+}
+
 function extractModuleEdges(ctx: Context, info: SourceInfo): void {
   const t = ctx.tables;
   const file = info.path;
+  const emitted = emittedDeclarations(info);
   const edge = (node: ts.Node, specNode: ts.StringLiteralLike, kind: string) => {
-    t.add("imports", { file, line: lineOf(node, info.sf), specifier: specNode.text, kind, ...resolveSpecifier(ctx, info, specNode) });
+    let runtime: boolean | null;
+    if (kind === "dynamic" || kind === "require") runtime = true;
+    else if (kind === "type_query") runtime = false;
+    else runtime = emitted === undefined ? null : emitted.has(node);
+    t.add("imports", { file, line: lineOf(node, info.sf), specifier: specNode.text, kind, runtime, ...resolveSpecifier(ctx, info, specNode) });
   };
   const name = (node: ts.Node, local: string, imported: string, target: ts.Node | undefined, typeOnly: boolean) => {
     const sym = target !== undefined ? info.checker.getSymbolAtLocation(target) : undefined;

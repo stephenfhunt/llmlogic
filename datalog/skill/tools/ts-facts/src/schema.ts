@@ -273,6 +273,11 @@ export const RELATIONS: readonly Relation[] = [
         ],
         "`type_only` is `import type`; `type_query` is `import(\"x\").T` in a type",
       ),
+      opt(
+        "runtime",
+        "bool",
+        "the statement survives into the emitted JavaScript — false when TypeScript elides it (its bindings are only used as types, or it is `import type`); a `.d.ts` never runs; absent if the emitter could not say",
+      ),
       opt("target_file", "string", "the resolved file, when it is under the root"),
       opt("target_package", "string", "package name, for a specifier resolving outside the root (`node:fs` for builtins)"),
       col("resolved", "bool", "the compiler resolved the specifier"),

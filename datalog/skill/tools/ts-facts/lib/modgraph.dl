@@ -3,7 +3,10 @@
 %
 %   file_dep(A, B, Kind)     file A imports file B (Kind: imports.kind)
 %   dep(A, B)                any file_dep — type-only imports included
-%   runtime_dep(A, B)        a dependency that survives type erasure
+%   runtime_dep(A, B)        loading A loads B: an import the emitted JavaScript
+%                            keeps (`imports.runtime`). TypeScript elides one
+%                            whose bindings are only used as types even without
+%                            `import type`, so `kind` alone over-counts
 %   file_reaches(A, B)       a chain of dep leads from A to B
 %   in_cycle(F)              F is on an import cycle
 %   cycle_edge(A, B)         a dep edge that lies on a cycle
@@ -18,7 +21,9 @@ import "../schema/structure.dl".
 
 file_dep(A, B, K) :- imports(file: A, target_file: B, kind: K), B is not absent, A != B.
 dep(A, B) :- file_dep(A, B, _).
-runtime_dep(A, B) :- file_dep(A, B, K), K != type_only, K != type_query.
+runtime_dep(A, B) :- imports(file: A, target_file: B, runtime: true), A != B.
+% Where the emitter could not say (runtime absent), fall back to what is written.
+runtime_dep(A, B) :- imports(file: A, target_file: B, runtime: R, kind: K), R is absent, K != type_only, K != type_query, A != B.
 
 file_reaches(A, B) :- dep(A, B).
 file_reaches(A, C) :- dep(A, B), file_reaches(B, C).

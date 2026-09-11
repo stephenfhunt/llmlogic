@@ -80,7 +80,20 @@ function loadOne(configPath: string, root: string): { project: LoadedProject; re
   }
   const parsed = ts.parseJsonConfigFileContent(read.config, ts.sys, path.dirname(configPath), undefined, configPath);
   diagnostics.push(...parsed.errors.filter((d) => d.code !== 18003)); // 18003: no inputs (a solution-style config)
-  const options: ts.CompilerOptions = { ...parsed.options, noEmit: true };
+  // Emit stays possible — the structure layer asks the emitter which imports
+  // survive into JavaScript — but only into memory, and only the JavaScript:
+  // nothing here changes how the program is checked or resolved.
+  const options: ts.CompilerOptions = {
+    ...parsed.options,
+    noEmit: false,
+    emitDeclarationOnly: false,
+    declaration: false,
+    declarationMap: false,
+    sourceMap: false,
+    inlineSourceMap: false,
+    noEmitOnError: false,
+    rewriteRelativeImportExtensions: false,
+  };
   const program = ts.createProgram({
     rootNames: parsed.fileNames,
     options,
