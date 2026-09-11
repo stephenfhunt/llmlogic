@@ -1,0 +1,64 @@
+% Cohesion of classes, and of components (lib/units.dl for the (G, C) ids).
+%
+% Per class — over its own non-static methods, getters and setters (constructors
+% excluded, as is conventional) and its own non-static fields, touched through
+% `this`; a callback nested in a method counts as that method:
+%   uses(C, M, F)         method M of C reads or writes field F of C
+%   linked(M, N)          M and N share a field, or one calls the other
+%   lcom4(C, N)           connected components of the method graph — 1 is
+%                         cohesive, N > 1 means C could split into N classes
+%                         (0: no methods)
+%   tcc(C, T)             tight class cohesion: the fraction of method pairs
+%                         sharing a field directly (float; classes with ≥ 2 methods)
+%   lcom_hs(C, L)         Henderson-Sellers LCOM: 0 when every method touches
+%                         every field, towards 1 as they share none (float;
+%                         classes with ≥ 2 methods and ≥ 1 field)
+%
+% Per component:
+%   relational_cohesion(G, C, H)   (internal type-to-type references + 1) / types
+%                                  — H below ~1.5 suggests types that do not belong together
+
+import "units.dl".
+import "types.dl".
+
+is_class(C) :- symbol(id: C, kind: class, origin: project).
+method(C, M) :- is_class(C), symbol(id: M, parent: C, kind: method, is_static: false).
+method(C, M) :- is_class(C), symbol(id: M, parent: C, kind: getter, is_static: false).
+method(C, M) :- is_class(C), symbol(id: M, parent: C, kind: setter, is_static: false).
+field(C, F) :- is_class(C), symbol(id: F, parent: C, kind: property, is_static: false).
+
+within(M, M) :- method(_, M).
+within(F, M) :- symbol(id: F, parent: P), within(P, M).
+
+uses(C, M, X) :- member_access(fn: F, member: X, class: C, via_this: true), within(F, M), method(C, M), field(C, X).
+% Any touch of a sibling method counts — reading a getter is calling it, and a
+% method passed along as `this.m` is still used.
+calls_own(M, N) :- member_access(fn: F, member: N, class: C, via_this: true), within(F, M), method(C, M), method(C, N), M != N.
+
+linked(M, N) :- uses(C, M, X), uses(C, N, X), M != N.
+linked(M, N) :- calls_own(M, N).
+linked(M, N) :- calls_own(N, M).
+
+lreach(M, M) :- method(_, M).
+lreach(M, X) :- lreach(M, Y), linked(Y, X).
+component_of(C, M, R) :- method(C, M), R = min { X | lreach(M, X) }.
+class_component(C, R) :- component_of(C, _, R).
+lcom4(C, N) :- is_class(C), N = count { R | class_component(C, R) }.
+
+method_pair(C, M, N) :- method(C, M), method(C, N), M < N.
+sharing_pair(C, M, N) :- method_pair(C, M, N), uses(C, M, X), uses(C, N, X).
+tcc(C, T) :-
+  is_class(C), P = count { M | method_pair(C, M, N) }, P > 0,
+  S = count { M | sharing_pair(C, M, N) }, T = S as float / P as float.
+
+users_of(C, X, K) :- field(C, X), K = count { M | uses(C, M, X) }.
+lcom_hs(C, L) :-
+  is_class(C), NM = count { M | method(C, M) }, NM > 1, NF = count { X | field(C, X) }, NF > 0,
+  S = sum { K | users_of(C, X, K) },
+  Mean = S as float / NF as float, L = (Mean - NM as float) / (1.0 - NM as float).
+
+type_member(G, U, T) :- is_type(T), symbol(id: T, file: F), member(G, U, F).
+internal_type_dep(G, U, A, B) :- type_dep(A, B), type_member(G, U, A), type_member(G, U, B).
+relational_cohesion(G, U, H) :-
+  comp(G, U), N = count { T | type_member(G, U, T) }, N > 0,
+  R = count { A | internal_type_dep(G, U, A, B) }, H = (R + 1) as float / N as float.

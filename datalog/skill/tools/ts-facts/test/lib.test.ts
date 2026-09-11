@@ -58,3 +58,49 @@ test("modgraph: file edges by kind, roll-up to directories, external packages", 
   assert.deepEqual(ask(out, "modgraph.dl", "unit_dep(1, A, B)"), []);
   assert.deepEqual(ask(out, "modgraph.dl", "external_dep(F, P)"), ['external_dep("src/main.ts", "node:path").']);
 });
+
+test("coupling: Martin's metrics per file, CBO per type", { skip }, () => {
+  const out = outOf("refs");
+  // use.ts depends on shapes.ts and nothing depends on it; view.tsx is isolated.
+  assert.deepEqual(ask(out, "coupling.dl", "instability(-1, C, I)"), [
+    'instability(-1, "src/shapes.ts", 0.0).',
+    'instability(-1, "src/use.ts", 1.0).',
+  ]);
+  // shapes.ts: Shape and abstract Base over Shape, Base, Circle, Plain.
+  assert.ok(ask(out, "coupling.dl", "abstractness(-1, C, A)").includes('abstractness(-1, "src/shapes.ts", 0.5).'));
+  assert.deepEqual(ask(out, "coupling.dl", "distance(-1, C, D)"), [
+    'distance(-1, "src/shapes.ts", 0.5).',
+    'distance(-1, "src/use.ts", 0.0).',
+  ]);
+  assert.deepEqual(ask(out, "coupling.dl", "sdp_violation(G, A, B)"), []);
+  // Base ↔ Shape (implements), Base ↔ Circle (new / extends); Shape ↔ Registry (types).
+  const cbo = ask(out, "coupling.dl", "cbo(T, N)");
+  assert.ok(cbo.includes('cbo("src/shapes.ts#Base", 2).'));
+  assert.ok(cbo.includes('cbo("src/shapes.ts#Shape", 2).'));
+  assert.ok(cbo.includes('cbo("src/shapes.ts#Circle", 1).'));
+  assert.ok(cbo.includes('cbo("src/use.ts#Registry", 1).'));
+});
+
+test("cohesion: LCOM4, TCC, LCOM-HS and relational cohesion", { skip }, () => {
+  const out = outOf("refs");
+  // Base: describe calls this.area and reads the getter this.name — one component.
+  // Registry: add touches this.items, handler touches nothing — two.
+  assert.deepEqual(ask(out, "cohesion.dl", "lcom4(C, N)"), [
+    'lcom4("src/shapes.ts#Base", 1).',
+    'lcom4("src/shapes.ts#Circle", 1).',
+    'lcom4("src/shapes.ts#Plain", 0).',
+    'lcom4("src/use.ts#Registry", 2).',
+  ]);
+  assert.deepEqual(ask(out, "cohesion.dl", "tcc(C, T)"), [
+    'tcc("src/shapes.ts#Base", 0.0).',
+    'tcc("src/shapes.ts#Circle", 1.0).',
+    'tcc("src/use.ts#Registry", 0.0).',
+  ]);
+  // Circle: both methods touch its one field → 0; Registry: one of two → 1.
+  assert.deepEqual(ask(out, "cohesion.dl", "lcom_hs(C, L)"), [
+    'lcom_hs("src/shapes.ts#Circle", 0.0).',
+    'lcom_hs("src/use.ts#Registry", 1.0).',
+  ]);
+  // shapes.ts: 4 types, 3 internal type references → (3 + 1) / 4.
+  assert.ok(ask(out, "cohesion.dl", "relational_cohesion(-1, U, H)").includes('relational_cohesion(-1, "src/shapes.ts", 1.0).'));
+});

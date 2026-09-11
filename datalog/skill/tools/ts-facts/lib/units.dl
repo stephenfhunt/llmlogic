@@ -1,0 +1,19 @@
+% Components at every granularity, for the coupling and cohesion libraries.
+%
+% A component is identified by (G, C), where the granularity G is
+%   -1   a file                      (C: the file path)
+%   -2   a package                   (C: the package name)
+%    N   a directory at depth N      (C: the directory; 0 is the root)
+% So `instability(1, C, I)` is instability between top-level directories, and
+% `instability(-1, C, I)` between files. A file sitting directly in a shallower
+% directory belongs to no component at a deeper N.
+%
+%   member(G, C, File)   File belongs to component C
+%   comp(G, C)           C is a component at granularity G
+
+import "../schema/structure.dl".
+
+member(-1, F, F) :- file(path: F).
+member(-2, P, F) :- file(path: F, package: P), P is not absent.
+member(D, U, F) :- file_ancestor(file: F, dir: U, depth: D).
+comp(G, C) :- member(G, C, _).
