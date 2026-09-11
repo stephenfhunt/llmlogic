@@ -23,7 +23,7 @@ makes every "untested" answer wrong. `references` are followed. The root (for
 every path in the facts) is the git top level unless you pass `--root`; a root
 below it reads that subtree's history only. Options: `--layers
 refs,flow,dataflow,quality,git` to extract less, `--no-git`, `--git-since DATE`,
-`--exclude GLOB`. A 24k-line project extracts in about 4 s to 205k facts.
+`--exclude GLOB`. A 24k-line project extracts in about 6 s to 205k facts.
 
 ```
 /tmp/facts/
@@ -40,7 +40,7 @@ Write your analysis as a file next to them (`/tmp/facts/q.dl`) that starts
 
 | layer | the relations you will use most |
 |---|---|
-| structure | `file` (path, dir, package, is_test, loc), `symbol` (id, kind, file, parent, exported, …), `imports` (file → target_file / target_package, kind), `exports`, `file_ancestor` (every enclosing dir, with depth) |
+| structure | `file` (path, dir, package, is_test, loc), `symbol` (id, kind, file, parent, exported, …), `imports` (file → target_file / target_package, kind, and whether it survives to `runtime`), `exports`, `file_ancestor` (every enclosing dir, with depth) |
 | refs | `ref(from, to, kind)` — every resolved reference between declarations; `call_site` (caller, callee, **dispatch**); `extends`, `implements`, `overrides`; `member_access` (for cohesion); `type_ref` (with position: param, return, …) |
 | flow | `fn` (one per function body, with cyclomatic, cognitive, nesting, Halstead); `flow_node`/`flow_edge` (a CFG per function); `def`/`use`; `closure`; `call_at` |
 | dataflow | `assign`, `alloc`, `load`, `store`, `formal`/`actual` — value flow in three-address form |
@@ -66,7 +66,7 @@ above (205k facts), including the import.
 | file | what it derives | time |
 |---|---|---|
 | `checks.dl` | `violation(Check, Subject)` — the extractor contradicting itself | 4.3 s |
-| `modgraph.dl` | `file_dep`, `runtime_dep` (type-only imports excluded), `in_cycle`, `cycle_edge`, `unit_dep` (directories at any depth), `package_edge`, `external_dep` | 0.3 s |
+| `modgraph.dl` | `file_dep`, `runtime_dep` (the imports emitted JavaScript keeps), `in_cycle`, `cycle_edge`, `unit_dep` (directories at any depth), `package_edge`, `external_dep` | 0.3 s |
 | `callgraph.dl` | `call_edge` (virtual calls expanded to every override), `call_edge_lexical` (a callback's calls counted as its enclosing function's), `called` | 0.9 s |
 | `callreach.dl` | `reaches`, `recursive`, `mutual` | 1.8 s |
 | `coupling.dl` | per component: `efferent`, `afferent`, `instability`, `abstractness`, `distance`, `sdp_violation`, `comp_edge_weight`; per type: `cbo` | 3.3 s |
@@ -129,10 +129,16 @@ untested(S) :- exports(symbol: S, kind: local), fn(id: S), not covered(S).
 
 ## 5. Traps specific to these facts
 
-1. **A `dep` cycle may not exist at run time.** `in_cycle` follows every import,
-   and `import type` is erased: the project above has an `answer.ts ↔ eval.ts`
-   cycle that is type-only on both sides. Ask over `runtime_dep` before calling
-   it a cycle.
+1. **An import may not exist at run time — even without `import type`.**
+   TypeScript drops an import whose bindings are only used as types, whatever
+   it is written as (and under `verbatimModuleSyntax` keeps every import not
+   marked `type`). `imports.kind` is only what was *written*; `imports.runtime`
+   is what the emitted JavaScript keeps, read from the compiler's own emit, and
+   `runtime_dep` follows it. `in_cycle` follows every import: the project above
+   has an `answer.ts ↔ eval.ts` cycle that is type-only on both sides, so check
+   `runtime_dep` before calling a cycle real. For single names, ask `ref`: a
+   name is a runtime dependency where some reference to it has a kind other
+   than `type`, `typeof` or `implements`.
 2. **A callback handed to a library is called by the library**, so no
    `call_edge` reaches it — `xs.map(x => f(x))` does not make its enclosing
    function call `f`. Use `call_edge_lexical` (or `call_edge_pt_lexical`) for

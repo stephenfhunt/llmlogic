@@ -70,6 +70,22 @@ class-hierarchy analysis), `indirect` (a function-typed value in project code:
 is named as the target instead: on tsdl 2,843 of 2,870 indirect sites were
 vitest's API, which no analysis of the project could ever resolve.
 
+**Whether an import survives to run time is the emitter's answer**, not the
+syntax's: TypeScript drops an import whose bindings only annotate, with or
+without `import type`, keeps every unmarked one under `verbatimModuleSyntax`, and
+keeps one only a JSX factory or decorator metadata uses. An after-transformer on
+an in-memory emit sees the final tree, and each surviving statement — an
+`import`, or the `require` CommonJS made of it — points back to its source
+declaration through `ts.getOriginalNode`. That is `imports.runtime`, and
+`runtime_dep` follows it. Per *binding*, CommonJS output keeps no trace, so
+single names are left to `ref.kind`. *Rejected:* restating the elision rules in
+the extractor (P8 restates them as an oracle instead — two copies that agree are
+evidence, one copy is a guess), and the checker's internal
+`isReferencedAliasDeclaration` (the rules minus the options, on an API with no
+promise). It costs an emit: 1.4 s on tsdl. Raised 2026-09-11 by the user; the
+first version had `runtime_dep` as "not `import type`", which was wrong for
+every project not written under `verbatimModuleSyntax`.
+
 **The CFG is statement-level and over-approximates exceptions.** Every node in a
 `try` may throw to its handler; outside one, only `throw` reaches `throw_exit`.
 A `finally` is entered by every jump crossing it and re-issues each outward.
@@ -117,7 +133,7 @@ both tsconfigs, 16-thread desktop:
 
 | | |
 |---|---|
-| extract, all layers | 4.3 s — load 0.85, refs 1.8, quality 0.4, flow 0.3 |
+| extract, all layers | 5.7 s — load 0.85, refs 1.8, structure 1.6 (its emit), quality 0.4, flow 0.3 |
 | facts | 204,865 in 61 relations; `var` 30k, `ref` 15k, `flow_node` 15k |
 | `lib/checks.dl` | 4.3 s, 519 MB, clean |
 | `modgraph.dl` cycles | 0.3 s |
@@ -142,6 +158,6 @@ ts-facts itself (6.5k lines): 87.6k facts in 2.4 s.
 - One full `npm test` run showed a failure that 25 further runs and 30 runs of
   each property file did not reproduce. Unexplained; the next one should be
   captured with the default reporter rather than `dot`.
-- TypeScript 7's API, when it stabilizes: a second backend, behind P1–P7.
+- TypeScript 7's API, when it stabilizes: a second backend, behind P1–P8.
 - Accessors, spread and instance method values in the dataflow layer — each a
   known under-approximation of `pts`, listed above.

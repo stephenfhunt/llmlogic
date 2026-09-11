@@ -31,21 +31,18 @@ tsconfig, get facts about everything from module relationships to code flow,
 useful for coupling, cohesion and questions no linter asks. Built as planned, in
 eleven commits, and it found two engine defects, which were fixed here when asked.
 
-**Done** — `skill/tools/ts-facts` (`./ts-facts`), **68 tool tests**, engine suite
+**Done** — `skill/tools/ts-facts` (`./ts-facts`), **72 tool tests**, engine suite
 and clippy clean, experiments **1,661** green
 - **61 relations over seven layers**: structure, refs (checker-resolved call
   sites with dispatch kinds), flow (a CFG per function, def/use, metrics),
   dataflow (Doop-style), quality, git (renames followed to today's path).
 - **`lib/`, split by cost**: checks, modgraph, callgraph/callreach, coupling,
   cohesion, metrics, flow, dominators, pointsto, taint, cochange.
-- **Properties P1–P7**, each mutation-verified (`testing.md`, *ts-facts*); P1 and
-  P5 execute generated programs in Node as their oracle.
-- **Engine:** `bugs/resolved/010` (an empty JSONL file would not import under a
-  schema) and `011` (a variable type clash named its union-find roots).
+- **Properties P1–P8**, each mutation-verified (`testing.md`); P1/P5 run in Node.
+- **Engine:** `bugs/resolved/010` (empty JSONL import), `011` (clash message).
 - **Harness:** the local subject's skill listing named every file under `skill/` —
   thousands, once the tool landed; it now names what the workspace carries.
-- Calibrated on **tsdl** (24.5k lines, TS 7): 205k facts in 4.3 s, every library
-  0.3–9.4 s, `checks.dl` clean.
+- **tsdl** (24.5k lines, TS 7): 205k facts in 5.7 s, libraries 0.3–9.4 s, clean.
 
 **Decided** (`spec.md` §17 2026-09-10; `notes/ts-facts.md`; experiments
 `decisions.md` 2026-09-11)
@@ -63,6 +60,12 @@ and clippy clean, experiments **1,661** green
 - The writer's header-only-CSV workaround for empty tables, once `010` was fixed.
 - `skill_body`'s directory-wide listing, including the wrapper it always listed
   and never copied.
+
+**Decided — *added 2026-09-11***
+- **`imports.runtime` comes from the emitter** (§17 amendment; P8). The user
+  asked whether import facts separate type from runtime imports: they did only
+  syntactically, and TypeScript elides any import whose bindings only annotate.
+  `runtime_dep` was wrong on every project not under `verbatimModuleSyntax`.
 
 **Next up**
 - **Point it at a real, larger codebase** than tsdl — a class-heavy one, since

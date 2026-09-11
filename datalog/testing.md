@@ -1384,5 +1384,11 @@ checker. Run counts: `TS_FACTS_RUNS` (P1/P3 default 200, the rest 25–40).
   `project_file` in compiler order.
 - [x] **P7** Schema: the writer rejects malformed rows; every table imports, and
   the engine's row count of each equals `relation_rows`.
+- [x] **P8** Import elision: `imports.runtime` is true exactly when TypeScript's
+  rule, restated (side-effect kept; `import type` never; under
+  `verbatimModuleSyntax` everything else kept; otherwise kept iff an unmarked
+  binding is used as a value), keeps the statement; guard: a plain import elided,
+  one kept, one kept by `verbatimModuleSyntax`, and an `import type`.
+  *Mutation:* `runtime` from syntax (`kind != type_only`) → red.
 - [x] `lib/checks.dl` finds no violation on every fixture, on ts-facts itself,
   and on `~/code/tsdl` when present.

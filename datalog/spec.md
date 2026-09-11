@@ -2570,6 +2570,12 @@ never say.
     by cost. The property layer (`testing.md`, *ts-facts*) found three extractor
     defects on its way in; real code found two more, and two engine defects
     (`bugs/resolved/010`, `011`).
+  - ***Amended 2026-09-11*** — **whether an import runs is the emitter's
+    answer** (`imports.runtime`, `notes/ts-facts.md`). `runtime_dep` had been
+    "not `import type`", but TypeScript elides any import whose bindings only
+    annotate, so it over-counted on every project not written under
+    `verbatimModuleSyntax` — the user's catch, not a test's. P8 restates the
+    elision rule as its oracle.
 
 - **2026-08-25** — **A diagnostic carries a stable code, and the code exists
   where the *fix* differs in kind** (§12; `ROADMAP.md`, *Machine-readable error

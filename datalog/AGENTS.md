@@ -132,7 +132,7 @@ agent guide: `skill/recipes/typescript.md`.
 cd skill/tools/ts-facts
 npm ci                     # typescript + fast-check (dev)
 npm run typecheck          # tsc over src/ and test/
-npm test                   # node:test; fixtures, properties P1–P7, checks.dl on tsdl if present
+npm test                   # node:test; fixtures, properties P1–P8, checks.dl on tsdl if present
 TS_FACTS_RUNS=500 npm test # more cases per property
 ```
 
