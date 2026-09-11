@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { extract, fixture } from "./helpers.ts";
+import * as fs from "node:fs";
+import { extract, fixture, tempDir, writeProject } from "./helpers.ts";
 
 const flow = extract(fixture("flow"), { layers: ["refs", "flow"] });
 const rows = (rel: string) => flow.tables.rows(rel);
@@ -36,6 +37,25 @@ test("cognitive complexity and nesting follow SonarSource's rules", () => {
   assert.equal(fnRow("loops")?.cognitive, 9); // for 1, nested if 2, ?? 1, for-of 1, nested if 2, while 1, do 1
   assert.equal(fnRow("loops")?.max_nesting, 2);
   assert.equal(fnRow("logic")?.cognitive, 3);
+});
+
+test("cognitive: an else-if or else body is one level deeper, like the if's", () => {
+  // SonarSource: `if`, `else if` and `else` all increment the nesting level, so
+  // each nested `if` below costs 2 (1 + nesting 1).
+  const dir = tempDir("cognitive");
+  writeProject(dir, {
+    "src/c.ts": [
+      "export function f(a: number): number {",
+      "  if (a > 1) { if (a > 2) return 1; }", // +1, nested +2
+      "  else if (a > 0) { if (a > 3) return 2; }", // +1, nested +2
+      "  else { if (a < -1) return 3; }", // +1, nested +2
+      "  return 0;",
+      "}",
+    ].join("\n"),
+  });
+  const r = extract(dir, { layers: ["refs", "flow"] });
+  assert.equal(r.tables.rows("fn").find((f) => f.id === "src/c.ts#f")?.cognitive, 9);
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test("counts: statements, returns, awaits, yields", () => {

@@ -638,7 +638,9 @@ function measure(fn: ts.Node, sf: ts.SourceFile): Metrics {
       const isElseIf = n.parent !== undefined && ts.isIfStatement(n.parent) && n.parent.elseStatement === n;
       m.cognitive += isElseIf ? 1 : 1 + cogNesting;
       if (n.elseStatement !== undefined && !ts.isIfStatement(n.elseStatement)) m.cognitive += 1;
-      const inner = isElseIf ? cogNesting : cogNesting + 1;
+      // An else-if is walked at its chain's level, so its body, like the if's
+      // and the else's, is one deeper.
+      const inner = cogNesting + 1;
       walk(n.expression, d, cogNesting);
       walk(n.thenStatement, d, inner);
       if (n.elseStatement !== undefined) walk(n.elseStatement, d, ts.isIfStatement(n.elseStatement) ? cogNesting : inner);
