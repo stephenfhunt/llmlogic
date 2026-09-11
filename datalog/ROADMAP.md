@@ -433,6 +433,12 @@ its ranking, not theirs.
   runtime error fires at all — so this is its own design session, not a patch.
   B5/C14 already assert the *answer* is order-invariant. _queued — **post-v1**._
   — §15/engine.
+- **An aggregate runs once per binding of the atom beside it, not per distinct
+  group key** — `calls(K, N) :- call_site(dispatch: K), N = count { … }` folds once
+  per call site. Projecting the key first (`dispatch_kind(K) :- call_site(dispatch:
+  K).`) took `code-analysis`'s `orient.dl` from **16.9 s to 1.2 s** on 205k facts
+  (2026-09-11); the engine could deduplicate group keys itself. Answers are
+  unaffected. _queued — **post-v1**._ — §9/engine.
 - **Interning / `Rc<str>` for values** — a **memory** item, not a time one.
   `Value::eq` plus libc `memcmp` is 2–3% of a run: the seek deletes the comparisons
   rather than making each cheaper, and symbol *length* was never the driver (16× the

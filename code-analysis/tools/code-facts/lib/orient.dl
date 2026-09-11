@@ -1,0 +1,55 @@
+% A first look at a fact base — run it directly, before asking anything:
+%
+%     ./datalog <out>/lib/orient.dl
+%
+% Size and shape, the most depended-on and most complex places, the runtime
+% import cycles, and the blind spots: how many calls and names the extractor
+% could not resolve, which is how much any "nothing calls X" answer can be
+% trusted. Every line is a place to start, not a finding.
+
+import "../schema/structure.dl".
+import "../schema/refs.dl".
+import "../schema/flow.dl".
+import "modgraph.dl".
+
+production_files(N) :- N = count { P | file(path: P, is_test: false, is_decl: false) }.
+test_files(N) :- N = count { P | file(path: P, is_test: true) }.
+code_lines(N) :- N = sum { L | file(path: P, sloc: L, is_test: false, is_decl: false) }.
+functions(N) :- N = count { F | fn(id: F, kind: K), K != module }.
+classes(N) :- N = count { C | symbol(id: C, kind: class, origin: project) }.
+exported_symbols(N) :- N = count { S | symbol(id: S, exported: true, origin: project) }.
+
+importers(F, N) :- file(path: F), N = count { A | dep(A, F) }.
+most_imported_count(M) :- M = max { N | importers(_, N) }.
+most_imported(F, N) :- most_imported_count(N), importers(F, N).
+
+most_complex_count(M) :- M = max { C | fn(cyclomatic: C) }.
+most_complex(F, C) :- most_complex_count(C), fn(id: F, cyclomatic: C).
+
+largest_count(M) :- M = max { L | file(sloc: L, is_test: false) }.
+largest_file(F, L) :- largest_count(L), file(path: F, sloc: L, is_test: false).
+
+runtime_reaches(A, B) :- runtime_dep(A, B).
+runtime_reaches(A, C) :- runtime_dep(A, B), runtime_reaches(B, C).
+in_runtime_cycle(F) :- runtime_reaches(F, F).
+files_in_runtime_cycles(N) :- N = count { F | in_runtime_cycle(F) }.
+
+% Group keys are projected first: an aggregate is evaluated per binding of the
+% atom beside it, so `call_site(dispatch: K), N = count { … }` counts once per
+% call site rather than once per dispatch kind.
+dispatch_kind(K) :- call_site(dispatch: K).
+calls(K, N) :- dispatch_kind(K), N = count { I | call_site(id: I, dispatch: K) }.
+unresolved_name_count(N) :- N = count { X | unresolved_ref(name: X) }.
+
+?- production_files(N).
+?- test_files(N).
+?- code_lines(N).
+?- functions(N).
+?- classes(N).
+?- exported_symbols(N).
+?- most_imported(F, N).
+?- most_complex(F, C).
+?- largest_file(F, L).
+?- files_in_runtime_cycles(N).
+?- calls(Dispatch, N).
+?- unresolved_name_count(N).

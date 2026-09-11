@@ -47,7 +47,8 @@ churn(F, A, D) :-
   A = sum { X | touch(sha: C, path_now: F, added: X), X is not absent, not bulk(C) },
   D = sum { Y | touch(sha: C, path_now: F, deleted: Y), Y is not absent, not bulk(C) }.
 
-author_commits(F, E, N) :- changed(_, F), commit(email: E), N = count { C | changed(C, F), commit(sha: C, email: E) }, N > 0.
+author_of(F, E) :- changed(C, F), commit(sha: C, email: E).
+author_commits(F, E, N) :- author_of(F, E), N = count { C | changed(C, F), commit(sha: C, email: E) }.
 main_author(F, E, S) :-
   author_commits(F, E, N), M = max { K | author_commits(F, _, K) }, N = M,
   revisions(F, R), S = N as float / R as float.

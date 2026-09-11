@@ -67,7 +67,8 @@ common_state(A, B, V) :- mutable_state(V), touches(A, V), touches(B, V), A < B, 
 % ── external ─────────────────────────────────────────────────────────────
 literal_spread_limit(5).
 string_in(V, F) :- literal(kind: string, value: V, file: F).
-spread(V, N) :- string_in(V, _), N = count { F | string_in(V, F) }.
+string_value(V) :- string_in(V, _).
+spread(V, N) :- string_value(V), N = count { F | string_in(V, F) }.
 shared_literal(FA, FB, V) :- string_in(V, FA), string_in(V, FB), FA < FB, spread(V, N), literal_spread_limit(L), N <= L.
 
 % ── control ──────────────────────────────────────────────────────────────
@@ -106,5 +107,6 @@ module_coupling(FA, FB, control) :- control_call(A, B, _), in_file(A, FA), in_fi
 module_coupling(FA, FB, stamp) :- stamp_call(A, B, _), in_file(A, FA), in_file(B, FB), FA != FB.
 module_coupling(FA, FB, data) :- data_call(A, B), in_file(A, FA), in_file(B, FB), FA != FB.
 
-coupling_rank(FA, FB, R) :- module_coupling(FA, FB, _), R = max { X | module_coupling(FA, FB, K), level_rank(K, X) }.
+coupled_pair(FA, FB) :- module_coupling(FA, FB, _).
+coupling_rank(FA, FB, R) :- coupled_pair(FA, FB), R = max { X | module_coupling(FA, FB, K), level_rank(K, X) }.
 worst_coupling(FA, FB, K) :- coupling_rank(FA, FB, R), level_rank(K, R).
