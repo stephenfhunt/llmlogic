@@ -1,0 +1,56 @@
+% Change coupling, from git history lined up with today's files (touch.path_now
+% follows renames). Commits touching more than `bulk_limit` files — reformats,
+% renames, dependency bumps — are left out of everything here; `commit.files`
+% has the raw number if you want them back.
+%
+%   changed(C, F)             commit C changed today's project file F
+%   revisions(F, N)           how many commits changed F
+%   cochange(A, B, N)         A and B changed together in N commits (A < B)
+%   confidence(A, B, X)       of the commits changing A, the fraction that also
+%                             changed B (asymmetric: a hub is rarely confident)
+%   hidden_coupling(A, B, N)  A and B co-change (N times) with no static link
+%                             in either direction — no import, and no symbol of
+%                             one referring to the other's (references resolve
+%                             through re-exports, so a barrel does not hide a
+%                             link). Coupling the code does not show. Filter on
+%                             N; 3 or more is a common start
+%   churn(F, Added, Deleted)  lines added and deleted over F's history (binary
+%                             changes have no line counts and are not in it)
+%   author_commits(F, Email, N)  who changed F, how often
+%   main_author(F, Email, Share) F's most frequent author and their share (float)
+%   first_change(F, T), last_change(F, T)   F's history span (timestamps)
+
+import "../schema/git.dl".
+import "../schema/refs.dl".
+import "modgraph.dl".
+
+bulk_limit(50).
+bulk(C) :- commit(sha: C, files: N), bulk_limit(L), N > L.
+changed(C, F) :- touch(sha: C, path_now: F), file(path: F), not bulk(C).
+
+revisions(F, N) :- file(path: F), N = count { C | changed(C, F) }.
+
+together(A, B) :- changed(C, A), changed(C, B), A < B.
+cochange(A, B, N) :- together(A, B), N = count { C | changed(C, A), changed(C, B) }.
+confidence(A, B, X) :- cochange(A, B, N), revisions(A, R), X = N as float / R as float.
+confidence(B, A, X) :- cochange(A, B, N), revisions(B, R), X = N as float / R as float.
+
+linked(A, B) :- dep(A, B).
+linked(A, B) :- dep(B, A).
+references(A, B) :- ref(from: S, to: T), symbol(id: S, file: A), symbol(id: T, file: B), A != B.
+linked(A, B) :- references(A, B).
+linked(A, B) :- references(B, A).
+hidden_coupling(A, B, N) :- cochange(A, B, N), not linked(A, B).
+
+churn(F, A, D) :-
+  file(path: F),
+  A = sum { X | touch(sha: C, path_now: F, added: X), X is not absent, not bulk(C) },
+  D = sum { Y | touch(sha: C, path_now: F, deleted: Y), Y is not absent, not bulk(C) }.
+
+author_commits(F, E, N) :- changed(_, F), commit(email: E), N = count { C | changed(C, F), commit(sha: C, email: E) }, N > 0.
+main_author(F, E, S) :-
+  author_commits(F, E, N), M = max { K | author_commits(F, _, K) }, N = M,
+  revisions(F, R), S = N as float / R as float.
+
+first_change(F, T) :- file(path: F), T = min { X | changed(C, F), commit(sha: C, time: X) }, T is not absent.
+last_change(F, T) :- file(path: F), T = max { X | changed(C, F), commit(sha: C, time: X) }, T is not absent.

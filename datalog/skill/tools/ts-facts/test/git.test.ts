@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { test } from "node:test";
-import { extract, tempDir, writeProject } from "./helpers.ts";
+import { datalog, engineAvailable, extract, tempDir, writeProject } from "./helpers.ts";
 
 function sh(cwd: string, ...args: string[]): void {
   execFileSync("git", args, {
@@ -70,4 +70,52 @@ test("git: a directory that is not a repository has no history, and says so by b
   const { tables } = extract(dir, { layers: ["git"] });
   assert.equal(tables.count("commit"), 0);
   assert.equal(tables.rows("extraction")[0]?.git_head, null);
+});
+
+test("cochange.dl: co-change counts, confidence, hidden coupling, churn and ownership", { skip: !engineAvailable() }, () => {
+  const dir = tempDir("cochange");
+  writeProject(dir, {
+    "src/a.ts": "export const a = 1;\n",
+    "src/b.ts": 'import { a } from "./a.js";\nexport const b = a;\n',
+    "src/c.ts": "export const c = 3;\n",
+  });
+  sh(dir, "init", "-q", "-b", "main");
+  sh(dir, "add", ".");
+  sh(dir, "commit", "-q", "-m", "start");
+  // a and c change together three times — and nothing imports between them.
+  for (let i = 0; i < 3; i++) {
+    fs.appendFileSync(path.join(dir, "src", "a.ts"), `export const a${i} = ${i};\n`);
+    fs.appendFileSync(path.join(dir, "src", "c.ts"), `export const c${i} = ${i};\n`);
+    sh(dir, "commit", "-q", "-am", `a and c ${i}`);
+  }
+  // a and b once, by someone else.
+  fs.appendFileSync(path.join(dir, "src", "a.ts"), "export const z = 0;\n");
+  fs.appendFileSync(path.join(dir, "src", "b.ts"), "export const y = 0;\n");
+  execFileSync("git", ["commit", "-q", "-am", "a and b"], {
+    cwd: dir,
+    stdio: "ignore",
+    env: { ...process.env, GIT_AUTHOR_NAME: "Bo", GIT_AUTHOR_EMAIL: "bo@example.com", GIT_COMMITTER_NAME: "Bo", GIT_COMMITTER_EMAIL: "bo@example.com" },
+  });
+  const out = path.join(dir, "out");
+  extract(dir, { out, layers: ["refs", "git"] });
+  const ask = (q: string) => datalog(path.join(out, "lib", "cochange.dl"), [q]).stdout.split("\n").filter((l) => l !== "");
+  assert.deepEqual(ask("cochange(A, B, N)"), [
+    'cochange("src/a.ts", "src/b.ts", 2).',
+    'cochange("src/a.ts", "src/c.ts", 4).',
+    'cochange("src/b.ts", "src/c.ts", 1).',
+  ]);
+  // The first commit added all three; b imports (and uses) a, so only a–c and b–c are hidden.
+  assert.deepEqual(ask("hidden_coupling(A, B, N)"), [
+    'hidden_coupling("src/a.ts", "src/c.ts", 4).',
+    'hidden_coupling("src/b.ts", "src/c.ts", 1).',
+  ]);
+  assert.deepEqual(ask('confidence("src/c.ts", B, X)'), ['confidence("src/c.ts", "src/a.ts", 1.0).', 'confidence("src/c.ts", "src/b.ts", 0.25).']);
+  assert.deepEqual(ask('revisions("src/a.ts", N)'), ['revisions("src/a.ts", 5).']);
+  assert.deepEqual(ask('churn("src/a.ts", A, D)'), ['churn("src/a.ts", 5, 0).']);
+  assert.deepEqual(ask('main_author("src/a.ts", E, S)'), ['main_author("src/a.ts", "ada@example.com", 0.8).']);
+  assert.deepEqual(ask('author_commits("src/b.ts", E, N)'), [
+    'author_commits("src/b.ts", "ada@example.com", 1).',
+    'author_commits("src/b.ts", "bo@example.com", 1).',
+  ]);
+  fs.rmSync(dir, { recursive: true, force: true });
 });
