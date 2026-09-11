@@ -151,17 +151,25 @@ both tsconfigs, 16-thread desktop:
 |---|---|
 | extract, all layers | 5.7 s — load 0.85, refs 1.8, structure 1.6 (its emit), quality 0.4, flow 0.3 |
 | facts | 204,865 in 61 relations; `var` 30k, `ref` 15k, `flow_node` 15k |
-| `lib/checks.dl` | 4.3 s, 519 MB, clean |
+| `lib/checks.dl` | 1.8 s, 319 MB, clean |
+| `orient.dl` | 0.9 s |
 | `modgraph.dl` cycles | 0.3 s |
-| `callgraph.dl` / `callreach.dl` closure | 0.9 s / 1.8 s |
-| `coupling.dl` | 3.3 s |
-| `flow.dl` dead stores | 9.4 s, 591 MB |
-| `dominators.dl` | 4.3 s |
+| `callgraph.dl` / `callreach.dl` closure | 0.7 s / 1.2 s |
+| `coupling.dl` | 1.7 s |
+| `flow.dl` dead stores | 7.9 s, 182 MB |
+| `dominators.dl` | 3.4 s |
 | `pointsto.dl` | 3.3 s |
 | `cochange.dl` | 2.3 s |
-| `cohesion.dl` with `module_lcom4` | 6.2 s |
-| `coupling_kinds.dl` | 12 s, 667 MB |
+| `cohesion.dl` with `module_lcom4` | 1.8 s |
+| `coupling_kinds.dl` | 3.3 s, 353 MB |
+| `metrics.dl` | 1.0 s |
 | `packages.dl` | 0.3 s |
+
+Re-measured 2026-09-11 after the re-keying and `Provenance::Reports` (§ At a
+million facts): every library is faster than it was and **every answer digest is
+unchanged**, checked library by library against the previous spellings on this
+same fact base. The largest moves were `coupling_kinds` 12 → 3.3 s,
+`cohesion` 6.2 → 1.8 s and `checks` 4.3 → 1.8 s.
 
 Findings, each verified against the source: `answer.ts ↔ eval.ts` is an import
 cycle, but through `import type` on both sides (so `runtime_dep` has none);
@@ -171,6 +179,88 @@ the test pins golden output that `answer.ts` renders, reached only through
 left are callbacks a library invokes (a Promise's `resolve`, fast-check's `tie`).
 
 ts-facts itself (6.5k lines): 87.6k facts in 2.4 s.
+
+## At a million facts
+
+VS Code 1.137.0 at `645f29cc`, `src/vs/base` — 155,801 lines across 485 files,
+**1,332,798 facts in 59 relations**, extracted in 17.7 s at 1.56 GB. 6.5× tsdl's
+facts. The sizing spike (`../../experiments/notes/code-design-pack.md`) found the
+libraries taking **100× the time for 6.5× the data** and blamed the aggregates.
+It was not the aggregates.
+
+**It was the seek's leading-prefix rule.** The engine's only index is a
+relation's own column order, and `seek::bound_prefix` stops at the first unbound
+column (`../../datalog/spec.md` §17 2026-08-21). So an atom that binds a column
+the relation does not lead with scans the whole relation, once per outer row.
+Every library over 30 s was over it for this reason:
+
+| rule | what it bound | what it scanned |
+|---|---|---|
+| `checks.dl`'s entry count | `flow_node`'s `fn`, `kind` — not `id` | 108,597 rows × 13,983 functions |
+| `checks.dl`'s `alloc.site` key | `alloc`'s `site` — not `var` | 25,381² |
+| `coupling.dl`'s `crossing` | `member`'s `File` — not `G` | 3,600 × 505 per ref, 99,881 refs |
+| `cohesion.dl`'s `method` | `symbol`'s `parent` — not `id` | 70,310 × 662 classes |
+| `cohesion.dl`'s `module_link` | `top_level`'s declaration — not its file | ~10k per ref |
+| `metrics.dl`'s `fan_in` | `call_edge`'s callee — not its caller | 177,793 × 13,983 |
+| `coupling_kinds.dl`'s `control_param` | `use`'s `var` — not its node | 57,312 × 12,429 params |
+
+**The fix is one rule per re-keying**, and `lib/keys.dl` is where the reason is
+written down: `child(P, S) :- symbol(id: S, parent: P).` and the rest
+(`file_member`, `called_by`, `entry_node`, `alloc_of`, `decl_file`, `access_of`,
+`used_at`, `touched_by`, `contains`, `extended_by`). Two of them took `checks.dl`
+from 199.6 s to 13.7 s with the answers byte-identical.
+
+**A re-keying is not free** — it materializes a copy of the relation — so it pays
+only where the scan it replaces is quadratic. `comp_edge_to` was written for
+`coupling.dl`'s `afferent`, measured at no gain against a scan of ~10⁷, and
+removed.
+
+Then the engine's share: an aggregate or a cast in any rule body used to
+provision the **full** derivation store for the whole program, to carry §9's skip
+count and §12's malformed count. `Provenance::Reports`
+(`../../datalog/spec.md` §17 2026-09-11) keeps only the derivations those counts
+are read from. Worth −32% time and −43% memory on `checks.dl`.
+
+| library | spike | now | peak RSS | rows | digest |
+|---|---:|---:|---:|---:|---|
+| `checks.dl` | 196 s | **9.3 s** | 1,804 MB | 42 | `60e0b1a60d91` |
+| `orient.dl` | 7.5 s | **4.9 s** | 1,077 MB | 15 | `34c4c8ec423e` |
+| `modgraph.dl` | 1.5 s | 1.5 s | 305 MB | 670 | `ea1bb455007d` |
+| `callgraph.dl` | 4.1 s | 4.9 s | 869 MB | 177,793 | `b4b166797098` |
+| `callreach.dl` | — | **38.0 s** | 4,087 MB | 4,391 | `0c2ef0341aa9` |
+| `coupling.dl` | 330 s | **27.2 s** | 1,073 MB | 5,973 | `ed0bce1f2667` |
+| `cohesion.dl` | 404 s | **28.2 s** | 2,328 MB | 2,489 | `e1c73e914963` |
+| `coupling_kinds.dl` | — | **24.6 s** | 2,029 MB | 60,399 | `cf3bffeab6d9` |
+| `metrics.dl` | — | **6.6 s** | 1,165 MB | 30,614 | `bb6aa0d4262f` |
+| `packages.dl` | — | 1.2 s | 288 MB | 190 | `7d103530aedf` |
+| `flow.dl` | — | 104.2 s | 989 MB | 118 | `3e51cdb30022` |
+| `dominators.dl` | — | 51.3 s | 1,086 MB | 2,950 | `0d84d957023c` |
+| `pointsto.dl` | — | **stopped at 104 s** | **23.7 GB** | — | — |
+
+Reproduce with `npm run bench -- --facts <dir>` (`tools/code-facts/bench/`),
+which prints this table. **The digest is the guard**: it is a sha256 of the
+library's answers to its own documented relations, and it did not move across any
+of the changes above — a speed-up that moves a row is not a speed-up.
+
+**Three libraries stayed expensive, and all three by construction** — each was
+audited for the leading-prefix trap and has none of it:
+
+- **`callreach.dl`, 38 s / 4.1 GB.** A whole-project call closure over 14k
+  functions and 178k edges is quadratic in the graph's density.
+  `callreach_seeded.dl` is the answer for a question about particular functions —
+  `taint.dl`'s idiom, a `seed/1` the caller supplies.
+- **`flow.dl`, 104 s**, and **`dominators.dl`, 51 s.** Reaching definitions and
+  liveness over 108,597 flow nodes and 90,511 edges; `rd_in`/`rd_out` are
+  node × definition × variable, which is the size of the analysis and not a
+  spelling of it.
+- **`pointsto.dl` does not fit: stopped at 104 s holding 23.7 GB.** A
+  flow-insensitive, field-based points-to over 179,748 variables and 25,381
+  allocation sites. It is the one library whose *question* has to change at this
+  scale — narrowed to a subtree, or to the variables a question names.
+
+So the playbook's own costs table has a ceiling in it now, and an agent working a
+repository this size should reach for the module and design libraries (all under
+30 s) before the flow ones.
 
 ## The Python frontend
 

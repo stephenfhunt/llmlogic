@@ -24,6 +24,63 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-11 (later still) — the library at a million facts: it was the seek, not the aggregates
+
+Picked up the `code_design` pack at step 1. The sizing spike blamed the
+aggregates; the measurement said otherwise, and the plan's own hypothesis went
+down with it.
+
+**Done** — **datalog 598 tests**, code-facts **108**, clippy and fmt clean
+- **It is the seek's leading-prefix rule.** `seek::bound_prefix` stops at the
+  first unbound column, so an atom binding a column its relation does not lead
+  with scans the whole relation once per outer row:
+  `count { E | flow_node(id: E, fn: F, kind: entry) }` is 108,597 rows × 13,983
+  functions. Every library over 30 s was over it for this and nothing else.
+- **The fix is one rule per re-keying, in the library** — `lib/keys.dl` (`child`)
+  plus `file_member`, `called_by`, `entry_node`, `alloc_of`, `decl_file`,
+  `access_of`, `used_at`, `touched_by`, `contains`. **`checks.dl` 199.6 s → 13.7 s
+  on two of them**, answers byte-identical.
+- **`Provenance::Reports`** (`datalog/`): an aggregate or a cast in any rule body
+  provisioned the *full* derivation store for the whole program to carry two
+  counts. Now it keeps only the derivations those counts are read from.
+- **`tools/code-facts/bench/`** times each library over a fact directory and
+  **digests its answers** — the guard that a speed-up did not move a row. It
+  did not, across every change here.
+- **On `vs/base` (1.33M facts):** `checks` 196 → **9.3 s**, `coupling` 330 →
+  **27.2**, `cohesion` 404 → **28.2**, `coupling_kinds` >289 → **24.6**,
+  `metrics` >79 → **6.6**, `orient` 7.5 → **4.9**. Table in
+  `code-analysis/notes/code-facts.md` § At a million facts.
+- **`callreach.dl` is the exception at 38 s / 4.1 GB** — a whole-project call
+  closure is quadratic in the graph's density and no re-keying touches it;
+  `callreach_seeded.dl` is the seeded form, `taint.dl`'s idiom.
+
+**Decided** (`datalog/spec.md` §17, `code-analysis/decisions.md`, both 2026-09-11)
+- **Secondary indexes stay rejected.** The rejected case is exactly what a real
+  corpus hit — and a program can re-key itself in one rule, which is cheaper than
+  a second copy of every relation. `keys.dl` states the rule for a reader.
+- **A re-keying is not free**; it pays only where the scan it replaces is
+  quadratic. `comp_edge_to` was written, measured at no gain, removed.
+- **`Reports` buys memory, not always time** — `cohesion` 35.3 → 28.2 s and
+  4.2 → 2.3 GB, but `coupling` 23.0 → 27.5 s for half the residency. A 900 s,
+  4 GB cell is short of the memory.
+- **E9's third claim is stated over the warnings, not over the predicate under
+  test** — an oracle built from `Derivation::reports` stayed green under its own
+  mutation.
+
+**Removed**
+- `comp_edge_to` (measured at no gain); the static per-rule gate on the reporting
+  walk (measured as noise, 9.4 → 9.3 s); from `checks.dl`, `coupling.dl`,
+  `cohesion.dl`, `metrics.dl` and `coupling_kinds.dl`, every scan-shaped join.
+
+**Next up**
+- **Pack step 2**: asset imports (`import './x.css'` resolved with no target, 42
+  in `vs/base`) and vendoring `@types/node` / `@types/mocha` — `checks.dl` clean
+  on `vs/base` is the gate before it is a corpus at all.
+- **The flow-layer libraries are now measured too** (`flow`, `dominators`,
+  `pointsto`); see the notes table for where they land and whether the playbook's
+  costs need a second pass.
+- Still open from the last session: a test file's process dying under load.
+
 ## 2026-09-11 (later) — `code-analysis/`: its own project and skill, and Python
 
 Asked whether a domain skill should package the extractor and the engine and

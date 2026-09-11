@@ -2553,6 +2553,42 @@ never say.
 
 ### Decisions
 
+- **2026-09-11** — **A program that only *reports* through provenance records
+  only the derivations the reports read** (§9/§12/§15; `Provenance::Reports`,
+  `Derivation::reports`). Third mode beside `Recorded` and `Unrecorded`, and an
+  amendment to 2026-08-21's *provisioned by demand* rather than a new principle:
+  the store was already gated on demand, and "skip but report" was demanding all
+  of it to carry two counts.
+  - **What it keeps** is a derivation with a premise that skipped an `absent`
+    input (§9) or lost a conversion on data (§12) — exactly what
+    `api::absent_skip_warnings` walks. **The deduplication key is unchanged**
+    (fact + `Derivation`), which is the whole of what 2026-07-24 and 2026-08-16
+    rest on, so every reported count is identical.
+  - **Measured on `code-analysis`'s libraries over VS Code's `vs/base` (1.33M
+    facts):** one cast rule, whose own work is one row per file, cost **+4.6 s and
+    +1.36 GB** by turning the full store on for `checks.dl`'s other 60 rules.
+    `checks.dl` is **9.3 s / 1.8 GB** against 13.8 s / 3.2 GB, `cohesion.dl`
+    **28.2 s / 2.3 GB** against 35.3 / 4.2.
+  - **It is not free on time — `coupling.dl` pays 27.5 s against 23.0 for half
+    the memory (1.07 GB against 2.10).** A kept derivation is *moved* into the
+    store and never dropped; a rejected one is dropped, and dropping it frees
+    seven premise tuples and their strings. So the mode trades allocator work for
+    residency, and wins outright only where the store it avoids was large enough
+    to pay for itself. Both directions are reported here because the memory is
+    what a 900 s, 4 GB cell is actually short of.
+  - **Gating the walk on a static per-rule "can this report at all"** was built
+    and **measured as noise** (9.4 s → 9.3 s) and removed — the same call
+    `notes/profile-2026-08-20.md` made about hoisting `literal_order`.
+  - **`?why` still records everything**, and anything but `Recorded` explains as
+    `Unrecorded` — a partial store must not be read as a proof. The `?whynot`
+    cross case tests `!= Recorded`, not `== Unrecorded`, or a program with an
+    aggregate would have built a proof out of the derivations that happened to
+    skip.
+  - **The guard is E9**, extended to all three modes — but its third claim is
+    stated over the **warnings**, not over `Derivation::reports`: an oracle built
+    from the predicate under test agrees with it forever, and mutating `reports`
+    to `false` was measured leaving such a claim green (`testing.md` E9).
+
 - **2026-09-10** — **The skill extracts TypeScript itself: `ts-facts`, on a pinned
   TypeScript 6.0, emitting primitives and leaving the measures to Datalog**
   (skill; `recipes/typescript.md`). The source-analysis dogfood found every wrong
@@ -2743,6 +2779,12 @@ never say.
     true of *answers* (E9) and was never true of *warnings*. A **query**'s
     aggregate is unaffected: `answer_reporting` hands its premises straight to the
     caller and nothing is stored.
+    - ***Amended 2026-09-11:*** it provisions `Provenance::Reports`, not the full
+      store. The amendment above was right that the reports are a provenance
+      surface and wrong that they need the whole recorder — they read two fields
+      off the premises of the derivations that skipped, and a program can skip in
+      none of them and still pay for every fact it derives. See this section's
+      2026-09-11 entry.
   - ***Consequences 2026-08-21 — a repair could fail to repair.*** E10's *a repair
     must repair* clause fired on its first run: a blocked pattern with a slot
     bound to `absent` rendered as `repair: add p(…, absent)`, and asserting that
@@ -2791,6 +2833,16 @@ never say.
     also serve a bound column that is not *leading* — worth 29× on a 3-way join
     written in the pessimal order — at a second copy of every relation, on top of
     a recorder already 78% of peak RSS. Filed on `ROADMAP.md` with that number.
+  - ***Consequences 2026-09-11 — the rejected half is what a real corpus hit, and
+    the program could pay it instead.*** On VS Code's `vs/base` (1.33M facts)
+    every `code-analysis` library over ~30 s was over it for this reason alone:
+    `count { E | flow_node(id: E, fn: F, kind: entry) }` binds columns 1 and 2 and
+    leaves column 0 free, so it scanned 108,597 rows per function, 13,983 times.
+    **`checks.dl` went 199.6 s → 13.7 s on two projection rules**, answers
+    byte-identical, and `coupling.dl` 330 s → 23 s on four. So the 29× estimate
+    was if anything low — and the fix a program can make for itself is one rule
+    per re-keying, which is why the index stays rejected and `code-analysis`'s
+    `lib/keys.dl` states the rule for a reader instead.
 
 - **2026-08-20** — **An aggregate is a fold over a multiset, so only its result
   is defined** (§9). `fold_aggregate` sorts its present values into §14 order

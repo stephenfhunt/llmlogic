@@ -20,7 +20,7 @@ the experiments measuring it measure one thing. Why the split:
 | `skill/` | the skill: `SKILL.md` (the playbook), `./datalog` and `./code-facts` wrappers, `reference/` |
 | `skill/reference/datalog.md` | **symlink** to `../datalog/skill/SKILL.md` — the language guide has one home |
 | `skill/reference/bring-your-own.md` | **symlink** to `../datalog/skill/recipes/source-analysis.md` — the experiments' `static_analysis` pack ships that file, so it stays in the datalog skill |
-| `tools/code-facts/` | the extractor: TypeScript source run by Node, a Python frontend, the rule library (`lib/`), tests |
+| `tools/code-facts/` | the extractor: TypeScript source run by Node, a Python frontend, the rule library (`lib/`), tests, `bench/` |
 | `package.sh` | builds the standalone bundle into `dist/` |
 | `decisions.md` | append-only decisions log (the amendment vocabulary is `../datalog/spec.md` §17's) |
 | `ROADMAP.md` | the item index |
@@ -35,7 +35,17 @@ npm ci                          # typescript + fast-check (dev)
 npm run typecheck               # tsc over src/ and test/
 npm test                        # fixtures, properties, checks.dl on tsdl if present
 CODE_FACTS_RUNS=500 npm test    # more cases per property
+npm run bench -- --facts <dir>  # time every library over an extracted fact
+                                # directory, and digest its answers
 ```
+
+**A change to `lib/` is a performance change until the bench says otherwise.**
+`bench/` prints wall clock, peak RSS and a sha256 of each library's answers to
+its own documented relations; the digest is what separates a speed-up from a
+different answer. Extract a fact directory outside the checkout first
+(`./skill/code-facts <tsconfig> -o ~/.cache/code-facts-bench/<name> --no-git`).
+The numbers to beat are in `notes/code-facts.md` § Calibration (tsdl) and § At a
+million facts (VS Code's `vs/base`).
 
 Needs **Node ≥ 22.18** (the source is run by type stripping); the Python
 frontend needs **Python ≥ 3.11**. Tests find the engine at `DATALOG_BIN` or

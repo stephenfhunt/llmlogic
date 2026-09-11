@@ -56,7 +56,11 @@ Two executables sit in this skill's directory: `code-facts` (the extractor) and
 
 Libraries are in `/tmp/facts/lib/`; each imports what it needs, and each costs
 what it imports, so import one. `reference/typescript.md` §3 lists every
-relation each derives, with measured times.
+relation each derives, with measured times on a 24k-line project **and on a
+156k-line one**. At that size the module and design libraries are seconds to
+half a minute, while `flow.dl`, `dominators.dl`, `callreach.dl` and
+`pointsto.dl` are minutes or do not fit — check the table before reaching for
+one, and narrow the question if you do.
 
 | concern | ask | where |
 |---|---|---|

@@ -75,7 +75,11 @@ project extracts in 4.3 s to 93k facts.
 
 ## 3. The library over Python facts
 
-Times on the project above (93k facts), including the import:
+Times on the project above (93k facts), including the import. What a large
+project costs, and the rule for writing your own rules over these facts — put the
+join key first, or the engine scans — are in
+[`typescript.md`](typescript.md) §3; both are about the engine and the schema,
+not the language.
 
 | file | time | over Python |
 |---|---|---|

@@ -425,7 +425,12 @@ its ranking, not theirs.
   actually uses — a second copy of every relation. The memory argument against it
   weakened 2026-08-21: the recorder is now paid only by a run that asks for a
   proof, so an index would no longer be stacked on 78% of peak RSS in the common
-  case. _queued — **post-v1**._ — §15/engine.
+  case. **This is the whole of `code-analysis`'s million-fact problem** (§17
+  2026-08-21, consequences 2026-09-11): every library over 30 s on VS Code's
+  `vs/base` was over it for this reason, and each was fixed *in the program* by
+  re-keying the relation — `checks.dl` 199.6 s → 13.7 s on two rules. So the
+  index stays rejected and the 29× is if anything low; what a program cannot
+  re-key is the case that reopens this. _queued — **post-v1**._ — §15/engine.
 - **Seeking makes body order matter more** — the same measurement, read the other
   way: good-vs-pessimal atom order cost **2.0×** before the seek and **29×** after.
   The scheduler runs positive atoms in strict source order with no cost model
@@ -438,7 +443,17 @@ its ranking, not theirs.
   per call site. Projecting the key first (`dispatch_kind(K) :- call_site(dispatch:
   K).`) took `code-analysis`'s `orient.dl` from **16.9 s to 1.2 s** on 205k facts
   (2026-09-11); the engine could deduplicate group keys itself. Answers are
-  unaffected. _queued — **post-v1**._ — §9/engine.
+  unaffected. **Not closed by 2026-09-11's reporting recorder**, which changes what
+  an aggregate *stores*, not how often it folds. _queued — **post-v1**._ —
+  §9/engine.
+- **A reporting run records only the derivations the reports read** — **shipped ✅
+  2026-09-11** (§17 that date; `Provenance::Reports`, `Derivation::reports`;
+  `testing.md` **E9**, now three-way). An aggregate or a cast in any rule body used
+  to provision the *full* store for the whole program to carry §9's skip count and
+  §12's malformed count. On 1.33M facts one cast rule cost **+4.6 s and +1.36 GB**;
+  `checks.dl` is **9.3 s / 1.8 GB** against 13.8 s / 3.2 GB. Counts byte-identical
+  — the deduplication key is unchanged. It buys **memory**, and not always time:
+  `coupling.dl` pays 27.5 s against 23.0 for half the residency. — §9/§12/engine.
 - **Interning / `Rc<str>` for values** — a **memory** item, not a time one.
   `Value::eq` plus libc `memcmp` is 2–3% of a run: the seek deletes the comparisons
   rather than making each cheaper, and symbol *length* was never the driver (16× the

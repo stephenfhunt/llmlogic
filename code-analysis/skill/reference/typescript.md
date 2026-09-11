@@ -61,25 +61,39 @@ allocation sites are integers.
 ## 3. The library
 
 Import the one you need, not all of them — evaluation computes everything a
-program imports (`bring-your-own.md` §2). Times are on the 24k-line project
-above (205k facts), including the import.
+program imports (`bring-your-own.md` §2). Two columns: the 24k-line project
+above (205k facts), and VS Code's `src/vs/base` (156k lines, **1.33M facts**) —
+the second is what a big repository costs, and the ratio is not the fact ratio.
+Both include the import.
 
-| file | what it derives | time |
-|---|---|---|
-| `checks.dl` | `violation(Check, Subject)` — the extractor contradicting itself | 4.3 s |
-| `modgraph.dl` | `file_dep`, `runtime_dep` (the imports emitted JavaScript keeps), `in_cycle`, `cycle_edge`, `unit_dep` (directories at any depth), `package_edge`, `external_dep` | 0.3 s |
-| `callgraph.dl` | `call_edge` (virtual calls expanded to every override), `call_edge_lexical` (a callback's calls counted as its enclosing function's), `called` | 0.9 s |
-| `callreach.dl` | `reaches`, `recursive`, `mutual` | 1.8 s |
-| `coupling.dl` | per component: `efferent`, `afferent`, `instability`, `abstractness`, `distance`, `sdp_violation`, `comp_edge_weight`; per type: `cbo` | 3.3 s |
-| `cohesion.dl` | per class: `lcom4`, `tcc`, `lcom_hs`; per file: `module_lcom4`, `module_component`; per component: `relational_cohesion` | 6.2 s |
-| `coupling_kinds.dl` | Myers' scale: `content_access`, `common_state`, `shared_literal`, `control_param`, `stamp_param`, `data_call`; per file pair `module_coupling`, `worst_coupling` | 12 s |
-| `packages.dl` | against package.json: `undeclared`, `unused`, `dev_in_production`, `only_in_tests`, `types_only` | 0.3 s |
-| `metrics.dl` | `dit`, `noc`, `wmc`, `rfc`, `fan_in`, `fan_out` | 1.7 s |
-| `flow.dl` | `reachable`, `unreachable`, `reaches_def`, `def_use`, `undefined_use`, `live_out`, `dead_store` | 8–9 s |
-| `dominators.dl` | `dominates`, `back_edge`, `loop_header` | 4.3 s |
-| `pointsto.dl` | `pts`, `heap`, `target`, `call_edge_pt` (indirect and structural calls resolved), `call_edge_pt_lexical`, `unresolved_call` | 3.3 s |
-| `taint.dl` | `tainted`, `tainted_sink` — you supply `source/1` and `sink/1` | pointsto + |
-| `cochange.dl` | `revisions`, `cochange`, `confidence`, `hidden_coupling`, `churn`, `author_commits`, `main_author`, `first_change`, `last_change` | 2.3 s |
+| file | what it derives | tsdl | `vs/base` |
+|---|---|---|---|
+| `checks.dl` | `violation(Check, Subject)` — the extractor contradicting itself | 1.8 s | 9.3 s |
+| `modgraph.dl` | `file_dep`, `runtime_dep` (the imports emitted JavaScript keeps), `in_cycle`, `cycle_edge`, `unit_dep` (directories at any depth), `package_edge`, `external_dep` | 0.3 s | 1.5 s |
+| `callgraph.dl` | `call_edge` (virtual calls expanded to every override), `call_edge_lexical` (a callback's calls counted as its enclosing function's), `called` | 0.7 s | 4.9 s |
+| `callreach.dl` | `reaches`, `recursive`, `mutual` — **the one that stays expensive**: a whole-project closure is quadratic in the call graph's density | 1.2 s | **38 s, 4.1 GB** |
+| `callreach_seeded.dl` | `reaches_from` — the same closure grown only from a `seed/1` you supply. Use it instead wherever the question names particular functions | — | — |
+| `coupling.dl` | per component: `efferent`, `afferent`, `instability`, `abstractness`, `distance`, `sdp_violation`, `comp_edge_weight`; per type: `cbo` | 1.7 s | 27 s |
+| `cohesion.dl` | per class: `lcom4`, `tcc`, `lcom_hs`; per file: `module_lcom4`, `module_component`; per component: `relational_cohesion` | 1.8 s | 28 s |
+| `coupling_kinds.dl` | Myers' scale: `content_access`, `common_state`, `shared_literal`, `control_param`, `stamp_param`, `data_call`; per file pair `module_coupling`, `worst_coupling` | 3.3 s | 25 s |
+| `packages.dl` | against package.json: `undeclared`, `unused`, `dev_in_production`, `only_in_tests`, `types_only` | 0.3 s | 1.2 s |
+| `metrics.dl` | `dit`, `noc`, `wmc`, `rfc`, `fan_in`, `fan_out` | 1.0 s | 6.6 s |
+| `flow.dl` | `reachable`, `unreachable`, `reaches_def`, `def_use`, `undefined_use`, `live_out`, `dead_store` | 7.9 s | **104 s** |
+| `dominators.dl` | `dominates`, `back_edge`, `loop_header` | 3.4 s | **51 s** |
+| `pointsto.dl` | `pts`, `heap`, `target`, `call_edge_pt` (indirect and structural calls resolved), `call_edge_pt_lexical`, `unresolved_call` | 3.3 s | **does not fit** — 23.7 GB and climbing at 104 s; narrow the question first |
+| `taint.dl` | `tainted`, `tainted_sink` — you supply `source/1` and `sink/1` | pointsto + | pointsto + |
+| `cochange.dl` | `revisions`, `cochange`, `confidence`, `hidden_coupling`, `churn`, `author_commits`, `main_author`, `first_change`, `last_change` | 2.3 s | no git history |
+
+**Writing your own rules? Put the join key first.** The engine indexes a relation
+by its own column order and seeks a **leading** prefix, stopping at the first
+unbound column, so an atom that binds a column the relation does not lead with
+scans the whole relation once per outer row. `symbol` leads with `id`, so
+`symbol(id: S, parent: P)` with only `P` known is a full scan of every symbol —
+which on a large project is the difference between seconds and minutes. Re-key it
+first: `child(P, S) :- symbol(id: S, parent: P).` and join on `child`.
+`lib/keys.dl` holds `child`, and each library carries the re-keyings it needs
+(`file_member`, `called_by`, `decl_file`, `access_of`, `used_at`). The copy is
+not free, so it pays where the scan it replaces is quadratic and not otherwise.
 
 **No classes? Use the module versions.** Much TypeScript has none — the project
 above has 0 classes and 94 exported functions — so `lcom4`, `wmc`, `dit` and
