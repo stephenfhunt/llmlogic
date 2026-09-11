@@ -24,6 +24,56 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-10 — `ts-facts`: a TypeScript project, extracted for the skill
+
+Asked for a maximalist tool in the skill's static-analysis section: point it at a
+tsconfig, get facts about everything from module relationships to code flow,
+useful for coupling, cohesion and questions no linter asks. Built as planned, in
+eleven commits, and it found two engine defects, which were fixed here when asked.
+
+**Done** — `skill/tools/ts-facts` (`./ts-facts`), **68 tool tests**, engine suite
+and clippy clean, experiments **1,661** green
+- **61 relations over seven layers**: structure, refs (checker-resolved call
+  sites with dispatch kinds), flow (a CFG per function, def/use, metrics),
+  dataflow (Doop-style), quality, git (renames followed to today's path).
+- **`lib/`, split by cost**: checks, modgraph, callgraph/callreach, coupling,
+  cohesion, metrics, flow, dominators, pointsto, taint, cochange.
+- **Properties P1–P7**, each mutation-verified (`testing.md`, *ts-facts*); P1 and
+  P5 execute generated programs in Node as their oracle.
+- **Engine:** `bugs/resolved/010` (an empty JSONL file would not import under a
+  schema) and `011` (a variable type clash named its union-find roots).
+- **Harness:** the local subject's skill listing named every file under `skill/` —
+  thousands, once the tool landed; it now names what the workspace carries.
+- Calibrated on **tsdl** (24.5k lines, TS 7): 205k facts in 4.3 s, every library
+  0.3–9.4 s, `checks.dl` clean.
+
+**Decided** (`spec.md` §17 2026-09-10; `notes/ts-facts.md`; experiments
+`decisions.md` 2026-09-11)
+- **TypeScript 6.0 pinned, in-process** — 7.0 has only an unstable IPC API.
+- **`src/schema.ts` is the schema's one home**; ids keyed by declaration position.
+- **Emit primitives, derive measures in Datalog**; a library's function-typed
+  callee is named as the target (2,843 of tsdl's 2,870 "indirect" calls were
+  vitest).
+- **Checking answers against the source found every call-graph trap.** Untested
+  exports on tsdl went 5 → 0 across library-invoked callbacks, callbacks in object
+  literals, and structural implementations CHA cannot see.
+  `hidden_coupling`'s top tsdl pair was real.
+
+**Removed**
+- The writer's header-only-CSV workaround for empty tables, once `010` was fixed.
+- `skill_body`'s directory-wide listing, including the wrapper it always listed
+  and never copied.
+
+**Next up**
+- **Point it at a real, larger codebase** than tsdl — a class-heavy one, since
+  tsdl has no classes and the cohesion library has only fixture evidence.
+- **One unexplained `npm test` failure**, seen once in ~25 full runs; capture the
+  next with the default reporter.
+- A TypeScript 7 backend when its API stabilizes; accessors, spread and instance
+  method values in the dataflow layer.
+- Unchanged from before: size the provenance run with `--repeats`; the
+  `SKILL.md` exit-code gap.
+
 ## 2026-08-31 (later ii) — Provenance-core questions, and a reach that is still zero
 
 Asked whether Haiku needs its own provenance test, whether we are set up for one,
@@ -136,57 +186,3 @@ the run, and the reason is more useful than the run would have been.**
 - **Part 2 unstarted**: provenance-core tasks (`critical-grant`,
   `minimal-repair`, `access-path`), keeping the set-equality answer contract.
 - Unchanged: `at-scale`, the mandate arm's `invoked` split, `scheduling`.
-
-## 2026-08-31 — The ladder found no rung: Haiku is over the whole generator range
-
-Asked for a small `prose` vs `engine` head-to-head on Haiku, to find where the
-engine starts to pay along size and difficulty. The axis does not exist for this
-subject.
-
-**Done** — **1,508 tests** (+28), ruff clean, offline grid renders
-- **`harness ladder`** — a slate chosen by construction and screened by nothing,
-  the opposite of `calibrate`: *which* items land in the band is itself a fact
-  about the rung. `MANIFEST_VERSION` 3 adds `selection`, so an unscreened slate's
-  `trials: 0` cannot be read as *the subject answered none of these*.
-- **`Record.difficulty`** and a **by-difficulty table** in every report, with
-  median wall and USD per rung — the number that sizes the next grid.
-- **Three instrument defects, each found by trying to use the thing:**
-  **`ontology` generated a different fixture in every process** (a dict built
-  from a set of strings fed `rng.choice` — the premise under *regenerated, not
-  stored*, invisible to 1,480 tests because a process agrees with itself);
-  **`--limit` and `--resume` could not be used together** though they are the
-  documented shape of a run, the staged sitting recording its own size as the
-  grid's; **the per-cell USD ceiling recorded nothing**, so `error_max_budget_usd`
-  would have graded `ERROR` and `resume` would have owed the cell forever.
-- **Three runs**: a controls gate (4/4 prose, 4/4 compliance, **no fabricated
-  import syntax** — the 14B's failure did not transfer), rung 1 staged, and the
-  88-cell ladder, halted by a session limit at 40 and resumed to 88.
-
-**Decided** (`decisions.md`, five entries + one open question;
-`hypotheses.md` addendum)
-- **80/80 in both arms on the measured slate**, 8/8 controls, **44/44
-  compliance**, zero cap-hits, zero truncations, $6.92. **`briefed − prose` is
-  +0 points at every rung** — and it is the pre-registered *upper bound*.
-- **Not a null about the engine; a statement about the slate.** Real, not a
-  grading artefact: d5 `delete-without-read` is a 262-row closure-then-negation
-  answer graded `missing=0 extra=0` against the plain-Python oracle, in 10 turns.
-- **The blocker is bracketed on both sides now.** The 14B is under the whole
-  range (14/7/5%), Haiku is over all of it, and there is no subject between them.
-- **Prose holds 5–6 turns from d1 to d5 while the engine arm climbs 8 → 12.5.**
-  Accuracy did not move along the axis; cost did.
-- **Open: nothing records how the `prose` arm answered.** The founding decision
-  names ad-hoc code as the honest counterfactual; `signals.py` counts the engine
-  and the `grep` escape and not that. On this run it is the whole mechanism.
-
-**Removed**
-- Nothing. The 16-cell staged sitting (`run-20260831T011829Z`) stays on disk
-  rather than being patched resumable: `results/` is append-only, and $1.26 is
-  the whole cost of that rule.
-
-**Next up**
-- **`at-scale` is the only axis left untested** — the track that defeats the
-  prose arm by construction rather than by structure, and the one place this
-  subject cannot bring its own script to bear on the whole fact base.
-- **A `wrote_script` signal before the next run**, not after: transcripts are not
-  persisted, so it is unrecoverable for anything on disk.
-- Unchanged: the `SKILL.md` gap, the mandate arm's `invoked` split, `scheduling`.
