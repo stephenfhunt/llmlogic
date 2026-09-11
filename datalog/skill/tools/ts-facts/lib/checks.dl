@@ -53,7 +53,7 @@ violation("implements.interface", I) :- implements(interface: I), not known(I).
 violation("overrides.member", M) :- overrides(member: M), not known(M).
 violation("overrides.base", B) :- overrides(base: B), not known(B).
 violation("member_access.member", M) :- member_access(member: M), not known(M).
-violation("member_access.class", C) :- member_access(class: C), not known(C).
+violation("member_access.owner", C) :- member_access(owner: C), not known(C).
 violation("type_ref.to", T) :- type_ref(to: T), not known(T).
 violation("symbol_type.symbol", S) :- symbol_type(symbol: S), not known(S).
 violation("a ref to a local escaped into ref", T) :- ref(to: T), symbol(id: T, kind: local).

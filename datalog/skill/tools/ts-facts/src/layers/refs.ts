@@ -160,10 +160,14 @@ function typePosition(node: ts.Node): string {
   return "other";
 }
 
-function isClassOrInterfaceId(ctx: Context, id: string | null | undefined): boolean {
+/** Types whose members `member_access` records: classes, interfaces, and object
+ * types — `type Config = { … }` and inline `{ … }` — which in a class-less
+ * codebase carry most of its records. */
+const MEMBER_OWNERS = new Set(["class", "interface", "type_alias", "type_literal"]);
+
+function isMemberOwner(ctx: Context, id: string | null | undefined): boolean {
   if (id === null || id === undefined) return false;
-  const k = ctx.kindOfId(id);
-  return k === "class" || k === "interface";
+  return MEMBER_OWNERS.has(ctx.kindOfId(id) ?? "");
 }
 
 export function extractRefs(ctx: Context): void {
@@ -240,15 +244,15 @@ function extractFile(ctx: Context, info: SourceInfo): void {
 
     if (kind === "type") t.add("type_ref", { from, to: id, position: typePosition(node), file, line });
 
-    // Member access on a project class or interface: the raw material of cohesion.
+    // Member access on a project type: the raw material of cohesion and stamp coupling.
     const tk = target?.kind;
     if (target !== undefined && target.origin === "project" && (tk === "property" || tk === "method" || tk === "getter" || tk === "setter") &&
-      isClassOrInterfaceId(ctx, target.parent) && !typeish && role !== "jsx") {
+      isMemberOwner(ctx, target.parent) && !typeish && role !== "jsx") {
       const p = node.parent;
       const viaThis = ts.isPropertyAccessExpression(p) && p.name === node &&
         (p.expression.kind === ts.SyntaxKind.ThisKeyword || p.expression.kind === ts.SyntaxKind.SuperKeyword);
       const mode = role === "call" ? "call" : accessMode(r);
-      t.add("member_access", { fn: from, member: id, class: target.parent, mode, via_this: viaThis, file, line });
+      t.add("member_access", { fn: from, member: id, owner: target.parent, mode, via_this: viaThis, file, line });
     }
   };
 

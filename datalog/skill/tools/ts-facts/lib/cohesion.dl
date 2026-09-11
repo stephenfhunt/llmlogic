@@ -30,10 +30,10 @@ field(C, F) :- is_class(C), symbol(id: F, parent: C, kind: property, is_static: 
 within(M, M) :- method(_, M).
 within(F, M) :- symbol(id: F, parent: P), within(P, M).
 
-uses(C, M, X) :- member_access(fn: F, member: X, class: C, via_this: true), within(F, M), method(C, M), field(C, X).
+uses(C, M, X) :- member_access(fn: F, member: X, owner: C, via_this: true), within(F, M), method(C, M), field(C, X).
 % Any touch of a sibling method counts — reading a getter is calling it, and a
 % method passed along as `this.m` is still used.
-calls_own(M, N) :- member_access(fn: F, member: N, class: C, via_this: true), within(F, M), method(C, M), method(C, N), M != N.
+calls_own(M, N) :- member_access(fn: F, member: N, owner: C, via_this: true), within(F, M), method(C, M), method(C, N), M != N.
 
 linked(M, N) :- uses(C, M, X), uses(C, N, X), M != N.
 linked(M, N) :- calls_own(M, N).

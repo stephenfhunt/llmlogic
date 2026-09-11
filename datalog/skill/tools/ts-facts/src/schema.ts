@@ -459,11 +459,13 @@ export const RELATIONS: readonly Relation[] = [
   {
     name: "member_access",
     layer: "refs",
-    doc: "A function touching a class member — the raw material of class cohesion.",
+    doc:
+      "A function touching a member of a project type — a class, an interface, an object type alias, or an inline object type. " +
+      "The raw material of class cohesion, and of stamp coupling (which of a record's fields a function actually reads).",
     columns: [
       col("fn", "string", "the accessing function (as `ref.from`)"),
       col("member", "string", ID),
-      col("class", "string", "the member's declaring class or interface"),
+      col("owner", "string", "the type declaring the member: a class, interface, type alias or inline object type"),
       oneOf("mode", ["read", "write", "readwrite", "call"], "how"),
       col("via_this", "bool", "accessed as `this.x` / `this.#x`"),
       col("file", "string", FILE),

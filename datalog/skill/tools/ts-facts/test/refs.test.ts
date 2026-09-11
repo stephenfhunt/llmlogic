@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { extract, fixture } from "./helpers.ts";
+import * as fs from "node:fs";
+import { extract, fixture, tempDir, writeProject } from "./helpers.ts";
 
 const refs = extract(fixture("refs"), { layers: ["refs"] });
 const rows = (rel: string) => refs.tables.rows(rel);
@@ -106,7 +107,7 @@ test("member access records mode and whether it went through this", () => {
     ],
   );
   const grow = rows("member_access").find((m) => m.member === "src/shapes.ts#Circle.grow");
-  assert.deepEqual([grow?.fn, grow?.mode, grow?.via_this, grow?.class], ["src/use.ts#main", "call", false, "src/shapes.ts#Circle"]);
+  assert.deepEqual([grow?.fn, grow?.mode, grow?.via_this, grow?.owner], ["src/use.ts#main", "call", false, "src/shapes.ts#Circle"]);
 });
 
 test("type_ref records the position a type is written in", () => {
@@ -144,4 +145,29 @@ test("a library's function-typed value is named as the target; a project's stays
     ["toBe", "virtual", "ext:../vendor/api.d.ts#Assertion.toBe"],
     ["toEqual", "virtual", "ext:../vendor/api.d.ts#Assertion.toEqual"],
   ]);
+});
+
+test("member access reaches object type aliases and inline object types, not only classes", () => {
+  const dir = tempDir("members");
+  writeProject(dir, {
+    "src/m.ts": [
+      "export type Config = { host: string; port: number; debug: boolean };",
+      "export interface Named { name: string }",
+      "export function connect(c: Config, n: Named, o: { retries: number }): string {",
+      "  return `${c.host}:${c.port} ${n.name} ${o.retries}`;",
+      "}",
+      "",
+    ].join("\n"),
+  });
+  const { tables } = extract(dir, { layers: ["refs"] });
+  assert.deepEqual(
+    tables.rows("member_access").map((m) => [m.member, m.owner, m.mode]),
+    [
+      ["src/m.ts#Config.host", "src/m.ts#Config", "read"],
+      ["src/m.ts#Config.port", "src/m.ts#Config", "read"],
+      ["src/m.ts#Named.name", "src/m.ts#Named", "read"],
+      ["src/m.ts#connect.<type@3:49>.retries", "src/m.ts#connect.<type@3:49>", "read"],
+    ],
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
 });
