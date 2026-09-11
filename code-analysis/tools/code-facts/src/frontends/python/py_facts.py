@@ -1314,12 +1314,9 @@ def main() -> int:
     if "refs" in layers:
         fe.emit_refs()
     if "flow" in layers or "quality" in layers:
-        try:
-            from py_flow import emit_flow_and_quality  # noqa: PLC0415 — the second half, beside this file
-        except ImportError:
-            emit_flow_and_quality = None
-        if emit_flow_and_quality is not None:
-            emit_flow_and_quality(fe, layers, emit)
+        from py_flow import emit_flow_and_quality  # noqa: PLC0415 — the second half, beside this file
+
+        emit_flow_and_quality(fe, layers, emit, sys.modules[__name__])
     fe.emit_symbols()
     flush()
     sys.stdout.write(json.dumps({"relation": "__counters__", "row": {"call_site": fe.next_call_site, "flow_node": fe.next_flow_node}}) + "\n")

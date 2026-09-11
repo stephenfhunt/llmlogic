@@ -194,3 +194,68 @@ test("a local rebound from itself (`x = x.next()`) resolves without recursing fo
   assert.equal(next?.dispatch, "unresolved");
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test("flow and quality: decisions, metrics, and what the authors suppressed or deferred", () => {
+  const dir = tempDir("py-quality");
+  writeFiles(dir, {
+    "q.py": [
+      "from typing import Any, cast",
+      "",
+      "async def fetch(x):",
+      "    return x",
+      "",
+      "def work(a, b: int, *rest):  # noqa: C901",
+      "    total = 0  # TODO: make it configurable",
+      "    for i in range(b):",
+      "        if a and i > 2:",
+      "            total += i",
+      "    try:",
+      "        fetch(a)",
+      "    except ValueError:",
+      "        pass",
+      "    except Exception as e:",
+      "        raise RuntimeError('wrapped') from e",
+      "    label = f'{total} items'",
+      "    return cast(int, total), {'key': 1.5}, label  # type: ignore[return-value]",
+      "",
+      "class K:",
+      "    def m(self, y):  # pragma: no cover",
+      "        return [z for z in y if z]",
+    ].join("\n"),
+  });
+  const r = extractPython(dir, { layers: ["refs", "flow", "quality"] });
+  const rows = (rel: string) => r.tables.rows(rel);
+  const fn = (id: string) => rows("fn").find((f) => f.id === id);
+  // for, if, and, two except clauses
+  assert.equal(fn("q.py#work")?.cyclomatic, 6);
+  assert.equal(fn("q.py#work")?.params, 3);
+  assert.equal(fn("q.py#K.m")?.params, 1, "a method's self is not counted");
+  assert.equal(fn("q.py#K.m")?.cyclomatic, 3, "a comprehension's for and if are decisions");
+  assert.equal(fn("q.py#<module>")?.kind, "module");
+  assert.deepEqual(
+    rows("lint_directive").map((d) => [d.line, d.tool, d.directive, d.rules]),
+    [
+      [6, "noqa", "ignore", "C901"],
+      [18, "mypy", "ignore", "return-value"],
+      [21, "coverage", "no cover", null],
+    ],
+  );
+  assert.deepEqual(rows("comment_marker").map((m) => [m.line, m.kind, m.text]), [[7, "todo", "make it configurable"]]);
+  assert.deepEqual(rows("catch_site").map((c) => [c.line, c.binds, c.empty, c.rethrows]), [
+    [13, false, true, false],
+    [15, true, false, true],
+  ]);
+  assert.deepEqual(rows("throw_site").map((t) => [t.fn, t.type]), [["q.py#work", "lib#RuntimeError"]]);
+  assert.deepEqual(rows("assertion").map((a) => [a.kind, a.to_type]), [["cast", "int"]]);
+  assert.equal(rows("floating_promise").length, 1, "fetch(a)'s coroutine is discarded");
+  const lits = rows("literal").map((l) => [l.kind, l.value]);
+  assert.ok(lits.some(([k, v]) => k === "string" && v === "wrapped"));
+  assert.ok(lits.some(([k, v]) => k === "template" && v === "{total} items"));
+  assert.ok(lits.some(([k, v]) => k === "number" && v === "1.5"));
+  assert.ok(!lits.some(([, v]) => v === "key"), "a dict key is a name, not a value");
+  assert.ok(!lits.some(([, v]) => v === "int"), "a cast's type is not a value");
+  const implicit = rows("any_site").filter((a) => a.kind === "implicit_param").map((a) => a.fn);
+  // `a` and `*rest` share a line, so their rows are one fact
+  assert.deepEqual(implicit.sort(), ["q.py#K.m", "q.py#fetch", "q.py#work"]);
+  fs.rmSync(dir, { recursive: true, force: true });
+});

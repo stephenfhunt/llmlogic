@@ -44,7 +44,11 @@ run: size its default run count from the measured per-run rate, not by eye.
   observations, function values, and values that can only have come through a
   field. *Mutations:* the heap-load rule removed → red (**green** before the heap
   guard and round-trip op existed — the first guard certified nothing about the
-  heap); the parameter rule removed → red.
+  heap); the parameter rule removed → red. The heap case was left to chance until
+  2026-09-11 and occurred in 32 of 400 runs — the guard failed about one suite in
+  30, the intermittent `npm test` failure the worklog had left unexplained. Each
+  function now round-trips a value through a field into `h`, which nothing else
+  writes (83 of 200 runs observe it).
 - [x] **P6** Determinism: permuting a tsconfig's `files` changes no output byte;
   guard: most runs actually reorder. *Mutation:* sources unsorted → red. Found
   `project_file` in compiler order.
@@ -75,6 +79,19 @@ run: size its default run count from the measured per-run rate, not by eye.
   breadth-first MRO (the frontend's first version) → red; depth-first → red;
   overrides against the first base only → red; no attribute through a module
   (`mod.Base`) → red.
+- [x] **P1-py** CFG soundness against real Python executions, P1's method with
+  Python's constructs: loop and `try` `else:`, typed and bare `except` (so an
+  exception can pass a clause that does not match), `with` whose `__exit__`
+  suppresses on some inputs, `match` with guards and a wildcard, `assert`; three
+  programs per run. Guard: back, break, continue, throw, finally, catch, case,
+  default and a catch's `on_false` all used, each else/elif/wildcard/typed-handler
+  probe reached, and a suppressing `with` followed by a normal return (the rarest,
+  an executed `continue`, in 35 of 200 runs). *Mutations:* implicit throws off →
+  red; `break` routed through the loop's `else` → red; `with` pushing no frame →
+  red; no propagation past the last typed clause → red; a guard folded into its
+  pattern's `case_test` → red — the frontend's first version, which P1-py found.
+- [x] **P3-py** Cyclomatic two ways for Python, on exception-free programs.
+  *Mutation:* a `match` guard's decision uncounted → red.
 - [x] `lib/checks.dl` finds no violation on every fixture, on code-facts itself,
   on `~/code/tsdl` when present, and on sqlparse when the experiments harness has
   cached it. On sqlparse the four `static_analysis` answers computed from the
