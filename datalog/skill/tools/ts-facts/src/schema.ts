@@ -418,7 +418,7 @@ export const RELATIONS: readonly Relation[] = [
       oneOf(
         "dispatch",
         ["static", "virtual", "indirect", "unresolved"],
-        "`virtual`: an instance member — expand through `overrides`; `indirect`: a function-typed value — see `callee_var`",
+        "`virtual`: an instance member — expand through `overrides`; `indirect`: a function-typed value in project code — see `callee_var` (a library's function-typed value is named as the target instead)",
       ),
       oneOf("kind", ["call", "new", "super", "tagged", "jsx", "decorator"], "syntactic form"),
       col("file", "string", FILE),

@@ -295,8 +295,14 @@ function extractFile(ctx: Context, info: SourceInfo): void {
       dispatch = callee !== null ? "static" : "unresolved";
     } else if (calleeSym !== undefined) {
       // A function-typed value — a parameter, variable or property holding one.
+      // Outside the project there is no value to follow (a library's facts
+      // stop at its declarations), so the declaration is the target: vitest's
+      // `expect(x).toBe(…)` calls `Assertion.toBe`, and says so.
       callee = ctx.idOfSymbol(calleeSym, checker) ?? null;
-      dispatch = callee !== null ? "indirect" : "unresolved";
+      const row = callee !== null ? ctx.symbolRow(callee) : undefined;
+      if (callee === null) dispatch = "unresolved";
+      else if (row !== undefined && row.origin !== "project") dispatch = row.kind === "property" || row.kind === "method" ? "virtual" : "static";
+      else dispatch = "indirect";
     }
     if (kind === "jsx") {
       // An element names its component (or intrinsic tag) directly.

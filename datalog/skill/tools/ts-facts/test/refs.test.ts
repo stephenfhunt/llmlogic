@@ -131,3 +131,17 @@ test("symbol_type records the checker's type", () => {
 test("nothing in the fixture is unresolved", () => {
   assert.deepEqual(rows("unresolved_ref"), []);
 });
+
+test("a library's function-typed value is named as the target; a project's stays indirect", () => {
+  const { tables } = extract(fixture("../fixtures-external/app"), { layers: ["refs"] });
+  const sites = tables.rows("call_site").map((c) => [c.callee_name, c.dispatch, c.callee]);
+  assert.deepEqual(sites.sort(), [
+    ["expect", "static", "ext:../vendor/api.d.ts#expect"],
+    ["expect", "static", "ext:../vendor/api.d.ts#expect"],
+    ["it", "static", "ext:../vendor/api.d.ts#it"],
+    ["run", "indirect", "src/app.ts#check.run"],
+    ["run", "indirect", "src/app.ts#check.run"],
+    ["toBe", "virtual", "ext:../vendor/api.d.ts#Assertion.toBe"],
+    ["toEqual", "virtual", "ext:../vendor/api.d.ts#Assertion.toEqual"],
+  ]);
+});

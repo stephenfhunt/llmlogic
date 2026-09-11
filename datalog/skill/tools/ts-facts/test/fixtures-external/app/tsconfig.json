@@ -1,0 +1,4 @@
+{
+  "compilerOptions": { "module": "nodenext", "moduleResolution": "nodenext", "strict": true, "noEmit": true, "noLib": true, "types": [] },
+  "files": ["src/app.ts"]
+}
