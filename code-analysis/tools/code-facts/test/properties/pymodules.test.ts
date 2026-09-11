@@ -4,9 +4,9 @@
 // The model is modgen's; only the rendering is Python. Each import is spelled
 // absolute or relative; a namespace import as `import a.b.m as ns`,
 // `from a.b import m as ns`, or plain `import a.b.m` called through the dotted
-// path; and a barrel re-exports through `__all__`. Some
-// runs have each package's __init__ import its own submodules — sqlparse's
-// shape, through which `from pkg import sub` has to still reach the submodule.
+// path; and a barrel re-exports through `__all__`. Three runs in four have each
+// package's __init__ import all its submodules — sqlparse's shape, through
+// which `from pkg import sub` has to still reach the submodule.
 
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
@@ -15,7 +15,10 @@ import fc from "fast-check";
 import { extractPython, tempDir, writeFiles } from "../helpers.ts";
 import { arbProject, fnName, normalizeCalls, type ProjectModel } from "./modgen.ts";
 
-const RUNS = Number.parseInt(process.env.CODE_FACTS_RUNS ?? "25", 10);
+// 40, not 25: the rarest guards (a plain `import a.b`, a submodule through an
+// __init__ that imports it) fire in about a quarter of runs each — measured
+// 105 and 124 of 400 — so a suite of 40 misses one about once in 10^5.
+const RUNS = Number.parseInt(process.env.CODE_FACTS_RUNS ?? "40", 10);
 
 const PACKAGES = ["src", "src/a", "src/b", "src/a/deep"];
 
@@ -45,15 +48,14 @@ interface Rendered {
   dotted: number;
 }
 
-function render(model: ProjectModel, withInits: boolean): Rendered {
+/** `spelling` picks each namespace import's spelling: 0–1 `from pkg import m as ns`, 2 `import a.b.m as ns`, 3 plain. */
+function render(model: ProjectModel, withInits: boolean, spelling: number[]): Rendered {
   const out: Rendered = { files: {}, imports: [], names: [], calls: [], relative: 0, fromPackage: 0, throughInit: 0, dotted: 0 };
-  const initImports = (k: number) => withInits && k % 2 === 0; // does m{k}'s package __init__ import it?
   const paths = model.files.map((f) => pyPath(f.path));
   const idOf = (k: number, j: number) => `${paths[k]}#${fnName(k, j)}`;
   const inits: Record<string, string[]> = Object.fromEntries(PACKAGES.map((p) => [p, []]));
   if (withInits) {
     paths.forEach((p, k) => {
-      if (!initImports(k)) return;
       const init = `${dirOf(p)}/__init__.py`;
       inits[dirOf(p)]?.push(`from . import m${k}`);
       out.imports.push([init, `.m${k}`, paths[k] ?? ""]);
@@ -78,14 +80,14 @@ function render(model: ProjectModel, withInits: boolean): Rendered {
         lines.push(`from ${spec} import ${fns.map(([k, j]) => fnName(k, j)).join(", ")}`);
         out.imports.push([me, spec, target]);
         for (const [k, j] of fns) out.names.push([me, fnName(k, j), fnName(k, j), idOf(k, j)]);
-      } else if ((i * 3 + imp.from) % 3 === 0) {
+      } else if (spelling[(i * 6 + imp.from) % spelling.length] === 2) {
         const spec = moduleParts(target).join(".");
         spelledRelative = false; // `import` is always absolute
         lines.push(`import ${spec} as ns${imp.from}`);
         prefix.set(imp.from, `ns${imp.from}`);
         out.imports.push([me, spec, target]);
         out.names.push([me, `ns${imp.from}`, "*", `${target}#<module>`]);
-      } else if ((i * 3 + imp.from) % 3 === 1) {
+      } else if (spelling[(i * 6 + imp.from) % spelling.length] === 3) {
         // `import src.a.m0` binds `src`, the top package; calls go through the whole path
         const spec = moduleParts(target).join(".");
         spelledRelative = false;
@@ -98,7 +100,7 @@ function render(model: ProjectModel, withInits: boolean): Rendered {
         const pkgSpec = spell(fromPkg, dirOf(target).split("/"), relative);
         const m = `m${imp.from}`;
         out.fromPackage++;
-        if (initImports(imp.from)) out.throughInit++;
+        if (withInits) out.throughInit++;
         lines.push(`from ${pkgSpec} import ${m} as ns${imp.from}`);
         prefix.set(imp.from, `ns${imp.from}`);
         out.imports.push([me, pkgSpec, `${dirOf(target)}/__init__.py`]);
@@ -143,9 +145,12 @@ test("P2-py: imports, imported names and calls are exactly the generated module 
   let throughInit = 0;
   let dotted = 0;
   fc.assert(
-    fc.property(arbProject, fc.boolean(), (raw, withInits) => {
+    // Three runs in four have every __init__ import its submodules: the guard on
+    // that case needs it common (at one in two, with half the submodules, it
+    // fired in 35 of 400 runs, and missed about one suite in ten).
+    fc.property(arbProject, fc.integer({ min: 0, max: 3 }), fc.array(fc.nat(3), { minLength: 36, maxLength: 36 }), (raw, inits, spelling) => {
       const model = normalizeCalls(raw);
-      const r = render(model, withInits);
+      const r = render(model, inits !== 0, spelling);
       const dir = tempDir("p2py");
       writeFiles(dir, r.files);
       const { tables } = extractPython(dir, { layers: ["refs"] });

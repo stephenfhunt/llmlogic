@@ -19,7 +19,9 @@ the tool moved here 2026-09-11. fast-check generators in
 `test/properties/`; `../datalog/testing.md`'s four rules apply as they do to the engine. P1 and P5 are
 **independent** oracles — Node executes the generated program — as is P4-py,
 where Python does; P2 and P4 restate the language (module resolution, member
-lookup) rather than calling the checker. Run counts: `CODE_FACTS_RUNS` (P1/P3 default 200, the rest 25–40).
+lookup) rather than calling the checker. Run counts: `CODE_FACTS_RUNS` (P1/P3 default 200, the rest 25–40). A
+non-vacuity guard that needs a shape to occur *once* is a coin flipped every
+run: size its default run count from the measured per-run rate, not by eye.
 
 - [x] **P1** CFG soundness against execution: every consecutive pair of probes in
   a real trace is a path through probe-free nodes of the extracted graph; guard:
@@ -58,8 +60,10 @@ lookup) rather than calling the checker. Run counts: `CODE_FACTS_RUNS` (P1/P3 de
   packages: `imports`, `import_name` and `call_site` equal the graph, with
   imports spelled absolute or relative, a namespace import as `import a.b as ns`,
   `from a import b as ns` or plain `import a.b`, a barrel via `__all__`, and
-  sometimes each `__init__` importing its own submodules; guard: each spelling
-  occurs, and a `from pkg import m` through an `__init__` that imports `m`.
+  usually each `__init__` importing its own submodules; guard: each spelling
+  occurs, and a `from pkg import m` through an `__init__` that imports `m` (40
+  runs by default: at 25, with that case rarer, the guard missed about one suite
+  in ten — an intermittent `npm test` failure).
   *Mutations:* the `__init__` self-import row kept → red; no fall-through to the
   submodule when a package's binding cycles → red; relative levels above one
   ignored → red; plain `import a.b` binding `a.b` rather than `a` → red.
