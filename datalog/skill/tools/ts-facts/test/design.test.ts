@@ -31,7 +31,7 @@ test("module cohesion: a file whose exports share nothing is several modules", {
     'module_lcom4("src/mixed.ts", 2).',
     'module_lcom4("src/server.ts", 2).',
     'module_lcom4("src/tight.ts", 1).',
-    'module_lcom4("test/format.test.ts", 1).',
+    'module_lcom4("test/format.check.ts", 1).',
   ]);
   assert.deepEqual(ask("cohesion.dl", 'module_component("src/mixed.ts", R, E)'), [
     'module_component("src/mixed.ts", "src/mixed.ts#later", "src/mixed.ts#later").',
@@ -63,7 +63,7 @@ test("coupling kinds: each of Myers' six, found where the fixture put it", { ski
   assert.deepEqual(ask("coupling_kinds.dl", "worst_coupling(A, B, K)"), [
     'worst_coupling("src/client.ts", "src/config.ts", content).',
     'worst_coupling("src/client.ts", "src/server.ts", common).',
-    'worst_coupling("test/format.test.ts", "src/format.ts", data).',
+    'worst_coupling("test/format.check.ts", "src/format.ts", data).',
   ]);
   assert.deepEqual(ask("coupling_kinds.dl", 'module_coupling("src/client.ts", "src/config.ts", K)'), [
     'module_coupling("src/client.ts", "src/config.ts", content).',
