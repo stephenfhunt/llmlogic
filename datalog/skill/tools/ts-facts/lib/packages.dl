@@ -1,0 +1,58 @@
+% Dependency hygiene: what each package.json declares, against what the
+% package's files import. A file belongs to its nearest package.json
+% (`file.package`); Node.js builtins are never dependencies.
+%
+%   imported(Pkg, Dep, File)            a file of Pkg imports package Dep
+%   imported_at_runtime(Pkg, Dep, File) ...and the import survives into
+%                                       JavaScript (`imports.runtime`)
+%   undeclared(Pkg, Dep, File)          imported, but in none of Pkg's
+%                                       dependency blocks (a type-only import
+%                                       is covered by `@types/Dep` too)
+%   unused(Pkg, Dep, Kind)              declared, imported by no file of Pkg. An
+%                                       `@types/` package counts as used when
+%                                       what it types is imported; a build tool
+%                                       that is run rather than imported
+%                                       (`typescript`, a linter) lands here too
+%   dev_in_production(Pkg, Dep, File)   a devDependency a non-test file imports
+%                                       at run time — it will not be installed
+%   only_in_tests(Pkg, Dep)             a dependency (not dev) that only test
+%                                       files import
+%   types_only(Pkg, Dep)                a dependency (not dev) every import of
+%                                       which is erased — it belongs in
+%                                       devDependencies
+
+import "../schema/structure.dl".
+
+imported(Pkg, Dep, F) :- imports(file: F, target_package: Dep, builtin: false), file(path: F, package: Pkg), Dep != Pkg.
+imported_at_runtime(Pkg, Dep, F) :-
+  imports(file: F, target_package: Dep, builtin: false, runtime: true), file(path: F, package: Pkg), Dep != Pkg.
+% Where the emitter could not say, fall back to what is written.
+imported_at_runtime(Pkg, Dep, F) :-
+  imports(file: F, target_package: Dep, builtin: false, runtime: R, kind: K), R is absent,
+  K != type_only, K != type_query, file(path: F, package: Pkg), Dep != Pkg.
+
+declared_as(Pkg, Dep, K) :- package_dep(package: Pkg, dep: Dep, kind: K).
+declared(Pkg, Dep) :- declared_as(Pkg, Dep, _).
+types_declared(Pkg, Dep) :- package_dep(package: Pkg, types_for: Dep).
+
+undeclared(Pkg, Dep, F) :- imported_at_runtime(Pkg, Dep, F), not declared(Pkg, Dep).
+undeclared(Pkg, Dep, F) :- imported(Pkg, Dep, F), not declared(Pkg, Dep), not types_declared(Pkg, Dep).
+
+used(Pkg, Dep) :- imported(Pkg, Dep, _).
+used(Pkg, T) :- package_dep(package: Pkg, dep: T, types_for: Dep), imported(Pkg, Dep, _).
+% @types/node types the builtins.
+used(Pkg, T) :- package_dep(package: Pkg, dep: T, types_for: "node"), imports(file: F, builtin: true), file(path: F, package: Pkg).
+unused(Pkg, Dep, K) :- declared_as(Pkg, Dep, K), not used(Pkg, Dep).
+
+runtime_dependency(Pkg, Dep) :- declared_as(Pkg, Dep, prod).
+runtime_dependency(Pkg, Dep) :- declared_as(Pkg, Dep, peer).
+runtime_dependency(Pkg, Dep) :- declared_as(Pkg, Dep, optional).
+dev_in_production(Pkg, Dep, F) :-
+  imported_at_runtime(Pkg, Dep, F), file(path: F, is_test: false),
+  declared_as(Pkg, Dep, dev), not runtime_dependency(Pkg, Dep).
+
+imported_by_production(Pkg, Dep) :- imported(Pkg, Dep, F), file(path: F, is_test: false).
+only_in_tests(Pkg, Dep) :- runtime_dependency(Pkg, Dep), imported(Pkg, Dep, _), not imported_by_production(Pkg, Dep).
+
+runtime_anywhere(Pkg, Dep) :- imported_at_runtime(Pkg, Dep, _).
+types_only(Pkg, Dep) :- runtime_dependency(Pkg, Dep), imported(Pkg, Dep, _), not runtime_anywhere(Pkg, Dep).

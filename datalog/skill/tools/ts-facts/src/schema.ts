@@ -248,6 +248,7 @@ export const RELATIONS: readonly Relation[] = [
       col("dep", "string", "the dependency's package name"),
       oneOf("kind", ["prod", "dev", "peer", "optional"], "which dependency block"),
       col("range", "string", "the version range as written"),
+      opt("types_for", "string", "for an `@types/` package, the package it types (`@types/node` → `node`)"),
     ],
   },
   {
@@ -280,6 +281,7 @@ export const RELATIONS: readonly Relation[] = [
       ),
       opt("target_file", "string", "the resolved file, when it is under the root"),
       opt("target_package", "string", "package name, for a specifier resolving outside the root (`node:fs` for builtins)"),
+      col("builtin", "bool", "the specifier names a Node.js builtin module (`fs`, `node:fs`)"),
       col("resolved", "bool", "the compiler resolved the specifier"),
     ],
   },

@@ -155,7 +155,7 @@ export function extractStructure(ctx: Context, packages: Packages): void {
     for (const [kind, deps] of blocks) {
       if (deps === null || typeof deps !== "object") continue;
       for (const [dep, range] of Object.entries(deps as Record<string, unknown>)) {
-        t.add("package_dep", { package: name, dep, kind, range: String(range) });
+        t.add("package_dep", { package: name, dep, kind, range: String(range), types_for: typesFor(dep) });
       }
     }
   }
@@ -165,6 +165,13 @@ export function extractStructure(ctx: Context, packages: Packages): void {
     extractExports(ctx, info);
     extractDeclarationDetail(ctx, info);
   }
+}
+
+/** The package an `@types/` package types: `@types/node` → `node`, `@types/a__b` → `@a/b`. */
+function typesFor(dep: string): string | null {
+  if (!dep.startsWith("@types/")) return null;
+  const typed = dep.slice("@types/".length);
+  return typed.includes("__") ? `@${typed.replace("__", "/")}` : typed;
 }
 
 function depthOf(dir: string): number {
@@ -244,7 +251,9 @@ function extractModuleEdges(ctx: Context, info: SourceInfo): void {
     if (kind === "dynamic" || kind === "require") runtime = true;
     else if (kind === "type_query") runtime = false;
     else runtime = emitted === undefined ? null : emitted.has(node);
-    t.add("imports", { file, line: lineOf(node, info.sf), specifier: specNode.text, kind, runtime, ...resolveSpecifier(ctx, info, specNode) });
+    const spec = specNode.text;
+    const builtin = !spec.startsWith(".") && !spec.startsWith("/") && isBuiltin(spec);
+    t.add("imports", { file, line: lineOf(node, info.sf), specifier: spec, kind, runtime, builtin, ...resolveSpecifier(ctx, info, specNode) });
   };
   const name = (node: ts.Node, local: string, imported: string, target: ts.Node | undefined, typeOnly: boolean) => {
     const sym = target !== undefined ? info.checker.getSymbolAtLocation(target) : undefined;

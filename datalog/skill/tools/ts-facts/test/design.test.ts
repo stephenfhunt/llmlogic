@@ -72,3 +72,24 @@ test("coupling kinds: each of Myers' six, found where the fixture put it", { ski
     'module_coupling("src/client.ts", "src/config.ts", stamp).',
   ]);
 });
+
+test("package hygiene: package.json against what the files import", { skip }, () => {
+  // node:fs is a builtin, left-pad is declared (with its @types), the rest are wrong one way each.
+  assert.deepEqual(ask("packages.dl", "undeclared(P, D, F)"), ['undeclared("design-fixture", "chalk", "src/format.ts").']);
+  assert.deepEqual(ask("packages.dl", "unused(P, D, K)"), ['unused("design-fixture", "unused-lib", prod).']);
+  assert.deepEqual(ask("packages.dl", "dev_in_production(P, D, F)"), ['dev_in_production("design-fixture", "dev-only", "src/format.ts").']);
+  assert.deepEqual(ask("packages.dl", "only_in_tests(P, D)"), ['only_in_tests("design-fixture", "only-in-tests").']);
+  // imported only with `import type`: erased, so it belongs in devDependencies
+  assert.deepEqual(ask("packages.dl", "types_only(P, D)"), ['types_only("design-fixture", "types-only-dep").']);
+});
+
+test("the extractor names builtins and what an @types package types", () => {
+  const { tables } = extract(fixture("design"), { layers: [] });
+  const fs = tables.rows("imports").find((r) => r.specifier === "node:fs");
+  assert.deepEqual([fs?.builtin, fs?.target_package], [true, "node:fs"]);
+  assert.equal(tables.rows("imports").find((r) => r.specifier === "chalk")?.builtin, false);
+  assert.deepEqual(
+    tables.rows("package_dep").filter((d) => d.types_for !== null).map((d) => [d.dep, d.types_for]),
+    [["@types/left-pad", "left-pad"]],
+  );
+});

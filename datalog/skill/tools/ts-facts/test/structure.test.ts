@@ -42,7 +42,7 @@ test("directories form a tree and every file has an ancestor at each depth", () 
 
 test("package.json is read for the package and its dependencies", () => {
   assert.deepEqual(rows("package"), [{ name: "basic-fixture", dir: ".", version: "1.0.0", private: true }]);
-  assert.deepEqual(rows("package_dep"), [{ package: "basic-fixture", dep: "left-pad", kind: "prod", range: "^1.3.0" }]);
+  assert.deepEqual(rows("package_dep"), [{ package: "basic-fixture", dep: "left-pad", kind: "prod", range: "^1.3.0", types_for: null }]);
 });
 
 test("imports: every module edge, its kind, and where it resolves", () => {
