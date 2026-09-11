@@ -32,3 +32,21 @@ export function main(): string {
   total([b], (s) => s.area());
   return b.describe();
 }
+
+export function wrapped(shapes: Shape[]): { count: number } {
+  return { count: shapes.map((s) => s.area()).length };
+}
+
+export interface Counter {
+  next(): number;
+}
+
+export function makeCounter(): Counter {
+  let n = 0;
+  const step = (): number => ++n;
+  return { next: () => step() };
+}
+
+export function useCounter(): number {
+  return makeCounter().next();
+}

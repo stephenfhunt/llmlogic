@@ -32,6 +32,8 @@ test("callgraph: a virtual call reaches every override of its declared target", 
   assert.deepEqual(ask(out, "callgraph.dl", 'declared(B) :- call_edge_declared("src/use.ts#Registry.handler", B)'), [
     'declared("src/shapes.ts#Shape.area").',
   ]);
+  // A callback inside an object literal still belongs to the enclosing function.
+  assert.ok(ask(out, "callgraph.dl", 'w(B) :- call_edge_lexical("src/use.ts#wrapped", B)').includes('w("src/shapes.ts#Shape.area").'));
   // main's callback calls Shape.area; lexically, main does too.
   assert.ok(ask(out, "callgraph.dl", 'm(B) :- call_edge_lexical("src/use.ts#main", B)').includes('m("src/shapes.ts#Circle.area").'));
   assert.ok(!ask(out, "callgraph.dl", 'm(B) :- call_edge("src/use.ts#main", B)').includes('m("src/shapes.ts#Circle.area").'));
@@ -69,9 +71,10 @@ test("coupling: Martin's metrics per file, CBO per type", { skip }, () => {
   ]);
   // shapes.ts: Shape and abstract Base over Shape, Base, Circle, Plain.
   assert.ok(ask(out, "coupling.dl", "abstractness(-1, C, A)").includes('abstractness(-1, "src/shapes.ts", 0.5).'));
+  // use.ts: Registry and the Counter interface → A = 0.5, I = 1 → |0.5 + 1 − 1|.
   assert.deepEqual(ask(out, "coupling.dl", "distance(-1, C, D)"), [
     'distance(-1, "src/shapes.ts", 0.5).',
-    'distance(-1, "src/use.ts", 0.0).',
+    'distance(-1, "src/use.ts", 0.5).',
   ]);
   assert.deepEqual(ask(out, "coupling.dl", "sdp_violation(G, A, B)"), []);
   // Base ↔ Shape (implements), Base ↔ Circle (new / extends); Shape ↔ Registry (types).
@@ -144,6 +147,14 @@ test("pointsto: an indirect call resolves to the callback passed in", { skip }, 
   // total(shapes, each) calls each(s); main passes an arrow — the only target.
   assert.deepEqual(ask(out, "pointsto.dl", 'e(F) :- call_edge_pt("src/use.ts#total", F)'), ['e("src/use.ts#main.<arrow@32:14>").']);
   assert.deepEqual(ask(out, "pointsto.dl", "unresolved_call(CS)"), []);
+  // An interface implemented by an object literal: CHA stops at the signature,
+  // points-to reaches the arrow (and, lexically, what the arrow calls).
+  assert.deepEqual(ask(out, "callgraph.dl", 'c(B) :- call_edge("src/use.ts#useCounter", B)'), [
+    'c("src/use.ts#Counter.next").',
+    'c("src/use.ts#makeCounter").',
+  ]);
+  assert.ok(ask(out, "pointsto.dl", 'p(B) :- call_edge_pt("src/use.ts#useCounter", B)').includes('p("src/use.ts#makeCounter.<object@47:10>.next").'));
+  assert.ok(ask(out, "pointsto.dl", 'p(B) :- call_edge_pt_lexical("src/use.ts#makeCounter.<object@47:10>.next", B)').includes('p("src/use.ts#makeCounter.step").'));
   // The Circle made in main reaches Registry.add's parameter through r.add(c).
   assert.deepEqual(
     ask(out, "pointsto.dl", 't(T) :- pts("src/use.ts#Registry.add.s", O), alloc(site: O, type: T)'),

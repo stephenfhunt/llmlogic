@@ -8,7 +8,10 @@
 %   call_edge_declared(A, B) the same without the expansion: the targets as
 %                            the checker resolved them
 %   call_edge_lexical(A, B)  call_edge, with calls made by anonymous callbacks
-%                            nested in A also counted as A's
+%                            nested in A also counted as A's — use it for
+%                            "does A (eventually) run B" wherever a callback is
+%                            handed to a library (map, then, forEach): the
+%                            library calls it, so no call_edge reaches it
 %   called(B)                B is the target of some call edge
 %
 % `indirect` calls (through a function-typed variable, parameter or property)
@@ -29,9 +32,16 @@ call_edge_declared(A, B) :- call_site(caller: A, callee: B, dispatch: virtual).
 call_edge(A, B) :- call_edge_declared(A, B).
 call_edge(A, M) :- call_site(caller: A, callee: B, dispatch: virtual), overridden_by(B, M).
 
+% An anonymous callback belongs to the nearest enclosing declaration with a
+% name, climbing through anonymous object literals on the way: in
+% `return { text: xs.map((x) => f(x)) }` the arrow's parent is the object, and
+% its calls are the enclosing function's.
 anonymous_fn(F) :- symbol(id: F, kind: function, name: "<arrow>").
 anonymous_fn(F) :- symbol(id: F, kind: function, name: "<function>").
-nested_anonymous(P, F) :- anonymous_fn(F), symbol(id: F, parent: P).
+anonymous_object(O) :- symbol(id: O, kind: object, name: "<object>").
+climb(F, P) :- anonymous_fn(F), symbol(id: F, parent: P).
+climb(F, Q) :- climb(F, P), anonymous_object(P), symbol(id: P, parent: Q).
+nested_anonymous(P, F) :- climb(F, P), not anonymous_object(P).
 nested_anonymous(P, F) :- nested_anonymous(P, X), nested_anonymous(X, F).
 
 call_edge_lexical(A, B) :- call_edge(A, B).

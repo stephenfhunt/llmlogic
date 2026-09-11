@@ -13,7 +13,13 @@
 %   target(CS, Fn)        call site CS may invoke function Fn — static and
 %                         virtual (CHA) targets, plus every function its callee
 %                         value points to
-%   call_edge_pt(A, Fn)   the call graph with indirect calls resolved
+%   call_edge_pt(A, Fn)   the call graph with indirect calls resolved — and
+%                         with calls through an interface reaching the object
+%                         literal that implements it structurally, which CHA
+%                         (lib/callgraph.dl) cannot see: it follows only
+%                         nominal `implements` and `extends`
+%   call_edge_pt_lexical(A, Fn)  the same, counting a nested callback's calls
+%                         as its enclosing function's (see call_edge_lexical)
 %   unresolved_call(CS)   an indirect call whose callee points to nothing known
 %   alloc_fn(Site, Fn)    Site is the function (or class) value Fn
 
@@ -43,5 +49,7 @@ pts(R, O) :- target(CS, F), formal_ret(fn: F, var: FR), actual_ret(call_site: CS
 pts(T, O) :- target(CS, F), this_var(fn: F, var: T), receiver(call_site: CS, var: R), pts(R, O).
 
 call_edge_pt(A, F) :- call_site(id: CS, caller: A), target(CS, F).
+call_edge_pt_lexical(A, F) :- call_edge_pt(A, F).
+call_edge_pt_lexical(A, F) :- nested_anonymous(A, X), call_edge_pt(X, F).
 has_target(CS) :- target(CS, _).
 unresolved_call(CS) :- call_site(id: CS, dispatch: indirect), not has_target(CS).
