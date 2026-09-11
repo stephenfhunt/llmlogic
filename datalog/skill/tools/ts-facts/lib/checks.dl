@@ -91,4 +91,13 @@ violation("this_var.fn", F) :- this_var(fn: F), not fn(id: F).
 violation("actual.call_site", S) :- extracted(refs), actual(call_site: C), not call_site(id: C), S = C as string.
 violation("alloc.site is not a key", S) :- alloc(site: O, var: A), alloc(site: O, var: B), A != B, S = O as string.
 
+% ── quality ──────────────────────────────────────────────────────────────
+violation("any_site.fn", F) :- any_site(fn: F), not known(F).
+violation("assertion.fn", F) :- assertion(fn: F), not known(F).
+violation("literal.fn", F) :- literal(fn: F), not known(F).
+violation("throw_site.type", T) :- throw_site(type: T), T is not absent, not known(T).
+violation("catch_site.fn", F) :- catch_site(fn: F), not known(F).
+violation("floating_promise.call_site", S) :- extracted(refs), floating_promise(call_site: C), not call_site(id: C), S = C as string.
+violation("diagnostic.file", F) :- diagnostic(file: F), F is not absent, not known_file(F).
+
 ?- violation(Check, Subject).

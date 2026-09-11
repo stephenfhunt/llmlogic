@@ -18,6 +18,12 @@ test("the writer rejects a row that does not match its relation", () => {
   assert.throws(() => t.add("nope", {}), /no relation/);
 });
 
+test("a string with a lone surrogate is written as well-formed Unicode", () => {
+  const t = new Tables();
+  t.add("comment_marker", { file: "a.ts", line: 1, kind: "todo", text: "bad \uD800 half" });
+  assert.equal(t.rows("comment_marker")[0]?.text, "bad \uFFFD half");
+});
+
 test("no symbol value in the schema is a reserved word or unwritable bare", () => {
   const reserved = new Set(["import", "as", "declare", "not", "true", "false", "absent", "is"]);
   for (const r of RELATIONS) {

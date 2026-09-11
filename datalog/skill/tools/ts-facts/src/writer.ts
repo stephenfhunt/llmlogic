@@ -141,7 +141,9 @@ function checkCell(rel: Relation, column: Column, value: Cell | undefined, row: 
   switch (column.type) {
     case "string":
       if (typeof value !== "string") throw new Error(`ts-facts: ${where()} must be a string`);
-      return value;
+      // A lone UTF-16 surrogate (a test fixture's "\uD800", say) has no UTF-8
+      // form; the reader rejects its JSON escape, so it becomes U+FFFD here.
+      return value.toWellFormed();
     case "int":
       if (typeof value !== "number" || !Number.isSafeInteger(value)) throw new Error(`ts-facts: ${where()} must be an integer`);
       return value;

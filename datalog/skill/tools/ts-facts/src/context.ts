@@ -25,9 +25,12 @@ export function colOf(node: ts.Node, sf: ts.SourceFile = node.getSourceFile()): 
 export function endLineOf(node: ts.Node, sf: ts.SourceFile = node.getSourceFile()): number {
   return sf.getLineAndCharacterOfPosition(node.getEnd()).line + 1;
 }
+/** Whitespace collapsed, and cut to at most `n` code points (never mid-pair). */
 export function truncate(s: string, n: number): string {
   const one = s.replace(/\s+/g, " ").trim();
-  return one.length <= n ? one : `${one.slice(0, n - 1)}…`;
+  if (one.length <= n) return one;
+  const points = [...one];
+  return points.length <= n ? one : `${points.slice(0, n - 1).join("")}…`;
 }
 
 /** Function-likes that can carry a body (signatures are not). */

@@ -3,8 +3,8 @@
   // stripping types, so only erasable syntax is allowed: no enums, namespaces,
   // or parameter properties.
   "compilerOptions": {
-    "target": "es2023",
-    "lib": ["es2023"],
+    "target": "es2024",
+    "lib": ["es2024"],
     "types": ["node"],
     "module": "nodenext",
     "moduleResolution": "nodenext",
