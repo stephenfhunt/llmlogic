@@ -53,6 +53,13 @@ inside(S, A) :- symbol(id: S, parent: P), inside(P, A).
 private_member(M) :- symbol(id: M, visibility: private).
 private_member(M) :- symbol(id: M, visibility: hash_private).
 content_access(A, M, C) :- member_access(fn: A, member: M, owner: C), private_member(M), not inside(A, C).
+% Python's `_x` is private by convention and reached into by anyone; a subclass
+% using its base's `_x` is the convention working, not content coupling.
+py_protected(M) :- symbol(id: M, visibility: protected, file: F), file(path: F, lang: py).
+descends(D, C) :- extends(child: D, parent: C).
+descends(D, C) :- extends(child: D, parent: X), descends(X, C).
+in_subclass(A, C) :- descends(D, C), inside(A, D).
+content_access(A, M, C) :- member_access(fn: A, member: M, owner: C), py_protected(M), not inside(A, C), not in_subclass(A, C).
 
 % ── common ───────────────────────────────────────────────────────────────
 module_variable(V) :- symbol(id: V, kind: variable, origin: project).
