@@ -33,6 +33,13 @@ function isDeclarationName(node: ts.Node): boolean {
   }
 }
 
+/** A string literal naming a member in brackets: `obj["key"]`. TypeScript lets
+ * this reach a `private` member, so it is where content coupling hides. */
+function isBracketMemberName(node: ts.Node): node is ts.StringLiteralLike {
+  const p = node.parent;
+  return ts.isStringLiteralLike(node) && p !== undefined && ts.isElementAccessExpression(p) && p.argumentExpression === node;
+}
+
 function isSkippedName(node: ts.Node): boolean {
   const p = node.parent;
   if (p === undefined) return true;
@@ -59,6 +66,7 @@ function roleNode(node: ts.Node): ts.Node {
   while (n.parent !== undefined) {
     const p = n.parent;
     if (ts.isPropertyAccessExpression(p) && p.name === n) n = p;
+    else if (ts.isElementAccessExpression(p) && p.argumentExpression === n) n = p;
     else if (ts.isQualifiedName(p) && p.right === n) n = p;
     else if (ts.isParenthesizedExpression(p) || ts.isNonNullExpression(p)) n = p;
     else break;
@@ -183,7 +191,7 @@ function extractFile(ctx: Context, info: SourceInfo): void {
   const typed = new Set<string>();
 
   const visit = (node: ts.Node): void => {
-    if (ts.isIdentifier(node) || ts.isPrivateIdentifier(node)) name(node);
+    if (ts.isIdentifier(node) || ts.isPrivateIdentifier(node) || isBracketMemberName(node)) name(node);
     if (ts.isCallExpression(node) || ts.isNewExpression(node) || ts.isTaggedTemplateExpression(node) ||
       ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node) ||
       (ts.isDecorator(node) && !ts.isCallExpression(node.expression))) {
@@ -194,7 +202,7 @@ function extractFile(ctx: Context, info: SourceInfo): void {
     ts.forEachChild(node, visit);
   };
 
-  const name = (node: ts.Identifier | ts.PrivateIdentifier): void => {
+  const name = (node: ts.Identifier | ts.PrivateIdentifier | ts.StringLiteralLike): void => {
     if (isSkippedName(node)) return;
     let sym: ts.Symbol | undefined;
     if (ts.isShorthandPropertyAssignment(node.parent) && node.parent.name === node) {
@@ -218,6 +226,7 @@ function extractFile(ctx: Context, info: SourceInfo): void {
         if (recv.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) return;
       }
       if (ts.isIdentifier(node) && (node.text === "undefined" || node.text === "arguments")) return;
+      if (isBracketMemberName(node)) return; // `record["key"]` on an index signature names no member
       const kind = role === "call" || role === "new" ? "call" : role === "jsx" ? "jsx" : typeish ? "type" : "read";
       t.add("unresolved_ref", { from, name: node.text, kind, file, line });
       return;
@@ -249,8 +258,11 @@ function extractFile(ctx: Context, info: SourceInfo): void {
     if (target !== undefined && target.origin === "project" && (tk === "property" || tk === "method" || tk === "getter" || tk === "setter") &&
       isMemberOwner(ctx, target.parent) && !typeish && role !== "jsx") {
       const p = node.parent;
-      const viaThis = ts.isPropertyAccessExpression(p) && p.name === node &&
-        (p.expression.kind === ts.SyntaxKind.ThisKeyword || p.expression.kind === ts.SyntaxKind.SuperKeyword);
+      const receiver = ts.isPropertyAccessExpression(p) && p.name === node ? p.expression
+        : ts.isElementAccessExpression(p) && p.argumentExpression === node ? p.expression
+          : undefined;
+      const viaThis = receiver !== undefined &&
+        (receiver.kind === ts.SyntaxKind.ThisKeyword || receiver.kind === ts.SyntaxKind.SuperKeyword);
       const mode = role === "call" ? "call" : accessMode(r);
       t.add("member_access", { fn: from, member: id, owner: target.parent, mode, via_this: viaThis, file, line });
     }

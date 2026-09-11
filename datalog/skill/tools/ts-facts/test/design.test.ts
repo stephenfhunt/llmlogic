@@ -40,3 +40,35 @@ test("module cohesion: a file whose exports share nothing is several modules", {
     'module_component("src/mixed.ts", "src/mixed.ts#recall", "src/mixed.ts#remember").',
   ]);
 });
+
+test("coupling kinds: each of Myers' six, found where the fixture put it", { skip }, () => {
+  // client.run reads Vault's private field by bracket access.
+  assert.deepEqual(ask("coupling_kinds.dl", "content_access(A, M, C)"), [
+    'content_access("src/client.ts#run", "src/config.ts#Vault.secret", "src/config.ts#Vault").',
+  ]);
+  // client.run writes state.hits, server.report reads it; tight.ts's `total` is shared only inside its file.
+  assert.deepEqual(ask("coupling_kinds.dl", "common_state(A, B, V)"), [
+    'common_state("src/client.ts#run", "src/server.ts#report", "src/config.ts#state").',
+  ]);
+  assert.deepEqual(ask("coupling_kinds.dl", "shared_literal(A, B, V)"), [
+    'shared_literal("src/client.ts", "src/server.ts", "application/json").',
+  ]);
+  assert.deepEqual(ask("coupling_kinds.dl", "control_param(F, P)"), [
+    'control_param("src/config.ts#render", "src/config.ts#render.verbose").',
+  ]);
+  // connect reads host of Config's four fields; address reads all four, so it is not stamp.
+  assert.deepEqual(ask("coupling_kinds.dl", "stamp_param(F, T, U, N)"), [
+    'stamp_param("src/config.ts#connect", "src/config.ts#Config", 1, 4).',
+  ]);
+  assert.deepEqual(ask("coupling_kinds.dl", "worst_coupling(A, B, K)"), [
+    'worst_coupling("src/client.ts", "src/config.ts", content).',
+    'worst_coupling("src/client.ts", "src/server.ts", common).',
+    'worst_coupling("test/format.test.ts", "src/format.ts", data).',
+  ]);
+  assert.deepEqual(ask("coupling_kinds.dl", 'module_coupling("src/client.ts", "src/config.ts", K)'), [
+    'module_coupling("src/client.ts", "src/config.ts", content).',
+    'module_coupling("src/client.ts", "src/config.ts", control).',
+    'module_coupling("src/client.ts", "src/config.ts", data).',
+    'module_coupling("src/client.ts", "src/config.ts", stamp).',
+  ]);
+});

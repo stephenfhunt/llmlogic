@@ -1,0 +1,110 @@
+% Coupling by kind — Myers' scale, strongest first, found in the facts rather
+% than counted from them. coupling.dl says *how much* two modules depend on
+% each other; this says *how*:
+%
+%   content   one module reaches into another's private state
+%             content_access(Fn, Member, Class): Fn, outside Class, touches a
+%             `private` member (bracket access, `obj["secret"]`, is allowed by
+%             TypeScript and is how this happens)
+%   common    two modules share mutable module-level state
+%             mutable_state(V): a module-level variable something writes — by
+%               reassignment, or through a field (`state.hits = …`)
+%             common_state(A, B, V): functions in two different files touch V
+%   external  two modules share a convention the code does not name
+%             shared_literal(FA, FB, Value): the same string literal in both
+%               (FA < FB), among literals in at most `literal_spread_limit` files —
+%               one used everywhere ("", ",") is vocabulary, not a convention
+%   control   a caller steers what its callee does
+%             control_param(Fn, P): a boolean parameter that decides a branch,
+%               or any parameter a `switch` is on — a switch on a discriminated
+%               union's tag included, which is often the design and not a flag
+%             control_call(A, B, P): A calls B, passing a flag into P
+%   stamp     a callee takes a whole record and uses part of it
+%             stamp_param(Fn, T, Used, Total): Fn takes a T (class, interface,
+%               object type) and touches Used of its Total members, Used < Total
+%             stamp_call(A, B, T): A calls such a B
+%   data      a callee takes only primitives
+%             data_call(A, B): every parameter of B is a primitive
+%
+% Rolled up per pair of files:
+%   module_coupling(FA, FB, Kind)   some coupling of that kind from FA to FB
+%   worst_coupling(FA, FB, Kind)    the strongest kind between them
+%
+% Heuristics, and where they bend: a parameter's type is judged from its
+% printed text (`symbol_type.text`), so "primitive" means exactly number,
+% string, boolean, bigint (optionally `| undefined`); stamp counts a member
+% touched anywhere in the function, not only through that parameter; calls are
+% call_edge (CHA), so a call through a function value is not here.
+% Needs the refs, flow, dataflow and quality layers.
+
+import "callgraph.dl".
+import "../schema/flow.dl".
+import "../schema/dataflow.dl".
+import "../schema/quality.dl".
+
+level_rank(content, 6). level_rank(common, 5). level_rank(external, 4).
+level_rank(control, 3). level_rank(stamp, 2). level_rank(data, 1).
+
+in_file(S, F) :- symbol(id: S, file: F).
+inside(S, S) :- symbol(id: S).
+inside(S, A) :- symbol(id: S, parent: P), inside(P, A).
+
+% ── content ──────────────────────────────────────────────────────────────
+private_member(M) :- symbol(id: M, visibility: private).
+private_member(M) :- symbol(id: M, visibility: hash_private).
+content_access(A, M, C) :- member_access(fn: A, member: M, owner: C), private_member(M), not inside(A, C).
+
+% ── common ───────────────────────────────────────────────────────────────
+module_variable(V) :- symbol(id: V, kind: variable, origin: project).
+writes(A, V) :- store(base: V, fn: A), module_variable(V).
+writes(A, V) :- def(node: N, var: V), flow_node(id: N, fn: A), module_variable(V), not symbol(id: A, kind: module).
+touches(A, V) :- writes(A, V).
+touches(A, V) :- load(base: V, fn: A), module_variable(V).
+touches(A, V) :- use(node: N, var: V), flow_node(id: N, fn: A), module_variable(V).
+mutable_state(V) :- writes(_, V).
+common_state(A, B, V) :- mutable_state(V), touches(A, V), touches(B, V), A < B, in_file(A, FA), in_file(B, FB), FA != FB.
+
+% ── external ─────────────────────────────────────────────────────────────
+literal_spread_limit(5).
+string_in(V, F) :- literal(kind: string, value: V, file: F).
+spread(V, N) :- string_in(V, _), N = count { F | string_in(V, F) }.
+shared_literal(FA, FB, V) :- string_in(V, FA), string_in(V, FB), FA < FB, spread(V, N), literal_spread_limit(L), N <= L.
+
+% ── control ──────────────────────────────────────────────────────────────
+boolean_text("boolean"). boolean_text("boolean | undefined").
+branch_node(cond). branch_node(loop_head).
+control_param(F, P) :-
+  param(fn: F, symbol: P), symbol_type(symbol: P, text: T), boolean_text(T),
+  use(node: N, var: P), flow_node(id: N, fn: F, kind: K), branch_node(K).
+control_param(F, P) :- param(fn: F, symbol: P), use(node: N, var: P), flow_node(id: N, fn: F, kind: switch).
+control_call(A, B, P) :- call_edge(A, B), control_param(B, P).
+
+% ── stamp ────────────────────────────────────────────────────────────────
+record_kind(class). record_kind(interface). record_kind(type_alias).
+member_kind(property). member_kind(method). member_kind(getter). member_kind(setter).
+member_of(T, M) :- symbol(id: M, parent: T, kind: K), member_kind(K).
+takes(F, T) :- type_ref(from: F, to: T, position: param), symbol(id: T, kind: K, origin: project), record_kind(K), fn(id: F).
+touched(F, T, M) :- takes(F, T), member_access(fn: X, member: M, owner: T), inside(X, F).
+stamp_param(F, T, U, N) :-
+  takes(F, T), N = count { M | member_of(T, M) },
+  U = count { M | touched(F, T, M) }, U < N.
+stamp_call(A, B, T) :- call_edge(A, B), stamp_param(B, T, _, _).
+
+% ── data ─────────────────────────────────────────────────────────────────
+primitive_text("number"). primitive_text("string"). primitive_text("boolean"). primitive_text("bigint").
+primitive_text("number | undefined"). primitive_text("string | undefined").
+primitive_text("boolean | undefined"). primitive_text("bigint | undefined").
+primitive_param(P) :- symbol_type(symbol: P, text: T), primitive_text(T).
+structured_param(B) :- param(fn: B, symbol: P), not primitive_param(P).
+data_call(A, B) :- call_edge(A, B), symbol(id: B, origin: project), not structured_param(B).
+
+% ── per pair of files ────────────────────────────────────────────────────
+module_coupling(FA, FB, content) :- content_access(A, _, C), in_file(A, FA), in_file(C, FB), FA != FB.
+module_coupling(FA, FB, common) :- common_state(A, B, _), in_file(A, FA), in_file(B, FB).
+module_coupling(FA, FB, external) :- shared_literal(FA, FB, _).
+module_coupling(FA, FB, control) :- control_call(A, B, _), in_file(A, FA), in_file(B, FB), FA != FB.
+module_coupling(FA, FB, stamp) :- stamp_call(A, B, _), in_file(A, FA), in_file(B, FB), FA != FB.
+module_coupling(FA, FB, data) :- data_call(A, B), in_file(A, FA), in_file(B, FB), FA != FB.
+
+coupling_rank(FA, FB, R) :- module_coupling(FA, FB, _), R = max { X | module_coupling(FA, FB, K), level_rank(K, X) }.
+worst_coupling(FA, FB, K) :- coupling_rank(FA, FB, R), level_rank(K, R).
