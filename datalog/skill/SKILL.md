@@ -258,8 +258,7 @@ DL
 ## More
 
 - **Recipes** for whole use cases — `recipes/source-analysis.md` (analysing a
-  codebase: extract facts with a real parser, import, ask; the traps), and
-  `recipes/typescript.md` (a TypeScript project: `./ts-facts` extracts it for you).
+  codebase: extract facts with a real parser, import, ask; the traps).
 - Full usage guide: [`../docs/agent-skill.md`](../docs/agent-skill.md).
 - Canonical example programs (recursion, negation, arithmetic, named args):
   `../spec.md` §16 and `../tests/programs/*.dl`.

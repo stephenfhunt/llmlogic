@@ -14,10 +14,10 @@ export const FIXTURES = path.join(TOOL_DIR, "test", "fixtures");
 export const FIXED_TIME = new Date("2026-01-01T00:00:00Z");
 
 export const DATALOG =
-  process.env.DATALOG_BIN ?? path.resolve(TOOL_DIR, "..", "..", "..", "target", "release", "datalog");
+  process.env.DATALOG_BIN ?? path.resolve(TOOL_DIR, "..", "..", "..", "datalog", "target", "release", "datalog");
 
 export function tempDir(label: string): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), `ts-facts-${label}-`));
+  return fs.mkdtempSync(path.join(os.tmpdir(), `code-facts-${label}-`));
 }
 
 /** Extract a project directory (its tsconfig.json) with the root pinned to it. */

@@ -22,7 +22,7 @@ import { extract, tempDir, writeProject } from "../helpers.ts";
 // P1's non-vacuity guard needs rare shapes (a break taken between two probes, a
 // caught exception) to occur somewhere in the sample: at 40 programs it missed
 // one about a run in four, at 200 it has not missed in 40 runs.
-const RUNS = Number.parseInt(process.env.TS_FACTS_RUNS ?? "200", 10);
+const RUNS = Number.parseInt(process.env.CODE_FACTS_RUNS ?? "200", 10);
 
 type Stmt =
   | { t: "probe" }

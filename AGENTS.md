@@ -12,6 +12,7 @@ and its own `AGENTS.md` describing how to work in it.
 | project | what it is |
 |---|---|
 | [`datalog/`](datalog/AGENTS.md) | a Datalog engine in Rust, targeted at LLM/agent use, with convenient import of fact tables from external sources. The first project. |
+| [`code-analysis/`](code-analysis/AGENTS.md) | a Claude Code skill for analysing a codebase's design with the engine: `code-facts` extracts TypeScript and Python source and git history into facts, a rule library derives coupling, cohesion, cycles, dead code and change coupling, and the skill is a playbook for exploring them. |
 | [`experiments/`](experiments/AGENTS.md) | a Python harness that measures whether an agent answers more accurately **with** a logic engine than without one. The instrument for `datalog`'s S1, and the repo's own validity question. |
 
 Future projects (other Rust crates, Python packages) get their own top-level

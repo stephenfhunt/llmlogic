@@ -1,10 +1,12 @@
-# ts-facts — a TypeScript project as Datalog facts
+# code-facts — a codebase as Datalog facts
 
-Overflow for `spec.md` §17 2026-09-10. The tool is `skill/tools/ts-facts`, run as
-`skill/ts-facts`; the agent-facing guide is `skill/recipes/typescript.md`, and the
-fact schema's one normative home is `src/schema.ts` (every output also carries a
-generated `SCHEMA.md`). This note is the *why*: what was decided, what was
-rejected, and what the tests found.
+Overflow for `../datalog/spec.md` §17 2026-09-10 and `../decisions.md`. The tool
+is `tools/code-facts`, run as `skill/code-facts`; the agent-facing guide is
+`skill/reference/typescript.md`, and the fact schema's one normative home is
+`src/schema.ts` (every output also carries a generated `SCHEMA.md`). It was
+`ts-facts`, living in the datalog skill, until 2026-09-11 (`../decisions.md`);
+the history below keeps that name where it was the name. This note is the
+*why*: what was decided, what was rejected, and what the tests found.
 
 ## What it is for
 
@@ -39,9 +41,10 @@ tsconfig), so nothing needs a transform. The tool typechecks itself and is its
 own realistic corpus. *Rejected:* plain JS with JSDoc (a checker-heavy codebase
 wants the checker), and committed compiled JS (a build artifact to keep in step).
 
-**It lives in the skill** (`skill/tools/ts-facts`), because it is part of the
-deliverable: `cargo package-skill` ships it (without `test/` or dev packages) and
-vendors its TypeScript. Its tests live beside it and run with `npm test`.
+**It ships with a skill** — first the datalog skill's, and from 2026-09-11 the
+`code-analysis` skill's (`../decisions.md`), whose `package.sh` bundles it
+without `test/` or dev packages and vendors its TypeScript. Its tests live beside
+it and run with `npm test`.
 
 **Output is JSONL plus generated import headers**, not inline `.dl` facts: the
 recipe's own lesson is that bulk facts belong in imports (28k facts in 0.32 s),
@@ -119,7 +122,7 @@ them out.
 
 ## What the tests found
 
-The property layer (catalog in `testing.md`, *ts-facts*) paid for itself on the
+The property layer (catalog in `../testing.md`) paid for itself on the
 way in. P1 runs generated programs in Node and requires every step of the real
 trace to be a CFG path: it found **a `for…of` head that re-evaluated its
 iterable** each iteration. P3 (cyclomatic = E − N + 2) found **parallel branch

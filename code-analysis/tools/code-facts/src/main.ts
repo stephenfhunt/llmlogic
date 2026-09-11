@@ -1,6 +1,6 @@
-// ts-facts — extract a TypeScript project into Datalog fact tables.
+// code-facts — extract a TypeScript project into Datalog fact tables.
 //
-//   ts-facts <tsconfig>... [-o DIR] [--root DIR] [--layers L,...] [--no-git]
+//   code-facts <tsconfig>... [-o DIR] [--root DIR] [--layers L,...] [--no-git]
 //            [--git-since DATE] [--git-max-commits N] [--exclude GLOB]...
 //
 // `run()` is the whole pipeline and is what the tests call; the CLI below only
@@ -53,7 +53,7 @@ export function run(opts: Options): Result {
     const v = f();
     const ms = performance.now() - start;
     timings.push([label, ms]);
-    log(`ts-facts: ${label} ${(ms / 1000).toFixed(2)}s`);
+    log(`code-facts: ${label} ${(ms / 1000).toFixed(2)}s`);
     return v;
   };
 
@@ -91,9 +91,9 @@ export function run(opts: Options): Result {
 
 function usage(): string {
   return [
-    "usage: ts-facts <tsconfig.json | dir>... [options]",
+    "usage: code-facts <tsconfig.json | dir>... [options]",
     "",
-    "  -o, --out DIR          output directory (default ./ts-facts-out)",
+    "  -o, --out DIR          output directory (default ./code-facts-out)",
     "  --root DIR             root every path is relative to (default: the git top-level)",
     `  --layers L,...         layers to extract (default all: ${OPTIONAL_LAYERS.join(",")}); structure always runs`,
     "  --no-git               skip the git history layer",
@@ -108,14 +108,14 @@ function usage(): string {
 function parseArgs(argv: string[]): Options {
   const tsconfigs: string[] = [];
   const exclude: string[] = [];
-  let out = "ts-facts-out";
+  let out = "code-facts-out";
   let root: string | undefined;
   let layers = new Set<Layer>(LAYERS);
   let gitSince: string | undefined;
   let gitMaxCommits: number | undefined;
   const value = (i: number, flag: string): string => {
     const v = argv[i];
-    if (v === undefined) throw new Error(`ts-facts: ${flag} needs a value`);
+    if (v === undefined) throw new Error(`code-facts: ${flag} needs a value`);
     return v;
   };
   for (let i = 0; i < argv.length; i++) {
@@ -136,14 +136,14 @@ function parseArgs(argv: string[]): Options {
         .filter((s) => s !== "");
       for (const w of wanted) {
         if (!(OPTIONAL_LAYERS as readonly string[]).includes(w) && w !== "structure") {
-          throw new Error(`ts-facts: unknown layer \`${w}\` (layers: structure,${OPTIONAL_LAYERS.join(",")})`);
+          throw new Error(`code-facts: unknown layer \`${w}\` (layers: structure,${OPTIONAL_LAYERS.join(",")})`);
         }
       }
       layers = new Set<Layer>(["meta", "structure", ...(wanted.filter((w) => w !== "structure") as Layer[])]);
-    } else if (a.startsWith("-")) throw new Error(`ts-facts: unknown option ${a}\n\n${usage()}`);
+    } else if (a.startsWith("-")) throw new Error(`code-facts: unknown option ${a}\n\n${usage()}`);
     else tsconfigs.push(a);
   }
-  if (tsconfigs.length === 0) throw new Error(`ts-facts: give at least one tsconfig\n\n${usage()}`);
+  if (tsconfigs.length === 0) throw new Error(`code-facts: give at least one tsconfig\n\n${usage()}`);
   return { tsconfigs, out, root, layers, exclude, gitSince, gitMaxCommits };
 }
 
@@ -157,10 +157,10 @@ function main(): void {
   }
   const started = performance.now();
   const result = run({ ...opts, log: (l) => console.error(l) });
-  const out = path.resolve(opts.out ?? "ts-facts-out");
+  const out = path.resolve(opts.out ?? "code-facts-out");
   const rows = result.tables.rows("relation_rows");
   const total = rows.reduce((n, r) => n + (r.rows as number), 0);
-  console.log(`ts-facts ${TOOL_VERSION}: ${total} facts in ${rows.length} relations → ${out}`);
+  console.log(`code-facts ${TOOL_VERSION}: ${total} facts in ${rows.length} relations → ${out}`);
   console.log(`  root ${result.root}`);
   const byLayer = new Map<string, string[]>();
   for (const r of rows) {

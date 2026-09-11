@@ -1,4 +1,4 @@
-// The relation catalog: every relation ts-facts emits, its columns, their types,
+// The relation catalog: every relation code-facts emits, its columns, their types,
 // and what they mean. This is the single normative home for the fact schema —
 // the writer validates every row against it, and `schema/*.dl` and `SCHEMA.md`
 // in the output are generated from it. Change a relation here and nowhere else.
@@ -150,7 +150,7 @@ export const RELATIONS: readonly Relation[] = [
     layer: "meta",
     doc: "One row describing the run that produced these facts.",
     columns: [
-      col("tool_version", "string", "ts-facts version"),
+      col("tool_version", "string", "code-facts version"),
       col("typescript_version", "string", "the TypeScript compiler that read the project"),
       col("node_version", "string", "the Node.js that ran the extractor"),
       col("root", "string", "absolute path every `file` column is relative to"),

@@ -1,8 +1,8 @@
 {
-  "name": "ts-facts",
+  "name": "code-facts",
   "version": "0.1.0",
   "private": true,
-  "description": "Extract a TypeScript project into Datalog fact tables for the datalog skill.",
+  "description": "Extract a codebase into Datalog fact tables for the code-analysis skill.",
   "type": "module",
   "engines": {
     "node": ">=22.18.0"

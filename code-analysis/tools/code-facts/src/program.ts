@@ -76,7 +76,7 @@ function loadOne(configPath: string, root: string): { project: LoadedProject; re
   const read = ts.readConfigFile(configPath, (f) => ts.sys.readFile(f));
   const diagnostics: ts.Diagnostic[] = [];
   if (read.error !== undefined) {
-    throw new Error(`ts-facts: cannot read ${configPath}: ${ts.flattenDiagnosticMessageText(read.error.messageText, "\n")}`);
+    throw new Error(`code-facts: cannot read ${configPath}: ${ts.flattenDiagnosticMessageText(read.error.messageText, "\n")}`);
   }
   const parsed = ts.parseJsonConfigFileContent(read.config, ts.sys, path.dirname(configPath), undefined, configPath);
   diagnostics.push(...parsed.errors.filter((d) => d.code !== 18003)); // 18003: no inputs (a solution-style config)
@@ -121,7 +121,7 @@ export function isProjectFile(program: ts.Program, sf: ts.SourceFile, root: stri
 export function load(configArgs: readonly string[], rootArg: string | undefined, exclude: readonly RegExp[]): Loaded {
   const configs = configArgs.map(resolveConfigPath);
   for (const c of configs) {
-    if (!fs.existsSync(c)) throw new Error(`ts-facts: no such tsconfig: ${c}`);
+    if (!fs.existsSync(c)) throw new Error(`code-facts: no such tsconfig: ${c}`);
   }
   const root = rootArg !== undefined ? path.resolve(rootArg) : findRoot(configs);
   const projects: LoadedProject[] = [];

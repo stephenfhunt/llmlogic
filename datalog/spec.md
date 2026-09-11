@@ -2576,6 +2576,10 @@ never say.
     annotate, so it over-counted on every project not written under
     `verbatimModuleSyntax` — the user's catch, not a test's. P8 restates the
     elision rule as its oracle.
+  - ***Amended 2026-09-11*** — **it moved out of the skill**, into its own project
+    and skill, `../code-analysis/`, renamed `code-facts`; the datalog skill's
+    `SKILL.md` and `recipes/` are back to `7f3e998`'s bytes, so the experiments'
+    briefing is what it was. Why: `../code-analysis/decisions.md` 2026-09-11.
 
 - **2026-08-25** — **A diagnostic carries a stable code, and the code exists
   where the *fix* differs in kind** (§12; `ROADMAP.md`, *Machine-readable error

@@ -1,19 +1,20 @@
-# Recipe: a TypeScript codebase, already extracted
+# A TypeScript codebase, extracted
 
-For TypeScript you do not write the extractor. `./ts-facts` (next to
+For TypeScript you do not write the extractor. `./code-facts` (next to
 `./datalog`) reads a project with the TypeScript compiler — the type checker
 resolves every name, so the call graph is resolved rather than guessed — and
 writes 61 relations across seven layers, from packages and import graphs down to
 control flow, def/use, points-to inputs, and git history. A rule library
 computes coupling, cohesion, reachability and the rest; you write the questions.
 
-`recipes/source-analysis.md` is the general method and its traps; this file is
-what is specific to these facts.
+`bring-your-own.md` is the general method and its traps (for a language no
+extractor here reads); this file is what is specific to these facts, and
+`../SKILL.md` is how to explore them.
 
 ## 1. Run it
 
 ```sh
-./ts-facts path/to/tsconfig.json [more tsconfigs] -o /tmp/facts
+./code-facts path/to/tsconfig.json [more tsconfigs] -o /tmp/facts
 ./datalog /tmp/facts/lib/checks.dl        # exit 1 = no violations: the facts are consistent
 ```
 
@@ -60,7 +61,7 @@ allocation sites are integers.
 ## 3. The library
 
 Import the one you need, not all of them — evaluation computes everything a
-program imports (`source-analysis.md` §2). Times are on the 24k-line project
+program imports (`bring-your-own.md` §2). Times are on the 24k-line project
 above (205k facts), including the import.
 
 | file | what it derives | time |
@@ -177,7 +178,7 @@ untested(S) :- exports(symbol: S, kind: local), fn(id: S), not covered(S).
    `*.test.*`, `*.spec.*`, `__tests__/`, `test(s)/`, and test-only tsconfigs).
 7. **The count trap is wider here.** `call_site` has 13 columns and `symbol` 18;
    a named-argument atom inside an aggregate carries every unmentioned one as a
-   witness. Project into a two-column rule first (`source-analysis.md` §5).
+   witness. Project into a two-column rule first (`bring-your-own.md` §5).
 8. **The flow graph over-approximates exceptions.** Inside a `try`, every node
    has a `throw` edge; outside one, only `throw` statements reach `throw_exit`. So
    `unreachable` is sound (what it names is dead), and an analysis that needs
@@ -192,7 +193,7 @@ untested(S) :- exports(symbol: S, kind: local), fn(id: S), not covered(S).
 
 ## 6. Verify before you believe
 
-`source-analysis.md` §6 applies unchanged: **Datalog proposes, source
+`bring-your-own.md` §6 applies unchanged: **Datalog proposes, source
 verifies.** Every trap in §5 was found that way — an answer, a file opened, the
 answer wrong for a reason the facts could have said. On the project above the
 check also went the other way: its strongest hidden coupling (`answer.ts` and

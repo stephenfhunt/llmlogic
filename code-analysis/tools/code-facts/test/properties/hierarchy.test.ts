@@ -12,7 +12,7 @@ import { test } from "node:test";
 import fc from "fast-check";
 import { extract, tempDir, writeProject } from "../helpers.ts";
 
-const RUNS = Number.parseInt(process.env.TS_FACTS_RUNS ?? "25", 10);
+const RUNS = Number.parseInt(process.env.CODE_FACTS_RUNS ?? "25", 10);
 
 interface TypeModel {
   isClass: boolean;

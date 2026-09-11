@@ -12,7 +12,7 @@ import { test } from "node:test";
 import fc from "fast-check";
 import { datalog, engineAvailable, extract, tempDir, writeProject } from "../helpers.ts";
 
-const RUNS = Number.parseInt(process.env.TS_FACTS_RUNS ?? "40", 10);
+const RUNS = Number.parseInt(process.env.CODE_FACTS_RUNS ?? "40", 10);
 const VARS = 5;
 
 type Op =

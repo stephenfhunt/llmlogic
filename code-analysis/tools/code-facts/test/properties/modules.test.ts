@@ -10,7 +10,7 @@ import fc from "fast-check";
 import { extract, snapshotDir, tempDir, writeProject } from "../helpers.ts";
 import { arbProject, fnName, normalizeCalls, type ProjectModel, render, specifier } from "./modgen.ts";
 
-const RUNS = Number.parseInt(process.env.TS_FACTS_RUNS ?? "25", 10);
+const RUNS = Number.parseInt(process.env.CODE_FACTS_RUNS ?? "25", 10);
 
 function tsconfig(files: string[]): object {
   // noLib: these properties are about the project's own graph, and parsing the

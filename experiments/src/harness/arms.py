@@ -169,8 +169,8 @@ def _link_binary(destination: Path) -> Path:
 
 #: What a workspace's skill copy carries beside `SKILL.md`. The one list both
 #: the copy and the local subject's listing of it read: the skill directory also
-#: holds tools (`tools/ts-facts`, with its tests and packages) that no cell gets,
-#: and a listing drawn from the directory would name files the workspace lacks.
+#: holds files no cell gets (its build wrapper), and a listing drawn from the
+#: directory would name files the workspace lacks.
 SKILL_SUBDIRS = ("examples", "recipes")
 
 

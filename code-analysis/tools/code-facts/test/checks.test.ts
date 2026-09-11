@@ -26,7 +26,7 @@ for (const name of fs.readdirSync(FIXTURES).sort()) {
   test(`checks.dl is clean on fixture ${name}`, { skip }, () => checkClean(name, [path.join(dir, "tsconfig.json")], dir));
 }
 
-test("checks.dl is clean on ts-facts itself", { skip }, () => checkClean("self", [path.join(TOOL_DIR, "tsconfig.json")], TOOL_DIR));
+test("checks.dl is clean on code-facts itself", { skip }, () => checkClean("self", [path.join(TOOL_DIR, "tsconfig.json")], TOOL_DIR));
 
 const tsdl = path.join(os.homedir(), "code", "tsdl");
 const tsdlConfigs = ["tsconfig.json", "tsconfig.test.json"].map((c) => path.join(tsdl, c));

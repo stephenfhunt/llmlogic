@@ -547,10 +547,8 @@ workaround and §16's preamble-vs-§16.4 contradiction fixed alongside.
 - **`skill/recipes/source-analysis.md`** — the source-analysis recipe: extract
   with a real parser, import, ask; the five traps. Bundled by `cargo
   package-skill`, so `recipes/` is now a shipped part of the skill. ✅ 2026-07-27.
-- **`ts-facts` — a TypeScript project as facts** (`skill/ts-facts`,
-  `recipes/typescript.md`): 61 relations over seven layers, a rule library for
-  coupling, cohesion, flow, points-to and change coupling. ✅ 2026-09-10 — §17,
-  `notes/ts-facts.md`. Open there: a TypeScript 7 backend when its API is stable.
+- **`ts-facts` — a TypeScript project as facts** — moved 2026-09-11 to its own
+  project, `../code-analysis/` (renamed `code-facts`). ✅ 2026-09-10 here — §17.
 - **"Big external fact base" demo** — the motivating import demo; unblocked by
   §13 (the USDA dogfood is a first pass). _queued — **post-v1**._ — skill.
 - **Make `EXPERIMENTS.md` a measuring instrument.** It is an honest checklist

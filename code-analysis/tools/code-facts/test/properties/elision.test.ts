@@ -14,7 +14,7 @@ import { test } from "node:test";
 import fc from "fast-check";
 import { extract, tempDir, writeProject } from "../helpers.ts";
 
-const RUNS = Number.parseInt(process.env.TS_FACTS_RUNS ?? "40", 10);
+const RUNS = Number.parseInt(process.env.CODE_FACTS_RUNS ?? "40", 10);
 
 // What lib.ts exports: classes are values and types, interfaces only types,
 // consts only values (as types, only through `typeof`).

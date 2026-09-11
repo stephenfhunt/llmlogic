@@ -1,4 +1,4 @@
-% ts-facts self-checks — run this file directly:
+% code-facts self-checks — run this file directly:
 %
 %     datalog lib/checks.dl
 %
