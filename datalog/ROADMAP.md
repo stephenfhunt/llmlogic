@@ -45,9 +45,17 @@ each; detail in §17 and `docs/worklog.md`.
 
 ## Open backlog
 
-> **Open defects live in [`bugs/`](bugs/)** — **none open as of 2026-08-25**.
+> **Open defects live in [`bugs/`](bugs/)** — `012` and `013` opened 2026-09-12.
 > **No design session blocks anything** either: §6's extension, the last one,
 > shipped 2026-08-18.
+>
+> **The next two items to build are in § Performance**, both from the 2026-09-12
+> dogfood measurement and in this order: **don't evaluate a rule no goal depends
+> on**, then **load only the relations the program names**. They are one
+> reachability analysis applied to rules and to relations, they are memory rather
+> than time, and together they close `bugs/012` and make `code-analysis`'s
+> `reach.dl` split optional. The user's call, 2026-09-12. *Column projection and
+> magic sets are the bigger chunk behind them and are deliberately not next.*
 >
 > **§1's six criteria all hold as of 2026-08-25** — S3, the last, closed with the
 > error code vocabulary.
@@ -428,7 +436,14 @@ deferred until a consumer needs them (§8's *Not covered*). — §13,
 - **TSV** — an easy format add, deferred with database loading. _queued — **post-v1**._ — §13.
 - **Filter pushdown for large sources** — v1 eagerly materializes every import;
   push selections into SQL when a consumer hits the wall (the path/`table`
-  syntax leaves room). _queued — **post-v1** (awaiting a consumer)._ — §13.
+  syntax leaves room). **The consumer arrived 2026-09-12**: a 4.04M-fact base
+  where importing every schema costs 8.03 GB to answer a 16-row question, and a
+  program that does not compile still pays 2.79 GB. But the two § Performance
+  items ruled next are the cheaper half of that bill and come first — they decide
+  *whether* a relation is read at all, where this decides *which rows*, and on
+  the measured workload the relations a program never names are the larger
+  saving. Re-price this against the floor once they land. _queued — **post-v1**._
+  — §13.
 - **Module namespacing** — v1 module imports share one global namespace;
   qualified names / visibility deferred until needed. _queued — **post-v1**._ — §13.
 
@@ -437,6 +452,83 @@ deferred until a consumer needs them (§8's *Not covered*). — §13,
 **Profiled ✅ 2026-08-20**, in [`notes/profile-2026-08-20.md`](notes/profile-2026-08-20.md).
 The profile falsified the ranking both earlier notes gave, so the items below are
 its ranking, not theirs.
+
+**The first two items come from a different measurement and are the next two to
+build** — a 4.04M-fact base (`code-analysis` on Grafana's frontend, 2026-09-12),
+where the binding constraint is **memory, not time**. The 2026-08-20 profile is a
+CPU profile over corpus programs; neither it nor the seek work touched what a run
+*materialises*, which is where a real fact base spends its resident set. Both items
+are the same analysis — reachability over the rule graph — applied once to rules
+and once to relations, and both are **pruning, not pushdown**: nothing about how a
+join is executed changes.
+
+- **Do not evaluate a rule no goal depends on** — _queued, **next**, post-v1._
+  Measured, on one fact base, one import, one question: a program that defines a
+  transitive closure **no `?-` goal or `-q` query references** costs **136 s /
+  10.03 GB**; the identical program without those four lines costs **13.2 s /
+  3.21 GB**. Same answer (`n(16)`). The engine evaluates every rule in the program
+  regardless of reachability from a goal.
+
+  This is documented behaviour, not a defect — "evaluation computes everything a
+  program imports" (`skill/recipes/source-analysis.md` §2) — so it is a design
+  call, and the price is now known. A reachability walk over the rule dependency
+  graph is standard and safe under stratification: a rule kept only because
+  something it feeds is negated or aggregated is still reachable *through* that
+  edge. Two questions the session has to answer rather than assume: whether
+  pruning may change which runtime errors fire (the same hazard that makes atom
+  reordering its own design session, above), and what happens when `-q` queries
+  arrive after the program is loaded.
+
+  **This is the whole of `code-analysis`'s `orient.dl` problem** (`../code-analysis/decisions.md`
+  2026-09-12 later): `modgraph.dl` carried a 17.45M-pair closure beside five cheap
+  rules, `orient.dl` imported it for `dep` and was OOM-killed at 21 GB. It was
+  fixed *in the library*, by splitting the closure into `reach.dl` — the second
+  time a library has been restructured to work around a missing engine feature
+  (the first is the seek item below). With this, that split becomes optional.
+  — §15/engine.
+
+- **Load only the relations the program names** — _queued, **next**, post-v1._
+  Materialisation is eager per imported schema file, not per referenced relation,
+  and it happens **before the program is checked**. Measured on the same base
+  (1.3 GB of JSONL on disk):
+
+  | program | time | peak RSS |
+  |---|---|---|
+  | `import "schema/git.dl"` + count commits | 1.1 s | 0.29 GB |
+  | `import "schema/structure.dl"` + count **16 rows** | 13.2 s | 3.21 GB |
+  | …the same, counting all 831,625 symbols instead | 13.5 s | 3.37 GB |
+  | `import "schema/all.dl"` + count **16 rows** | 30.3 s | 8.03 GB |
+  | **a program that does not compile** | 11.0 s | **2.79 GB** |
+
+  So the resident set is ~6× the JSONL, the question asked barely moves it
+  (0.16 GB between one 16-row relation and all 831,625 symbols), and a syntax
+  error pays the whole bill — which is `bugs/012`, and this item closes it.
+  Concretely: `lib/packages.dl` names none of `symbol`, `ref`, `call_site`,
+  `symbol_type` or `literal`, which are **1.09 GB of the 1.3 GB on disk**.
+
+  Ordering note: this item wants the *rule* walk above to exist first, since
+  "which relations does the program name" is read off the same graph — a relation
+  is needed iff some reachable rule mentions it. — §13/§15/engine.
+
+- **Real pushdown: column projection, then demand transformation** — _designing,
+  post-v1._ The two items above are pruning — they decide *whether* to read a
+  relation or run a rule. These decide what a scan and a recursion actually
+  compute, and they are a bigger chunk: both change evaluation rather than
+  scheduling, and the second changes it under negation and aggregation, where this
+  engine's stratification guarantees live.
+  - **Column projection.** `symbol` has 18 columns and a typical rule binds two
+    or three. Whether that pays cannot be answered from outside the engine — it
+    depends on row-vs-column storage and on whether strings are interned — so the
+    first task is the measurement, not the implementation: extract a fact
+    directory with a schema trimmed to the columns one library names, and compare
+    the floor against the table above. **Do that before assuming a win.**
+  - **Demand transformation (magic sets).** The only one of the four that helps a
+    closure that *is* wanted: `reach.dl` asked for one file's reachability still
+    derives all 17.45M pairs. `callreach_seeded.dl` is the hand-rolled version and
+    is evidence of the demand — a `seed/1` the caller supplies, which is exactly
+    the binding a magic-set rewrite would infer. `references.md`'s evaluation
+    group covers it; the delicate part is soundness under stratified negation,
+    where the rewrite can move a literal across a stratum boundary.
 
 - **Seek the bound prefix instead of scanning the relation** — **shipped ✅
   2026-08-21** (§17 that date; `src/engine/seek.rs`; `testing.md` **B12**). Up to

@@ -43,6 +43,15 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
   so) runs in 13.6 s / 3.3 GB — but the threshold is a guess from four measured
   points, so it is a design call. _queued_ — `notes/code-facts.md` § Dogfooding —
   Grafana.
+- **Unwind the workarounds once the engine prunes** — `reach.dl` exists because
+  the engine evaluates every rule in a program whether or not a goal reaches it,
+  and `lib/keys.dl`'s re-keyings exist because a bound non-leading column still
+  scans. Both are the library paying for a missing engine feature, and the first
+  of the two is now **next** on `../datalog/ROADMAP.md` § Performance. When it
+  lands, re-measure and decide per file: `reach.dl` folding back into
+  `modgraph.dl` would be simpler, and `cochange.dl` could import modgraph without
+  thinking about it. _queued_ — do not unwind speculatively; the bench digest is
+  what says the answers did not move.
 - **A public-API-surface relation.** "Is this symbol reachable from a published
   entry point" was rebuilt by hand three times in one session and was still not
   certainly complete (`export * from` chains, `export { x as default }`,

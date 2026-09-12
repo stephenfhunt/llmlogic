@@ -33,9 +33,8 @@ commits, deps installed, the bundle in its `.claude/skills/`. Two scopes, each
 explored by a fresh agent holding only `SKILL.md` and `reference/`.
 
 **Done** — code-facts **118 tests**, typecheck and bench clean, digests unmoved
-- **Extraction and the gate held on a codebase it had never seen**:
-  `grafana-ui` all layers → 1.17M facts / 67 s; the whole frontend
-  `refs,quality,git` → **4.04M facts / 389 s / 16.8 GB**; `checks.dl` **exit 1,
+- **Extraction and the gate held on a codebase it had never seen**: 1.17M facts
+  from `grafana-ui`, **4.04M** from the whole frontend, `checks.dl` **exit 1,
   zero violations** on both, first try.
 - **`lib/reach.dl`** — the closure split out of `modgraph.dl`, which computed
   17.45M pairs for every importer while both read only `dep`. Same answer:
@@ -43,13 +42,12 @@ explored by a fresh agent holding only `SKILL.md` and `reference/`.
   went from **OOM-killed at 21 GB** to 207 s.
 - **`packages.dl` works in a monorepo** — `imported_workspace` reads the
   dependency off `file.package`, since a sibling resolves to a file (44,908 of
-  55,762 imports here) and `unused` was naming four packages that 540 statements
-  import. An unnamed `package.json` is no longer a package.
+  55,762 imports) and `unused` named four packages 540 statements import. An
+  unnamed `package.json` is no longer a package.
 - **New `monorepo` fixture**; `bugs/` opened for `code-analysis` (five), two more
   against the engine (`012`, `013`).
 - **Findings, verified in the source**: a latent bug at `useDragAndDrop.tsx:109`;
-  three unused runtime deps in a published package; a plugin-decoupling migration
-  plan — two plugins switchable today, a 75-line file blocking nine.
+  three unused runtime deps in a published package; a plugin-decoupling plan.
 
 **Decided** (`code-analysis/decisions.md` 2026-09-12 later; long form
 `code-analysis/notes/code-facts.md` § Dogfooding — Grafana)
@@ -73,10 +71,14 @@ explored by a fresh agent holding only `SKILL.md` and `reference/`.
 - **`orient.dl` is fixed but still 13.9 GB** — its own `runtime_reaches` is 11.8M
   pairs; the gate that declines the cycle question runs in 13.6 s / 3.3 GB, but
   its threshold is a guess from four points — a design call.
-- **Open**: `code-analysis/bugs/001`–`005`, `datalog/bugs/012`–`013`; on the
-  ROADMAPs, a string predicate, top-N and run progress (datalog), a
-  public-API-surface relation (code-analysis). H-CA1 still needs its reference
-  program and the `code-analysis` arm.
+- **The next two datalog items are ruled** (user, 2026-09-12; measurements and
+  sequencing in `datalog/ROADMAP.md` § Performance): *don't evaluate a rule no
+  goal depends on*, then *load only the relations the program names* — one
+  reachability analysis applied twice. They close `bugs/012` and make `reach.dl`
+  optional; `code-analysis/ROADMAP.md` carries the unwind item. Column projection
+  and magic sets are the bigger chunk behind them, deliberately not next.
+- **Open**: `code-analysis/bugs/001`–`005`, `datalog/bugs/012`–`013`. H-CA1 still
+  needs its reference program and the `code-analysis` arm.
 
 ## 2026-09-11 (later still) — the library at a million facts: it was the seek, not the aggregates
 

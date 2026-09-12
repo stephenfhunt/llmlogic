@@ -60,3 +60,9 @@ pointing the program at a fact directory whose JSONL files are unreadable
 
 Nothing recorded depends on the current order. It raises the value of the
 `--check`-only mode nobody has needed yet, and it interacts with nothing in §17.
+
+**Carried by a ROADMAP item.** *Load only the relations the program names*
+(`../ROADMAP.md` § Performance, one of the two ruled next on 2026-09-12) has to
+decide which relations to open from the rule graph, which means the program is
+already parsed and checked when the first file is read. This closes as a side
+effect of that item; it does not need its own fix.
