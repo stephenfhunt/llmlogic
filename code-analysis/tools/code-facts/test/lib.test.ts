@@ -55,7 +55,7 @@ test("modgraph: file edges by kind, roll-up to directories, external packages", 
     'file_dep("src/util/index.ts", "src/util/math.ts", reexport).',
     'file_dep("src/util/index.ts", "src/util/math.ts", reexport_all).',
   ]);
-  assert.deepEqual(ask(out, "modgraph.dl", "in_cycle(F)"), []);
+  assert.deepEqual(ask(out, "reach.dl", "in_cycle(F)"), []);
   // At depth 1 everything is in `src`, so no edge crosses a unit boundary; at
   // depth 2 only src/util/* have a unit at all.
   assert.deepEqual(ask(out, "modgraph.dl", "unit_dep(1, A, B)"), []);

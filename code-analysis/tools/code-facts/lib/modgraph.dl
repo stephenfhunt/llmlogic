@@ -7,15 +7,23 @@
 %                            keeps (`imports.runtime`). TypeScript elides one
 %                            whose bindings are only used as types even without
 %                            `import type`, so `kind` alone over-counts
-%   file_reaches(A, B)       a chain of dep leads from A to B
-%   in_cycle(F)              F is on an import cycle
-%   cycle_edge(A, B)         a dep edge that lies on a cycle
 %   unit(F, Depth, Dir)      file F sits in directory Dir at depth Depth
 %                            (a file directly in a shallower directory has no
 %                            unit at that depth)
 %   unit_dep(Depth, UA, UB)  some file in UA depends on some file in UB
 %   package_edge(PA, PB)     a file of package PA depends on one of PB
 %   external_dep(F, Pkg)     file F imports from a package outside the root
+%
+% Reachability and cycles — `file_reaches`, `in_cycle`, `cycle_edge` — are in
+% `reach.dl`, which imports this file. They are a transitive closure over the
+% import graph, quadratic in its density, and everything here is one
+% non-recursive rule; keeping them together made every importer of this file pay
+% for a closure it usually does not read. Measured on Grafana's frontend (8,910
+% files, 56,047 imports): a count over `dep` alone cost 306 s and 12.6 GB with
+% the closure in this file and 70 s and 3.3 GB without it, for the same answer,
+% and `orient.dl` — which imports this and never reads `file_reaches` — was
+% OOM-killed at 21 GB. Same split, same reason, as `callreach.dl`
+% (found dogfooding, 2026-09-12).
 
 import "../schema/structure.dl".
 
@@ -24,11 +32,6 @@ dep(A, B) :- file_dep(A, B, _).
 runtime_dep(A, B) :- imports(file: A, target_file: B, runtime: true), A != B.
 % Where the emitter could not say (runtime absent), fall back to what is written.
 runtime_dep(A, B) :- imports(file: A, target_file: B, runtime: R, kind: K), R is absent, K != type_only, K != type_query, A != B.
-
-file_reaches(A, B) :- dep(A, B).
-file_reaches(A, C) :- dep(A, B), file_reaches(B, C).
-in_cycle(F) :- file_reaches(F, F).
-cycle_edge(A, B) :- dep(A, B), file_reaches(B, A).
 
 unit(F, D, U) :- file_ancestor(file: F, dir: U, depth: D).
 unit_dep(D, UA, UB) :- dep(A, B), unit(A, D, UA), unit(B, D, UB), UA != UB.

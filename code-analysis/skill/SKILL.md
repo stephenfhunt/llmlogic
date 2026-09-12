@@ -84,7 +84,7 @@ one, and narrow the question if you do.
 
 | concern | ask | where |
 |---|---|---|
-| **architecture** | import cycles that exist at run time; dependencies pointing up a layer; which rules your architecture should obey (below) | `modgraph.dl`: `runtime_dep`, `cycle_edge`, `unit_dep`; `coupling.dl`: `sdp_violation` |
+| **architecture** | import cycles that exist at run time; dependencies pointing up a layer; which rules your architecture should obey (below) | `modgraph.dl`: `runtime_dep`, `unit_dep`; `reach.dl`: `cycle_edge`, `in_cycle` (a closure — see the cost table); `coupling.dl`: `sdp_violation` |
 | **how much coupling** | afferent / efferent / instability / distance per file (`G = -1`), directory depth (`G = N`), package (`G = -2`) | `coupling.dl` |
 | **how two modules are coupled** | the strongest kind per file pair — content, common, external, control, stamp, data — and the member, variable, literal or parameter that makes it so | `coupling_kinds.dl`: `worst_coupling`, then the per-kind relations |
 | **hidden coupling** | files that change together with no import or reference between them | `cochange.dl`: `hidden_coupling` |
