@@ -495,6 +495,14 @@ join is executed changes.
   answers identical ([`notes/memory-profile-2026-09-12.md`](notes/memory-profile-2026-09-12.md)).
   — §13/§15/engine.
 
+- **Profile `pointsto.dl` as a vehicle for the engine** — _queued_. `code-analysis`'s
+  Andersen-style points-to analysis does not fit `vs/base` (1.33M facts): past
+  14 GB at 130 s after the 2026-09-12 memory work, 23.7 GB before. Nothing special
+  to it (`code-analysis/decisions.md` 2026-09-12 evening): what it teaches is
+  engine work. Leads already named: the delta copy, the per-candidate premise
+  clone, interning ([`notes/memory-profile-2026-09-12.md`](notes/memory-profile-2026-09-12.md)).
+  — §15/engine.
+
 - **Real pushdown: column projection, then demand transformation** — _designing,
   post-v1._ The two items above are pruning — they decide *whether* to read a
   relation or run a rule. These decide what a scan and a recursion actually
@@ -535,7 +543,10 @@ join is executed changes.
   `vs/base` was over it for this reason, and each was fixed *in the program* by
   re-keying the relation — `checks.dl` 199.6 s → 13.7 s on two rules. So the
   index stays rejected and the 29× is if anything low; what a program cannot
-  re-key is the case that reopens this. _queued — **post-v1**._ — §15/engine.
+  re-key is the case that reopens this — and since 2026-09-12 the `code-analysis`
+  skill no longer teaches re-keying (a library free of engine workarounds is the
+  user's direction), so every rule an agent writes is that case. _queued —
+  **post-v1**._ — §15/engine.
 - **Seeking makes body order matter more** — the same measurement, read the other
   way: good-vs-pessimal atom order cost **2.0×** before the seek and **29×** after.
   The scheduler runs positive atoms in strict source order with no cost model
