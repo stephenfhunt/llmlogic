@@ -263,10 +263,12 @@ impl Model {
     /// fact-keyed copy of the whole EDB, which on an imported table is the
     /// larger half of what is being saved.
     fn insert_base(&mut self, fact: Fact) {
-        self.relations[fact.pred.0 as usize].insert(fact.tuple.clone());
         if self.provenance == Provenance::Recorded {
+            self.relations[fact.pred.0 as usize].insert(fact.tuple.clone());
             self.first_round.entry(fact.clone()).or_insert(0);
             self.base.insert(fact);
+        } else {
+            self.relations[fact.pred.0 as usize].insert(fact.tuple);
         }
     }
 
@@ -338,7 +340,27 @@ pub fn eval_pruned(
     provenance: Provenance,
     live: Option<&[bool]>,
 ) -> Result<Model> {
-    eval_capped(program, u32::MAX, provenance, live).map_err(|error| match error {
+    uncapped(eval_capped(program, u32::MAX, provenance, live))
+}
+
+/// [`eval_pruned`], moving the program's facts into the model instead of copying
+/// them: `program.facts` is left empty.
+///
+/// A large run's base is mostly imported rows, and a copy left two of them alive
+/// for the whole evaluation (`notes/memory-profile-2026-09-12.md`). A caller
+/// that will evaluate the same program again needs the facts twice, and uses
+/// [`eval_pruned`].
+pub fn eval_pruned_moving_facts(
+    program: &mut Program,
+    provenance: Provenance,
+    live: Option<&[bool]>,
+) -> Result<Model> {
+    let facts = std::mem::take(&mut program.facts);
+    uncapped(eval_seeded(program, facts, u32::MAX, provenance, live))
+}
+
+fn uncapped(result: std::result::Result<Model, Capped>) -> Result<Model> {
+    result.map_err(|error| match error {
         Capped::Failed(error) => error,
         Capped::Diverged => unreachable!("u32::MAX rounds is not a cap anyone reaches"),
     })
@@ -372,10 +394,28 @@ pub(crate) fn eval_capped(
     provenance: Provenance,
     live: Option<&[bool]>,
 ) -> std::result::Result<Model, Capped> {
+    eval_seeded(
+        program,
+        program.facts.iter().cloned(),
+        max_rounds,
+        provenance,
+        live,
+    )
+}
+
+/// [`eval_capped`] over base facts the caller supplies — `program.facts`, copied
+/// or moved out of it.
+fn eval_seeded(
+    program: &Program,
+    facts: impl IntoIterator<Item = Fact>,
+    max_rounds: u32,
+    provenance: Provenance,
+    live: Option<&[bool]>,
+) -> std::result::Result<Model, Capped> {
     validate(program).map_err(Capped::Failed)?;
     let mut model = Model::new(program.predicates.len(), provenance);
-    for fact in &program.facts {
-        model.insert_base(fact.clone());
+    for fact in facts {
+        model.insert_base(fact);
     }
     let mut round = 0;
     for stratum in &program.strata {

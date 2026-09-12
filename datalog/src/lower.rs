@@ -51,7 +51,7 @@ use crate::schedule;
 /// hand-constructed ASTs and tests; the pipeline uses
 /// [`lower_with_sources`].
 pub fn lower(program: &ast::Program) -> Result<ir::Program, Vec<Error>> {
-    lower_with_sources(program, &[])
+    lower_with_sources(program, Vec::new())
 }
 
 /// Lowers a surface program with data imports already loaded (§13).
@@ -60,14 +60,16 @@ pub fn lower(program: &ast::Program) -> Result<ir::Program, Vec<Error>> {
 /// source order (the same order [`crate::sources::load_imports`] produces).
 /// Each loaded table supplies a schema-less import's arity and header field
 /// names before any clause lowers — so named access to imported relations
-/// works — and its rows become base facts. An empty `tables` reproduces
-/// [`lower`]'s no-sources behavior exactly.
+/// works — and its rows become base facts. The tables are consumed: their rows
+/// move into the program rather than being copied, since on a large import they
+/// are most of the run's memory (`notes/memory-profile-2026-09-12.md`). An
+/// empty `tables` reproduces [`lower`]'s no-sources behavior exactly.
 pub fn lower_with_sources(
     program: &ast::Program,
-    tables: &[crate::sources::LoadedTable],
+    mut tables: Vec<crate::sources::LoadedTable>,
 ) -> Result<ir::Program, Vec<Error>> {
     let mut lowerer = Lowerer::default();
-    lowerer.collect_predicates(program, tables);
+    lowerer.collect_predicates(program, &tables);
     lowerer.attach_field_names();
     let mut out = ir::Program::default();
 
@@ -99,13 +101,12 @@ pub fn lower_with_sources(
                     // Imported rows are ordinary base facts (§13): the leaves
                     // of provenance, typed by the same facts-pin-columns rule
                     // as in-program facts.
-                    if let Some(table) = tables.get(data_import) {
-                        for row in &table.rows {
-                            out.facts.push(ir::Fact {
-                                pred,
-                                tuple: ir::Tuple(row.clone()),
-                            });
-                        }
+                    if let Some(table) = tables.get_mut(data_import) {
+                        let rows = std::mem::take(&mut table.rows);
+                        out.facts.extend(rows.into_iter().map(|row| ir::Fact {
+                            pred,
+                            tuple: ir::Tuple(row),
+                        }));
                     }
                     data_import += 1;
                 }

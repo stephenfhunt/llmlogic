@@ -44,7 +44,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 
 use crate::ast::{ImportKind, StatementKind};
-use crate::engine::{Model, Provenance, eval_pruned, trace_failure};
+use crate::engine::{Model, Provenance, eval_pruned, eval_pruned_moving_facts, trace_failure};
 use crate::error::{AggregateSite, Error, Warning};
 use crate::ir;
 use crate::lower::{check_program, live_predicates, lower, lower_with_sources};
@@ -161,7 +161,7 @@ fn run_pruning(
         errors
     };
     let one = |error: Error| place(vec![error]);
-    let (program, live) = lower_and_load(&resolved.program, prune).map_err(&place)?;
+    let (mut program, live) = lower_and_load(&resolved.program, prune).map_err(&place)?;
     let mut warnings = check_program(&program);
     for warning in &warnings {
         report(warning);
@@ -174,8 +174,18 @@ fn run_pruning(
     // Only what a goal depends on is evaluated (§17, 2026-09-12): a rule nothing
     // asks about neither pays for itself nor fails the run. The static warnings
     // above were computed over the whole program, so pruning cannot hide one.
+    //
+    // The base facts move into the model rather than being copied, which
+    // halves what a large import holds while it runs — unless the program asks
+    // for an explanation, whose cross case below may evaluate it a second time.
     let live = live.as_deref();
-    let model = eval_pruned(&program, program.provenance_pruned(live), live).map_err(&one)?;
+    let provenance = program.provenance_pruned(live);
+    let model = if program.explanations.is_empty() {
+        eval_pruned_moving_facts(&mut program, provenance, live)
+    } else {
+        eval_pruned(&program, provenance, live)
+    }
+    .map_err(&one)?;
     warnings.extend(absent_skip_warnings(&model, &program, live));
 
     let mut answers = Vec::with_capacity(program.queries.len());
@@ -306,7 +316,7 @@ fn lower_and_load(
 ) -> Result<(ir::Program, Option<Vec<bool>>), Vec<Error>> {
     let full = || -> Result<(ir::Program, Option<Vec<bool>>), Vec<Error>> {
         let tables = load_imports(program)?;
-        let lowered = lower_with_sources(program, &tables)?;
+        let lowered = lower_with_sources(program, tables)?;
         typecheck(&lowered)?;
         let live = if prune {
             live_predicates(&lowered)
@@ -345,7 +355,7 @@ fn lower_and_load(
             })
         })
         .collect();
-    let lowered = lower_with_sources(program, &tables)?;
+    let lowered = lower_with_sources(program, tables)?;
     match typecheck(&lowered) {
         Ok(_) => Ok((lowered, live)),
         Err(errors) if !skipped => Err(errors),
@@ -862,7 +872,7 @@ parsed(K, V) :- raw(K, S), V = S as int.
         let ast = parse(REPORTING).expect("parses");
         let resolved = resolve_modules(ast, None).expect("resolves");
         let tables = load_imports(&resolved.program).expect("no imports to load");
-        let program = lower_with_sources(&resolved.program, &tables).expect("lowers");
+        let program = lower_with_sources(&resolved.program, tables).expect("lowers");
         typecheck(&program).expect("typechecks");
         program
     }
@@ -1274,7 +1284,7 @@ fine(X) :- p(X).
         let Ok(tables) = load_imports(&resolved.program) else {
             return false;
         };
-        let Ok(program) = lower_with_sources(&resolved.program, &tables) else {
+        let Ok(program) = lower_with_sources(&resolved.program, tables) else {
             return false;
         };
         let Some(live) = live_predicates(&program) else {
