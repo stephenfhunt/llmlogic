@@ -24,4 +24,26 @@ if [[ ! -d "$TOOL/node_modules/typescript" ]]; then
   npm ci --omit=dev --no-audit --no-fund --prefix "$TOOL" >&2
 fi
 
+# V8 caps the old space near 4 GB however much memory the machine has, and a
+# real project walks through that during `ids` — VS Code's `src/` died there at
+# 41 s on a box with 20 GB free, and what the user saw was a native V8 stack
+# trace, not a diagnosis. So ask for a share of the machine instead of taking
+# node's default. `CODE_FACTS_HEAP_MB` overrides; an unreadable total leaves the
+# default alone rather than guessing.
+if [[ -z "${CODE_FACTS_HEAP_MB:-}" ]]; then
+  if [[ -r /proc/meminfo ]]; then
+    TOTAL_MB=$(( $(awk '/^MemTotal:/ {print $2}' /proc/meminfo) / 1024 ))
+  elif command -v sysctl >/dev/null 2>&1; then
+    TOTAL_MB=$(( $(sysctl -n hw.memsize 2>/dev/null || echo 0) / 1048576 ))
+  else
+    TOTAL_MB=0
+  fi
+  if (( TOTAL_MB > 0 )); then
+    CODE_FACTS_HEAP_MB=$(( TOTAL_MB * 3 / 4 ))
+  fi
+fi
+
+if [[ -n "${CODE_FACTS_HEAP_MB:-}" ]]; then
+  exec node "--max-old-space-size=$CODE_FACTS_HEAP_MB" --disable-warning=ExperimentalWarning "$TOOL/src/main.ts" "$@"
+fi
 exec node --disable-warning=ExperimentalWarning "$TOOL/src/main.ts" "$@"

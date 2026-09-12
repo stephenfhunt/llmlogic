@@ -23,6 +23,14 @@ import { type Layer, LAYERS, OPTIONAL_LAYERS } from "./schema.ts";
 import { Tables } from "./writer.ts";
 
 export const TOOL_VERSION = "0.1.0";
+
+/** Above this, extraction is a minutes-and-gigabytes job and says so.
+ *
+ * 156k lines of VS Code's `vs/base` is 18 s and 1.6 GB, and its whole `src/` —
+ * 2.87M lines — needs more than a default V8 heap has and more than the rule
+ * library can then chew. The number is where "this is fine" stops being the
+ * safe assumption, not a limit. */
+const LARGE_PROJECT_LINES = 300_000;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const LIB_DIR = path.join(HERE, "..", "lib");
 const PY_FRONTEND = path.join(HERE, "frontends", "python", "py_facts.py");
@@ -74,6 +82,19 @@ export function run(opts: Options): Result {
 
   if (opts.tsconfigs.length > 0) {
     const loaded = timed("load", () => load(opts.tsconfigs, root, exclude));
+    // Say how big the job is *before* spending minutes on it. Extraction peaks
+    // at roughly 1 GB per 100k lines, and the phase that blows a small heap is
+    // `ids`, which comes next — so a user who is about to wait, or about to run
+    // out of memory, finds out here rather than from a V8 stack trace.
+    const lines = loaded.sources.reduce((n, s) => n + s.sf.getLineStarts().length, 0);
+    log(`code-facts: ${loaded.sources.length} files, ${lines} lines`);
+    if (lines > LARGE_PROJECT_LINES) {
+      log(
+        `code-facts: this is a large project — expect roughly ${Math.ceil(lines / 100_000)} GB and ` +
+          "minutes, and the heavier libraries (flow, dominators, pointsto, callreach) may not fit. " +
+          "Consider a tsconfig scoped to the subtree you are asking about.",
+      );
+    }
     const packages = new Packages(loaded.root);
     const ctx = new Context(loaded, tables, (f) => packages.nameOf(f));
     timed("ids", () => ctx.prepass());
