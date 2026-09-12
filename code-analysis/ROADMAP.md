@@ -24,14 +24,12 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
   `declare module`, so `imports.target_ambient` names the pattern and
   `checks.dl` counts it as a target. _shipped_ — `decisions.md` 2026-09-11
   (later ii); `checks.dl` clean on `vs/base`.
-- **A `require`d JSON module is a dangling `target_file`** — `resolveJsonModule`
-  resolves `require('../product.json')` on disk, but a CommonJS `require` never
-  puts the file in the TypeScript program, so no `file` row is ever emitted and
-  `checks.dl` reports the contradiction (2 rows on VS Code's `src/`). Needs a
-  schema call: a `json` value for `file.lang` and `file` rows for resolved
-  non-program targets, against leaving `target_file` for files the fact base
-  covers. _queued_ — `decisions.md` 2026-09-12; found dogfooding, and `vs/base`
-  alone does not contain the shape.
+- **JSON modules are data, and a resolved target is always a `file` row** —
+  `json` is a `file.lang`, and a target the program does not include is
+  synthesised. _shipped_ — `decisions.md` 2026-09-12; `checks.dl` clean on VS
+  Code's whole `src/`.
+- **`orient.dl` gates every count on its layer** — no `functions(0)` over a layer
+  that was not extracted, and `code_lines` excludes data. _shipped_ — same entry.
 - **Python dataflow layer** (points-to and taint for Python). _parked_ until the
   first Python version has been used.
 - **A TypeScript 7 backend**, when its compiler API stabilizes. _parked._

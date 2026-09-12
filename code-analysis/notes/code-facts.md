@@ -309,16 +309,33 @@ dozen files and always extract every layer.
    layer — could not run at all. The playbook told a large repository to drop
    layers and then broke on having done it, and the schema file's own comment
    claimed the opposite. A test had *pinned* the wrong behaviour.
-4. **A `require`d JSON module is a dangling `target_file`.** `resolveJsonModule`
-   resolves it on disk; a CommonJS `require` never puts it in the program, so no
-   `file` row is emitted. Two rows, one file, and `vs/base` does not contain the
-   shape — only the whole repository did. Open: `../ROADMAP.md`.
+4. **JSON modules, two facets, and the invisible one is worse.** A `require`d
+   `.json` resolves on disk but never enters the program, so `target_file` named
+   a file with no `file` row — the two violations. An *imported* one does enter
+   the program and got a row with **`lang: ts`**, because `langOf` falls through
+   to `ts` for anything it does not recognise. `json` is now a language, and a
+   resolved target that is not a program file gets a synthesised row, so the row
+   no longer depends on which spelling some *other* module used.
 5. **`orient.dl` reported `functions(0)`** for a codebase with tens of thousands,
    because `fn` is a flow-layer relation and flow was off. The engine's
    `undefined-predicate` warning fires, but it names `fn/19` — not the number it
-   made wrong — and `most_complex` simply vanished from the output. The step
-   whose job is blind-spot awareness had a blind spot. It now prints
-   `layer_extracted(L)` first.
+   made wrong — and `most_complex` simply vanished. **Every count is now gated on
+   the layer it needs**, so a question these facts cannot answer gets no line at
+   all, and `layer_extracted(L)` comes first.
+
+**One failure mode, three mechanisms.** 3, 4 and 5 are the same thing: *the facts
+and the summaries disagreed about what was missing, and the tool reported a
+confident number over the gap instead of declining to answer.* No schema, a wrong
+`lang`, an ungated count. `orient.dl` exists to prevent exactly that and was
+committing it three ways — which is why fixing 4 immediately exposed a third
+instance, `code_lines` summing config data as source.
+
+**Verified end to end on the whole repository**, bundle rebuilt and reinstalled:
+extraction 8,905,693 facts, `checks.dl` **exit 1, zero violations** in 104 s /
+19.3 GB, `orient.dl` 360 s / 21.9 GB with no `functions` line and no
+`most_complex` line. `production_files` 6,607 → **6,600** and `code_lines`
+809,471 → **807,428**: nine JSON files, 2,621 lines of themes and manifests, had
+been counted as TypeScript source.
 
 **What it got right, on a codebase it had never seen**: 8,810 files, 809,471
 production lines, 15,007 classes, 32,059 exported symbols;
