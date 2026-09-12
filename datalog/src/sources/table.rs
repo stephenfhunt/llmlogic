@@ -101,27 +101,54 @@ pub(crate) fn finalize(
         None => vec![None; arity],
     };
 
-    let mut columns: Vec<Vec<Value>> = Vec::with_capacity(arity);
+    // Every column's type is fixed before any cell is converted, so the raw rows
+    // can then be consumed as they are typed: a cell's text moves into its value
+    // instead of being copied, and a table is held once rather than three times
+    // over (`notes/memory-profile-2026-09-12.md`). Errors still come out column
+    // by column — a column whose type cannot be inferred reports only that.
+    let mut types: Vec<Option<TypeName>> = Vec::with_capacity(arity);
+    let mut column_errors: Vec<Vec<Error>> = Vec::with_capacity(arity);
     for (col, declared_ty) in declared.iter().enumerate() {
-        match type_column(
-            &data,
-            col,
-            *declared_ty,
-            &fields[col],
-            first_data_row,
-            source,
-        ) {
-            Ok(values) => columns.push(values),
-            Err(mut column_errors) => errors.append(&mut column_errors),
+        let ty = match declared_ty {
+            Some(ty) => Ok(*ty),
+            None => infer_column(&data, col, &fields[col], source),
+        };
+        match ty {
+            Ok(ty) => {
+                types.push(Some(ty));
+                column_errors.push(Vec::new());
+            }
+            Err(inference_errors) => {
+                types.push(None);
+                column_errors.push(inference_errors);
+            }
         }
     }
+
+    let mut rows: Vec<Vec<Value>> = Vec::with_capacity(data.len());
+    for (index, row) in data.into_iter().enumerate() {
+        let mut values = Vec::with_capacity(arity);
+        for (col, cell) in row.into_iter().enumerate() {
+            let Some(ty) = types[col] else { continue };
+            match coerce(cell, ty) {
+                Ok(value) => values.push(value),
+                Err(reason) => column_errors[col].push(Error::new(
+                    ErrorCode::UnconvertibleCell,
+                    format!(
+                        "in `{source}`: row {}, column `{}`: {reason}",
+                        first_data_row + index,
+                        fields[col],
+                    ),
+                )),
+            }
+        }
+        rows.push(values);
+    }
+    errors.extend(column_errors.into_iter().flatten());
     if !errors.is_empty() {
         return Err(errors);
     }
 
-    let mut rows: Vec<Vec<Value>> = (0..data.len())
-        .map(|r| columns.iter().map(|c| c[r].clone()).collect())
-        .collect();
     rows.sort();
     rows.dedup();
     Ok(LoadedTable { fields, rows })
@@ -200,10 +227,17 @@ fn arrange(
             if !errors.is_empty() {
                 return Err(errors);
             }
+            // The positions are distinct — the schema's fields are, and each
+            // binds the one column of its name — so each cell moves out once.
             let rows = raw
                 .rows
                 .into_iter()
-                .map(|row| positions.iter().map(|&p| row[p].clone()).collect())
+                .map(|mut row| {
+                    positions
+                        .iter()
+                        .map(|&p| std::mem::replace(&mut row[p], RawValue::Absent))
+                        .collect()
+                })
                 .collect();
             Ok((fields, rows, 1))
         }
@@ -292,41 +326,6 @@ fn validate_field_names(names: &[String], source: &str) -> Result<(), Vec<Error>
     }
 }
 
-/// The inferred or declared type of one column, then its materialized values.
-fn type_column(
-    data: &[Vec<RawValue>],
-    col: usize,
-    declared: Option<TypeName>,
-    field: &str,
-    first_data_row: usize,
-    source: &str,
-) -> Result<Vec<Value>, Vec<Error>> {
-    let ty = match declared {
-        Some(ty) => ty,
-        None => infer_column(data, col, field, source)?,
-    };
-
-    let mut errors = Vec::new();
-    let mut values = Vec::with_capacity(data.len());
-    for (index, row) in data.iter().enumerate() {
-        match coerce(&row[col], ty) {
-            Ok(value) => values.push(value),
-            Err(reason) => errors.push(Error::new(
-                ErrorCode::UnconvertibleCell,
-                format!(
-                    "in `{source}`: row {}, column `{field}`: {reason}",
-                    first_data_row + index,
-                ),
-            )),
-        }
-    }
-    if errors.is_empty() {
-        Ok(values)
-    } else {
-        Err(errors)
-    }
-}
-
 /// §13 column inference: unify the cells' classifications. Untyped (CSV)
 /// columns fall back to string on any conflict — the cells' own text is the
 /// value. Typed sources widen int/float and otherwise conflict as an error
@@ -398,7 +397,19 @@ fn infer_column(
 
 /// Converts one cell to a declared/inferred column type, or returns the clause
 /// explaining why it could not (the caller prefixes source, row and column).
-fn coerce(value: &RawValue, ty: TypeName) -> Result<Value, String> {
+///
+/// Takes the cell by value so a string column's text moves into its value —
+/// most of an import's bytes are strings, and this is the one arm that would
+/// otherwise copy them.
+fn coerce(value: RawValue, ty: TypeName) -> Result<Value, String> {
+    match (value, ty) {
+        (RawValue::Text(t) | RawValue::Str(t), TypeName::String) => Ok(Value::String(t)),
+        (value, ty) => coerce_borrowed(&value, ty),
+    }
+}
+
+/// [`coerce`] for every cell whose value is not moved.
+fn coerce_borrowed(value: &RawValue, ty: TypeName) -> Result<Value, String> {
     let fail = |value: &RawValue| Err(format!("{} is not {}", render(value), type_label(ty)));
     // A missing value inhabits any column (§4): it is coerced to `absent`
     // regardless of the column's type, and is never a type violation. Real
