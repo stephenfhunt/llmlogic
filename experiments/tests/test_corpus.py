@@ -6,6 +6,7 @@ substituted corpus is a changed answer key with nothing saying so.
 
 import hashlib
 import io
+import json
 import re
 import tarfile
 
@@ -15,12 +16,37 @@ from harness import corpus
 
 
 def test_every_corpus_is_pinned_by_version_and_hash():
+    """Each kind of corpus, pinned by the thing that kind can actually promise.
+
+    An archive pins its bytes; a repository cannot (GitHub generates a tarball
+    per request), so it pins the commit its tag must resolve to; a node install
+    pins its lockfile, which carries an integrity hash per package including
+    transitive ones. What matters is that **no kind is unpinned**, which is why
+    this walks `CORPORA` rather than a list someone has to remember to extend.
+    """
     for item in corpus.CORPORA:
-        assert re.fullmatch(r"[0-9a-f]{64}", item.sha256), item
-        # The URL must name the exact version too: a "latest" link would move the
-        # tree under a run while the hash check reported the wrong archive rather
-        # than the real problem.
-        assert item.version in item.url, item
+        if isinstance(item, corpus.Corpus):
+            assert re.fullmatch(r"[0-9a-f]{64}", item.sha256), item
+            # The URL must name the exact version too: a "latest" link would move
+            # the tree under a run while the hash check reported the wrong archive
+            # rather than the real problem.
+            assert item.version in item.url, item
+        elif isinstance(item, corpus.GitCorpus):
+            assert re.fullmatch(r"[0-9a-f]{40}", item.commit), item
+            assert item.url.endswith(".git"), item
+        elif isinstance(item, corpus.NodePackages):
+            lock = item.manifest / "package-lock.json"
+            assert lock.is_file(), item
+            # `npm ci` refuses a lockfile that does not resolve every package,
+            # and checks an integrity hash for each. A lockfile without them is
+            # a manifest wearing a lockfile's name.
+            locked = json.loads(lock.read_text())["packages"]
+            named = [name for name in locked if name.startswith("node_modules/")]
+            assert named, item
+            for name in named:
+                assert locked[name].get("integrity"), (item, name)
+        else:  # pragma: no cover - a new kind must say how it is pinned
+            raise AssertionError(f"{item} is a corpus kind with no pin checked here")
 
 
 def test_a_corpus_that_is_not_fetched_says_how_to_fetch_it(tmp_path, monkeypatch):
