@@ -24,6 +24,55 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-12 (later) — rule and relation pruning: a run pays for what its goals reach
+
+Picked up the two § Performance items the Grafana dogfood ruled next. Both
+shipped, and `bugs/012` closed with them — narrowed, because half its premise was
+false.
+
+**Done** — **datalog 615 tests**, clippy (both feature sets) and fmt clean
+- **Rule pruning** (`0841069`): only the rules a goal depends on run. The walk
+  reuses `collect_stratum_edges`, so a relation read only under `not` or inside an
+  aggregate stays live. `vs/base`, `callreach.dl` beside an unrelated question:
+  **37.4 s / 4.20 GB → 3.1 s / 0.70 GB**.
+- **Relation pruning**: with every schema explicit the program is lowered before
+  any import is read, and only reached imports are. The same question **0.01 s /
+  33 MB**; an unknown field **5.5 s / 1.10 GB → 0.00 s**; counting all 179,748
+  `var` rows **6.7 s / 1.64 GB → 0.71 s / 0.21 GB**.
+- **B13** at three levels plus an import half; four mutations recorded, each
+  reddening its test. The text guard's first draft ran *pruned* and went quiet
+  under the mutation it guards.
+- **`code-analysis` bench digests identical** on the 13 libraries that answer
+  (`pointsto` does not fit either way); `npm test` green on the new binary.
+- **`bugs/014`**: a declared temporal column fixes no type, so an empty relation
+  makes `A + @1d` a type error. `012`'s syntax-error half never reproduced.
+
+**Decided** (`datalog/spec.md` §17 2026-09-12, two entries; the user's calls)
+- **Permissive**: a pruned rule cannot fail or hang a run; static warnings stay
+  whole-program; a program with no goals prunes nothing.
+- **The early check is lowering, not typecheck.** The approved plan argued a
+  fact-free typecheck only under-rejects; the source said otherwise. The user
+  asked whether sources could supply types — they can (Parquet free, JSONL/CSV a
+  streaming pass), but typecheck ignores declared types for the same reason.
+  Split: lowering now, *a column's type is known before its rows* designed later.
+- **A type rejection over a partial load is re-checked over a full one**, so a
+  pruned run accepts and rejects exactly what a full load does.
+- **A skipped import is still checked short of reading** — a broken path fails.
+
+**Removed**
+- Load-then-lower for explicit-schema programs; ~90 lines of pre-build analysis
+  in the two ROADMAP items (now §17); the recipe's "import the closure, not the
+  library" advice and its 35× anecdote; `bugs/012` (to `resolved/`).
+
+**Next up**
+- **`code-analysis` can unwind `reach.dl`** — its item's precondition landed;
+  re-measure with the bench and decide per file.
+- **A column's type is known before its rows** (`bugs/014`) — a design session:
+  declarations as constraints first, a source's own types second.
+- **Nothing is ruled next in datalog § Performance**; column projection and magic
+  sets are the bigger chunk, and relation pruning moved their floor.
+- **Open**: `datalog/bugs/009`, `013`, `014`; `code-analysis/bugs/001`–`005`.
+
 ## 2026-09-12 — the playbook on a codebase nobody here wrote: Grafana, end to end
 
 Asked for a real analysis of a real project, git facts included — the exploring
@@ -193,56 +242,3 @@ down with it.
 - **The flow-layer libraries are now measured too** (`flow` 104 s,
   `dominators` 51 s, `pointsto` does not fit); the playbook says so.
 - Still open from the last session: a test file's process dying under load.
-
-## 2026-09-11 (later) — `code-analysis/`: its own project and skill, and Python
-
-Asked whether a domain skill should package the extractor and the engine and
-guide the exploration. Decided with the user: a new project, a Python extractor
-now, the measurement designed now and built next session. Built so.
-
-**Done** — **108 tool tests**, experiments **1,661**, every commit gated
-- **`code-analysis/`**: `ts-facts` moved and renamed `code-facts`; the datalog
-  skill restored to `7f3e998` byte for byte, so experiment workspaces hash as
-  before. The skill is a playbook (extract → `checks.dl` → `orient.dl` → explore
-  → verify → report, architecture rules as exit codes) with a reference per
-  language; `package.sh` builds the bundle, verified installed.
-- **Python frontend** (stdlib; Node validates its stream against `schema.ts`):
-  every layer but dataflow. P1-py–P4-py, mutation-verified; P1-py and P4-py take
-  `python3` itself as the oracle.
-- **Found on the way in:** breadth-first MRO; a `match` guard sharing its
-  pattern's node; sqlparse's self-importing `__init__` (1,165 unresolved names);
-  `x = x.next()` recursing forever; lambdas in decorators never declared;
-  comprehensions in nested defs binding outward; and, in TypeScript, cognitive
-  complexity under-counting else-if bodies.
-- **Checked independently:** the facts answer `static_analysis`'s four questions
-  exactly as `truth.py`; on `experiments/` (21.6k lines, 4.3 s) 1,116 of 1,117
-  branch counts equal ruff's mccabe; and `anthropic`, declared in its
-  `pyproject.toml`, is imported nowhere.
-- **The unexplained `npm test` failure was P5's heap guard** (32 of 400 runs);
-  P2-py had a second (35 of 400). Both reshaped, their rates measured.
-- **H-CA1 pre-registered** — `experiments/hypotheses.md` addendum.
-
-**Decided** (`code-analysis/decisions.md`; experiments `decisions.md` 2026-09-11 later)
-- **One schema for both languages**; a Python writer would be a second home.
-- **Python cyclomatic counts like ESLint**, for parity; mccabe's difference is
-  documented and measured, not hidden.
-- **A guard that needs a shape once is sized from its measured rate.**
-- **H-CA1's `engine` arm gets `code-facts` undocumented**; the primary endpoint
-  is `code-analysis` − `engine` at haiku.
-
-**Removed**
-- From the datalog skill: `ts-facts`, `tools/`, `recipes/typescript.md`. From the
-  frontend: its breadth-first `mro()`, its unscoped binding walk, the silent
-  fallback when `py_flow` failed to import.
-
-**Next up**
-- **Build the H-CA1 pack**: the TypeScript corpus, oracles, `node`/`python3` on a
-  scrubbed PATH; run `harness power` on the real item count before any grid.
-  ***Added later the same day***: VS Code can be the fixture, scoped to
-  `vs/base`, once the library is faster (`coupling.dl` 330 s, `cohesion.dl`
-  404 s on 1.33M facts) — plan in `experiments/notes/code-design-pack.md`.
-- **A test file's process dies now and then** (`'test failed'`, no assertion):
-  twice in 25 runs under heavy concurrent load, never in 35 idle ones; and one
-  uncaptured failure. Capture every suite run's output until it is named.
-- Parked: a Python dataflow layer; a name-tier helper in `lib/` for Python's
-  unresolved calls.
