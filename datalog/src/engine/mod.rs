@@ -272,12 +272,13 @@ impl Model {
         }
     }
 
-    /// Records one derivation, returning whether the fact itself is new.
+    /// Records one derivation, returning the fact's tuple if the fact itself is
+    /// new — the copy the round's delta holds. A rediscovered fact costs no copy.
     ///
     /// The return value comes from the relation, never from the derivation
     /// store, which is what lets the store be skipped without changing the
     /// delta the fixpoint iterates on (`testing.md` E9).
-    fn insert_derived(&mut self, fact: Fact, derivation: Derivation, round: u32) -> bool {
+    fn insert_derived(&mut self, fact: Fact, derivation: Derivation, round: u32) -> Option<Tuple> {
         let store = match self.provenance {
             Provenance::Recorded => true,
             // The reporting surfaces read `skipped` and `lost` off the premises
@@ -297,11 +298,18 @@ impl Model {
                 .or_default()
                 .insert(derivation);
         }
-        let is_new = self.relations[fact.pred.0 as usize].insert(fact.tuple.clone());
-        if is_new && self.provenance == Provenance::Recorded {
-            self.first_round.insert(fact, round);
+        let relation = &mut self.relations[fact.pred.0 as usize];
+        if relation.contains(&fact.tuple) {
+            return None;
         }
-        is_new
+        relation.insert(fact.tuple.clone());
+        if self.provenance == Provenance::Recorded {
+            let tuple = fact.tuple.clone();
+            self.first_round.insert(fact, round);
+            Some(tuple)
+        } else {
+            Some(fact.tuple)
+        }
     }
 }
 
@@ -670,8 +678,7 @@ fn eval_stratum(
         let mut delta: HashMap<PredId, BTreeSet<Tuple>> = HashMap::new();
         for (fact, derivation) in pending.drain(..) {
             let pred = fact.pred;
-            let tuple = fact.tuple.clone();
-            if model.insert_derived(fact, derivation, round) {
+            if let Some(tuple) = model.insert_derived(fact, derivation, round) {
                 delta.entry(pred).or_default().insert(tuple);
             }
         }
@@ -780,6 +787,28 @@ fn collect_rule_matches(
                 })
                 .collect(),
         );
+        // A derivation the model will not keep is not built: its premises copy
+        // every matched tuple, once per match, rediscoveries included
+        // (`notes/memory-profile-2026-09-12.md`). This is the test
+        // `insert_derived` applies, so an empty derivation is dropped exactly
+        // where the full one would have been.
+        let keep = match model.provenance() {
+            Provenance::Recorded => true,
+            Provenance::Reports => crate::provenance::premises_report(premises.iter().flatten()),
+            Provenance::Unrecorded => false,
+        };
+        let premises = if keep {
+            premises
+                .iter()
+                .map(|premise| {
+                    premise
+                        .clone()
+                        .expect("complete match: every body literal contributed a premise")
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
         pending.push((
             Fact {
                 pred: rule.head.pred,
@@ -787,14 +816,7 @@ fn collect_rule_matches(
             },
             Derivation {
                 rule: rule_id,
-                premises: premises
-                    .iter()
-                    .map(|premise| {
-                        premise
-                            .clone()
-                            .expect("complete match: every body literal contributed a premise")
-                    })
-                    .collect(),
+                premises,
             },
         ));
     })

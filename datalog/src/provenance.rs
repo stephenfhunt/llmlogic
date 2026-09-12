@@ -141,12 +141,18 @@ impl Derivation {
     /// walk looks at, so [`crate::engine::Provenance::Reports`] can keep those
     /// and drop the rest without changing a single count.
     pub fn reports(&self) -> bool {
-        self.premises.iter().any(|premise| match premise {
-            Premise::Aggregate { skipped, .. } => *skipped > 0,
-            Premise::Builtin { lost, .. } => lost.is_some(),
-            Premise::Fact(_) | Premise::NoMatch(_) | Premise::Presence { .. } => false,
-        })
+        premises_report(&self.premises)
     }
+}
+
+/// [`Derivation::reports`] over premises not yet collected into a derivation —
+/// which is what lets the fixpoint decide whether to build one at all.
+pub(crate) fn premises_report<'a>(premises: impl IntoIterator<Item = &'a Premise>) -> bool {
+    premises.into_iter().any(|premise| match premise {
+        Premise::Aggregate { skipped, .. } => *skipped > 0,
+        Premise::Builtin { lost, .. } => lost.is_some(),
+        Premise::Fact(_) | Premise::NoMatch(_) | Premise::Presence { .. } => false,
+    })
 }
 
 /// The answer to a goal that does **not** hold (§11): why not, per rule.
