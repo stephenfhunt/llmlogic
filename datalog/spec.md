@@ -1655,10 +1655,17 @@ structured error naming the feature. DuckDB does transport and dialect parsing
 only — CSV is read `all_varchar` so the literal-grammar inference above is the
 sole typing authority. The engine-side seam is the `FactSource` trait
 (`src/sources/`): backends read raw tables, and one shared `finalize` layer
-applies every rule in this section. Imports are **eagerly materialized** into
-ordinary in-memory facts before lowering; the evaluator never touches DuckDB
-(lazy loading / filter pushdown is an explicit non-goal for v1 — §17 open
-question). URL imports read **directly** over DuckDB httpfs — no local file is
+applies every rule in this section. An import that is read is materialized
+whole into ordinary in-memory facts; the evaluator never touches DuckDB.
+**Which imports are read follows the program's goals.** When every data import
+has an explicit schema, the program is lowered first — so a lowering error
+arrives before any file is opened — and only the imports a goal reaches (§15)
+are read. The rest contribute no rows but are still refused for anything a read
+would refuse before its first row: a reserved or unsupported format, a missing
+local file. A schema-less import takes its arity from its header, so a program
+with one reads every import before lowering. Typecheck runs over what was read,
+and a rejection over a partial read is re-checked over a full one (§17,
+2026-09-12). URL imports read **directly** over DuckDB httpfs — no local file is
 written, so a read-only environment can still import from a URL. The first URL
 import runs `INSTALL httpfs; LOAD httpfs;` (a runtime extension fetch; failure
 is a structured error explaining the network requirement).
@@ -1734,9 +1741,8 @@ designed for them and not only for `std/time`, deliberately (§17).
 
 *Not covered:* **database loading** — the `table "…"` grammar is reserved and
 SQLite/DuckDB/Postgres loading is deferred until a consumer needs it — and **TSV**,
-deferred with it. **Filter pushdown**: every import is eagerly materialized, so a
-large source is read whole; pushing selections into SQL waits on someone hitting
-that wall. **Module namespacing**: v1 shares one global namespace, and qualified
+deferred with it. **Filter pushdown**: an import a goal reaches is read whole;
+pushing selections into SQL waits on someone hitting that wall. **Module namespacing**: v1 shares one global namespace, and qualified
 names and visibility are deferred — `std/` is a reserved *prefix*, not a
 namespace system, and gates a module's names rather than qualifying them. A cell the reader cannot represent is a
 structured error, and what that costs the *run* is §15's.
@@ -2559,6 +2565,27 @@ marker that records a decision working out *well*, which the log would otherwise
 never say.
 
 ### Decisions
+
+- **2026-09-12** — **An import no goal reaches is not read, and the program is
+  lowered before any import is** (§13; `api::lower_and_load`,
+  `sources::load_imports_where`). Closes `bugs/012` for what lowering finds.
+  - **Lowered first only when every data import names its columns** — a
+    schema-less import takes its arity from its header, so such a program still
+    reads every import before lowering.
+  - **The early check is lowering, not typecheck** (the user's, same day). A
+    declared type is not an inference constraint, so a fact-free typecheck
+    rejects `T = A + @1d` over a declared `timestamp` that one fact makes valid
+    (`bugs/014`). Declarations as constraints is a ROADMAP design item.
+  - **A rejection over a partial load is re-checked over a full one.** Fewer
+    facts can only make typecheck reject more, so a pruned run accepts and
+    rejects exactly what a full load does.
+  - **A skipped import is still checked short of reading** — format, feature, a
+    missing local file; a URL is not probed. What moves: a lowering error now
+    precedes a source error, and a bad cell in an unread file fails nothing.
+
+  Guarded by B13's import half; mutations: skip every import, trust the partial
+  rejection. `vs/base`: an unknown field 5.5 s / 1.10 GB → **0.00 s / 8 MB**;
+  `schema/all.dl` counting 179,748 `var` rows 6.7 s / 1.64 GB → **0.71 s / 0.21 GB**.
 
 - **2026-09-12** — **A rule no goal depends on is not evaluated** (§15;
   `lower::live_predicates`, `engine::eval_pruned`). Live is every predicate a
@@ -4051,7 +4078,12 @@ never say.
     2026-07-20 "schema-less import has no schema" limitation as predicted, and
     typecheck needs no new channel — imported rows are column-uniform facts and
     the existing "facts pin columns" rule types them (resolves §4's source (2)
-    note).
+    note). ***Amended 2026-09-12*** — *before lowering* now holds only for a
+    program with a schema-less import; with every schema explicit, lowering runs
+    first and only the imports a goal reaches are read. "No new channel" held,
+    and turned out to be the cost: a declared column type is not a constraint, so
+    a partial load can reject a program a full one accepts (`bugs/014`), and the
+    run re-checks such a rejection over a full load rather than trust it.
   - **Module imports** (`import "lib.dl".`, no `as`): splice-in-place statement
     union, once-only by canonical path (diamonds dedup; cycles terminate), no
     namespacing, queries in imported files are errors, local files only.

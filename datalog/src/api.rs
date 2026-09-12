@@ -43,16 +43,16 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 
-use crate::ast::StatementKind;
+use crate::ast::{ImportKind, StatementKind};
 use crate::engine::{Model, Provenance, eval_pruned, trace_failure};
 use crate::error::{AggregateSite, Error, Warning};
 use crate::ir;
-use crate::lower::{check_program, live_predicates, lower_with_sources};
+use crate::lower::{check_program, live_predicates, lower, lower_with_sources};
 use crate::parser::parse;
 use crate::print::{print_atom, print_explanation, print_ground_fact};
 use crate::provenance::{Explained, ProofTree};
 use crate::resolve::resolve_modules;
-use crate::sources::load_imports;
+use crate::sources::{LoadedTable, load_imports, load_imports_where};
 use crate::typecheck::typecheck;
 
 /// The result of a successful [`run`]: the least model plus each query's
@@ -161,9 +161,7 @@ fn run_pruning(
         errors
     };
     let one = |error: Error| place(vec![error]);
-    let tables = load_imports(&resolved.program).map_err(&place)?;
-    let program = lower_with_sources(&resolved.program, &tables).map_err(&place)?;
-    typecheck(&program).map_err(&place)?;
+    let (program, live) = lower_and_load(&resolved.program, prune).map_err(&place)?;
     let mut warnings = check_program(&program);
     for warning in &warnings {
         report(warning);
@@ -176,11 +174,6 @@ fn run_pruning(
     // Only what a goal depends on is evaluated (§17, 2026-09-12): a rule nothing
     // asks about neither pays for itself nor fails the run. The static warnings
     // above were computed over the whole program, so pruning cannot hide one.
-    let live = if prune {
-        live_predicates(&program)
-    } else {
-        None
-    };
     let live = live.as_deref();
     let model = eval_pruned(&program, program.provenance_pruned(live), live).map_err(&one)?;
     warnings.extend(absent_skip_warnings(&model, &program, live));
@@ -286,6 +279,78 @@ fn run_pruning(
         explanations,
         warnings,
     })
+}
+
+/// Lowers and typechecks a module-resolved program with its data imports
+/// loaded, returning it with its live set ([`live_predicates`]; `None` when
+/// nothing is pruned). With `prune`, only the relations a goal reaches are read
+/// (§13, §17 2026-09-12).
+///
+/// **The program is lowered before anything is read** when every data import
+/// carries an explicit schema: arity and field names then come from the
+/// schemas, so an unknown field, an unsafe variable or an unstratifiable program
+/// is reported before the first file opens, and the live set is known in time
+/// to decide which files to open. A schema-less import takes its arity from its
+/// header, so a program with one loads every import first.
+///
+/// **Typecheck runs after the load, and a rejection over a partial load is not
+/// the verdict.** Facts pin column types and a declared type does not
+/// (`bugs/014`), so leaving facts out can make typecheck reject a program it
+/// would accept — never accept one it would reject. A partial load that fails
+/// typecheck is redone over every import, and that answer stands: a pruned run
+/// accepts and rejects exactly the programs a full load does, and only a run
+/// already headed for a type error pays the difference.
+fn lower_and_load(
+    program: &crate::ast::Program,
+    prune: bool,
+) -> Result<(ir::Program, Option<Vec<bool>>), Vec<Error>> {
+    let full = || -> Result<(ir::Program, Option<Vec<bool>>), Vec<Error>> {
+        let tables = load_imports(program)?;
+        let lowered = lower_with_sources(program, &tables)?;
+        typecheck(&lowered)?;
+        let live = if prune {
+            live_predicates(&lowered)
+        } else {
+            None
+        };
+        Ok((lowered, live))
+    };
+    let every_schema_explicit = program.statements.iter().all(|statement| {
+        !matches!(
+            &statement.kind,
+            StatementKind::Import(import)
+                if matches!(import.kind, ImportKind::Data { schema: None, .. })
+        )
+    });
+    if !(prune && every_schema_explicit) {
+        return full();
+    }
+
+    let early = lower(program)?;
+    let live = live_predicates(&early);
+    let wanted = |index: usize| {
+        live.as_ref()
+            .is_none_or(|live| live[early.imports[index].pred.0 as usize])
+    };
+    let loaded = load_imports_where(program, &wanted)?;
+    let skipped = loaded.iter().any(Option::is_none);
+    // A skipped import still lowers — its schema gives it arity, fields and
+    // definedness — and contributes no rows.
+    let tables: Vec<LoadedTable> = loaded
+        .into_iter()
+        .map(|table| {
+            table.unwrap_or(LoadedTable {
+                fields: Vec::new(),
+                rows: Vec::new(),
+            })
+        })
+        .collect();
+    let lowered = lower_with_sources(program, &tables)?;
+    match typecheck(&lowered) {
+        Ok(_) => Ok((lowered, live)),
+        Err(errors) if !skipped => Err(errors),
+        Err(_) => full(),
+    }
 }
 
 /// Builds the combined program source for the agent CLI: the `base` program
@@ -1322,6 +1387,110 @@ fine(X) :- p(X).
             prop_assert_eq!(pruned.answers, full.answers, "{}", &program);
             prop_assert_eq!(pruned.explanations, full.explanations, "{}", &program);
             prop_assert_eq!(pruned.warnings, full.warnings, "{}", &program);
+        }
+    }
+
+    /// One imported relation for B13's import half, written once per test
+    /// process: `m("a", 1)` and `m("b", -1)`, as JSONL under an explicit schema.
+    fn m_jsonl() -> &'static Path {
+        static PATH: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+        PATH.get_or_init(|| {
+            let dir = std::env::temp_dir().join(format!("datalog-b13-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).expect("mkdir");
+            let path = dir.join("m.jsonl");
+            std::fs::write(
+                &path,
+                "{\"k\": \"a\", \"v\": 1}\n{\"k\": \"b\", \"v\": -1}\n",
+            )
+            .expect("write");
+            path
+        })
+    }
+
+    /// `arb_pruning_program` with an imported relation `m` in front of it, read
+    /// by `pos` — and asked about only when `reach` is set.
+    fn with_import(program: &str, reach: bool) -> String {
+        let goal = if reach { "?- pos(K).\n" } else { "" };
+        format!(
+            "import \"{}\" as m(k: string, v: int).\npos(K) :- m(k: K, v: V), V > 0.\n{program}{goal}",
+            m_jsonl().display()
+        )
+    }
+
+    /// Does lowering `src` before any load leave an import unread?
+    fn skips_an_import(src: &str) -> bool {
+        let Ok(ast) = parse(src) else { return false };
+        let Ok(resolved) = resolve_modules(ast, None) else {
+            return false;
+        };
+        let Ok(program) = lower(&resolved.program) else {
+            return false;
+        };
+        let Some(live) = live_predicates(&program) else {
+            return false;
+        };
+        program
+            .imports
+            .iter()
+            .any(|import| !live[import.pred.0 as usize])
+    }
+
+    /// **B13's import half — non-vacuity**, against its sentence: a pruned load
+    /// changes no answer, so the generator must reach a run that skips `m` and
+    /// one that reads it where its rows are in the answer.
+    #[test]
+    fn b13_import_generator_skips_and_reads_a_relation_that_matters() {
+        use proptest::strategy::{Strategy, ValueTree};
+        use proptest::test_runner::TestRunner;
+
+        let mut runner = TestRunner::deterministic();
+        let strategy = (crate::testgen::arb_pruning_program(), any::<bool>());
+        let (mut skipped, mut mattered) = (0, 0);
+        for _ in 0..100 {
+            let (program, reach) = strategy
+                .new_tree(&mut runner)
+                .expect("strategy produces a value")
+                .current();
+            let src = with_import(&program, reach);
+            if skips_an_import(&src) {
+                skipped += 1;
+            }
+            let full = run_pruning(&src, None, &mut |_| {}, false).expect("full run");
+            if full
+                .answers
+                .iter()
+                .flatten()
+                .any(|line| line == "pos(\"a\").")
+            {
+                mattered += 1;
+            }
+        }
+        assert!(skipped > 0, "no generated program left `m` unread");
+        assert!(
+            mattered > 0,
+            "no generated program answered from `m`'s rows"
+        );
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 64, ..ProptestConfig::default() })]
+
+        /// **B13, imports** — reading only the imports a goal reaches changes no
+        /// answer, explanation or warning, against a run that reads them all.
+        ///
+        /// Mutation-verified: `wanted` answering `false` for every import
+        /// reddens it (`pos` loses its rows).
+        #[test]
+        fn b13_pruned_loading_changes_no_answer(
+            program in crate::testgen::arb_pruning_program(),
+            reach in any::<bool>(),
+        ) {
+            let src = with_import(&program, reach);
+            let (pruned, full) = pruned_and_full(&src, None);
+            let (pruned, full) = (pruned.expect("pruned run"), full.expect("full run"));
+            prop_assert_eq!(pruned.answers, full.answers, "{}", &src);
+            prop_assert_eq!(pruned.explanations, full.explanations, "{}", &src);
+            prop_assert_eq!(pruned.warnings, full.warnings, "{}", &src);
         }
     }
 

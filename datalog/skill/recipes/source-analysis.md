@@ -56,7 +56,10 @@ with `import "lib/graph.dl".` therefore charges an analysis for the closures its
 questions read and nothing else — so one library can hold the cheap rules and the
 expensive ones side by side. A program with **no goals at all** computes
 everything it defines, which is what makes `datalog p.dl` a check that every rule
-runs.
+runs. Imports follow the same rule when each one names its columns
+(`as calls(caller: string, callee: string)`): a relation no goal reaches is never
+read, and a mistake in the program is reported before any file is. A schema-less
+import like the ones above is always read.
 
 JSON `null` and an empty CSV cell both arrive as `absent`, and the same program
 over the same table as JSONL and as CSV gives byte-identical output — so a

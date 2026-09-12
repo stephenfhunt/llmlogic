@@ -13,9 +13,11 @@
 //! the feature, loading any data import is a structured [`Error::Source`]
 //! naming the feature.
 //!
-//! Loaded tables are eagerly materialized and become ordinary base facts
+//! A loaded table is materialized whole and becomes ordinary base facts
 //! (`ir::Program.facts`): the evaluator never touches a source, and imported
-//! tuples anchor provenance leaves (§11).
+//! tuples anchor provenance leaves (§11). *Which* tables are loaded is the
+//! caller's: [`load_imports_where`] reads only the ones a program's goals reach
+//! and checks the rest without reading them (`api.rs`, §17 2026-09-12).
 
 // Without the reader feature, `RawValue` and parts of `finalize` are defined
 // but never constructed — that is the escape-hatch build, not dead design.
@@ -44,6 +46,23 @@ pub(crate) trait FactSource {
 /// the alignment [`crate::lower::lower_with_sources`] expects. Collects errors
 /// across all imports so one run surfaces every source problem (§12).
 pub fn load_imports(program: &Program) -> Result<Vec<LoadedTable>, Vec<Error>> {
+    let tables = load_imports_where(program, &|_| true)?;
+    Ok(tables.into_iter().flatten().collect())
+}
+
+/// [`load_imports`], reading only the data imports `wanted` selects — by
+/// position among the program's data imports, the alignment
+/// [`crate::ir::Program::imports`] has — and `None` in place of the rest.
+///
+/// A skipped import is still **checked short of reading it**: a reserved
+/// database path, an unsupported format, a build without the reader, and a local
+/// file that does not exist all fail exactly as they would if it were read. So a
+/// typo in an import path is an error whether or not a goal reaches the relation;
+/// what skipping saves is the rows (§13, §17 2026-09-12). A URL is not probed.
+pub fn load_imports_where(
+    program: &Program,
+    wanted: &dyn Fn(usize) -> bool,
+) -> Result<Vec<Option<LoadedTable>>, Vec<Error>> {
     let mut tables = Vec::new();
     let mut errors = Vec::new();
     for statement in &program.statements {
@@ -53,11 +72,13 @@ pub fn load_imports(program: &Program) -> Result<Vec<LoadedTable>, Vec<Error>> {
         let ImportKind::Data { table, schema, .. } = &import.kind else {
             continue; // module imports are already spliced away
         };
-        match load_table(
-            &import.path,
-            table.as_ref().map(|(name, _)| name.as_str()),
-            schema.as_deref(),
-        ) {
+        let table = table.as_ref().map(|(name, _)| name.as_str());
+        let loaded = if wanted(tables.len()) {
+            load_table(&import.path, table, schema.as_deref()).map(Some)
+        } else {
+            check_table(&import.path, table).map(|()| None)
+        };
+        match loaded {
             Ok(loaded) => tables.push(loaded),
             // The import statement's path is the place, for every way loading
             // it can fail — a missing file, an unreadable one, a schema that
@@ -87,6 +108,24 @@ pub fn load_table(
     table: Option<&str>,
     schema: Option<&[FieldDecl]>,
 ) -> Result<LoadedTable, Vec<Error>> {
+    let backend = open_table(path, table)?;
+    let raw = backend.read(path).map_err(|e| vec![e])?;
+    finalize(raw, schema, path)
+}
+
+/// Everything [`load_table`] would refuse before reading a row: the reserved
+/// database forms, the format dispatch (which is also where a build without the
+/// reader fails), and a local file that is not there. Reads nothing.
+fn check_table(path: &str, table: Option<&str>) -> Result<(), Vec<Error>> {
+    open_table(path, table)?;
+    if !is_url(path) && std::fs::metadata(path).is_err() {
+        return Err(vec![file_not_found(path)]);
+    }
+    Ok(())
+}
+
+/// The reader for one import, or the reason there is none.
+fn open_table(path: &str, table: Option<&str>) -> Result<Box<dyn FactSource>, Vec<Error>> {
     if table.is_some() || has_database_extension(path) {
         return Err(vec![Error::new(
             ErrorCode::UnsupportedFormat,
@@ -96,9 +135,14 @@ pub fn load_table(
             ),
         )]);
     }
-    let backend = backend_for(path).map_err(|e| vec![e])?;
-    let raw = backend.read(path).map_err(|e| vec![e])?;
-    finalize(raw, schema, path)
+    backend_for(path).map_err(|e| vec![e])
+}
+
+/// A local import path that does not exist — one message for a read import and
+/// a skipped one alike.
+#[cfg_attr(not(feature = "duckdb"), allow(dead_code))]
+pub(crate) fn file_not_found(path: &str) -> Error {
+    Error::new(ErrorCode::FileNotFound, format!("`{path}`: file not found"))
 }
 
 /// Picks the reader for a path by extension/scheme (§13 format table). URLs
@@ -187,6 +231,47 @@ fn backend(backend: Option<Box<dyn FactSource>>, path: &str) -> Result<Box<dyn F
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A skipped import reads no rows but is refused for everything a read would
+    /// refuse before its first row — so skipping cannot hide a broken path, and
+    /// the message is the same one a read gives.
+    #[test]
+    fn a_skipped_import_is_checked_but_not_read() {
+        let dir = std::env::temp_dir().join(format!("datalog-skip-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        let present = dir.join("present.jsonl");
+        std::fs::write(&present, "not json at all\n").expect("write");
+        let missing = dir.join("missing.jsonl");
+        let program = |path: &std::path::Path| {
+            crate::parser::parse(&format!("import \"{}\" as t(a: int).\n", path.display()))
+                .expect("parses")
+        };
+
+        // Skipped, a file whose rows would not parse is never opened.
+        let tables = load_imports_where(&program(&present), &|_| false).expect("not read");
+        assert_eq!(tables.len(), 1);
+        assert!(tables[0].is_none());
+
+        // Skipped or read, a missing file is the same error.
+        let skipped = load_imports_where(&program(&missing), &|_| false).expect_err("missing");
+        assert!(
+            skipped[0].to_string().contains("file not found"),
+            "{skipped:?}"
+        );
+        #[cfg(feature = "duckdb")]
+        {
+            let read = load_imports_where(&program(&missing), &|_| true).expect_err("missing");
+            assert_eq!(skipped[0].to_string(), read[0].to_string());
+        }
+
+        // An unsupported format is refused without being read.
+        let odd = crate::parser::parse("import \"data.xlsx\" as t(a: int).\n").expect("parses");
+        let errors = load_imports_where(&odd, &|_| false).expect_err("unsupported");
+        assert!(
+            errors[0].to_string().contains("unsupported import format"),
+            "{errors:?}"
+        );
+    }
 
     #[test]
     fn database_paths_and_table_clauses_are_reserved() {

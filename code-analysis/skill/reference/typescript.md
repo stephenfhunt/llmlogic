@@ -60,9 +60,8 @@ allocation sites are integers.
 
 ## 3. The library
 
-Import the one you need, not all of them — a library's rules are evaluated only
-where your goals reach them (`bring-your-own.md` §2), but every relation its
-schema imports is still loaded. Two columns: the 24k-line project
+A library costs what your questions reach in it: a rule no goal depends on is not
+evaluated, and a relation none reaches is not loaded (`bring-your-own.md` §2). Two columns: the 24k-line project
 above (205k facts), and VS Code's `src/vs/base` (156k lines, **1.33M facts**) —
 the second is what a big repository costs, and the ratio is not the fact ratio.
 Both include the import.

@@ -669,6 +669,101 @@ fn a_rule_no_goal_depends_on_cannot_hang_the_run() {
     assert!(stderr.contains("value-creating recursion"), "{stderr}");
 }
 
+/// A fresh directory holding `locked.jsonl` (mode 000: unreadable, but it
+/// exists), `u.jsonl` and `ev.jsonl`, for the relation-pruning tests.
+#[cfg(feature = "duckdb")]
+fn pruning_dir(name: &str) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::env::temp_dir().join(format!("datalog-prune-{name}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    let locked = dir.join("locked.jsonl");
+    std::fs::write(&locked, "{\"a\": 1}\n").expect("write");
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).expect("chmod");
+    std::fs::write(dir.join("u.jsonl"), "{\"a\": 7}\n").expect("write");
+    std::fs::write(dir.join("ev.jsonl"), "{\"at\": \"2026-01-01T00:00:00\"}\n").expect("write");
+    dir
+}
+
+/// Runs `program`, written into `dir` as `main.dl`, so its imports resolve there.
+#[cfg(feature = "duckdb")]
+fn run_in(dir: &std::path::Path, program: &str) -> Output {
+    let main = dir.join("main.dl");
+    std::fs::write(&main, program).expect("write");
+    run_args(&[main.to_str().unwrap()])
+}
+
+#[test]
+#[cfg(feature = "duckdb")]
+fn a_program_error_arrives_before_any_fact_is_read() {
+    // `bugs/012`'s acceptance: the only fact file is unreadable, so a diagnostic
+    // that arrives at all arrived without reading it (§17, 2026-09-12).
+    let dir = pruning_dir("error");
+    let imports = "import \"locked.jsonl\" as t(a: int).\n";
+
+    let lowering = run_in(&dir, &format!("{imports}?- t(nosuch: X).\n"));
+    assert_eq!(lowering.code, 2, "{}", lowering.stderr);
+    assert!(lowering.stderr.contains("nosuch"), "{}", lowering.stderr);
+    assert!(
+        !lowering.stderr.contains("locked.jsonl"),
+        "{}",
+        lowering.stderr
+    );
+
+    let syntax = run_in(&dir, &format!("{imports}oops(X) :- t(X)\n"));
+    assert_eq!(syntax.code, 2, "{}", syntax.stderr);
+    assert!(syntax.stderr.contains("syntax error"), "{}", syntax.stderr);
+    assert!(!syntax.stderr.contains("locked.jsonl"), "{}", syntax.stderr);
+}
+
+#[test]
+#[cfg(feature = "duckdb")]
+fn a_relation_no_goal_reaches_is_not_read() {
+    let dir = pruning_dir("unreached");
+    let imports = "import \"locked.jsonl\" as t(a: int).\nimport \"u.jsonl\" as u(a: int).\n";
+
+    let unreached = run_in(&dir, &format!("{imports}?- u(a: X).\n"));
+    assert_eq!(unreached.code, 0, "{}", unreached.stderr);
+    assert_eq!(unreached.stdout, "u(7).\n");
+
+    // Ask about it and it is read — and cannot be.
+    let reached = run_in(&dir, &format!("{imports}?- t(a: X).\n"));
+    assert_eq!(reached.code, 2, "{}", reached.stderr);
+    assert!(
+        reached.stderr.contains("locked.jsonl"),
+        "{}",
+        reached.stderr
+    );
+}
+
+#[test]
+#[cfg(feature = "duckdb")]
+fn a_missing_import_is_an_error_even_when_no_goal_reaches_it() {
+    // Skipping saves the rows, not the check: a typo in a path still fails.
+    let dir = pruning_dir("missing");
+    let out = run_in(
+        &dir,
+        "import \"nope.jsonl\" as t(a: int).\nimport \"u.jsonl\" as u(a: int).\n?- u(a: X).\n",
+    );
+    assert_eq!(out.code, 2, "{}", out.stderr);
+    assert!(out.stderr.contains("file not found"), "{}", out.stderr);
+}
+
+#[test]
+#[cfg(feature = "duckdb")]
+fn a_skipped_relation_cannot_turn_a_program_into_a_type_error() {
+    // `ev` is unreached, so its row is not loaded, and without it `A + @1d`
+    // over a declared timestamp is `bugs/014`'s false type error. A rejection
+    // over a partial load is re-checked over a full one, so this answers.
+    let dir = pruning_dir("fallback");
+    let out = run_in(
+        &dir,
+        "import \"ev.jsonl\" as ev(at: timestamp).\nimport \"u.jsonl\" as u(a: int).\n\
+         later(T) :- ev(at: A), T = A + @1d.\n?- u(a: X).\n",
+    );
+    assert_eq!(out.code, 0, "{}", out.stderr);
+    assert_eq!(out.stdout, "u(7).\n");
+}
+
 #[test]
 fn an_undefined_predicate_in_a_pruned_rule_still_warns() {
     // Pruning happens at evaluation, after the whole-program lint, so a typo in a

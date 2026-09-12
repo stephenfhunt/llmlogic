@@ -67,10 +67,7 @@ impl FactSource for DuckDbSource {
         if is_url {
             ensure_httpfs(&conn, path)?;
         } else if std::fs::metadata(path).is_err() {
-            return Err(Error::new(
-                ErrorCode::FileNotFound,
-                format!("`{path}`: file not found"),
-            ));
+            return Err(super::file_not_found(path));
         }
         match self.format {
             DataFormat::Csv => {

@@ -546,6 +546,16 @@ compared keyed by predicate *name*, not `PredId`.
     exists.
   - `api::tests::b13_the_corpus_answers_the_same_pruned` — every
     `tests/programs/*.dl` but `nonterminating.dl`, errors included.
+  - `api::tests::b13_pruned_loading_changes_no_answer` — the import half: the
+    same programs behind an imported `m` that `pos` reads and a goal reaches or
+    does not, reading only reached imports against reading all. *Mutation*:
+    `wanted` answering `false` for every import (minimal case: `?- ok(K).` with
+    `?- pos(K).`). Guard: `b13_import_generator_skips_and_reads_a_relation_that_matters`.
+  - `tests/system.rs` `a_skipped_relation_cannot_turn_a_program_into_a_type_error`
+    — a partial load's typecheck rejection is re-checked over a full load
+    (`bugs/014` is why it can differ). *Mutation*: return the partial load's
+    errors. `a_program_error_arrives_before_any_fact_is_read` is `bugs/012`'s
+    acceptance, over a mode-000 fact file.
   - Guards: `b13_generator_reaches_both_silent_shapes` measures that `banned` and
     `big` each change some answer by deleting the rule from the text and running
     **unpruned** — its first draft ran pruned and went quiet under mutation 1,

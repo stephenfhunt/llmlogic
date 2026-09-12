@@ -46,9 +46,9 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
 - **Unwind the workarounds once the engine prunes** — `reach.dl` exists because
   the engine evaluates every rule in a program whether or not a goal reaches it,
   and `lib/keys.dl`'s re-keyings exist because a bound non-leading column still
-  scans. Both are the library paying for a missing engine feature, and the first
-  of the two is now **next** on `../datalog/ROADMAP.md` § Performance. When it
-  lands, re-measure and decide per file: `reach.dl` folding back into
+  scans. Both are the library paying for a missing engine feature. The first
+  **landed 2026-09-12** — `../datalog/ROADMAP.md` § Performance, rule *and*
+  relation pruning — so re-measure and decide per file: `reach.dl` folding back into
   `modgraph.dl` would be simpler, and `cochange.dl` could import modgraph without
   thinking about it. _queued_ — do not unwind speculatively; the bench digest is
   what says the answers did not move.

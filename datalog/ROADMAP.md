@@ -45,15 +45,15 @@ each; detail in §17 and `docs/worklog.md`.
 
 ## Open backlog
 
-> **Open defects live in [`bugs/`](bugs/)** — `012` and `013` opened 2026-09-12.
+> **Open defects live in [`bugs/`](bugs/)** — `013` opened 2026-09-12, `014` the same day.
 > **No design session blocks anything** either: §6's extension, the last one,
 > shipped 2026-08-18.
 >
-> **The next item to build is in § Performance**: **load only the relations the
-> program names**, from the 2026-09-12 dogfood measurement. It reads the live set
-> rule pruning shipped with (✅ 2026-09-12), it is memory rather than time, and it
-> closes `bugs/012`. The user's call, 2026-09-12. *Column projection and magic
-> sets are the bigger chunk behind it and are deliberately not next.*
+> **§ Performance's two pruning items shipped 2026-09-12** — rule pruning and
+> relation pruning, closing `bugs/012`. *Column projection and magic sets are the
+> bigger chunk behind them and were deliberately not next*; nothing is ruled next
+> yet. The early check they left at lowering is *a column's type is known before
+> its rows* (§ Import follow-ons, `bugs/014`).
 >
 > **§1's six criteria all hold as of 2026-08-25** — S3, the last, closed with the
 > error code vocabulary.
@@ -78,7 +78,10 @@ each; detail in §17 and `docs/worklog.md`.
 > **S1's harness (`EXPERIMENTS.md`) now sits alongside them** instead of near the
 > bottom, since §1 names it as the instrument v1 is defined against.
 >
-> Eight are resolved in `bugs/resolved/`: `008` (a rule-level type clash
+> Nine are resolved in `bugs/resolved/`: `012` (a program error paid for the whole
+> fact load), **fixed 2026-09-12** by relation pruning, which lowers before it
+> reads — its syntax-error half never reproduced, and the early check stops at
+> lowering because of `014`; `008` (a rule-level type clash
 > manufactured a second, *false* diagnostic asserting the fact table held values
 > it does not), **fixed 2026-08-24** — the declared-vs-inferred sweep is skipped
 > once inference is poisoned, and its message re-derives the column's type from
@@ -436,12 +439,19 @@ deferred until a consumer needs them (§8's *Not covered*). — §13,
   push selections into SQL when a consumer hits the wall (the path/`table`
   syntax leaves room). **The consumer arrived 2026-09-12**: a 4.04M-fact base
   where importing every schema costs 8.03 GB to answer a 16-row question, and a
-  program that does not compile still pays 2.79 GB. But the two § Performance
-  items ruled next are the cheaper half of that bill and come first — they decide
-  *whether* a relation is read at all, where this decides *which rows*, and on
-  the measured workload the relations a program never names are the larger
-  saving. Re-price this against the floor once they land. _queued — **post-v1**._
+  program that does not compile still pays 2.79 GB. **Re-priced
+  2026-09-12**, after relation pruning: the floor is now what a goal *reaches* —
+  on `vs/base`, a 1-row question over `schema/all.dl` is 0.01 s, and counting all
+  179,748 `var` rows 0.71 s / 0.21 GB. What is left is a reached relation read
+  whole to answer a few of its rows. _queued — **post-v1**._
   — §13.
+- **A column's type is known before its rows** — a declared type (`declare`, or
+  an import's `as rel(f: t)`) is checked after inference, never used by it, so
+  only a fact fixes a column's type; that is `bugs/014`, and it is why checking a
+  program before its facts load stops at lowering. Declarations as constraints
+  first; a source's own types second (a Parquet footer is free, JSONL/CSV a
+  streaming pass). Changes what `bugs/resolved/008`'s wording rests on.
+  _design session — post-v1._ — §4/§12/§13.
 - **Module namespacing** — v1 module imports share one global namespace;
   qualified names / visibility deferred until needed. _queued — **post-v1**._ — §13.
 
@@ -451,8 +461,8 @@ deferred until a consumer needs them (§8's *Not covered*). — §13,
 The profile falsified the ranking both earlier notes gave, so the items below are
 its ranking, not theirs.
 
-**The first two items come from a different measurement — the first shipped
-2026-09-12 and the second is next** — a 4.04M-fact base (`code-analysis` on Grafana's frontend, 2026-09-12),
+**The first two items come from a different measurement, and both shipped
+2026-09-12** — a 4.04M-fact base (`code-analysis` on Grafana's frontend, 2026-09-12),
 where the binding constraint is **memory, not time**. The 2026-08-20 profile is a
 CPU profile over corpus programs; neither it nor the seek work touched what a run
 *materialises*, which is where a real fact base spends its resident set. Both items
@@ -468,28 +478,13 @@ join is executed changes.
   with no goals prunes nothing. `code-analysis`'s `reach.dl` split is now optional;
   its ROADMAP carries the unwind. — §15/engine.
 
-- **Load only the relations the program names** — _queued, **next**, post-v1._
-  Materialisation is eager per imported schema file, not per referenced relation,
-  and it happens **before the program is checked**. Measured on the same base
-  (1.3 GB of JSONL on disk):
-
-  | program | time | peak RSS |
-  |---|---|---|
-  | `import "schema/git.dl"` + count commits | 1.1 s | 0.29 GB |
-  | `import "schema/structure.dl"` + count **16 rows** | 13.2 s | 3.21 GB |
-  | …the same, counting all 831,625 symbols instead | 13.5 s | 3.37 GB |
-  | `import "schema/all.dl"` + count **16 rows** | 30.3 s | 8.03 GB |
-  | **a program that does not compile** | 11.0 s | **2.79 GB** |
-
-  So the resident set is ~6× the JSONL, the question asked barely moves it
-  (0.16 GB between one 16-row relation and all 831,625 symbols), and a syntax
-  error pays the whole bill — which is `bugs/012`, and this item closes it.
-  Concretely: `lib/packages.dl` names none of `symbol`, `ref`, `call_site`,
-  `symbol_type` or `literal`, which are **1.09 GB of the 1.3 GB on disk**.
-
-  Ordering note: this item wants the *rule* walk above to exist first, since
-  "which relations does the program name" is read off the same graph — a relation
-  is needed iff some reachable rule mentions it. — §13/§15/engine.
+- **Load only the relations the program names** — **shipped ✅ 2026-09-12** (§17
+  that date; `api::lower_and_load`, `sources::load_imports_where`; `testing.md`
+  **B13**). With every schema explicit the program is lowered before any import is
+  read, and only reached imports are. On `vs/base`: `schema/all.dl` counting all
+  179,748 `var` rows **6.7 s / 1.64 GB → 0.71 s / 0.21 GB**; an unknown field
+  **5.5 s / 1.10 GB → 0.00 s**. Closed `bugs/012`; the early check stops at
+  lowering because of `bugs/014`. — §13/§15/engine.
 
 - **Real pushdown: column projection, then demand transformation** — _designing,
   post-v1._ The two items above are pruning — they decide *whether* to read a
