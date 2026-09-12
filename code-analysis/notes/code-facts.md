@@ -287,6 +287,49 @@ experiments' four `static_analysis` questions exactly as `truth.py` does.
 clean; with nested definitions set aside, 1116 of 1117 functions' branch counts
 equal ruff's mccabe.
 
+## Dogfooding the playbook — VS Code, whole repository
+
+2026-09-12. The bundle installed into a `.claude/skills/` and the playbook
+followed end to end, as a user would, on a repository nobody here wrote. Five
+things came out of it; **none was reachable from the fixtures**, which are a few
+dozen files and always extract every layer.
+
+| what a user does | what happened |
+|---|---|
+| `code-facts src/tsconfig.json` | **V8 fatal OOM at 41 s**, native stack trace, no output — on a box with 20 GB free |
+| the same, 12 GB heap | dies at **403 s / 13.1 GB** in `dataflow`, after five of six phases |
+| `--layers refs,quality` | **8,905,689 facts, 276 s, 13.0 GB** — a 2.87M-line repository is analysable |
+| `checks.dl` on that | **40 semantic errors, exit 2** — then, fixed, 115 s / 19.3 GB and **2 real violations** |
+| `orient.dl` on that | 389 s / 21.8 GB, and `functions(0)` on 2.9M lines |
+
+1. **Node's heap was never raised.** V8 caps the old space near 4 GB whatever the
+   machine has. The tool was failing for want of a flag, not for want of memory.
+2. **Nothing said how big the job was** until after the phase that died.
+3. **A layer switched off had no schema**, so `checks.dl` — which covers every
+   layer — could not run at all. The playbook told a large repository to drop
+   layers and then broke on having done it, and the schema file's own comment
+   claimed the opposite. A test had *pinned* the wrong behaviour.
+4. **A `require`d JSON module is a dangling `target_file`.** `resolveJsonModule`
+   resolves it on disk; a CommonJS `require` never puts it in the program, so no
+   `file` row is emitted. Two rows, one file, and `vs/base` does not contain the
+   shape — only the whole repository did. Open: `../ROADMAP.md`.
+5. **`orient.dl` reported `functions(0)`** for a codebase with tens of thousands,
+   because `fn` is a flow-layer relation and flow was off. The engine's
+   `undefined-predicate` warning fires, but it names `fn/19` — not the number it
+   made wrong — and `most_complex` simply vanished from the output. The step
+   whose job is blind-spot awareness had a blind spot. It now prints
+   `layer_extracted(L)` first.
+
+**What it got right, on a codebase it had never seen**: 8,810 files, 809,471
+production lines, 15,007 classes, 32,059 exported symbols;
+`src/vs/base/common/lifecycle.ts` imported by **3,551** files;
+`editorOptions.ts` the largest at 4,675 lines; and **zero runtime import
+cycles** across the whole tree — checked against 81,056 runtime import edges, so
+it is a finding and not an empty relation. The blind spots it reported honestly:
+125,525 unresolved calls and 126,018 unresolved names, which is what a checkout
+with no `node_modules` looks like and would be far smaller on a developer's own
+machine.
+
 ## Open
 
 - The intermittent `npm test` failure once listed here was P5's heap guard

@@ -14,6 +14,34 @@ with the long form in [`notes/code-facts.md`](notes/code-facts.md).
 
 ## Decisions
 
+- **2026-09-12** — **Three defects, found by running the playbook as a user and
+  not by any test.** The dogfood was a large repository end to end; each of
+  these sat in front of a first result, and none was reachable from a fixture of
+  a few dozen files.
+  - **The wrapper never raised node's heap.** V8 caps the old space near 4 GB
+    whatever the machine has, so `code-facts src/tsconfig.json` on VS Code died
+    at 41 s with a native V8 trace and no output, on a box with 20 GB free. It
+    now takes three quarters of total RAM. **A tool that routinely needs more
+    than a default has to ask for it**, and a fatal trace is not a diagnosis.
+  - **Extraction said nothing about scale until it was too late.** It now prints
+    the file and line count as soon as the program loads — before the phase that
+    dies — and the warning quotes **measured anchors** rather than a rate: cost
+    is sublinear (156k lines is 1.6 GB, 2.9M is 13 GB), and the first version
+    extrapolated to 29 GB and was wrong by 2.2× exactly where it mattered.
+  - **A layer switched off had no schema, so `checks.dl` could not run.** 40
+    semantic errors and exit 2 — and the file's own header claimed the opposite.
+    **This made the playbook contradict itself**: step 1 tells a large repository
+    to drop layers, step 2 then fails. Unextracted layers are now `declare`d and
+    empty. A test had *pinned* the wrong behaviour, which is how it survived.
+  - **What this says about the test suite.** Every one of these is a property of
+    the tool at a scale and in a configuration the fixtures never take. The
+    property catalog tests what the extractor *derives*; nothing tested what a
+    user *encounters*. The end-to-end check added here (`checks.dl` on a
+    layer-less extraction) is the first of that kind.
+  - **Whole-repository analysis is viable, with layers dropped.** VS Code's
+    `src/` — 2.87M lines, 9,007 files — is **8.9M facts in 276 s and 13 GB**
+    under `--layers refs,quality`; with every layer it exhausts a 12 GB heap.
+
 - **2026-09-11 (later ii)** — **An import that resolves through a wildcard
   `declare module` names a pattern, not a file or a package**
   (`imports.target_ambient`). `import './actionbar.css'` was `resolved: true`

@@ -2,15 +2,25 @@
 %
 %     ./datalog <out>/lib/orient.dl
 %
-% Size and shape, the most depended-on and most complex places, the runtime
-% import cycles, and the blind spots: how many calls and names the extractor
-% could not resolve, which is how much any "nothing calls X" answer can be
-% trusted. Every line is a place to start, not a finding.
+% Which layers it has, the size and shape, the most depended-on and most complex
+% places, the runtime import cycles, and the blind spots: how many calls and
+% names the extractor could not resolve, which is how much any "nothing calls X"
+% answer can be trusted. Every line is a place to start, not a finding — and the
+% first line bounds all the others, because a count over a layer that was not
+% extracted is 0 for a reason that has nothing to do with the code.
 
 import "../schema/structure.dl".
 import "../schema/refs.dl".
 import "../schema/flow.dl".
 import "modgraph.dl".
+
+% Which layers this extraction actually has. **Read this line first.** A layer
+% switched off (`--layers`, `--no-git`) leaves its relations declared and empty,
+% so every count over it is 0 — and a 0 that means "not extracted" looks exactly
+% like a 0 that means "none". `functions(0)` on a 2.9M-line codebase was this,
+% and the engine's `undefined-predicate` warning names a relation rather than
+% the number it made wrong (found dogfooding, 2026-09-12).
+layer_extracted(L) :- relation_rows(layer: L, rows: R), R > 0.
 
 production_files(N) :- N = count { P | file(path: P, is_test: false, is_decl: false) }.
 test_files(N) :- N = count { P | file(path: P, is_test: true) }.
@@ -41,6 +51,7 @@ dispatch_kind(K) :- call_site(dispatch: K).
 calls(K, N) :- dispatch_kind(K), N = count { I | call_site(id: I, dispatch: K) }.
 unresolved_name_count(N) :- N = count { X | unresolved_ref(name: X) }.
 
+?- layer_extracted(Layer).
 ?- production_files(N).
 ?- test_files(N).
 ?- code_lines(N).
