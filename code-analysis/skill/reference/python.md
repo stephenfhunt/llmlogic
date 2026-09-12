@@ -19,8 +19,7 @@ interpreter). A directory without a `tsconfig.json` is read as Python; give a
 tsconfig and a Python root together for a mixed repository. Every `.py` and
 `.pyi` below the target is read, except virtualenvs, `build`, `dist` and dot
 directories; `--exclude` drops more. A module's name climbs directories while
-they hold an `__init__.py`, so a `src/` layout needs nothing special. A 21.6k-line
-project extracts in 4.3 s to 93k facts.
+they hold an `__init__.py`, so a `src/` layout needs nothing special.
 
 ## 2. What the facts say — where Python differs
 
@@ -75,20 +74,17 @@ project extracts in 4.3 s to 93k facts.
 
 ## 3. The library over Python facts
 
-Times on the project above (93k facts), including the import. What a large
-project costs, and the rule for writing your own rules over these facts — put the
-join key first, or the engine scans — are in
-[`typescript.md`](typescript.md) §3; both are about the engine and the schema,
-not the language.
+What each library computes is in [`typescript.md`](typescript.md) §3; this is
+what differs over Python facts.
 
-| file | time | over Python |
-|---|---|---|
-| `checks.dl` | 4.0 s | run directly |
-| `modgraph.dl`, `callgraph.dl`, `callreach.dl`, `packages.dl`, `cochange.dl` | 0.3–0.9 s | as for TypeScript; the call graph has the holes of §4 trap 3 |
-| `coupling.dl`, `cohesion.dl`, `metrics.dl`, `dominators.dl` | 3–5 s | as for TypeScript |
-| `coupling_kinds.dl` | 11 s | `content` is also reaching into another class's `_x` (from outside it and its subclasses); `data`, `stamp` and `control` need **annotations** — an unannotated parameter is neither primitive nor a record, so a call through it is classified by nothing |
-| `flow.dl` | 11 s | as for TypeScript |
-| `pointsto.dl`, `taint.dl` | — | **empty**: there is no Python dataflow layer. "Untested exports" goes over `call_edge_lexical` plus the name tier, and says so |
+| file | over Python |
+|---|---|
+| `checks.dl` | run directly |
+| `modgraph.dl`, `callgraph.dl`, `callreach.dl`, `packages.dl`, `cochange.dl` | as for TypeScript; the call graph has the holes of §4 trap 3 |
+| `coupling.dl`, `cohesion.dl`, `metrics.dl`, `dominators.dl` | as for TypeScript |
+| `coupling_kinds.dl` | `content` is also reaching into another class's `_x` (from outside it and its subclasses); `data`, `stamp` and `control` need **annotations** — an unannotated parameter is neither primitive nor a record, so a call through it is classified by nothing |
+| `flow.dl` | as for TypeScript |
+| `pointsto.dl`, `taint.dl` | **empty**: there is no Python dataflow layer. "Untested exports" goes over `call_edge_lexical` plus the name tier, and says so |
 
 ## 4. Traps specific to Python facts
 

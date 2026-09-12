@@ -1,6 +1,5 @@
 % Call graph over resolved call sites — direct edges only (the closure is in
-% callreach.dl: import that only when you need reachability, it is the
-% expensive part).
+% callreach.dl).
 %
 %   call_edge(A, B)          A calls B: static calls, plus every virtual call
 %                            expanded to each override of its declared target

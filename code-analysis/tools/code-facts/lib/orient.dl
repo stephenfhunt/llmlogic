@@ -33,7 +33,7 @@ code_lines(N) :- N = sum { L | file(path: P, sloc: L, is_test: false, is_decl: f
 
 % **Gated on their layer, so a 0 that means "not extracted" cannot print.** It
 % did: `functions(0)` on a 2.9M-line codebase, because `fn` is a flow-layer
-% relation and a repository that size has to be extracted without it. Reporting
+% relation and flow was not extracted. Reporting
 % nothing is the honest answer to a question these facts cannot answer, and
 % `layer_extracted` above says which those are (found dogfooding, 2026-09-12).
 functions(N) :- layer_extracted(flow), N = count { F | fn(id: F, kind: K), K != module }.

@@ -1,7 +1,4 @@
-% Dominators and natural loops. Quadratic in a function's size: every node
-% floods its function once. Fine for ordinary functions; a file's `<module>`
-% graph with thousands of top-level statements is where it gets slow —
-% restrict `candidate` to the functions you care about for those.
+% Dominators and natural loops, per function.
 %
 %   dominates(A, B)     every path from the entry to B passes through A
 %                       (reflexive: a node dominates itself)

@@ -409,6 +409,64 @@ test caught it is worth more than the fix: the calibration corpus, VS Code's
 was never exercised. Grafana's frontend has **915 files in 27 cycles, the largest
 a 796-file SCC**. *A corpus chosen for size does not exercise shape.*
 
+### Re-measured after the engine stopped copying
+
+The same evening, the engine's memory work
+(`../../datalog/notes/memory-profile-2026-09-12.md`): an import is no longer held
+three times while it is typed, the base facts no longer twice for the whole run,
+and no proof is built for a match nothing keeps. **Every digest is identical.**
+
+On Grafana's frontend, `orient.dl` **224 s / 9.46 GB → 87 s / 4.94 GB**, answers
+byte-identical, and its runtime closure alone 133 s / 6.73 GB → 44 s / 3.45 GB.
+`callreach.dl`, not run here before on the grounds above, asked `recursive` and
+`mutual`: **18 s / 1.37 GB**. `cochange.dl` asked `revisions` and
+`hidden_coupling`: **337 s / 1.97 GB** (16.7 GB before the engine pruned).
+`pointsto.dl` still does not fit: on `vs/base` it was stopped above 14 GB at
+130 s — its cost is its own points-to closure, which none of this touched.
+
+The rest of the Grafana bench, against § Re-measured after the engine learned to
+prune above. Answers were compared here for `orient.dl`, `modgraph.dl` and
+`packages.dl` (identical); the others rest on `vs/base`'s identical digests below.
+
+| library | after pruning | now |
+|---|---:|---:|
+| `modgraph.dl`, cycle questions asked | 220 s / 9.3 GB | 75 s / **5.1 GB** |
+| `packages.dl` | 1.6 s / 0.17 GB | 1.3 s / **0.09 GB** |
+| `coupling.dl` | 484 s / 9.3 GB | 298 s / **3.8 GB** |
+| `coupling_kinds.dl` | 305 s / 9.1 GB | 148 s / **6.1 GB** |
+| `checks.dl` | 42 s / 6.2 GB | 35 s / **3.2 GB** |
+| `cohesion.dl` | 285 s / 5.4 GB | 211 s / **3.1 GB** |
+| `metrics.dl` | 23 s / 4.4 GB | 17 s / **2.4 GB** |
+| `callgraph.dl` | 29 s / 4.0 GB | 20 s / **2.8 GB** |
+
+On `vs/base`, `bench/` with the trunk binary and then the new one, back to back.
+Other measurements were running, so the times are indicative; the peaks and
+digests are not.
+
+| library | trunk | now | digest |
+|---|---:|---:|---|
+| `callreach.dl` | 34.5 s / 3,492 MB | 13.4 s / **677 MB** | `0c2ef0341aa9` |
+| `cohesion.dl` | 28.3 s / 1,945 MB | 17.2 s / **384 MB** | `e1c73e914963` |
+| `checks.dl` | 8.7 s / 1,256 MB | 6.9 s / **686 MB** | no rows |
+| `coupling_kinds.dl` | 21.0 s / 1,043 MB | 12.5 s / **677 MB** | `cf3bffeab6d9` |
+| `dominators.dl` | 50.4 s / 892 MB | 33.6 s / **449 MB** | `0d84d957023c` |
+| `coupling.dl` | 29.4 s / 645 MB | 16.4 s / **295 MB** | `ed0bce1f2667` |
+| `flow.dl` | 68.6 s / 629 MB | 39.6 s / **492 MB** | `3e51cdb30022` |
+| `callgraph.dl` | 3.1 s / 425 MB | 2.0 s / **319 MB** | `b4b166797098` |
+| `metrics.dl` | 3.2 s / 401 MB | 2.1 s / **247 MB** | `bb6aa0d4262f` |
+| `orient.dl` | 2.0 s / 332 MB | 1.6 s / **169 MB** | `124833fead3d` |
+| `modgraph.dl`, cycle questions asked | 0.3 s / 65 MB | 0.2 s / **44 MB** | `ff07c4a2b1a3` |
+| `packages.dl` | 0.1 s / 37 MB | 0.1 s / 39 MB | `7d103530aedf` |
+
+`modgraph.dl` and `packages.dl` were measured over the repository's `lib/`: a fact
+directory's own `lib/` is copied at extraction and goes stale, and the copies
+under `~/.cache` predate `reach.dl` being folded back — which is how a first
+Grafana run "asked about cycles" in 1.2 s.
+
+**What a non-recursive library costs now is the table it imports**, held once:
+`symbol` alone is 1.37 GB on Grafana, and a library reading 4 of its 18 columns
+could load it in 0.58 GB — column projection, a datalog design item.
+
 ### What it found, verified in the source
 
 On `@grafana/ui`: five independent measures — complexity × churn, revisions,

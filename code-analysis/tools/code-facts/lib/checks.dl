@@ -6,9 +6,8 @@
 % another; Subject is always a string (integer ids are cast). Exit 1 (no rows) is a clean fact base; exit 0 prints each violation.
 % A check over a layer that was not extracted derives nothing: the writer
 % `declare`s every relation of an unextracted layer, so this program — which
-% covers all of them — runs against a partial extraction. That matters because a
-% large repository needs one (`--layers refs,quality`); before the declarations
-% it failed with 40 semantic errors instead.
+% covers all of them — runs against a partial extraction (`--layers`,
+% `--no-git`).
 %
 % This is "Datalog proposes, source verifies" pointed at the extractor: before
 % believing an analysis, believe the facts it rests on.

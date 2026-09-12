@@ -4,10 +4,6 @@
 % point to. Sound for the modelled subset (see the dataflow layer's notes);
 % imprecise by design, so read `pts` as "may point to".
 %
-% Cost: this is the heaviest library here. It is a fixpoint over every
-% variable in the program; expect seconds on a small project and much more on
-% a large one. Query narrowly (`pts("…#x", O)`) and time it before relying on it.
-%
 %   pts(V, Site)          variable V may hold the object allocated at Site
 %   heap(Site, F, Site2)  field F of the Site object may hold the Site2 object
 %   target(CS, Fn)        call site CS may invoke function Fn — static and

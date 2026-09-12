@@ -18,8 +18,8 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
   `decisions.md` 2026-09-11 (later), `notes/code-facts.md` § At a million facts.
 - **`bench/`** — times each library over a fact directory and digests its
   answers. _shipped_ — `npm run bench -- --facts <dir>`.
-- **`callreach.dl` whole-project does not fit** a 14k-function call graph;
-  `callreach_seeded.dl` is the seeded closure. _shipped_ — same decision.
+- **`callreach_seeded.dl`** — the call closure grown from a seed you supply.
+  _shipped_ — same decision.
 - **Asset imports** — `import './x.css'` resolves through a wildcard
   `declare module`, so `imports.target_ambient` names the pattern and
   `checks.dl` counts it as a target. _shipped_ — `decisions.md` 2026-09-11
@@ -38,17 +38,19 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
   file, not a package name, so `imported_workspace` reads the dependency off
   `file.package`. _shipped_ — same entry; an unnamed `package.json` is no longer
   a package.
-- **`orient.dl` still costs 9.5 GB** on 8,910 files (179 s; 13.9 GB before the
-  engine pruned): its own `runtime_reaches` closure is 11.8M pairs, and pruning
-  cannot skip a closure a goal asks for. A size gate that declines the cycle
-  question (and says so) ran in 13.6 s / 3.3 GB before pruning — but the threshold
-  is a guess from four measured points, so it is a design call. _queued_ — `notes/code-facts.md` § Dogfooding —
-  Grafana.
 - **`lib/keys.dl`'s re-keyings stay until the engine seeks a non-leading column** —
   the one library workaround left for a missing engine feature (`reach.dl`, the
-  other, is unwound above). Re-measure with the bench before removing any.
-  _parked_ — `../datalog/ROADMAP.md` § Performance, *a bound column that is not
-  leading still scans*.
+  other, is unwound above). The skill no longer teaches re-keying, and a library
+  workaround is engine debt (`decisions.md` 2026-09-12 evening). Re-measure with
+  the bench before removing any. _queued_ — `../datalog/ROADMAP.md` § Performance,
+  *a bound column that is not leading still scans*.
+- **Profile the TypeScript extractor** — 389 s and 16.8 GB for Grafana's frontend
+  with `refs,quality,git`; VS Code's `src/` exhausts a 12 GB heap in `dataflow`.
+  Attribute by phase before changing anything, as the engine's profile did.
+  _queued_ — `notes/code-facts.md` § Dogfooding.
+- **`pointsto.dl` does not fit `vs/base`** — past 14 GB at 130 s. Profiled as a
+  vehicle for the engine, with nothing special to it. _queued_ —
+  `../datalog/ROADMAP.md` § Performance.
 - **The decorator layer has never met a real subject** — `decorator` is zero rows
   in every fact base on disk, and `implements` is 2 rows on `@grafana/ui`. A
   decorator-saturated, nominally-typed codebase (NestJS, TypeORM, Angular) is the

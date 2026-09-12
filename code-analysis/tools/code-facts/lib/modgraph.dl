@@ -21,15 +21,6 @@
 % included.** A cycle they report may not exist at run time; re-derive over
 % `runtime_dep` before calling one real (`../SCHEMA.md`, and the language
 % reference's first trap).
-%
-% **Cost.** Everything but the last three is one non-recursive rule. Those three
-% are a transitive closure, quadratic in the graph's density — and the engine
-% evaluates a rule only for a program whose goals depend on it, so a program that
-% asks about `dep` pays nothing for them. Ask about a cycle and you pay it: on
-% Grafana's frontend — 8,910 files, 56,047 imports — `file_reaches` is **17.45M
-% derived pairs** and the program holding it peaks at 12.6 GB. Over a few
-% thousand files, seed the question instead (`callreach_seeded.dl` is the
-% idiom), or ask it of a subtree.
 
 import "../schema/structure.dl".
 

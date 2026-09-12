@@ -32,26 +32,7 @@ Two executables sit in this skill's directory: `code-facts` (the extractor) and
    <skill>/code-facts tsconfig.json tsconfig.test.json -o /tmp/facts
    <skill>/code-facts path/to/python-project -o /tmp/facts
    ```
-   Git history comes along when the project is a repository. A 20k-line project
-   takes about 5 s; `code-facts` prints the file and line count as soon as it has
-   loaded the program, **before** the expensive phases, so check that number
-   against the next paragraph rather than waiting to find out.
-
-   **If the project is large, scope it or drop layers.** Extraction peaks around
-   1 GB per 100k lines. Measured on VS Code: `src/vs/base` (156k lines) is 18 s
-   and 1.6 GB and everything works; the whole of `src/` (2.87M lines, 9,000
-   files) needs more than a **12 GB** heap and dies in `dataflow`. Two ways down,
-   in the order worth trying:
-   - **`--layers refs,quality`** — skip `flow` and `dataflow`. That is the whole
-     architecture, coupling, cohesion, dependency and dead-export half of this
-     playbook, and it is what makes a million-line repository answerable at all:
-     the same VS Code `src/` that cannot finish with every layer becomes
-     **8.9M facts in 276 s and 13 GB**. You lose `flow.dl`, `dominators.dl`,
-     `pointsto.dl` and `taint.dl`.
-   - **A tsconfig scoped to the subtree you are asking about**, extending the
-     project's own so the compiler options stay honest. Remember that a subtree
-     is rarely self-contained — TypeScript will pull in whatever it imports, and
-     those files come along.
+   Git history comes along when the project is a repository.
 
    Then read `reference/typescript.md` or `reference/python.md`
    — what the facts can and cannot say differs by language, and most sharply
@@ -74,17 +55,13 @@ Two executables sit in this skill's directory: `code-facts` (the extractor) and
 
 ## What to explore
 
-Libraries are in `/tmp/facts/lib/`; each imports what it needs, and each costs
-what it imports, so import one. `reference/typescript.md` §3 lists every
-relation each derives, with measured times on a 24k-line project **and on a
-156k-line one**. At that size the module and design libraries are seconds to
-half a minute, while `flow.dl`, `dominators.dl`, `callreach.dl` and
-`pointsto.dl` are minutes or do not fit — check the table before reaching for
-one, and narrow the question if you do.
+Libraries are in `/tmp/facts/lib/`; each imports what it needs, so import the one
+that answers the question. `reference/typescript.md` §3 lists every relation each
+derives.
 
 | concern | ask | where |
 |---|---|---|
-| **architecture** | import cycles that exist at run time; dependencies pointing up a layer; which rules your architecture should obey (below) | `modgraph.dl`: `runtime_dep`, `unit_dep`, `cycle_edge`, `in_cycle` (the last two a closure — see the cost table); `coupling.dl`: `sdp_violation` |
+| **architecture** | import cycles that exist at run time; dependencies pointing up a layer; which rules your architecture should obey (below) | `modgraph.dl`: `runtime_dep`, `unit_dep`, `cycle_edge`, `in_cycle`; `coupling.dl`: `sdp_violation` |
 | **how much coupling** | afferent / efferent / instability / distance per file (`G = -1`), directory depth (`G = N`), package (`G = -2`) | `coupling.dl` |
 | **how two modules are coupled** | the strongest kind per file pair — content, common, external, control, stamp, data — and the member, variable, literal or parameter that makes it so | `coupling_kinds.dl`: `worst_coupling`, then the per-kind relations |
 | **hidden coupling** | files that change together with no import or reference between them | `cochange.dl`: `hidden_coupling` |
@@ -114,12 +91,9 @@ cannot show — dead exports (name your entry points) and untested exports (over
   ```sh
   <skill>/datalog q.dl -q '?why cycle_edge("src/a.ts", "src/b.ts")'
   ```
-- **Narrow before you close over the whole graph.** Reachability over every call
-  edge is the expensive query; seed it from the files you care about.
-- **Project before you aggregate.** An aggregate beside a wide atom both counts
-  the wrong thing (`reference/bring-your-own.md` §5, the count trap) and runs once
-  per row of that atom: `kind(K) :- call_site(dispatch: K).` first, then count
-  per `kind(K)`.
+- **Project before you aggregate.** An aggregate beside a wide atom counts the
+  wrong thing (`reference/bring-your-own.md` §5, the count trap):
+  `kind(K) :- call_site(dispatch: K).` first, then count per `kind(K)`.
 - **Metrics are relative.** An instability of 0.8 means nothing alone; the same
   file being the least stable thing everything depends on means a lot. Compare
   within the codebase, not against a textbook threshold.
@@ -159,8 +133,8 @@ toolkit makes easy.
 
 ## Reference
 
-- `reference/typescript.md` — the facts: layers and relations, ids, the library
-  with measured costs, the questions worth asking, and ten traps.
+- `reference/typescript.md` — the facts: layers and relations, ids, the library, the
+  questions worth asking, and ten traps.
 - `reference/python.md` — what differs for Python: what resolves without a type
   checker, what the library can and cannot compute, and seven traps.
 - `reference/datalog.md` — the Datalog language: syntax, negation, aggregation,

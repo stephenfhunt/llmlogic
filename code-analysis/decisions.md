@@ -14,6 +14,21 @@ with the long form in [`notes/code-facts.md`](notes/code-facts.md).
 
 ## Decisions
 
+- **2026-09-12 (evening)** — **The tool is made usable at size, not documented
+  around it.** The user's rulings, on the engine's memory work
+  (`../datalog/notes/memory-profile-2026-09-12.md`):
+  - **No size gate on `orient.dl`.** It asks for its runtime closure at any size;
+    what that costs is the engine's to reduce — 4.94 GB on Grafana's frontend.
+  - **The skill carries no size or cost guidance** — no timing columns, no "does
+    not fit", no "narrow before you close over the graph", no join-key rule. An
+    agent asks the question the analysis needs; one too slow to answer is a defect
+    in the engine or the extractor, and is profiled as one.
+  - **The engine stays generic.** `pointsto.dl` is profiled as a vehicle for
+    engine work, never given behaviour of its own; the extractor gets its own
+    profiling session.
+  - **The library reads naturally**, so a workaround in it is engine debt:
+    `lib/keys.dl` is the one left (2026-09-11 (later), reopened).
+
 - **2026-09-12 (later still)** — **The import-graph closure is back in
   `modgraph.dl`, because the engine now pays for a rule only when a goal reaches
   it.** `reach.dl` is deleted; `file_reaches` / `in_cycle` / `cycle_edge` close out
@@ -48,6 +63,11 @@ with the long form in [`notes/code-facts.md`](notes/code-facts.md).
     which has **zero** import cycles, so the one superlinear rule in the library
     was never exercised. Grafana's frontend has 915 files in 27 cycles, the
     largest a 796-file SCC. **A corpus chosen for size does not exercise shape.**
+    ***Consequences 2026-09-12 (evening)*** — it held for the engine's memory
+    work too: the fix worth 3.3 GB on Grafana's runtime closure is worth 2 MB on
+    `vs/base` `orient.dl`, whose saving came from the base facts instead. Measured
+    on both before either was believed
+    (`../datalog/notes/memory-profile-2026-09-12.md`).
   - **`packages.dl` reads a workspace dependency off `file.package`.** A monorepo
     sibling resolves *inside* the root, so `imports.target_package` is absent on
     every one — 44,908 of 55,762 imports here — and `unused` named four packages
@@ -142,6 +162,9 @@ with the long form in [`notes/code-facts.md`](notes/code-facts.md).
     900 s, 4 GB cell is short of the memory, so the trade is the right way round.
   - **The guard is the bench** (`tools/code-facts/bench/`): every library's
     answers digest, so a speed-up that moves a row is not a speed-up.
+  ***Reopened 2026-09-12 (evening)*** — a library free of engine workarounds is the
+  direction (above): the skill no longer teaches re-keying, and `lib/keys.dl` stays
+  only until the engine seeks a non-leading column.
 
 - **2026-09-11** — **Code analysis is its own project and its own skill**, not a
   second job of the `datalog` skill. Three reasons, the first decisive:
