@@ -347,6 +347,89 @@ it is a finding and not an empty relation. The blind spots it reported honestly:
 with no `node_modules` looks like and would be far smaller on a developer's own
 machine.
 
+## Dogfooding the playbook — Grafana, a real analysis
+
+2026-09-12, and deliberately the other half of the VS Code run above: that one
+stopped at `checks.dl` and `orient.dl`, so **the exploring half of the playbook
+and the whole git layer had never been used on a real codebase**. Subject:
+`grafana/grafana` at `9d9d93ee41` — 9,426 TypeScript files, 1.59M lines, 73,113
+commits, `node_modules` installed, the packaged bundle dropped into its
+`.claude/skills/`. Two scopes, each explored by a fresh agent whose only context
+was the bundle's `SKILL.md` and `reference/`; every finding was then checked
+against the Grafana source here.
+
+| scope | extraction | `checks.dl` |
+|---|---|---|
+| `packages/grafana-ui`, **every layer** | 975 files / 133k lines → **1.17M facts, 67 s, 2.2 GB** | exit 1, clean, 10 s / 1.9 GB |
+| root + 15 package tsconfigs, `refs,quality,git` | 8,910 files / 1.48M lines → **4.04M facts, 389 s, 16.8 GB** | exit 1, clean, 53 s / 9.2 GB |
+
+### What broke, and what it cost
+
+| what a user does | what happened |
+|---|---|
+| `datalog lib/orient.dl` on 4.0M facts — **step 3 of the method** | **killed at 76 s holding 21.1 GB** |
+| the same after splitting `reach.dl` out | **207 s / 13.9 GB**, complete |
+| any program importing `lib/modgraph.dl` for `dep` alone | **306 s / 12.6 GB**; 70 s / 3.3 GB with `dep` inline |
+| `lib/cochange.dl`'s own question, same comparison | **351 s / 16.7 GB** against **59 s / 7.4 GB** |
+| `lib/packages.dl` in a monorepo | four workspace siblings reported `unused`; 540 statements import them |
+| a program with a **typo** | **11 s and 2.7 GiB** — the facts load before the program is checked |
+| `lib/cohesion.dl` | 304 s / 9.0 GB, **11× its `vs/base` figure** at 3× the facts |
+
+Two fixed here (`../decisions.md` 2026-09-12 later); the rest filed in `../bugs/`
+and `../../datalog/bugs/`, and the missing capabilities on the two ROADMAPs.
+
+**The fix that mattered was a library-design mistake, not a rule.** `modgraph.dl`
+carried the import graph's transitive closure — 17.45M pairs here — beside five
+non-recursive rules, and both of its importers read only `dep`. The reason no
+test caught it is worth more than the fix: the calibration corpus, VS Code's
+`vs/base`, has **zero import cycles**, so the one superlinear rule in the library
+was never exercised. Grafana's frontend has **915 files in 27 cycles, the largest
+a 796-file SCC**. *A corpus chosen for size does not exercise shape.*
+
+### What it found, verified in the source
+
+On `@grafana/ui`: five independent measures — complexity × churn, revisions,
+`module_lcom4`, a runtime import cycle, co-change spread — all land on
+`components/Table/TableNG`, whose `utils.ts` is 1,934 lines that `module_component`
+splits into one blob of 32 exports and **14 free-floating singletons**. A real
+latent bug at `useDragAndDrop.tsx:109` (an uncaught `.then()` on a promise
+memoised with `??=`, so one chunk-load failure poisons the cache for the page).
+`jquery`, `@types/jquery` and `react-router-dom` declared as runtime dependencies
+of a **published** package that imports none of them.
+
+On the whole frontend, asked the maintainers' own in-flight question — decoupling
+the built-in plugins, enforced by eslint for four data sources and a second rule
+shipped commented-out — it produced a migration plan: two plugins can have the
+rule switched on today; `public/app/features/canvas` is 30 files that **nothing
+outside the canvas panel imports** (so moving it clears 68 of that plugin's 98
+blocking imports in one commit); the best-ratio move is a **75-line** file that
+blocks nine plugins and is the sole blocker for two; and the direction nobody
+lints is the larger one — 386 core→plugin imports, plus a runtime edge into a
+plugin already declared decoupled.
+
+**`imports.runtime` was the difference between right and wrong**, not a nicety:
+**88 of 490** blocking imports are type-only, and `imports.kind` says `static`
+for all 490, because Grafana writes `import { type X }` and never `import type`.
+
+### Three oracles, and the one confident negative
+
+The git layer agrees with `git log --follow` exactly — 93 commits touching
+`TableNG.tsx`, 93 `touch` rows, minus 6 bulk commits = `revisions` 87 — including
+rename-following through a directory move that a plain `git log -- path` misses.
+`files_in_runtime_cycles(915)` matches an independent Tarjan SCC written in
+Python. And a regex import-scanner written before either agent ran agrees plugin
+by plugin, reproducing 0 blocking imports for the four plugins eslint already
+enforces.
+
+Against that, the one wrong answer: `n_pkg_to_public(0)` — "nothing under
+`packages/` imports `public/`", reported as the strongest structural result —
+**is false**. `packages/grafana-ui/.storybook/preview.ts:22` imports
+`../../../public/sass/grafana.light.scss`, and `.storybook/tsconfig.json` was not
+among the tsconfigs given. The query could not have found it either way: a
+`.scss` specifier resolves to `target_ambient`, never `target_file`. *A confident
+negative over a blind spot* is the failure mode the playbook names, and step 5 —
+open the source — is what caught it.
+
 ## Open
 
 - The intermittent `npm test` failure once listed here was P5's heap guard

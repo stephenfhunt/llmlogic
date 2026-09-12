@@ -24,6 +24,60 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-12 — the playbook on a codebase nobody here wrote: Grafana, end to end
+
+Asked for a real analysis of a real project, git facts included — the exploring
+half of the playbook and the git layer had never been used outside fixtures.
+Subject `grafana/grafana` @ `9d9d93ee41`: 9,426 TS files, 1.59M lines, 73,113
+commits, deps installed, the bundle in its `.claude/skills/`. Two scopes, each
+explored by a fresh agent holding only `SKILL.md` and `reference/`.
+
+**Done** — code-facts **118 tests**, typecheck and bench clean, digests unmoved
+- **Extraction and the gate held on a codebase it had never seen**:
+  `grafana-ui` all layers → 1.17M facts / 67 s; the whole frontend
+  `refs,quality,git` → **4.04M facts / 389 s / 16.8 GB**; `checks.dl` **exit 1,
+  zero violations** on both, first try.
+- **`lib/reach.dl`** — the closure split out of `modgraph.dl`, which computed
+  17.45M pairs for every importer while both read only `dep`. Same answer:
+  **306 s / 12.6 GB → 70 s / 3.3 GB**, and `orient.dl` — *step 3 of the method* —
+  went from **OOM-killed at 21 GB** to 207 s.
+- **`packages.dl` works in a monorepo** — `imported_workspace` reads the
+  dependency off `file.package`, since a sibling resolves to a file (44,908 of
+  55,762 imports here) and `unused` was naming four packages that 540 statements
+  import. An unnamed `package.json` is no longer a package.
+- **New `monorepo` fixture**; `bugs/` opened for `code-analysis` (five), two more
+  against the engine (`012`, `013`).
+- **Findings, verified in the source**: a latent bug at `useDragAndDrop.tsx:109`;
+  three unused runtime deps in a published package; a plugin-decoupling migration
+  plan — two plugins switchable today, a 75-line file blocking nine.
+
+**Decided** (`code-analysis/decisions.md` 2026-09-12 later; long form
+`code-analysis/notes/code-facts.md` § Dogfooding — Grafana)
+- **A closure does not travel with the cheap rules** — a library costs what it
+  imports; `callreach.dl`'s precedent applied here and had not been taken.
+- **A corpus chosen for size does not exercise shape.** `vs/base` has *zero*
+  import cycles, so the one superlinear rule was never run; Grafana has 915 files
+  in 27, the largest a 796-file SCC.
+- **A relation that cannot tell two cases apart claims the weaker one** —
+  `imported_workspace` feeds `used`, not `undeclared`.
+- **Three oracles agreed** (`git log --follow`, a Tarjan SCC, a regex import
+  scanner); the one wrong answer was a *confident negative over a blind spot*,
+  caught by the verify step, not by the engine.
+
+**Removed**
+- `file_reaches`/`in_cycle`/`cycle_edge` from `modgraph.dl` (moved); the dir-name
+  fallback for an unnamed `package.json`; the bench's two closure queries from
+  its `modgraph` entry, now their own.
+
+**Next up**
+- **`orient.dl` is fixed but still 13.9 GB** — its own `runtime_reaches` is 11.8M
+  pairs; the gate that declines the cycle question runs in 13.6 s / 3.3 GB, but
+  its threshold is a guess from four points — a design call.
+- **Open**: `code-analysis/bugs/001`–`005`, `datalog/bugs/012`–`013`; on the
+  ROADMAPs, a string predicate, top-N and run progress (datalog), a
+  public-API-surface relation (code-analysis). H-CA1 still needs its reference
+  program and the `code-analysis` arm.
+
 ## 2026-09-11 (later still) — the library at a million facts: it was the seek, not the aggregates
 
 Picked up the `code_design` pack at step 1. The sizing spike blamed the
@@ -190,93 +244,3 @@ now, the measurement designed now and built next session. Built so.
   uncaptured failure. Capture every suite run's output until it is named.
 - Parked: a Python dataflow layer; a name-tier helper in `lib/` for Python's
   unresolved calls.
-
-## 2026-09-11 — ts-facts at module scale: cohesion, coupling kinds, package hygiene
-
-Asked, after a brainstorm on what the facts make derivable, for the
-`member_access` fix and three library additions. All four shipped; the
-brainstorm's other threads are below.
-
-**Done** — **79 tool tests**, each commit gated on the suite
-- **`member_access`** covers object type aliases and inline object types
-  (`class` → `owner`): tsdl 2,757 → 3,281 rows. The refs layer resolves
-  `obj["secret"]`, which is how TypeScript code reaches a `private`.
-- **`cohesion.dl`: `module_lcom4`** — a file's exports grouped by what they
-  share. tsdl: `test/support.ts` is 9 groups; `lexer.ts`'s second is
-  `CONTEXTUAL_KEYWORDS`, exported and used by nothing in `src`.
-- **`coupling_kinds.dl`** — Myers' scale per file pair. tsdl's `external`
-  coupling is real: Datalog tokens (`":-"`, `"?why"`) spelled in several modules.
-- **`packages.dl`** — undeclared, unused, dev-in-production, test-only and
-  types-only dependencies; `imports.builtin` and `package_dep.types_for` added.
-- New `design` fixture, expectations worked by hand; recipe, note updated.
-
-**Decided**
-- **Classify by fact, not by count:** each coupling kind names the member,
-  variable, literal or parameter that makes it so.
-- **Text-typed heuristics stay in the lib, stated** — "primitive" is printed
-  `symbol_type.text`; changing them is editing one rule.
-
-**Removed**
-- `member_access.class` (renamed). Nothing else.
-
-**Next up**
-- **`SKILL.md`'s description** never mentions codebases or `./ts-facts`; the
-  user's call, since it loads every session and the experiments measure it.
-- From the brainstorm, unbuilt: architecture rules as exit-code checks with
-  `?why` for the offending chain; `--tag` name classification at extraction;
-  purity and escape analysis; Lakos levelization (collapse cycles first).
-- **Two broken intermediate commits** (`bb41e57`, `feb9741`: a fixture file the
-  npm glob ran as a test), fixed forward in `244620e`.
-
-## 2026-09-10 — `ts-facts`: a TypeScript project, extracted for the skill
-
-Asked for a maximalist tool in the skill's static-analysis section: point it at a
-tsconfig, get facts about everything from module relationships to code flow,
-useful for coupling, cohesion and questions no linter asks. Built as planned, in
-eleven commits, and it found two engine defects, which were fixed here when asked.
-
-**Done** — `skill/tools/ts-facts` (`./ts-facts`), **72 tool tests**, engine suite
-and clippy clean, experiments **1,661** green
-- **61 relations over seven layers**: structure, refs (checker-resolved call
-  sites with dispatch kinds), flow (a CFG per function, def/use, metrics),
-  dataflow (Doop-style), quality, git (renames followed to today's path).
-- **`lib/`, split by cost**: checks, modgraph, callgraph/callreach, coupling,
-  cohesion, metrics, flow, dominators, pointsto, taint, cochange.
-- **Properties P1–P8**, each mutation-verified (`testing.md`); P1/P5 run in Node.
-- **Engine:** `bugs/resolved/010` (empty JSONL import), `011` (clash message).
-- **Harness:** the local subject's skill listing named every file under `skill/` —
-  thousands, once the tool landed; it now names what the workspace carries.
-- **tsdl** (24.5k lines, TS 7): 205k facts in 5.7 s, libraries 0.3–9.4 s, clean.
-
-**Decided** (`spec.md` §17 2026-09-10; `notes/ts-facts.md`; experiments
-`decisions.md` 2026-09-11)
-- **TypeScript 6.0 pinned, in-process** — 7.0 has only an unstable IPC API.
-- **`src/schema.ts` is the schema's one home**; ids keyed by declaration position.
-- **Emit primitives, derive measures in Datalog**; a library's function-typed
-  callee is named as the target (2,843 of tsdl's 2,870 "indirect" calls were
-  vitest).
-- **Checking answers against the source found every call-graph trap.** Untested
-  exports on tsdl went 5 → 0 across library-invoked callbacks, callbacks in object
-  literals, and structural implementations CHA cannot see.
-  `hidden_coupling`'s top tsdl pair was real.
-
-**Removed**
-- The writer's header-only-CSV workaround for empty tables, once `010` was fixed.
-- `skill_body`'s directory-wide listing, including the wrapper it always listed
-  and never copied.
-
-**Decided — *added 2026-09-11***
-- **`imports.runtime` comes from the emitter** (§17 amendment; P8). The user
-  asked whether import facts separate type from runtime imports: they did only
-  syntactically, and TypeScript elides any import whose bindings only annotate.
-  `runtime_dep` was wrong on every project not under `verbatimModuleSyntax`.
-
-**Next up**
-- **Point it at a real, larger codebase** than tsdl — a class-heavy one, since
-  tsdl has no classes and the cohesion library has only fixture evidence.
-- **One unexplained `npm test` failure**, seen once in ~25 full runs; capture the
-  next with the default reporter.
-- A TypeScript 7 backend when its API stabilizes; accessors, spread and instance
-  method values in the dataflow layer.
-- Unchanged from before: size the provenance run with `--repeats`; the
-  `SKILL.md` exit-code gap.

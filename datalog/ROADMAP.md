@@ -261,6 +261,33 @@ that settled the first.
 Items landing on the agent surface, the one consumer least able to work around
 them. Except where noted these are documented v1 limits rather than defects.
 
+- **No string predicate of any kind** — _queued, post-v1_. There is no
+  `contains` / `prefix` / `suffix`, and no `like`; `contains(P, ".x.")` is an
+  undefined predicate and `P like "%.x.%"` a parse error. A fact base whose keys
+  are *paths* — which every source-analysis fact base is — therefore cannot
+  express a convention the schema did not anticipate, and the workaround is to
+  leave the engine, generate a table in another language and import it. Measured
+  cost when it bit: a dead-export query over a real library returned 594 rows of
+  which 453 were one file-naming convention, and filtering them meant a Python
+  script writing a fact file, so the query stopped being self-contained and
+  re-runnable. The design question is not whether but *how much*: one predicate
+  closes the case, a pattern language is a language. — found dogfooding
+  (`../code-analysis/notes/code-facts.md` § Dogfooding — Grafana).
+- **No `ORDER BY` / `LIMIT`, and no top-N** — _queued, post-v1_. Ranking is the
+  most common thing an agent does with an answer, and the documented idiom is to
+  compute a maximum and threshold on it, which costs a rule per ranking and
+  cannot express "the ten largest". Every top-N in two real reviews was produced
+  by piping output through `sort -rn | head`. Whether this belongs in the
+  language or in the *printer* is the open question — a sort is not a relational
+  operation, and `?- top 10 by N: p(X, N).` is a query-surface feature, not a
+  semantics one.
+- **A long run says nothing while it runs** — _queued, post-v1_. A library that
+  took 304 s at a constant 9 GB produced no output until it finished, so
+  "working" and "wedged" are indistinguishable and the only recourse is to `ps`
+  the process. A heartbeat on stderr (facts derived, current stratum) every N
+  seconds would close it. Interacts with the `--progress` question nobody has
+  needed at fixture scale.
+
 - **The answer shape — what a query prints, and under what relation name.** ✅
   **2026-08-17**, closing the widening *and* the multi-atom existence check it had
   absorbed. The rule is set **equality** between the positive atoms' variables and

@@ -30,6 +30,25 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
   Code's whole `src/`.
 - **`orient.dl` gates every count on its layer** — no `functions(0)` over a layer
   that was not extracted, and `code_lines` excludes data. _shipped_ — same entry.
+- **`reach.dl` — the import-graph closure, split out of `modgraph.dl`** so a
+  program that only wants `dep` does not pay for it. _shipped_ —
+  `decisions.md` 2026-09-12 (later); `orient.dl` on a 1.48M-line repository went
+  from OOM-killed at 21 GB to 207 s / 13.9 GB.
+- **`packages.dl` sees workspace siblings** — a monorepo import resolves to a
+  file, not a package name, so `imported_workspace` reads the dependency off
+  `file.package`. _shipped_ — same entry; an unnamed `package.json` is no longer
+  a package.
+- **`orient.dl` still costs 13.9 GB** on 8,910 files: its own `runtime_reaches`
+  closure is 11.8M pairs. A size gate that declines the cycle question (and says
+  so) runs in 13.6 s / 3.3 GB — but the threshold is a guess from four measured
+  points, so it is a design call. _queued_ — `notes/code-facts.md` § Dogfooding —
+  Grafana.
+- **A public-API-surface relation.** "Is this symbol reachable from a published
+  entry point" was rebuilt by hand three times in one session and was still not
+  certainly complete (`export * from` chains, `export { x as default }`,
+  conditional `exports` maps). For a published library that is the primary object
+  of study, and `packages.dl` already reads the `package.json` the `exports` map
+  lives in. _queued._
 - **Python dataflow layer** (points-to and taint for Python). _parked_ until the
   first Python version has been used.
 - **A TypeScript 7 backend**, when its compiler API stabilizes. _parked._

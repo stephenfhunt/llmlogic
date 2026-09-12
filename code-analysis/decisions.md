@@ -14,6 +14,38 @@ with the long form in [`notes/code-facts.md`](notes/code-facts.md).
 
 ## Decisions
 
+- **2026-09-12 (later)** — **A library pays for what it imports, so a closure
+  does not travel with the cheap rules.** Found by analysing a 1.48M-line
+  repository nobody here wrote; long form in `notes/code-facts.md` § Dogfooding —
+  Grafana.
+  - **`file_reaches` / `in_cycle` / `cycle_edge` move to `reach.dl`.**
+    `modgraph.dl` computed the import graph's transitive closure — 17.45M pairs
+    on this subject — for every importer, and its two importers (`orient.dl`,
+    `cochange.dl`) read only `dep`. Isolated, same answer: **306 s / 12.6 GB with
+    the closure, 70 s / 3.3 GB without**. `orient.dl` — the playbook's *step 3* —
+    went from OOM-killed at 21 GB to completing in 207 s. Same split, same
+    reason, as `callreach.dl`; the precedent was there and this file had not
+    taken it.
+  - **Why no test caught it:** the calibration corpus is VS Code's `vs/base`,
+    which has **zero** import cycles, so the one superlinear rule in the library
+    was never exercised. Grafana's frontend has 915 files in 27 cycles, the
+    largest a 796-file SCC. **A corpus chosen for size does not exercise shape.**
+  - **`packages.dl` reads a workspace dependency off `file.package`.** A monorepo
+    sibling resolves *inside* the root, so `imports.target_package` is absent on
+    every one — 44,908 of 55,762 imports here — and `unused` named four packages
+    that 540 statements import. `imported_workspace` fixes `used`; it deliberately
+    does **not** feed `undeclared`, because `imports` cannot say whether a
+    specifier was written bare (a package request) or as a path (reaching across
+    a directory), and only the first is a missing declaration.
+  - ***Rejected:* making the new edge feed `undeclared` too.** Tried, and it
+    reported a relative import into another directory as an undeclared dependency
+    — on Grafana, a phantom dependency on a package called `scripts/cli`. A
+    relation that cannot tell the two apart should claim the weaker thing.
+  - **An unnamed `package.json` is not a package** — `{"type": "module"}` is a
+    module-system marker; npm cannot install it and nothing can declare a
+    dependency on it, so its files belong to the nearest *named* package. Naming
+    it after its directory is what produced the phantom above.
+
 - **2026-09-12** — **Three defects, found by running the playbook as a user and
   not by any test.** The dogfood was a large repository end to end; each of
   these sat in front of a first result, and none was reachable from a fixture of
