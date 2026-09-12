@@ -1,0 +1,15 @@
+{
+  "name": "vs-base-types",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The type packages VS Code's src/vs/base needs, pinned. Not code: a manifest and a lockfile, so `npm ci` reproduces exactly the declarations the answer key was computed against. Versions follow vscode-1.137.0's own package.json.",
+  "devDependencies": {
+    "@types/mocha": "10.0.10",
+    "@types/node": "24.13.4",
+    "@types/sinon": "10.0.20",
+    "@types/ssh2": "1.15.5",
+    "@types/trusted-types": "2.0.7",
+    "@types/yauzl": "2.10.3",
+    "@types/yazl": "2.4.6"
+  }
+}

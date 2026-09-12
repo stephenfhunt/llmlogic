@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowJs": false,
+    "types": [
+      "node",
+      "mocha",
+      "trusted-types"
+    ]
+  },
+  "include": [
+    "./typings/*.d.ts",
+    "./vs/base/**/*.ts",
+    "./vs/*.ts",
+    "./vs/platform/**/*.ts"
+  ]
+}
