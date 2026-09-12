@@ -62,12 +62,28 @@ test("every written table imports into the engine, and the counts agree", { skip
   assert.deepEqual(got, expected);
 });
 
-test("a layer switched off leaves its schema file as a comment", () => {
+test("a layer switched off is declared and empty, not missing", () => {
+  // It used to be left as a bare comment, and `all.dl` skipped it. That made a
+  // *partial* extraction — which is what a large repository needs, `--layers
+  // refs,quality` — unusable: a named argument requires a known field name, so
+  // `lib/checks.dl`, which covers every layer, failed with 40 semantic errors
+  // instead of deriving nothing. Found by running the playbook on VS Code.
   const out = tempDir("layers");
   extract(fixture("basic"), { out, layers: [] });
   const flow = fs.readFileSync(path.join(out, "schema", "flow.dl"), "utf8");
   assert.match(flow, /NOT EXTRACTED/);
+  assert.match(flow, /^declare flow_node\(id: int, fn: string/m);
   assert.doesNotMatch(flow, /^import/m);
   assert.ok(!fs.existsSync(path.join(out, "facts", "flow_node.jsonl")));
-  assert.doesNotMatch(fs.readFileSync(path.join(out, "schema", "all.dl"), "utf8"), /flow\.dl/);
+  assert.match(fs.readFileSync(path.join(out, "schema", "all.dl"), "utf8"), /flow\.dl/);
+});
+
+test("checks.dl runs on a partial extraction and finds nothing wrong", { skip: !engineAvailable() }, () => {
+  // The end-to-end form of the claim above: the whole-schema program has to run
+  // against the half-schema fact base. Exit 1 is "ran, no violations"; exit 2 is
+  // "did not answer", which is what the comment-only schema produced.
+  const out = tempDir("layers-checks");
+  extract(fixture("basic"), { out, layers: [] });
+  const r = datalog(path.join(out, "lib", "checks.dl"));
+  assert.equal(r.code, 1, `expected a clean run, got exit ${r.code}:\n${r.stdout}${r.stderr}`);
 });

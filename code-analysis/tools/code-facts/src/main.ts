@@ -26,9 +26,10 @@ export const TOOL_VERSION = "0.1.0";
 
 /** Above this, extraction is a minutes-and-gigabytes job and says so.
  *
- * 156k lines of VS Code's `vs/base` is 18 s and 1.6 GB, and its whole `src/` —
- * 2.87M lines — needs more than a default V8 heap has and more than the rule
- * library can then chew. The number is where "this is fine" stops being the
+ * The warning quotes **measured** anchors rather than extrapolating: cost is
+ * sublinear in lines (156k lines is 1.6 GB, 2.9M is 13 GB, not 29), and a number
+ * derived from a rate would have been wrong by more than a factor of two at the
+ * size where it matters. This threshold is where "this is fine" stops being the
  * safe assumption, not a limit. */
 const LARGE_PROJECT_LINES = 300_000;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -90,9 +91,11 @@ export function run(opts: Options): Result {
     log(`code-facts: ${loaded.sources.length} files, ${lines} lines`);
     if (lines > LARGE_PROJECT_LINES) {
       log(
-        `code-facts: this is a large project — expect roughly ${Math.ceil(lines / 100_000)} GB and ` +
-          "minutes, and the heavier libraries (flow, dominators, pointsto, callreach) may not fit. " +
-          "Consider a tsconfig scoped to the subtree you are asking about.",
+        "code-facts: this is a large project — minutes and many GB. For scale: 156k lines " +
+          "is 18 s and 1.6 GB with every layer; 2.9M lines needs `--layers refs,quality` " +
+          "and is then 276 s and 13 GB, while every layer exhausts a 12 GB heap. " +
+          "`--layers refs,quality` keeps the architecture, coupling, cohesion and " +
+          "dependency libraries and drops flow, dominators, pointsto and taint.",
       );
     }
     const packages = new Packages(loaded.root);

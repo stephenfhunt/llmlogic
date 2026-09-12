@@ -33,7 +33,27 @@ Two executables sit in this skill's directory: `code-facts` (the extractor) and
    <skill>/code-facts path/to/python-project -o /tmp/facts
    ```
    Git history comes along when the project is a repository. A 20k-line project
-   takes about 5 s. Then read `reference/typescript.md` or `reference/python.md`
+   takes about 5 s; `code-facts` prints the file and line count as soon as it has
+   loaded the program, **before** the expensive phases, so check that number
+   against the next paragraph rather than waiting to find out.
+
+   **If the project is large, scope it or drop layers.** Extraction peaks around
+   1 GB per 100k lines. Measured on VS Code: `src/vs/base` (156k lines) is 18 s
+   and 1.6 GB and everything works; the whole of `src/` (2.87M lines, 9,000
+   files) needs more than a **12 GB** heap and dies in `dataflow`. Two ways down,
+   in the order worth trying:
+   - **`--layers refs,quality`** — skip `flow` and `dataflow`. That is the whole
+     architecture, coupling, cohesion, dependency and dead-export half of this
+     playbook, and it is what makes a million-line repository answerable at all:
+     the same VS Code `src/` that cannot finish with every layer becomes
+     **8.9M facts in 276 s and 13 GB**. You lose `flow.dl`, `dominators.dl`,
+     `pointsto.dl` and `taint.dl`.
+   - **A tsconfig scoped to the subtree you are asking about**, extending the
+     project's own so the compiler options stay honest. Remember that a subtree
+     is rarely self-contained — TypeScript will pull in whatever it imports, and
+     those files come along.
+
+   Then read `reference/typescript.md` or `reference/python.md`
    — what the facts can and cannot say differs by language, and most sharply
    for Python, which has no type checker behind it. For another language, see
    `reference/bring-your-own.md`.
