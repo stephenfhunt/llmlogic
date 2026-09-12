@@ -2,7 +2,14 @@
 % package's files import. A file belongs to its nearest package.json
 % (`file.package`); Node.js builtins are never dependencies.
 %
+% Works in a monorepo: a workspace sibling resolves to a file inside the root
+% rather than to a package name, and counts as used all the same
+% (`imported_workspace` below).
+%
 %   imported(Pkg, Dep, File)            a file of Pkg imports package Dep
+%   imported_workspace(Pkg, Dep, File)  a file of Pkg imports a *file* of
+%                                       package Dep — the monorepo case, where
+%                                       the specifier resolves inside the root
 %   imported_at_runtime(Pkg, Dep, File) ...and the import survives into
 %                                       JavaScript (`imports.runtime`)
 %   undeclared(Pkg, Dep, File)          imported, but in none of Pkg's
@@ -31,6 +38,27 @@ imported_at_runtime(Pkg, Dep, F) :-
   imports(file: F, target_package: Dep, builtin: false, runtime: R, kind: K), R is absent,
   K != type_only, K != type_query, file(path: F, package: Pkg), Dep != Pkg.
 
+% A workspace sibling in a monorepo has no `target_package`: the specifier
+% resolves to a source file *inside* the root, through a tsconfig `paths`
+% mapping or a node_modules symlink back into the tree, and `target_package` is
+% set only for a target outside it. The dependency is real and it is the target
+% file's own package, so read it off `file.package` instead. Without this,
+% `unused` names every workspace sibling a package actually depends on: on
+% Grafana it named four that 540 statements import
+% (found dogfooding, 2026-09-12).
+%
+% **This feeds `used` only, not `undeclared`.** `imports` does not record
+% whether a specifier was written bare (`@scope/lib` — a request for a package,
+% which package.json should declare) or as a path (`../../lib/x` — reaching
+% across a directory, which nobody declares), and both resolve to a file. So a
+% missing *declaration* cannot be told from an ordinary relative import and is
+% not claimed; what can be told is that the dependency exists, which is all
+% `unused` needs.
+imported_workspace(Pkg, Dep, F) :-
+  imports(file: F, target_file: T), T is not absent,
+  file(path: F, package: Pkg), file(path: T, package: Dep),
+  Pkg is not absent, Dep is not absent, Dep != Pkg.
+
 declared_as(Pkg, Dep, K) :- package_dep(package: Pkg, dep: Dep, kind: K).
 declared(Pkg, Dep) :- declared_as(Pkg, Dep, _).
 types_declared(Pkg, Dep) :- package_dep(package: Pkg, types_for: Dep).
@@ -39,6 +67,7 @@ undeclared(Pkg, Dep, F) :- imported_at_runtime(Pkg, Dep, F), not declared(Pkg, D
 undeclared(Pkg, Dep, F) :- imported(Pkg, Dep, F), not declared(Pkg, Dep), not types_declared(Pkg, Dep).
 
 used(Pkg, Dep) :- imported(Pkg, Dep, _).
+used(Pkg, Dep) :- imported_workspace(Pkg, Dep, _).
 used(Pkg, T) :- package_dep(package: Pkg, dep: T, types_for: Dep), imported(Pkg, Dep, _).
 % @types/node types the builtins.
 used(Pkg, T) :- package_dep(package: Pkg, dep: T, types_for: "node"), imports(file: F, builtin: true), file(path: F, package: Pkg).

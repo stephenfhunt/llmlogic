@@ -40,7 +40,15 @@ export class Packages {
     const pj = path.join(abs, "package.json");
     if (fs.existsSync(pj)) {
       try {
-        found = { dir: relDir, json: JSON.parse(fs.readFileSync(pj, "utf8")) as PackageJson };
+        const json = JSON.parse(fs.readFileSync(pj, "utf8")) as PackageJson;
+        // A `package.json` with no `name` is a module-system marker — the
+        // `{"type": "module"}` that makes one directory ESM — not a package.
+        // npm cannot install or publish it and nothing can declare a dependency
+        // on it, so the files under it belong to the nearest *named* package
+        // instead. Naming it after its directory made `packages.dl` report an
+        // import into `scripts/cli/` as an undeclared dependency on a package
+        // called `scripts/cli` (found dogfooding, 2026-09-12).
+        if (typeof json.name === "string") found = { dir: relDir, json };
       } catch {
         found = null;
       }
@@ -53,7 +61,7 @@ export class Packages {
   nameOf(relFile: string): string | null {
     const p = this.nearest(parentDir(relFile));
     if (p === null) return null;
-    return typeof p.json.name === "string" ? p.json.name : p.dir;
+    return p.json.name as string;
   }
 
   all(): { dir: string; json: PackageJson }[] {
@@ -146,7 +154,7 @@ export function extractStructure(ctx: Context, packages: Packages): void {
   }
 
   for (const p of packages.all()) {
-    const name = typeof p.json.name === "string" ? p.json.name : p.dir;
+    const name = p.json.name as string;
     t.add("package", {
       name,
       dir: p.dir,

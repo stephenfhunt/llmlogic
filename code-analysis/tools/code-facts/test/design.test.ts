@@ -93,3 +93,52 @@ test("the extractor names builtins and what an @types package types", () => {
     [["@types/left-pad", "left-pad"]],
   );
 });
+
+// A monorepo: workspace siblings resolve to files inside the root, so
+// `imports.target_package` is absent on every one of them. Found dogfooding
+// Grafana, where `unused` named four `@grafana/*` packages that 540 import
+// statements use (`../../notes/code-facts.md` § Dogfooding — Grafana).
+test("package hygiene in a monorepo: a workspace sibling is a dependency", { skip }, () => {
+  const mono = tempDir("monorepo");
+  extract(fixture("monorepo"), { out: mono, layers: ["refs"] });
+  const askm = (query: string): string[] => {
+    const r = datalog(path.join(mono, "lib", "packages.dl"), [query]);
+    assert.ok(r.code === 0 || r.code === 1, `${query}: exit ${r.code}\n${r.stderr}`);
+    return r.stdout.split("\n").filter((l) => l !== "");
+  };
+
+  // Every edge is file-to-file: `imported` sees none of them.
+  assert.deepEqual(askm('i(P, D) :- imported(P, D, _), P = "@fix/app"'), []);
+  assert.deepEqual(askm("imported_workspace(P, D, F)"), [
+    'imported_workspace("@fix/app", "@fix/lib", "packages/app/src/index.ts").',
+    'imported_workspace("@fix/app", "@fix/other", "packages/app/src/index.ts").',
+    // a relative import into a file of the root package is an edge too
+    'imported_workspace("@fix/app", "monorepo-fixture", "packages/app/src/index.ts").',
+  ]);
+
+  // The point of the fix: `@fix/lib` is declared by `@fix/app` and really used,
+  // so it must not be reported unused. Only the root's `left-pad` is.
+  assert.deepEqual(askm("unused(P, D, K)"), ['unused("monorepo-fixture", "left-pad", prod).']);
+
+  // And the deliberate silence: `@fix/app` imports `@fix/other` without
+  // declaring it, but `imports` cannot say whether a specifier was written bare
+  // or as a path, so no `undeclared` is claimed. If this ever starts reporting,
+  // the rule has begun guessing.
+  assert.deepEqual(askm("undeclared(P, D, F)"), []);
+});
+
+// A `package.json` with no `name` — the `{"type": "module"}` marker — is not a
+// package: npm cannot install it and nothing can declare a dependency on it.
+// Naming it after its directory made an import into `scripts/tool/` read as an
+// undeclared dependency on a package called `scripts/tool`.
+test("an unnamed package.json is a module-system marker, not a package", () => {
+  const { tables } = extract(fixture("monorepo"), { layers: [] });
+  assert.deepEqual(tables.rows("package").map((p) => p.name).sort(), [
+    "@fix/app",
+    "@fix/lib",
+    "@fix/other",
+    "monorepo-fixture",
+  ]);
+  // Its files belong to the nearest *named* package instead.
+  assert.equal(tables.rows("file").find((f) => f.path === "scripts/tool/name.ts")?.package, "monorepo-fixture");
+});
