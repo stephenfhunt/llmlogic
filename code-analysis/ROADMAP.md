@@ -38,10 +38,11 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
   file, not a package name, so `imported_workspace` reads the dependency off
   `file.package`. _shipped_ — same entry; an unnamed `package.json` is no longer
   a package.
-- **`orient.dl` still costs 13.9 GB** on 8,910 files: its own `runtime_reaches`
-  closure is 11.8M pairs. A size gate that declines the cycle question (and says
-  so) runs in 13.6 s / 3.3 GB — but the threshold is a guess from four measured
-  points, so it is a design call. _queued_ — `notes/code-facts.md` § Dogfooding —
+- **`orient.dl` still costs 9.5 GB** on 8,910 files (179 s; 13.9 GB before the
+  engine pruned): its own `runtime_reaches` closure is 11.8M pairs, and pruning
+  cannot skip a closure a goal asks for. A size gate that declines the cycle
+  question (and says so) ran in 13.6 s / 3.3 GB before pruning — but the threshold
+  is a guess from four measured points, so it is a design call. _queued_ — `notes/code-facts.md` § Dogfooding —
   Grafana.
 - **`lib/keys.dl`'s re-keyings stay until the engine seeks a non-leading column** —
   the one library workaround left for a missing engine feature (`reach.dl`, the

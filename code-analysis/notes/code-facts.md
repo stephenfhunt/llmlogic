@@ -378,6 +378,29 @@ against the Grafana source here.
 Two fixed here (`../decisions.md` 2026-09-12 later); the rest filed in `../bugs/`
 and `../../datalog/bugs/`, and the missing capabilities on the two ROADMAPs.
 
+### Re-measured after the engine learned to prune
+
+Same 4.04M facts, later the same day: rule and relation pruning in the engine,
+`reach.dl` folded back into `modgraph.dl`. `bench/`, one run each.
+
+| library | time | peak RSS | recorded above |
+|---|---:|---:|---|
+| `orient.dl` | 179 s | 9.5 GB | 207 s / 13.9 GB |
+| `modgraph.dl`, cycle questions asked | 209 s | 9.3 GB | 12.6 GB for `dep` alone |
+| `coupling.dl` | 484 s | 9.3 GB | — |
+| `coupling_kinds.dl` | 305 s | 9.1 GB | — |
+| `checks.dl` | 42 s | 6.2 GB | 53 s / 9.2 GB |
+| `cohesion.dl` | 285 s | 5.4 GB | 304 s / 9.0 GB |
+| `metrics.dl` | 23 s | 4.4 GB | — |
+| `callgraph.dl` | 29 s | 4.0 GB | — |
+| `packages.dl` | 1.6 s | 0.17 GB | — |
+
+**Nothing ran out of memory.** `pointsto.dl` and `callreach.dl` were not run —
+neither fits even `vs/base` comfortably. What is left of `orient.dl`'s cost is its
+own runtime closure, which a goal asks for; what is left of `modgraph.dl`'s is the
+import closure, paid only because the bench asks about cycles. The slow ones are
+now the coupling and cohesion libraries: time, not memory.
+
 **The fix that mattered was a library-design mistake, not a rule.** `modgraph.dl`
 carried the import graph's transitive closure — 17.45M pairs here — beside five
 non-recursive rules, and both of its importers read only `dep`. The reason no

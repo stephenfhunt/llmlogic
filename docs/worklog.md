@@ -48,6 +48,8 @@ false.
   makes `A + @1d` a type error. `012`'s syntax-error half never reproduced.
 - **`reach.dl` unwound into `modgraph.dl`**: answers byte-identical; `dep` over a
   synthetic 2,000-file cycle 32.7 s unpruned → 0.03 s.
+- **Grafana re-measured** (4.04M facts): nothing runs out of memory; worst peaks
+  `orient.dl` 9.5 GB (was 13.9) and `modgraph.dl` with cycles 9.3 GB.
 
 **Decided** (`datalog/spec.md` §17 2026-09-12, two entries; the user's calls)
 - **Permissive**: a pruned rule cannot fail or hang a run; static warnings stay
@@ -69,8 +71,9 @@ false.
 **Next up**
 - **A column's type is known before its rows** (`bugs/014`) — a design session:
   declarations as constraints first, a source's own types second.
-- **Nothing is ruled next in datalog § Performance**; column projection and magic
-  sets are the bigger chunk, and relation pruning moved their floor.
+- **Nothing is ruled next in datalog § Performance.** On Grafana the largest cost
+  left is `orient.dl`'s own closure (9.5 GB) — its size gate is a user call — and
+  the coupling libraries at 5–8 min (`code-analysis/notes` § Re-measured).
 - **Open**: `datalog/bugs/009`, `013`, `014`; `code-analysis/bugs/001`–`005`.
 
 ## 2026-09-12 — the playbook on a codebase nobody here wrote: Grafana, end to end
