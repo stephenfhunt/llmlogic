@@ -46,6 +46,8 @@ false.
   (`pointsto` does not fit either way); `npm test` green on the new binary.
 - **`bugs/014`**: a declared temporal column fixes no type, so an empty relation
   makes `A + @1d` a type error. `012`'s syntax-error half never reproduced.
+- **`reach.dl` unwound into `modgraph.dl`**: answers byte-identical; `dep` over a
+  synthetic 2,000-file cycle 32.7 s unpruned → 0.03 s.
 
 **Decided** (`datalog/spec.md` §17 2026-09-12, two entries; the user's calls)
 - **Permissive**: a pruned rule cannot fail or hang a run; static warnings stay
@@ -65,8 +67,6 @@ false.
   library" advice and its 35× anecdote; `bugs/012` (to `resolved/`).
 
 **Next up**
-- **`code-analysis` can unwind `reach.dl`** — its item's precondition landed;
-  re-measure with the bench and decide per file.
 - **A column's type is known before its rows** (`bugs/014`) — a design session:
   declarations as constraints first, a source's own types second.
 - **Nothing is ruled next in datalog § Performance**; column projection and magic

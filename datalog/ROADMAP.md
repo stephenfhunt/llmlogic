@@ -475,8 +475,8 @@ join is executed changes.
   On `vs/base`, `callreach.dl` imported beside a question that never reads it:
   **37.4 s / 4.20 GB → 3.1 s / 0.70 GB**, same answer. A pruned rule can no longer
   fail or hang a run, static warnings still cover the whole program, and a program
-  with no goals prunes nothing. `code-analysis`'s `reach.dl` split is now optional;
-  its ROADMAP carries the unwind. — §15/engine.
+  with no goals prunes nothing. `code-analysis`'s `reach.dl` split was unwound the
+  same day, answers byte-identical. — §15/engine.
 
 - **Load only the relations the program names** — **shipped ✅ 2026-09-12** (§17
   that date; `api::lower_and_load`, `sources::load_imports_where`; `testing.md`
@@ -499,7 +499,7 @@ join is executed changes.
     directory with a schema trimmed to the columns one library names, and compare
     the floor against the table above. **Do that before assuming a win.**
   - **Demand transformation (magic sets).** The only one of the four that helps a
-    closure that *is* wanted: `reach.dl` asked for one file's reachability still
+    closure that *is* wanted: `modgraph.dl`'s `file_reaches` asked for one file's reachability still
     derives all 17.45M pairs. `callreach_seeded.dl` is the hand-rolled version and
     is evidence of the demand — a `seed/1` the caller supplies, which is exactly
     the binding a magic-set rewrite would infer. `references.md`'s evaluation

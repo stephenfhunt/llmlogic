@@ -30,10 +30,10 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
   Code's whole `src/`.
 - **`orient.dl` gates every count on its layer** — no `functions(0)` over a layer
   that was not extracted, and `code_lines` excludes data. _shipped_ — same entry.
-- **`reach.dl` — the import-graph closure, split out of `modgraph.dl`** so a
-  program that only wants `dep` does not pay for it. _shipped_ —
-  `decisions.md` 2026-09-12 (later); `orient.dl` on a 1.48M-line repository went
-  from OOM-killed at 21 GB to 207 s / 13.9 GB.
+- **The import-graph closure lives in `modgraph.dl` and costs only when asked** —
+  split into `reach.dl` while the engine evaluated every rule, folded back once it
+  stopped; answers byte-identical. _shipped_ — `decisions.md` 2026-09-12 (later
+  still).
 - **`packages.dl` sees workspace siblings** — a monorepo import resolves to a
   file, not a package name, so `imported_workspace` reads the dependency off
   `file.package`. _shipped_ — same entry; an unnamed `package.json` is no longer
@@ -43,15 +43,11 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
   so) runs in 13.6 s / 3.3 GB — but the threshold is a guess from four measured
   points, so it is a design call. _queued_ — `notes/code-facts.md` § Dogfooding —
   Grafana.
-- **Unwind the workarounds once the engine prunes** — `reach.dl` exists because
-  the engine evaluates every rule in a program whether or not a goal reaches it,
-  and `lib/keys.dl`'s re-keyings exist because a bound non-leading column still
-  scans. Both are the library paying for a missing engine feature. The first
-  **landed 2026-09-12** — `../datalog/ROADMAP.md` § Performance, rule *and*
-  relation pruning — so re-measure and decide per file: `reach.dl` folding back into
-  `modgraph.dl` would be simpler, and `cochange.dl` could import modgraph without
-  thinking about it. _queued_ — do not unwind speculatively; the bench digest is
-  what says the answers did not move.
+- **`lib/keys.dl`'s re-keyings stay until the engine seeks a non-leading column** —
+  the one library workaround left for a missing engine feature (`reach.dl`, the
+  other, is unwound above). Re-measure with the bench before removing any.
+  _parked_ — `../datalog/ROADMAP.md` § Performance, *a bound column that is not
+  leading still scans*.
 - **The decorator layer has never met a real subject** — `decorator` is zero rows
   in every fact base on disk, and `implements` is 2 rows on `@grafana/ui`. A
   decorator-saturated, nominally-typed codebase (NestJS, TypeORM, Angular) is the

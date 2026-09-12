@@ -69,8 +69,7 @@ Both include the import.
 | file | what it derives | tsdl | `vs/base` |
 |---|---|---|---|
 | `checks.dl` | `violation(Check, Subject)` — the extractor contradicting itself | 1.8 s | 9.3 s |
-| `modgraph.dl` | `file_dep`, `runtime_dep` (the imports emitted JavaScript keeps), `unit_dep` (directories at any depth), `package_edge`, `external_dep` — all linear | 0.3 s | 1.5 s |
-| `reach.dl` | `file_reaches`, `in_cycle`, `cycle_edge` — the import graph's transitive closure, split out of `modgraph.dl` because it is quadratic in the graph's density. **17.45M pairs and 12.6 GB on a 8,910-file repository**; seed it or scope it above a few thousand files | 0.4 s | 2 s |
+| `modgraph.dl` | `file_dep`, `runtime_dep` (the imports emitted JavaScript keeps), `unit_dep` (directories at any depth), `package_edge`, `external_dep` — all linear — and `file_reaches`, `in_cycle`, `cycle_edge`, the import graph's transitive closure. The closure is quadratic in the graph's density and is evaluated only when a goal asks for it: **17.45M pairs and 12.6 GB on a 8,910-file repository**; seed it or scope it above a few thousand files | < 0.1 s | 0.3 s |
 | `callgraph.dl` | `call_edge` (virtual calls expanded to every override), `call_edge_lexical` (a callback's calls counted as its enclosing function's), `called` | 0.7 s | 4.9 s |
 | `callreach.dl` | `reaches`, `recursive`, `mutual` — **the one that stays expensive**: a whole-project closure is quadratic in the call graph's density | 1.2 s | **38 s, 4.1 GB** |
 | `callreach_seeded.dl` | `reaches_from` — the same closure grown only from a `seed/1` you supply. Use it instead wherever the question names particular functions | — | — |
@@ -163,7 +162,7 @@ untested(S) :- exports(symbol: S, kind: local), fn(id: S), not covered(S).
    it is written as (and under `verbatimModuleSyntax` keeps every import not
    marked `type`). `imports.kind` is only what was *written*; `imports.runtime`
    is what the emitted JavaScript keeps, read from the compiler's own emit, and
-   `runtime_dep` follows it. `reach.dl`'s `in_cycle` follows every import: the project above
+   `runtime_dep` follows it. `modgraph.dl`'s `in_cycle` follows every import: the project above
    has an `answer.ts ↔ eval.ts` cycle that is type-only on both sides, so check
    `runtime_dep` before calling a cycle real. For single names, ask `ref`: a
    name is a runtime dependency where some reference to it has a kind other

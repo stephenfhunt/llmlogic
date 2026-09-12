@@ -14,6 +14,22 @@ with the long form in [`notes/code-facts.md`](notes/code-facts.md).
 
 ## Decisions
 
+- **2026-09-12 (later still)** — **The import-graph closure is back in
+  `modgraph.dl`, because the engine now pays for a rule only when a goal reaches
+  it.** `reach.dl` is deleted; `file_reaches` / `in_cycle` / `cycle_edge` close out
+  `modgraph.dl` again (`../datalog/spec.md` §17 2026-09-12, rule pruning).
+  - **Same answers**: on `vs/base` the folded `modgraph.dl`, asked all five of its
+    questions, prints what the old `modgraph.dl` and `reach.dl` printed — 670
+    lines, byte for byte — and `orient.dl`'s bench digest is unchanged.
+  - **Checked on shape, not size** — the lesson below applied. `vs/base` has no
+    import cycle, so a synthetic 2,000-file cycle is the check: `dep` alone
+    through the folded file is **32.7 s / 778 MB** on an engine without pruning
+    and **0.03 s / 34 MB** with it.
+  - **`lib/keys.dl` stays**: its re-keyings answer the leading-prefix seek, which
+    pruning does not touch. **`callreach.dl` stays split** — the same shape, but
+    nothing imports `callgraph.dl` expecting to avoid it, and the seeded variant
+    beside it is a different closure.
+
 - **2026-09-12 (later)** — **A library pays for what it imports, so a closure
   does not travel with the cheap rules.** Found by analysing a 1.48M-line
   repository nobody here wrote; long form in `notes/code-facts.md` § Dogfooding —
@@ -25,7 +41,9 @@ with the long form in [`notes/code-facts.md`](notes/code-facts.md).
     the closure, 70 s / 3.3 GB without**. `orient.dl` — the playbook's *step 3* —
     went from OOM-killed at 21 GB to completing in 207 s. Same split, same
     reason, as `callreach.dl`; the precedent was there and this file had not
-    taken it.
+    taken it. ***Superseded by 2026-09-12 (later still)*** — the engine now
+    evaluates only the rules a goal reaches, so the closure is back in
+    `modgraph.dl`.
   - **Why no test caught it:** the calibration corpus is VS Code's `vs/base`,
     which has **zero** import cycles, so the one superlinear rule in the library
     was never exercised. Grafana's frontend has 915 files in 27 cycles, the

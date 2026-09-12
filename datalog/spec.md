@@ -2909,6 +2909,11 @@ never say.
     pruning is `ROADMAP.md`'s next item — and `code-analysis` carries an item to
     unwind `reach.dl` once it lands. The 2026-09-11 note stands for re-keying; it
     does not generalise to any gap a program can technically work around.
+  - ***Consequences 2026-09-12 (later still)*** — the unwind landed the same day:
+    `modgraph.dl` holds the closure again, answers byte-identical on `vs/base`, and
+    a program asking only `dep` over a synthetic 2,000-file import cycle costs
+    0.03 s where the unpruned engine took 32.7 s. The layer change did not have to
+    outlive the gap that forced it.
 
 - **2026-08-20** — **An aggregate is a fold over a multiset, so only its result
   is defined** (§9). `fold_aggregate` sorts its present values into §14 order

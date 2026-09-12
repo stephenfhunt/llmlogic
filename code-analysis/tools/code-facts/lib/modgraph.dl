@@ -1,5 +1,5 @@
-% Module graph: file-to-file dependencies from imports, and their roll-up to
-% directories and packages.
+% Module graph: file-to-file dependencies from imports, their roll-up to
+% directories and packages, and the cycles they form.
 %
 %   file_dep(A, B, Kind)     file A imports file B (Kind: imports.kind)
 %   dep(A, B)                any file_dep — type-only imports included
@@ -13,17 +13,23 @@
 %   unit_dep(Depth, UA, UB)  some file in UA depends on some file in UB
 %   package_edge(PA, PB)     a file of package PA depends on one of PB
 %   external_dep(F, Pkg)     file F imports from a package outside the root
+%   file_reaches(A, B)       a chain of dep leads from A to B
+%   in_cycle(F)              F is on an import cycle
+%   cycle_edge(A, B)         a dep edge that lies on a cycle
 %
-% Reachability and cycles — `file_reaches`, `in_cycle`, `cycle_edge` — are in
-% `reach.dl`, which imports this file. They are a transitive closure over the
-% import graph, quadratic in its density, and everything here is one
-% non-recursive rule; keeping them together made every importer of this file pay
-% for a closure it usually does not read. Measured on Grafana's frontend (8,910
-% files, 56,047 imports): a count over `dep` alone cost 306 s and 12.6 GB with
-% the closure in this file and 70 s and 3.3 GB without it, for the same answer,
-% and `orient.dl` — which imports this and never reads `file_reaches` — was
-% OOM-killed at 21 GB. Same split, same reason, as `callreach.dl`
-% (found dogfooding, 2026-09-12).
+% **The cycle relations follow `dep`, which is every import, type-only
+% included.** A cycle they report may not exist at run time; re-derive over
+% `runtime_dep` before calling one real (`../SCHEMA.md`, and the language
+% reference's first trap).
+%
+% **Cost.** Everything but the last three is one non-recursive rule. Those three
+% are a transitive closure, quadratic in the graph's density — and the engine
+% evaluates a rule only for a program whose goals depend on it, so a program that
+% asks about `dep` pays nothing for them. Ask about a cycle and you pay it: on
+% Grafana's frontend — 8,910 files, 56,047 imports — `file_reaches` is **17.45M
+% derived pairs** and the program holding it peaks at 12.6 GB. Over a few
+% thousand files, seed the question instead (`callreach_seeded.dl` is the
+% idiom), or ask it of a subtree.
 
 import "../schema/structure.dl".
 
@@ -38,3 +44,8 @@ unit_dep(D, UA, UB) :- dep(A, B), unit(A, D, UA), unit(B, D, UB), UA != UB.
 
 package_edge(PA, PB) :- dep(A, B), file(path: A, package: PA), file(path: B, package: PB), PA != PB.
 external_dep(F, P) :- imports(file: F, target_package: P), P is not absent.
+
+file_reaches(A, B) :- dep(A, B).
+file_reaches(A, C) :- dep(A, B), file_reaches(B, C).
+in_cycle(F) :- file_reaches(F, F).
+cycle_edge(A, B) :- dep(A, B), file_reaches(B, A).

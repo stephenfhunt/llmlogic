@@ -45,9 +45,8 @@ export const LIBRARIES: Library[] = [
   { name: "orient", queries: [] },
   {
     name: "modgraph",
-    queries: ["unit_dep(D, A, B)", "package_edge(A, B)", "external_dep(F, P)"],
+    queries: ["unit_dep(D, A, B)", "package_edge(A, B)", "external_dep(F, P)", "in_cycle(F)", "cycle_edge(A, B)"],
   },
-  { name: "reach", queries: ["in_cycle(F)", "cycle_edge(A, B)"] },
   {
     name: "callgraph",
     queries: ["call_edge(A, B)", "call_edge_declared(A, B)", "call_edge_lexical(A, B)", "called(B)"],
