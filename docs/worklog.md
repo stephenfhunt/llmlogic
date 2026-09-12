@@ -108,15 +108,32 @@ down with it.
   renders byte-identically, so no archived prompt moved.
 - **Installed, not in `SLATE`**; `harness domains` prints it as such.
 
+**Then step 4, the same day** — **28 questions, and the ones that were dropped**
+- **The user pushed back on a hand-rolled TypeScript parser, and was right.**
+  `static_analysis`'s key uses `ast` and the extractor it grades uses `ast` too:
+  control 1 forbids an oracle that calls *the thing under test*, never one that
+  uses a parser. The oracle now parses with `ts.createSourceFile` — syntax only.
+- **`tests/test_truth_independence.py` then caught the design**: `truth.py` may
+  not `import subprocess`, bluntly, so parsing moved to `harness.corpus` beside
+  `git clone` and `npm ci`.
+- **A `truth.py` may reimplement a graph; it may not reimplement a measure.**
+  The import graph agrees with `code-facts` **exactly** (2,039 edges); class
+  LCOM4 disagrees on **47 of 187** classes with no single cause. The cohesion
+  questions were built, measured, and deleted.
+- **Three templates, 28 paired items** after three degeneracy rules — the last
+  of which (the answer may not be the universe) cost ten items and caught
+  `browser/ui/selectBox`, where every file is in a cycle.
+- **The at-scale track is a pilot** — 28 items supports ~+25 points; the
+  registered +10 needs 155. Addendum written before any cell ran.
+
 **Next up**
-- **Pack step 4**: six to eight question templates and their oracles, each a
-  plain `truth.py` that never imports `code-facts` or `lib/`. **Avoid the 286
-  unresolved** — Electron's generated typings, `sqlite3`, `process.env` index
-  reads — and avoid `callreach`, `flow`, `dominators` and `pointsto`, which at
-  this scale are minutes or do not fit.
-- **Contamination is the live threat** (the note's step 4): exact sets at the
-  pinned commit, nothing VS Code's own CI already forces empty, and at least one
-  question whose answer differs between 1.137.0 and an adjacent release.
+- **Two things stand between the pack and a run**, both their own work: a
+  **reference program** answering every task (`tests/test_reference_corpus.py`)
+  and the **`code-analysis` arm**, which H-CA1's endpoint is defined over. The
+  pack is installed and deliberately not in `SLATE` until both exist.
+- **One contamination check is outstanding**: at least one question whose answer
+  differs between 1.137.0 and an adjacent release. If it cannot be satisfied,
+  report the caveat as unmitigated rather than dropping it.
 - **The flow-layer libraries are now measured too** (`flow` 104 s,
   `dominators` 51 s, `pointsto` does not fit); the playbook says so.
 - Still open from the last session: a test file's process dying under load.
