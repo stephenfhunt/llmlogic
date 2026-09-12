@@ -10,6 +10,7 @@ text — never from `code-facts`, which is the tool under test in this pack.
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 import pytest
 
@@ -149,3 +150,46 @@ def test_a_cell_workspace_materializes_at_this_scale(tmp_path):
     # The prompt orients with one line per root, never an index of 761 paths.
     assert "a source tree: 507 files" in workspace.prompt
     assert "uri.ts" not in workspace.prompt
+
+
+# ---- The questions -----------------------------------------------------------
+
+
+def test_every_task_validates_and_asks_something_different():
+    from harness.domains import validate
+    from harness.domains.code_design import tasks
+
+    built = tasks.tasks()
+    assert built, "no tasks built — the band or the corpus moved"
+    for task in built:
+        validate("code_design", task)
+    # One question asked 38 times is the failure the pre-registration named. The
+    # generator deduplicates by *answer*, so two directories with the same rows
+    # cannot both become items; this is the claim seen from the text's side.
+    assert len({task.question for task in built}) == len(built)
+    assert len({task.id for task in built}) == len(built)
+
+
+def test_no_answer_is_the_whole_universe_it_is_drawn_from():
+    # `generate.validate`'s universe check only looks at .csv fixtures, which
+    # this pack has none of — so the rule it stands for is asserted here over
+    # the universe these questions actually draw from.
+    from harness.domains.code_design import tasks, truth
+
+    for task in tasks.tasks():
+        if task.id.startswith("import-cycle-"):
+            directory = "src/vs/" + task.id.removeprefix("import-cycle-").replace("-", "/")
+            candidates = truth.files_under(directory)
+            if candidates:
+                assert {row[0] for row in task.truth.rows} != candidates, task.key
+
+
+def test_the_oracle_never_reaches_for_the_tool_it_grades():
+    # Control 1, as text: truth.py is checked by test_truth_independence for
+    # shelling out, and this is the other half — it must not import the
+    # extractor or the rule library either, by any spelling.
+    source = (
+        Path(__file__).resolve().parents[1] / "src/harness/domains/code_design/truth.py"
+    ).read_text()
+    for forbidden in ("code_facts", "code-facts", "lib/", "datalog"):
+        assert forbidden not in source.split('"""')[2], forbidden

@@ -46,7 +46,7 @@ def parsed() -> Parsed:
     this spawns Node over 507 files; the corpus is pinned, so the answer cannot
     change under the cache.
     """
-    sources = fixture.sources()
+    sources = fixture.build().files
     prefix = f"{fixture.PACKAGE}/"
     payload = [
         {"path": name[len(prefix) :], "text": text}
@@ -240,73 +240,57 @@ def unimported_exports(directory: str) -> Answer:
     return Answer(frozenset(rows))
 
 
-def _groups(members: list[str], linked: dict[str, set[str]]) -> list[frozenset[str]]:
-    """Connected components of `members` under `linked`, largest first."""
+@cache
+def _reachable_from(entries: tuple[str, ...]) -> frozenset[str]:
+    """Files reachable by following imports from `entries`, entries included."""
+    edges = runtime_edges()
     seen: set[str] = set()
-    found: list[frozenset[str]] = []
-    for start in members:
-        if start in seen:
+    queue = [entry for entry in entries if entry in parsed()]
+    while queue:
+        node = queue.pop()
+        if node in seen:
             continue
-        component: set[str] = set()
-        queue = [start]
-        while queue:
-            node = queue.pop()
-            if node in component:
-                continue
-            component.add(node)
-            queue.extend(n for n in linked.get(node, set()) if n not in component)
-        seen |= component
-        found.append(frozenset(component))
-    return sorted(found, key=lambda c: (-len(c), sorted(c)))
+        seen.add(node)
+        queue.extend(target for target in edges.get(node, frozenset()) if target not in seen)
+    return frozenset(seen)
 
 
-def method_groups(path: str, class_name: str) -> list[frozenset[str]]:
-    """A class's methods, grouped by what they share — LCOM4's own graph.
+def files_no_entry_point_reaches(directory: str, entries: tuple[str, ...]) -> Answer:
+    """Files of `directory` that no chain of imports from `entries` arrives at.
 
-    Two methods are linked when they touch a field of the same name through
-    `this`, or when one names the other through `this`. Both halves are
-    syntactic and the question says so: `this.x` is a touch of `x`, whatever
-    `x` turns out to be.
+    The entry points are named in the question — there is no such thing as *the*
+    entry point of a library, and inferring one would be the oracle deciding
+    something the subject was not told.
     """
-    entry = parsed().get(path)
-    if entry is None:
-        return []
-    shape = next((c for c in entry["classes"] if c["name"] == class_name), None)
-    if shape is None:
-        return []
-    # Keyed by position, not by name: a getter and a setter share a name and are
-    # two different methods. Keying by name merged them *and* leaked one's
-    # touches into the other, which collapsed `ButtonWithIcon`'s two groups into
-    # one — found by diffing against an independent implementation, not by
-    # reading this code.
-    keys = [f"{index}:{m['name']}" for index, m in enumerate(shape["methods"])]
-    touches = {key: set(m["touches"]) for key, m in zip(keys, shape["methods"], strict=True)}
-    named = {key: m["name"] for key, m in zip(keys, shape["methods"], strict=True)}
-    linked: dict[str, set[str]] = defaultdict(set)
-    for left in keys:
-        for right in keys:
-            if left >= right:
-                continue
-            shared = touches[left] & touches[right]
-            calls = named[right] in touches[left] or named[left] in touches[right]
-            if (shared - {named[left], named[right]}) or calls:
-                linked[left].add(right)
-                linked[right].add(left)
-    return [frozenset(named[key] for key in group) for group in _groups(keys, linked)]
+    reached = _reachable_from(entries)
+    return Answer(frozenset((path,) for path in sorted(files_under(directory) - reached)))
 
 
-def classes_with_split_methods(directory: str, minimum_methods: int = 3) -> Answer:
-    """Classes under `directory` whose methods fall into more than one group.
+def exports_no_test_imports(directory: str, test_root: str) -> Answer:
+    """Exported declarations of `directory` that no file under `test_root` imports.
 
-    `minimum_methods` keeps out the classes where the answer is arithmetic: a
-    two-method class either shares something or does not, and nobody needs a
-    grouping rule to see which.
+    Name-based and direct, like `unimported_exports`: what a test *exercises* is
+    a question about running it, and this one is about what it names.
     """
+    wanted: dict[str, set[str]] = defaultdict(set)
+    for path, entry in parsed().items():
+        if not path.startswith(f"{test_root}/"):
+            continue
+        for record in entry["imports"]:
+            target = resolve(path, record["specifier"])
+            if target is None:
+                continue
+            for name in record["names"]:
+                if name.get("namespace"):
+                    wanted[target].update(n["name"] for n in _exports_of(target))
+                else:
+                    wanted[target].add(name["name"])
     rows = set()
     for path in sorted(files_under(directory)):
-        for shape in parsed()[path]["classes"]:
-            if len(shape["methods"]) < minimum_methods:
-                continue
-            if len(method_groups(path, shape["name"])) > 1:
-                rows.add((path, shape["name"]))
+        if path.startswith(f"{test_root}/"):
+            continue
+        taken = wanted.get(path, set())
+        for declaration in _exports_of(path):
+            if declaration["name"] not in taken:
+                rows.add((path, declaration["name"]))
     return Answer(frozenset(rows))

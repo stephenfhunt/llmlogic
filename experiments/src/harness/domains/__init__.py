@@ -61,9 +61,12 @@ def blocked() -> dict[str, str]:
 def unslated() -> list[str]:
     """Packs that are installed but not in `SLATE`, alphabetically.
 
-    A pack under construction — its fixture built, its questions not — is
-    importable and must not be drawn by a grid. Naming it is what keeps *not
-    drawn* distinguishable from *not there*.
+    A pack is slated when it can be *run*, which is more than having questions.
+    `code_design` has 38 validated tasks and is not here by choice: slating it
+    obliges a reference program that answers every one of them
+    (`tests/test_reference_corpus.py`) and a `code-analysis` arm for the
+    hypothesis it was built for, and both are their own work. Naming it is what
+    keeps *not drawn* distinguishable from *not there*.
     """
     return sorted(_installed() - set(SLATE))
 
@@ -78,6 +81,12 @@ def available() -> list[str]:
 #: time: a calibrated slate that is quietly missing a domain is the 2026-08-24
 #: failure mode wearing a different hat.
 NO_GENERATOR = {
+    "code_design": (
+        "its fixture is a pinned checkout of VS Code and its questions are "
+        "directories of it — there is nothing to seed, and the item count is "
+        "whatever the real tree supports, which is the finding rather than a "
+        "parameter"
+    ),
     "static_analysis": (
         "its fixture is a fetched, pinned copy of sqlparse — there is nothing to "
         "seed, and a synthetic package would trade away the one property the pack "

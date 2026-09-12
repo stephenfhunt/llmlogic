@@ -22,6 +22,8 @@ module resolution finds it by walking up and nothing needs a `paths` mapping.
 
 from __future__ import annotations
 
+from functools import cache
+
 from harness.corpus import VSCODE, VSCODE_TYPES
 from harness.task import Fixture
 
@@ -106,5 +108,9 @@ def sources() -> dict[str, str]:
     return files
 
 
+@cache
 def build() -> Fixture:
+    """Cached: every task shares one fixture, and reading 761 files per task is
+    44 times the work for the same bytes. The corpus is pinned, so nothing can
+    change under the cache."""
     return Fixture(files=dict(sources()), schemas={})
