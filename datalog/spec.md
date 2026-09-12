@@ -2843,6 +2843,19 @@ never say.
     was if anything low — and the fix a program can make for itself is one rule
     per re-keying, which is why the index stays rejected and `code-analysis`'s
     `lib/keys.dl` states the rule for a reader instead.
+  - ***Consequences 2026-09-12 — "the program can pay it instead" has a boundary,
+    and a second workaround found it.*** A 4.04M-fact corpus hit a different
+    engine gap: every rule in a program is evaluated whether or not a goal reaches
+    it, so `modgraph.dl` computed a 17.45M-pair closure for importers that read
+    only `dep`, and `orient.dl` was OOM-killed at 21 GB. The program *could* pay
+    it — and did, by splitting `lib/reach.dl` out — but the price was not one rule:
+    it changed what every importer imports, two reference documents and the bench,
+    and left the file unable to hold a relation that belongs in it. **Re-keying is
+    a rule a program writes; restructuring a library is a layout change forced on
+    every consumer.** So this one is being fixed in the engine instead — rule
+    pruning is `ROADMAP.md`'s next item — and `code-analysis` carries an item to
+    unwind `reach.dl` once it lands. The 2026-09-11 note stands for re-keying; it
+    does not generalise to any gap a program can technically work around.
 
 - **2026-08-20** — **An aggregate is a fold over a multiset, so only its result
   is defined** (§9). `fold_aggregate` sorts its present values into §14 order
