@@ -37,7 +37,11 @@ violation("file_ancestor.dir", D) :- file_ancestor(dir: D), not dir(path: D).
 violation("symbol.id is not a key", I) :- symbol(id: I, kind: K1), symbol(id: I, kind: K2), K1 != K2.
 violation("symbol.id is not a key", I) :- symbol(id: I, line: L1), symbol(id: I, line: L2), L1 != L2.
 violation("project symbol without a file", I) :- symbol(id: I, origin: project, file: F), F is absent.
-violation("resolved import without a target", F) :- imports(file: F, resolved: true, target_file: T, target_package: P), T is absent, P is absent.
+% An ambient `declare module "*.css"` resolves a specifier that names no file
+% and no package, so `target_ambient` is a target too — see schema.ts.
+violation("resolved import without a target", F) :-
+  imports(file: F, resolved: true, target_file: T, target_package: P, target_ambient: A),
+  T is absent, P is absent, A is absent.
 
 % ── refs ─────────────────────────────────────────────────────────────────
 violation("ref.from", F) :- ref(from: F), not known(F).

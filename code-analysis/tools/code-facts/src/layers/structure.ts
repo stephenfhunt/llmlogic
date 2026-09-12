@@ -186,36 +186,71 @@ function depthOf(dir: string): number {
   return dir === "." ? 0 : dir.split("/").length;
 }
 
-function resolveSpecifier(
-  ctx: Context,
-  info: SourceInfo,
-  specNode: ts.StringLiteralLike,
-): { target_file: string | null; target_package: string | null; resolved: boolean } {
+interface Resolution {
+  target_file: string | null;
+  target_package: string | null;
+  target_ambient: string | null;
+  resolved: boolean;
+}
+
+/** The module name an ambient `declare module "…"` declares, if `decl` is one.
+ *
+ * A wildcard pattern (`"*.css"`, `"vs/css!*"`) is the interesting case: it is
+ * how a project types an import of something that is not a module at all, and
+ * the specifier then resolves to no file and no package. */
+function ambientModuleName(decl: ts.Declaration | undefined): string | undefined {
+  if (decl === undefined || !ts.isModuleDeclaration(decl) || !ts.isStringLiteral(decl.name)) return undefined;
+  return decl.name.text;
+}
+
+function resolveSpecifier(ctx: Context, info: SourceInfo, specNode: ts.StringLiteralLike): Resolution {
   const spec = specNode.text;
   const opts = info.project.options;
   const mode = ts.getModeForUsageLocation(info.sf, specNode, opts);
+  const none = { target_file: null, target_package: null, target_ambient: null };
   const res = ts.resolveModuleName(spec, info.sf.fileName, opts, ts.sys, undefined, undefined, mode).resolvedModule;
   if (res !== undefined) {
     const abs = path.resolve(res.resolvedFileName);
     const fromPkg = packageFromPath(abs);
     if (fromPkg === undefined && (abs === ctx.root || abs.startsWith(ctx.root + path.sep))) {
-      return { target_file: relTo(ctx.root, abs), target_package: null, resolved: true };
+      return { ...none, target_file: relTo(ctx.root, abs), resolved: true };
     }
-    return { target_file: null, target_package: fromPkg ?? packageOfSpecifier(spec), resolved: true };
+    return { ...none, target_package: fromPkg ?? packageOfSpecifier(spec), resolved: true };
   }
   const bare = !spec.startsWith(".") && !spec.startsWith("/");
   if (bare && isBuiltin(spec)) {
-    return { target_file: null, target_package: spec.startsWith("node:") ? spec : `node:${spec}`, resolved: true };
+    return { ...none, target_package: spec.startsWith("node:") ? spec : `node:${spec}`, resolved: true };
   }
   // An ambient `declare module "x"` resolves in the checker though not on disk.
   const moduleSymbol = info.checker.getSymbolAtLocation(specNode);
   if (moduleSymbol !== undefined) {
     const decl = moduleSymbol.declarations?.[0];
     const file = decl !== undefined ? decl.getSourceFile().fileName : undefined;
+    // A symbol whose declaration *is* a source file under the root was resolved
+    // by the checker along a path `resolveModuleName` did not take (a path
+    // mapping, say). That has a real target and is not ambient.
+    if (decl !== undefined && ts.isSourceFile(decl)) {
+      const abs = path.resolve(decl.fileName);
+      if (packageFromPath(abs) === undefined && (abs === ctx.root || abs.startsWith(ctx.root + path.sep))) {
+        return { ...none, target_file: relTo(ctx.root, abs), resolved: true };
+      }
+    }
     const pkg = file !== undefined ? packageFromPath(file) : undefined;
-    return { target_file: null, target_package: bare ? packageOfSpecifier(spec) : (pkg ?? null), resolved: true };
+    const ambient = ambientModuleName(decl);
+    // A *wildcard* match says nothing about a package: `bundler!./widget.css`
+    // and `vs/css!./x.css` are bare by the leading-character test and would
+    // otherwise be read as packages named `bundler!.` and `vs/css!.`. An ambient
+    // declaration of an exact name (`declare module "@vscode/copilot-api"`) is
+    // the opposite case — the specifier *is* the package.
+    const wildcard = ambient !== undefined && ambient.includes("*");
+    return {
+      ...none,
+      target_package: wildcard ? null : bare ? packageOfSpecifier(spec) : (pkg ?? null),
+      target_ambient: ambient ?? null,
+      resolved: true,
+    };
   }
-  return { target_file: null, target_package: bare ? packageOfSpecifier(spec) : null, resolved: false };
+  return { ...none, target_package: bare ? packageOfSpecifier(spec) : null, resolved: false };
 }
 
 /**

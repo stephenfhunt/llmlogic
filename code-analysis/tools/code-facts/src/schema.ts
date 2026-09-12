@@ -284,6 +284,11 @@ export const RELATIONS: readonly Relation[] = [
       ),
       opt("target_file", "string", "the resolved file, when it is under the root"),
       opt("target_package", "string", "package name, for a specifier resolving outside the root (`node:fs` for builtins)"),
+      opt(
+        "target_ambient",
+        "string",
+        'the pattern of the ambient `declare module` the specifier matched, when that is what resolved it — `"*.css"` for an asset import. Such a specifier names no file and no package, which is why `resolved` alone does not imply a target',
+      ),
       col("builtin", "bool", "the specifier names a Node.js builtin module (`fs`, `node:fs`)"),
       col("resolved", "bool", "the compiler resolved the specifier"),
     ],

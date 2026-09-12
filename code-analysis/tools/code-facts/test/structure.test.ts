@@ -120,3 +120,34 @@ test("doc rows cover API-level declarations only", () => {
   assert.equal(docs.has("src/main.ts#total.sum"), false, "locals are not documented API");
   assert.equal(docs.has("src/util/math.ts#add.a"), false, "nor are parameters");
 });
+
+// An import of something that is not a module — a stylesheet, a bundler-prefixed
+// specifier — resolves through a wildcard `declare module` and names no file and
+// no package. `resolved: true` with both targets absent is a fact base
+// contradicting itself, which is what `checks.dl` used to (rightly) report on 42
+// files of VS Code; `target_ambient` is the third kind of target.
+const assets = extract(fixture("assets"), { layers: [] });
+
+test("an asset import resolves to an ambient module pattern, not a file or a package", () => {
+  assert.deepEqual(
+    assets.tables
+      .rows("imports")
+      .map((i) => [i.specifier, i.kind, i.target_file, i.target_package, i.target_ambient, i.resolved]),
+    [
+      ["./widget.css", "side_effect", null, null, "*.css", true],
+      ["bundler!./widget.css", "side_effect", null, null, "bundler!*", true],
+      ["./help.js", "static", "src/help.ts", null, null, true],
+    ],
+  );
+});
+
+test("an ambient target is not a module edge: nothing depends on the stylesheet", () => {
+  // The point of keeping it out of `target_file`: a file that imports a
+  // stylesheet must not gain an import edge, or every such file would look
+  // coupled to whatever `.d.ts` declared the wildcard.
+  const edges = assets.tables.rows("imports").filter((i) => i.target_file !== null);
+  assert.deepEqual(
+    edges.map((i) => [i.file, i.target_file]),
+    [["src/widget.ts", "src/help.ts"]],
+  );
+});
