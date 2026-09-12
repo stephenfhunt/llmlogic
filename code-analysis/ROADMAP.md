@@ -20,9 +20,10 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
   answers. _shipped_ — `npm run bench -- --facts <dir>`.
 - **`callreach.dl` whole-project does not fit** a 14k-function call graph;
   `callreach_seeded.dl` is the seeded closure. _shipped_ — same decision.
-- **Asset imports** — `import './x.css'` is resolved with no target, which
-  `checks.dl` rightly calls a contradiction (42 files in `vs/base`). _queued_ —
-  same note, step 2.
+- **Asset imports** — `import './x.css'` resolves through a wildcard
+  `declare module`, so `imports.target_ambient` names the pattern and
+  `checks.dl` counts it as a target. _shipped_ — `decisions.md` 2026-09-11
+  (later ii); `checks.dl` clean on `vs/base`.
 - **Python dataflow layer** (points-to and taint for Python). _parked_ until the
   first Python version has been used.
 - **A TypeScript 7 backend**, when its compiler API stabilizes. _parked._

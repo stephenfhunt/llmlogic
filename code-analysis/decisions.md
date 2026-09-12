@@ -14,6 +14,27 @@ with the long form in [`notes/code-facts.md`](notes/code-facts.md).
 
 ## Decisions
 
+- **2026-09-11 (later ii)** — **An import that resolves through a wildcard
+  `declare module` names a pattern, not a file or a package**
+  (`imports.target_ambient`). `import './actionbar.css'` was `resolved: true`
+  with both targets absent — a fact base contradicting itself, which `checks.dl`
+  reported on 42 files of `vs/base`.
+  - **The declaring `.d.ts` must not go in `target_file`.** It is the obvious
+    fix and it is wrong: every stylesheet-importing file would gain an import
+    edge to `src/typings/css.d.ts`, and `modgraph`'s cycles, `coupling` and
+    `cohesion` would all inherit a dependency that does not exist at run time.
+  - ***Rejected:* a new `imports.kind`.** `kind` is the syntactic form
+    (`static`, `side_effect`, `dynamic`, …); how a specifier *resolved* is a
+    different axis, and collapsing them would make "a side-effect import" and
+    "an asset import" unaskable apart.
+  - ***Rejected:* `resolved: false`.** The checker did resolve it, and making it
+    indistinguishable from a broken import would inflate every blind-spot count
+    `orient.dl` prints.
+  - **A wildcard match is not a package.** `bundler!./widget.css` and
+    `vs/css!./x.css` are bare by the leading-character test and were becoming
+    `target_package` `"bundler!."`. Found by the new `assets` fixture, not by
+    reasoning.
+
 - **2026-09-11 (later)** — **The library re-keys the relations it joins on, and
   says so in one place: `lib/keys.dl`.** The million-fact problem was not the
   aggregates the sizing spike blamed. The engine seeks a **leading** prefix and

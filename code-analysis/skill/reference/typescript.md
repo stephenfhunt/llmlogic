@@ -41,7 +41,7 @@ Write your analysis as a file next to them (`/tmp/facts/q.dl`) that starts
 
 | layer | the relations you will use most |
 |---|---|
-| structure | `file` (path, dir, package, is_test, loc), `symbol` (id, kind, file, parent, exported, …), `imports` (file → target_file / target_package, kind, and whether it survives to `runtime`), `exports`, `file_ancestor` (every enclosing dir, with depth) |
+| structure | `file` (path, dir, package, is_test, loc), `symbol` (id, kind, file, parent, exported, …), `imports` (file → target_file / target_package / target_ambient, kind, and whether it survives to `runtime`), `exports`, `file_ancestor` (every enclosing dir, with depth) |
 | refs | `ref(from, to, kind)` — every resolved reference between declarations; `call_site` (caller, callee, **dispatch**); `extends`, `implements`, `overrides`; `member_access` (class, interface and object-type members — for cohesion and stamp coupling); `type_ref` (with position: param, return, …) |
 | flow | `fn` (one per function body, with cyclomatic, cognitive, nesting, Halstead); `flow_node`/`flow_edge` (a CFG per function); `def`/`use`; `closure`; `call_at` |
 | dataflow | `assign`, `alloc`, `load`, `store`, `formal`/`actual` — value flow in three-address form |

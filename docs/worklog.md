@@ -72,13 +72,30 @@ down with it.
   walk (measured as noise, 9.4 → 9.3 s); from `checks.dl`, `coupling.dl`,
   `cohesion.dl`, `metrics.dl` and `coupling_kinds.dl`, every scan-shaped join.
 
+**Then step 2, the same day** — **`checks.dl` is clean on `vs/base`**, the gate
+- **Asset imports resolve through a wildcard `declare module`**, so
+  `imports.target_ambient` names the pattern. Putting the declaring `.d.ts` in
+  `target_file` is the obvious fix and is wrong — every stylesheet-importing file
+  would gain an import edge that does not exist at run time. A new `assets`
+  fixture caught a second bug on the way: `bundler!./x.css` was becoming
+  `target_package` `"bundler!."`.
+- **Type packages pinned by lockfile** (`experiments/corpora/vs-base-types/`, no
+  vendored bytes): unresolved names **12,061 → 286**, `ref` 99,881 → 120,179,
+  `diagnostic` 3,134 → 62, `any_site` 13,225 → 1,369.
+- **`vs/base` is not self-contained** — 11 files outside it, without which the
+  extraction is 1,336,528 facts and 463 unresolved rather than 1,363,422 and 286.
+- **111 tool tests.**
+
 **Next up**
-- **Pack step 2**: asset imports (`import './x.css'` resolved with no target, 42
-  in `vs/base`) and vendoring `@types/node` / `@types/mocha` — `checks.dl` clean
-  on `vs/base` is the gate before it is a corpus at all.
-- **The flow-layer libraries are now measured too** (`flow`, `dominators`,
-  `pointsto`); see the notes table for where they land and whether the playbook's
-  costs need a second pass.
+- **Pack step 3**: the corpus in the harness — `GitCorpus` pinned by commit, the
+  `vs/base` subtree plus those 11 files, and the `at-scale` fixture path checked
+  (`task.Fixture` writes files to disk and the catalogue summarizes an asset tree
+  in one line, so 156k lines is not inlined — but confirm `domains.load_all()`
+  and `test_controls_hold` still run at that size).
+- **Step 4's questions must avoid the 286**: Electron's generated typings,
+  `sqlite3`, `process.env` index reads.
+- **The flow-layer libraries are now measured too** (`flow` 104 s,
+  `dominators` 51 s, `pointsto` does not fit); the playbook says so.
 - Still open from the last session: a test file's process dying under load.
 
 ## 2026-09-11 (later) — `code-analysis/`: its own project and skill, and Python

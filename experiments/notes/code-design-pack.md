@@ -102,6 +102,19 @@ out, and H-CA1 would measure the timeout.
 
 ## Step 2 — what VS Code exposes in the extractor
 
+> **Done 2026-09-11.** `checks.dl` is **clean on `vs/base`** — the gate below.
+> Asset imports resolve through a wildcard `declare module`, so
+> `imports.target_ambient` names the pattern (`../../code-analysis/decisions.md`
+> 2026-09-11 later ii). The type packages are pinned by lockfile in
+> `../corpora/vs-base-types/`, which takes unresolved names **12,061 → 286** and
+> `ref` 99,881 → 120,179. Two things the assembly settled, both for step 3:
+> `node_modules` goes at the **workspace root** so nothing needs a `paths`
+> mapping, and **`vs/base` is not self-contained** — it reaches 11 files outside
+> itself, without which the extraction is 1,336,528 facts and 463 unresolved
+> instead of 1,363,422 and 286. The residual blind spot (Electron's generated
+> typings, `sqlite3`, `process.env` index reads) is in that directory's README,
+> and **step 4's questions must not depend on it**.
+
 1. **Asset imports.** `import './actionbar.css'` is `resolved` with no
    `target_file`, which `checks.dl` calls a violation — correctly, as the facts
    contradict themselves. Decide the rule (an asset import is its own `kind`,
