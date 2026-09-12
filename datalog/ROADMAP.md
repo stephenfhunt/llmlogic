@@ -471,13 +471,49 @@ join is executed changes.
 
   This is documented behaviour, not a defect — "evaluation computes everything a
   program imports" (`skill/recipes/source-analysis.md` §2) — so it is a design
-  call, and the price is now known. A reachability walk over the rule dependency
-  graph is standard and safe under stratification: a rule kept only because
-  something it feeds is negated or aggregated is still reachable *through* that
-  edge. Two questions the session has to answer rather than assume: whether
-  pruning may change which runtime errors fire (the same hazard that makes atom
-  reordering its own design session, above), and what happens when `-q` queries
-  arrive after the program is loaded.
+  call, and the price is now known. **What pruning costs was measured on the
+  engine, 2026-09-12, rather than argued:**
+
+  - **Answers are safe, and there is exactly one way to get it wrong.** The walk
+    must follow negated atoms and aggregate goals as dependency edges. Two
+    programs pin it: `ok(X) :- p(X), not banned(X).` where `banned` is reachable
+    only under the negation, and `n(N) :- N = count { X | big(X) }.` where `big`
+    is reachable only inside the set-builder. Prune either and the answers become
+    `ok(1..3)` and `n(0)` — **silently wrong**, with no diagnostic. The correct
+    edge set already exists and already covers all three cases:
+    `collect_stratum_edges` (`src/lower.rs:1662`) emits positive atoms, negated
+    atoms, and recurses into aggregate goals. **Reuse it.** The failure mode is a
+    second walk written over positive body atoms only.
+  - **The error path changes, and this is the real decision.** A rule no goal
+    depends on can still fail the whole run today: `boom(X, Y) :- p(X), Y = 100 / X.`
+    with a `p(0)` fact and nothing referencing `boom` gives
+    `semantic error [arithmetic-error]`, **exit 2**, and the program's actual
+    answer is never printed. Pruned, the program succeeds. That is the same
+    hazard that makes atom reordering its own design session (below), and it
+    needs a §17 entry saying which behaviour is wanted — not a side effect
+    noticed afterwards.
+  - **Termination changes the same way.** An unreachable non-terminating rule
+    hangs the program today and answers once pruned, which moves what §6/§10's
+    certified fragment is *about*. Both changes are permissive: strictly more
+    programs succeed.
+  - **Static diagnostics survive — if pruning stays at eval time.** An undefined
+    predicate referenced only by an unreachable rule warns today *and* the program
+    still answers (exit 0), because the warning comes from typecheck over the
+    whole program. That warning is the blind-spot signal `orient.dl`'s layer
+    gating depends on (`../code-analysis/decisions.md` 2026-09-12), so keeping it
+    is not optional. Pushing pruning earlier — don't typecheck what you won't run
+    — silently drops it. **Decide that fork deliberately.**
+  - **The goal set is always complete before evaluation**, so there is no
+    "queries arrive later" case to handle: `-q` is spliced into the program text
+    by `program_with_queries` (`src/api.rs:289`) and there is no evaluate-then-query
+    API. One-shot is what makes this item cheap.
+
+  **"Pruning does not change answers" is an equivalence claim, so it ships as a
+  property** (`testing.md`'s first rule): every corpus program answers identically
+  with pruning on and off, and the generator must produce rules reachable only
+  under a negation and only inside an aggregate goal, or it is vacuous on exactly
+  the two cases that break it. Mutation-verify by deleting the negated edge from
+  the walk — that mutation must fail the property.
 
   **This is the whole of `code-analysis`'s `orient.dl` problem** (`../code-analysis/decisions.md`
   2026-09-12 later): `modgraph.dl` carried a 17.45M-pair closure beside five cheap
