@@ -151,3 +151,33 @@ test("an ambient target is not a module edge: nothing depends on the stylesheet"
     [["src/widget.ts", "src/help.ts"]],
   );
 });
+
+// A `.json` a module imports is one of the program's files under
+// `resolveJsonModule` — but only when something `import`s it. A CommonJS
+// `require` of the same file resolves on disk and leaves the program alone, so
+// `imports.target_file` named a file that had no `file` row. VS Code's
+// `product.json` is the real case, and `checks.dl` reported the contradiction.
+const jsonmod = extract(fixture("jsonmod"), { layers: [] });
+
+test("a json module is data, and is a file row however it was imported", () => {
+  const rows = jsonmod.tables.rows("file").map((f) => [f.path, f.lang]);
+  assert.deepEqual(rows.sort(), [
+    ["src/cjs.ts", "ts"],
+    // Reached by `import`: in the program, and no longer called TypeScript.
+    ["src/data.json", "json"],
+    ["src/esm.ts", "ts"],
+    // Reached only by `require`: synthesised, because a resolved target that is
+    // not a file row is a fact base contradicting itself.
+    ["src/settings.json", "json"],
+  ]);
+});
+
+test("both json spellings resolve to a target that is a known file", () => {
+  const known = new Set(jsonmod.tables.rows("file").map((f) => f.path));
+  const targets = jsonmod.tables
+    .rows("imports")
+    .filter((i) => typeof i.target_file === "string")
+    .map((i) => i.target_file);
+  assert.deepEqual(targets.sort(), ["src/data.json", "src/settings.json"]);
+  for (const target of targets) assert.ok(known.has(target), `${target} has no file row`);
+});

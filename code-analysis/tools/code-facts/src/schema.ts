@@ -202,7 +202,11 @@ export const RELATIONS: readonly Relation[] = [
       col("path", "string", FILE),
       col("dir", "string", "its directory (`.` for the root)"),
       opt("package", "string", "name in the nearest enclosing package.json"),
-      oneOf("lang", ["ts", "tsx", "mts", "cts", "dts", "js", "jsx", "mjs", "cjs", "py", "pyi"], "file flavour"),
+      oneOf(
+        "lang",
+        ["ts", "tsx", "mts", "cts", "dts", "js", "jsx", "mjs", "cjs", "py", "pyi", "json"],
+        "file flavour. `json` is **data, not source** — a file a module imports rather than one that was compiled; exclude it wherever you mean code",
+      ),
       col("loc", "int", "lines"),
       col("sloc", "int", "lines carrying at least one token (not blank, not only comments)"),
       col("is_test", "bool", "a test file (`*.test.*`, `*.spec.*`, `__tests__/`, `test(s)/`, or only in a test tsconfig)"),

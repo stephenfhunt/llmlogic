@@ -71,7 +71,22 @@ export function parentDir(rel: string): string {
 function langOf(p: string): string {
   if (p.endsWith(".d.ts") || p.endsWith(".d.mts") || p.endsWith(".d.cts")) return "dts";
   const ext = path.extname(p).slice(1);
+  // `json` is named rather than falling through to `ts`: with `resolveJsonModule`
+  // an imported `.json` really is one of the program's files, and calling it
+  // TypeScript made its data lines part of `code_lines`.
+  if (ext === "json") return "json";
   return ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"].includes(ext) ? ext : "ts";
+}
+
+/** Lines of a file the compiler never parsed, for a `file` row we synthesise.
+ *
+ * `sloc` is every non-blank line: JSON has no comment syntax to discount, and
+ * guessing at JSONC would be a rule nobody could check. */
+function linesOnDisk(absolute: string): { loc: number; sloc: number } {
+  const text = fs.readFileSync(absolute, "utf8");
+  const lines = text.split("\n");
+  if (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  return { loc: lines.length, sloc: lines.filter((l) => l.trim() !== "").length };
 }
 
 /** Lines as `wc -l` counts them: a final newline does not start another. */
@@ -156,6 +171,36 @@ export function extractStructure(ctx: Context, packages: Packages): void {
     extractModuleEdges(ctx, info);
     extractExports(ctx, info);
     extractDeclarationDetail(ctx, info);
+  }
+
+  // A resolved target that is not one of the program's files still has to be a
+  // `file` row, or the facts contradict themselves — `imports.target_file`
+  // naming something `file` does not. It happens with `resolveJsonModule`: an
+  // `import` of a `.json` puts it in the program, but a CommonJS `require` of
+  // the same file does not, so whether the row existed depended on which
+  // spelling some other module happened to use. VS Code's `product.json` is the
+  // real case (`../../notes/code-facts.md`, the dogfood).
+  const known = new Set(t.rows("file").map((f) => f.path as string));
+  const missing = new Set<string>();
+  for (const row of t.rows("imports")) {
+    const target = row.target_file;
+    if (typeof target === "string" && !known.has(target)) missing.add(target);
+  }
+  for (const p of [...missing].sort()) {
+    const absolute = path.join(ctx.root, p);
+    if (!fs.existsSync(absolute)) continue;
+    const { loc, sloc } = linesOnDisk(absolute);
+    t.add("file", {
+      path: p,
+      dir: parentDir(p),
+      package: packages.nameOf(p),
+      lang: langOf(p),
+      loc,
+      sloc,
+      is_test: TEST_PATH.test(p),
+      is_decl: false,
+      is_generated: false,
+    });
   }
 }
 
