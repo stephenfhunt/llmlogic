@@ -1218,8 +1218,13 @@ and the asking form, which is also what unblocked E5.
     reddens; make `Derivation::reports` return `false` so the reporting store
     keeps nothing — the api-level warning test reddens (E9 itself does **not**,
     measured 2026-09-11, which is why the third claim was rewritten off that
-    predicate). Non-vacuity: a guard pins that the generator reaches a program
-    with a derived fact *and* a query, both halves holding trivially over an EDB.
+    predicate). The fixpoint builds a derivation only when the model will keep
+    it, and skips a match whose fact is already held when nothing of it is kept
+    (2026-09-12, `notes/memory-profile-2026-09-12.md`): treating `Reports` as
+    keeping no premises reddens the api-level warning test (E9 does not);
+    skipping *every* match nothing keeps reddens E9. Non-vacuity: a guard pins
+    that the generator reaches a program with a derived fact *and* a query, both
+    halves holding trivially over an EDB.
 - [x] **E10** **A near-miss holds against the model.** `?whynot`'s guard: for a
   goal that does not hold, `trace_failure` re-solves each candidate rule through
   the scheduler the fixpoint uses, so everything it reports must be true of the

@@ -486,6 +486,15 @@ join is executed changes.
   **5.5 s / 1.10 GB → 0.00 s**. Closed `bugs/012`; the early check stops at
   lowering because of `bugs/014`. — §13/§15/engine.
 
+- **Hold the base facts once; build a derivation only if it is kept** — **shipped ✅
+  2026-09-12** (§17 that date; `testing.md` **E9**). Heaptrack found an import
+  held three times while typed, the base facts twice for the whole run, and every
+  match's proof built and dropped under `Unrecorded`. Grafana's `orient.dl`
+  **224 s / 9.46 GB → 87 s / 4.94 GB**, its runtime closure alone 133 s / 6.73 GB →
+  44 s / 3.45 GB; `vs/base` `checks.dl` 1,265 → 699 MB,
+  answers identical ([`notes/memory-profile-2026-09-12.md`](notes/memory-profile-2026-09-12.md)).
+  — §13/§15/engine.
+
 - **Real pushdown: column projection, then demand transformation** — _designing,
   post-v1._ The two items above are pruning — they decide *whether* to read a
   relation or run a rule. These decide what a scan and a recursion actually
@@ -495,9 +504,10 @@ join is executed changes.
   - **Column projection.** `symbol` has 18 columns and a typical rule binds two
     or three. Whether that pays cannot be answered from outside the engine — it
     depends on row-vs-column storage and on whether strings are interned — so the
-    first task is the measurement, not the implementation: extract a fact
-    directory with a schema trimmed to the columns one library names, and compare
-    the floor against the table above. **Do that before assuming a win.**
+    measurement came first: **measured 2026-09-12**, Grafana's `symbol` trimmed
+    to the 4 of 18 columns `orient.dl` reads loads in **582 MB / 3.2 s against
+    1,374 MB / ~11 s** ([`notes/memory-profile-2026-09-12.md`](notes/memory-profile-2026-09-12.md)).
+    The win is real; the design is not started.
   - **Demand transformation (magic sets).** The only one of the four that helps a
     closure that *is* wanted: `modgraph.dl`'s `file_reaches` asked for one file's reachability still
     derives all 17.45M pairs. `callreach_seeded.dl` is the hand-rolled version and
@@ -553,7 +563,10 @@ join is executed changes.
   `Value::eq` plus libc `memcmp` is 2–3% of a run: the seek deletes the comparisons
   rather than making each cheaper, and symbol *length* was never the driver (16× the
   width costs 7.5% of wall clock, but 75% more allocated bytes and 32% more RSS).
-  [`notes/profile-2026-08-20.md`](notes/profile-2026-08-20.md). _queued — **post-v1**: memory only, and S6 is about exponents._ — §4/engine.
+  [`notes/profile-2026-08-20.md`](notes/profile-2026-08-20.md). On Grafana's
+  `symbol` the 5.8M string cells hold 263 MB of text, 96 MB of it distinct (2.7×),
+  each cell a 32-byte `Value` plus a heap block
+  ([`notes/memory-profile-2026-09-12.md`](notes/memory-profile-2026-09-12.md)). _queued — **post-v1**: memory only, and S6 is about exponents._ — §4/engine.
 - **Parallelism** — assess how much of semi-naive evaluation and joins can go
   parallel (independent rules within a stratum, partitioned/hash joins) while
   preserving the deterministic canonical output and full provenance recording,

@@ -797,6 +797,13 @@ fn collect_rule_matches(
             Provenance::Reports => crate::provenance::premises_report(premises.iter().flatten()),
             Provenance::Unrecorded => false,
         };
+        // Nor is a match whose fact the model already holds pending at all, when
+        // nothing of it is kept: the model is frozen while a round collects, so
+        // `insert_derived` would find the fact present and store nothing. In a
+        // recursive rule most matches are these rediscoveries.
+        if !keep && model.relation(rule.head.pred).contains(&tuple) {
+            return;
+        }
         let premises = if keep {
             premises
                 .iter()

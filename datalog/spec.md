@@ -2566,6 +2566,26 @@ never say.
 
 ### Decisions
 
+- **2026-09-12** — **A run holds its base facts once, and builds a derivation
+  only if it will keep it** (§13/§15; `sources::table::finalize`,
+  `lower::lower_with_sources`, `engine::eval_pruned_moving_facts`,
+  `collect_rule_matches`). Heaptrack over Grafana's frontend; long form
+  `notes/memory-profile-2026-09-12.md`.
+  - **An import is typed by consuming it.** Every column's type is fixed before
+    any cell converts, so cells move; errors still come out column by column.
+  - **Lowering consumes the tables, evaluation the facts** — except for a program
+    with an explanation, whose `?whynot` cross case evaluates twice.
+  - **`insert_derived`'s keep test runs at the match.** A derivation nothing keeps
+    is not built, and a match whose fact the model holds is not pending: the model
+    is frozen while a round collects (the batched application E1 guards).
+  - **Real profilers, not an allocator counter in the engine** (the user's):
+    heaptrack and valgrind over a `profiling` cargo profile.
+
+  Guarded by E9 (two recorded mutations) and `code-analysis`'s bench digests.
+  Grafana's runtime closure 133 s / 6.73 GB → **44 s / 3.45 GB**; `vs/base`
+  `checks.dl` 1,265 → **699 MB**. Interning and column projection stay design
+  items, now measured (ROADMAP § Performance).
+
 - **2026-09-12** — **An import no goal reaches is not read, and the program is
   lowered before any import is** (§13; `api::lower_and_load`,
   `sources::load_imports_where`). Closes `bugs/012` for what lowering finds.
