@@ -119,21 +119,33 @@ def relation_catalogue(fixture: Fixture) -> str:
         same = " — the same rows in each format" if len(spellings) > 1 else ""
         lines.append(f"- {names} ({rows} rows) — columns: {fields}{same}")
     if assets := fixture.assets():
-        lines.append(_asset_summary(fixture, assets))
+        lines.extend(_asset_summary(fixture, assets))
     return "\n".join(lines)
 
 
-def _asset_summary(fixture: Fixture, assets: list[str]) -> str:
-    """One line for a whole source tree.
+def _asset_summary(fixture: Fixture, assets: list[str]) -> list[str]:
+    """One line per top-level directory of asset files.
 
     Listing every path would put the tree in the prompt twice — once as a
     catalogue and once as the files themselves — and the subject is meant to walk
     it, not to be handed an index of it.
+
+    **Per root, not one line for all of them**, because a fixture can carry a
+    codebase *and* what the codebase is compiled against: `code_design` ships
+    VS Code's `vs/base` beside the `@types` packages its `tsconfig` needs, and
+    the type declarations are the larger half by line count. One combined figure
+    would tell the subject the codebase is 2.5× its real size. A fixture with a
+    single root — every one before this — renders byte-identically.
     """
-    roots = sorted({name.split("/", maxsplit=1)[0] for name in assets})
-    total_lines = sum(len(fixture.text(name).splitlines()) for name in assets)
-    where = ", ".join(f"`{root}`" for root in roots)
-    return f"- {where} — a source tree: {len(assets)} files, {total_lines} lines"
+    counts: dict[str, tuple[int, int]] = {}
+    for name in assets:
+        root = name.split("/", maxsplit=1)[0]
+        files, lines = counts.get(root, (0, 0))
+        counts[root] = (files + 1, lines + len(fixture.text(name).splitlines()))
+    return [
+        f"- `{root}` — a source tree: {files} files, {lines} lines"
+        for root, (files, lines) in sorted(counts.items())
+    ]
 
 
 #: What `engine-forced` adds, and the whole of what it adds.
