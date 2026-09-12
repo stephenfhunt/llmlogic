@@ -49,13 +49,11 @@ each; detail in §17 and `docs/worklog.md`.
 > **No design session blocks anything** either: §6's extension, the last one,
 > shipped 2026-08-18.
 >
-> **The next two items to build are in § Performance**, both from the 2026-09-12
-> dogfood measurement and in this order: **don't evaluate a rule no goal depends
-> on**, then **load only the relations the program names**. They are one
-> reachability analysis applied to rules and to relations, they are memory rather
-> than time, and together they close `bugs/012` and make `code-analysis`'s
-> `reach.dl` split optional. The user's call, 2026-09-12. *Column projection and
-> magic sets are the bigger chunk behind them and are deliberately not next.*
+> **The next item to build is in § Performance**: **load only the relations the
+> program names**, from the 2026-09-12 dogfood measurement. It reads the live set
+> rule pruning shipped with (✅ 2026-09-12), it is memory rather than time, and it
+> closes `bugs/012`. The user's call, 2026-09-12. *Column projection and magic
+> sets are the bigger chunk behind it and are deliberately not next.*
 >
 > **§1's six criteria all hold as of 2026-08-25** — S3, the last, closed with the
 > error code vocabulary.
@@ -453,8 +451,8 @@ deferred until a consumer needs them (§8's *Not covered*). — §13,
 The profile falsified the ranking both earlier notes gave, so the items below are
 its ranking, not theirs.
 
-**The first two items come from a different measurement and are the next two to
-build** — a 4.04M-fact base (`code-analysis` on Grafana's frontend, 2026-09-12),
+**The first two items come from a different measurement — the first shipped
+2026-09-12 and the second is next** — a 4.04M-fact base (`code-analysis` on Grafana's frontend, 2026-09-12),
 where the binding constraint is **memory, not time**. The 2026-08-20 profile is a
 CPU profile over corpus programs; neither it nor the seek work touched what a run
 *materialises*, which is where a real fact base spends its resident set. Both items
@@ -462,66 +460,13 @@ are the same analysis — reachability over the rule graph — applied once to r
 and once to relations, and both are **pruning, not pushdown**: nothing about how a
 join is executed changes.
 
-- **Do not evaluate a rule no goal depends on** — _queued, **next**, post-v1._
-  Measured, on one fact base, one import, one question: a program that defines a
-  transitive closure **no `?-` goal or `-q` query references** costs **136 s /
-  10.03 GB**; the identical program without those four lines costs **13.2 s /
-  3.21 GB**. Same answer (`n(16)`). The engine evaluates every rule in the program
-  regardless of reachability from a goal.
-
-  This is documented behaviour, not a defect — "evaluation computes everything a
-  program imports" (`skill/recipes/source-analysis.md` §2) — so it is a design
-  call, and the price is now known. **What pruning costs was measured on the
-  engine, 2026-09-12, rather than argued:**
-
-  - **Answers are safe, and there is exactly one way to get it wrong.** The walk
-    must follow negated atoms and aggregate goals as dependency edges. Two
-    programs pin it: `ok(X) :- p(X), not banned(X).` where `banned` is reachable
-    only under the negation, and `n(N) :- N = count { X | big(X) }.` where `big`
-    is reachable only inside the set-builder. Prune either and the answers become
-    `ok(1..3)` and `n(0)` — **silently wrong**, with no diagnostic. The correct
-    edge set already exists and already covers all three cases:
-    `collect_stratum_edges` (`src/lower.rs:1662`) emits positive atoms, negated
-    atoms, and recurses into aggregate goals. **Reuse it.** The failure mode is a
-    second walk written over positive body atoms only.
-  - **The error path changes, and this is the real decision.** A rule no goal
-    depends on can still fail the whole run today: `boom(X, Y) :- p(X), Y = 100 / X.`
-    with a `p(0)` fact and nothing referencing `boom` gives
-    `semantic error [arithmetic-error]`, **exit 2**, and the program's actual
-    answer is never printed. Pruned, the program succeeds. That is the same
-    hazard that makes atom reordering its own design session (below), and it
-    needs a §17 entry saying which behaviour is wanted — not a side effect
-    noticed afterwards.
-  - **Termination changes the same way.** An unreachable non-terminating rule
-    hangs the program today and answers once pruned, which moves what §6/§10's
-    certified fragment is *about*. Both changes are permissive: strictly more
-    programs succeed.
-  - **Static diagnostics survive — if pruning stays at eval time.** An undefined
-    predicate referenced only by an unreachable rule warns today *and* the program
-    still answers (exit 0), because the warning comes from typecheck over the
-    whole program. That warning is the blind-spot signal `orient.dl`'s layer
-    gating depends on (`../code-analysis/decisions.md` 2026-09-12), so keeping it
-    is not optional. Pushing pruning earlier — don't typecheck what you won't run
-    — silently drops it. **Decide that fork deliberately.**
-  - **The goal set is always complete before evaluation**, so there is no
-    "queries arrive later" case to handle: `-q` is spliced into the program text
-    by `program_with_queries` (`src/api.rs:289`) and there is no evaluate-then-query
-    API. One-shot is what makes this item cheap.
-
-  **"Pruning does not change answers" is an equivalence claim, so it ships as a
-  property** (`testing.md`'s first rule): every corpus program answers identically
-  with pruning on and off, and the generator must produce rules reachable only
-  under a negation and only inside an aggregate goal, or it is vacuous on exactly
-  the two cases that break it. Mutation-verify by deleting the negated edge from
-  the walk — that mutation must fail the property.
-
-  **This is the whole of `code-analysis`'s `orient.dl` problem** (`../code-analysis/decisions.md`
-  2026-09-12 later): `modgraph.dl` carried a 17.45M-pair closure beside five cheap
-  rules, `orient.dl` imported it for `dep` and was OOM-killed at 21 GB. It was
-  fixed *in the library*, by splitting the closure into `reach.dl` — the second
-  time a library has been restructured to work around a missing engine feature
-  (the first is the seek item below). With this, that split becomes optional.
-  — §15/engine.
+- **Do not evaluate a rule no goal depends on** — **shipped ✅ 2026-09-12** (§17
+  that date; `lower::live_predicates`, `engine::eval_pruned`; `testing.md` **B13**).
+  On `vs/base`, `callreach.dl` imported beside a question that never reads it:
+  **37.4 s / 4.20 GB → 3.1 s / 0.70 GB**, same answer. A pruned rule can no longer
+  fail or hang a run, static warnings still cover the whole program, and a program
+  with no goals prunes nothing. `code-analysis`'s `reach.dl` split is now optional;
+  its ROADMAP carries the unwind. — §15/engine.
 
 - **Load only the relations the program names** — _queued, **next**, post-v1._
   Materialisation is eager per imported schema file, not per referenced relation,

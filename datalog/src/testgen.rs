@@ -821,6 +821,38 @@ pub(crate) fn arb_closure_program() -> impl Strategy<Value = String> {
     (arb_edb_text(), bodies).prop_map(|(edb, rules)| format!("{edb}{rules}"))
 }
 
+/// A program **as text** for rule pruning's equivalence (`testing.md` **B13**):
+/// an EDB, five fixed rules, and one to three goals drawn from a menu — so what
+/// a run depends on changes from case to case while the rules do not.
+///
+/// Each rule is reachable in one way the walk has to get right. `banned` is read
+/// **only under `not`** (by `ok`) and `big` **only inside an aggregate goal** (by
+/// `total`): the two edges whose loss answers wrongly with no diagnostic. A
+/// query's own aggregate reaches `ok` the same way. `doubled` is reached by one
+/// goal on the menu and pruned in every other case, and `?- n(K, V).` prunes
+/// every rule at once. The explanation goals make an explanation a root, and
+/// `?whynot` over a fact that holds takes the re-evaluation path.
+pub(crate) fn arb_pruning_program() -> impl Strategy<Value = String> {
+    const RULES: &str = "\
+banned(K) :- n(K, V), V < 0.
+ok(K) :- n(K, _), not banned(K).
+big(K, V) :- n(K, V), V > 0.
+total(S) :- S = sum { V | big(_, V) }.
+doubled(K, W) :- n(K, V), W = V * 2.
+";
+    let goal = prop_oneof![
+        Just("?- ok(K).".to_string()),
+        Just("?- total(S).".to_string()),
+        Just("?- doubled(K, W).".to_string()),
+        Just("?- n(K, V).".to_string()),
+        Just("?- N = count { K | ok(K) }.".to_string()),
+        (0u8..3).prop_map(|k| format!("?why ok(\"{}\").", key_name(k))),
+        (0u8..3).prop_map(|k| format!("?whynot ok(\"{}\").", key_name(k))),
+    ];
+    (arb_edb_text(), proptest::collection::vec(goal, 1..=3))
+        .prop_map(|(edb, goals)| format!("{edb}{RULES}{}\n", goals.join("\n")))
+}
+
 /// **The structural laws of a conjunction and a disjunction**, as spellings.
 ///
 /// Returns `(base, variant)` — two programs that must answer identically —

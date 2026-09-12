@@ -422,13 +422,21 @@ impl Program {
     /// store: the §9/§12 counts are read off the premises that skipped, and
     /// nothing asked for a proof (§17, 2026-09-11).
     pub fn provenance(&self) -> crate::engine::Provenance {
+        self.provenance_pruned(None)
+    }
+
+    /// [`Program::provenance`] for a run that evaluates only the `live` rules
+    /// ([`crate::lower::live_predicates`]; `None` is every rule). A rule pruned
+    /// away produces no premise, so an aggregate in it is no reason to keep a
+    /// store.
+    pub fn provenance_pruned(&self, live: Option<&[bool]>) -> crate::engine::Provenance {
         let asked = self
             .explanations
             .iter()
             .any(|explanation| explanation.sigil == crate::ast::Sigil::Why);
         if asked {
             crate::engine::Provenance::Recorded
-        } else if self.reports_through_provenance() {
+        } else if self.reports_through_provenance_pruned(live) {
             crate::engine::Provenance::Reports
         } else {
             crate::engine::Provenance::Unrecorded
@@ -451,8 +459,15 @@ impl Program {
     /// hands its premises straight to the caller and the model never stores
     /// them (§14).
     pub fn reports_through_provenance(&self) -> bool {
+        self.reports_through_provenance_pruned(None)
+    }
+
+    /// [`Program::reports_through_provenance`] over only the rules a pruned run
+    /// evaluates — those whose head is `live` (`None` is every rule).
+    pub fn reports_through_provenance_pruned(&self, live: Option<&[bool]>) -> bool {
         self.rules
             .iter()
+            .filter(|rule| live.is_none_or(|live| live[rule.head.pred.0 as usize]))
             .any(|rule| rule.body.iter().any(Self::literal_reports))
     }
 

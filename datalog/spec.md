@@ -1970,6 +1970,13 @@ program has negation or aggregation — bottom-up:
   canonical output order — is deterministic by construction.
 - **Stratified fixpoint**: the IR's strata are evaluated in order, each to
   fixpoint before the next (a single stratum until §7 lands).
+- **Pruning**: only the rules a goal depends on are evaluated — those whose
+  head is among the predicates a query body or explanation goal names, closed
+  under every dependency edge, negated and aggregated ones included
+  (`lower::live_predicates`). A program with no goals evaluates every rule.
+  Answers are unchanged (testing.md B13); a rule that is not evaluated also
+  cannot raise a runtime error or keep the run from terminating, while §10's
+  and §12's static warnings still cover the whole program (§17, 2026-09-12).
 - **Semi-naive iteration** (references.md group 2): each stratum begins with a
   naive seed pass over the full relations; each later round joins, per rule
   and per body position *i*, the previous round's **delta** at *i*, the full
@@ -2552,6 +2559,25 @@ marker that records a decision working out *well*, which the log would otherwise
 never say.
 
 ### Decisions
+
+- **2026-09-12** — **A rule no goal depends on is not evaluated** (§15;
+  `lower::live_predicates`, `engine::eval_pruned`). Live is every predicate a
+  query body or explanation goal names, closed under `collect_stratum_edges` —
+  negated and aggregated edges included, since a walk over positive atoms prunes
+  a relation read only under `not` or inside a set-builder and answers wrongly
+  with no diagnostic. Three rulings, the user's, same day:
+  - **Permissive.** A pruned rule cannot fail or hang the run: an unreached
+    `Y = 100 / X` no longer exits 2, an unreached value-creating cycle answers.
+    §9/§12 skip counts from a pruned rule go with it; they are post-evaluation.
+  - **Static diagnostics stay whole-program.** Pruning is at evaluation, after
+    `check_program` and §10's lint, so an undefined predicate in an unreached rule
+    still warns — the blind-spot signal `code-analysis`'s layer gating reads.
+    Pruning before typecheck was the rejected fork: it drops that warning.
+  - **No goals, no pruning** — `datalog p.dl` stays a check that every rule runs.
+
+  `RuleId`s and strata are untouched. Guarded by **B13**; its recorded mutations
+  drop each strict edge from the closure. `vs/base`, `callreach.dl` beside a
+  question that never reads it: 37.4 s / 4.20 GB → **3.1 s / 0.70 GB**.
 
 - **2026-09-11** — **A program that only *reports* through provenance records
   only the derivations the reports read** (§9/§12/§15; `Provenance::Reports`,

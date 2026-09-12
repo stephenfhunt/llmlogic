@@ -44,10 +44,10 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::Path;
 
 use crate::ast::StatementKind;
-use crate::engine::{Model, Provenance, eval_with, trace_failure};
+use crate::engine::{Model, Provenance, eval_pruned, trace_failure};
 use crate::error::{AggregateSite, Error, Warning};
 use crate::ir;
-use crate::lower::{check_program, lower_with_sources};
+use crate::lower::{check_program, live_predicates, lower_with_sources};
 use crate::parser::parse;
 use crate::print::{print_atom, print_explanation, print_ground_fact};
 use crate::provenance::{Explained, ProofTree};
@@ -131,6 +131,18 @@ pub fn run_at_reporting(
     source_path: Option<&Path>,
     report: &mut dyn FnMut(&Warning),
 ) -> Result<RunResult, Vec<Error>> {
+    run_pruning(src, source_path, report, true)
+}
+
+/// [`run_at_reporting`] with rule pruning (§17, 2026-09-12) switchable: `false`
+/// evaluates every rule whatever the goals. Crate-internal, because the only
+/// reason to turn it off is to compare the two runs (`testing.md` **B13**).
+fn run_pruning(
+    src: &str,
+    source_path: Option<&Path>,
+    report: &mut dyn FnMut(&Warning),
+    prune: bool,
+) -> Result<RunResult, Vec<Error>> {
     let ast = parse(src)?;
     let resolved = resolve_modules(ast, source_path)?;
     // Every stage after this one works over the IR and never holds the program
@@ -160,8 +172,18 @@ pub fn run_at_reporting(
     // `?why` needs a derivation store, `?whynot` needs the model and a re-solve,
     // and a run with no goals at all needs neither — which is the case that was
     // paying 70–78% of peak RSS for nothing.
-    let model = eval_with(&program, program.provenance()).map_err(&one)?;
-    warnings.extend(absent_skip_warnings(&model, &program));
+    //
+    // Only what a goal depends on is evaluated (§17, 2026-09-12): a rule nothing
+    // asks about neither pays for itself nor fails the run. The static warnings
+    // above were computed over the whole program, so pruning cannot hide one.
+    let live = if prune {
+        live_predicates(&program)
+    } else {
+        None
+    };
+    let live = live.as_deref();
+    let model = eval_pruned(&program, program.provenance_pruned(live), live).map_err(&one)?;
+    warnings.extend(absent_skip_warnings(&model, &program, live));
 
     let mut answers = Vec::with_capacity(program.queries.len());
     for (position, query) in program.queries.iter().enumerate() {
@@ -221,7 +243,7 @@ pub fn run_at_reporting(
             .iter()
             .any(|explanation| model.contains(&explanation.goal));
     let recorded = if needs_recorded {
-        Some(eval_with(&program, Provenance::Recorded).map_err(&one)?)
+        Some(eval_pruned(&program, Provenance::Recorded, live).map_err(&one)?)
     } else {
         None
     };
@@ -395,13 +417,18 @@ pub fn run_with_queries_at_reporting(
 /// Aggregates written in a **query** are covered by
 /// [`query_skip_warnings`], which reads the premises `Model::answer` builds and
 /// used to discard; a query records no derivations, so this scan cannot see it.
-pub(crate) fn absent_skip_warnings(model: &Model, program: &ir::Program) -> Vec<Warning> {
+pub(crate) fn absent_skip_warnings(
+    model: &Model,
+    program: &ir::Program,
+    live: Option<&[bool]>,
+) -> Vec<Warning> {
     // Only a program that aggregates or converts has anything to report here;
     // skipping the derivation scan keeps this free for everything else. It is
     // the same predicate that provisions the recorder, shared so the two cannot
     // drift — if this scan ever runs on an unprovisioned model it reports
-    // nothing, silently.
-    if !program.reports_through_provenance() {
+    // nothing, silently. `live` is the set the run evaluated: a pruned rule
+    // produced no premise, so it is not a reason to scan.
+    if !program.reports_through_provenance_pruned(live) {
         return Vec::new();
     }
     debug_assert!(
@@ -592,6 +619,7 @@ fn answer_lines(query: &ir::Query, rows: &[Vec<ir::Value>], program: &ir::Progra
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::eval_with;
     use crate::error::ErrorCode;
     use proptest::prelude::*;
 
@@ -796,13 +824,13 @@ parsed(K, V) :- raw(K, S), V = S as int.
         let recorded = eval_with(&program, Provenance::Recorded).expect("evaluates");
         let reports = eval_with(&program, Provenance::Reports).expect("evaluates");
         assert_eq!(
-            absent_skip_warnings(&reports, &program),
-            absent_skip_warnings(&recorded, &program),
+            absent_skip_warnings(&reports, &program, None),
+            absent_skip_warnings(&recorded, &program, None),
             "the reporting store lost a warning the full store reports"
         );
 
         // Non-vacuity: a test that compares two empty lists proves nothing.
-        let warnings = absent_skip_warnings(&reports, &program);
+        let warnings = absent_skip_warnings(&reports, &program, None);
         assert_eq!(warnings.len(), 2, "expected both warnings: {warnings:?}");
         assert!(
             warnings
@@ -1102,6 +1130,199 @@ parsed(K, V) :- raw(K, S), V = S as int.
             "every answer used the `answer/N` fallback — the appended facts are \
              inert, so the property never reaches a relation a rule derives"
         );
+    }
+
+    // ---- Rule pruning (§15, §17 2026-09-12; `testing.md` B13) ---------------
+
+    /// A relation read **only under `not`** is still evaluated. Pruning it would
+    /// leave `banned` empty, so `not banned(X)` would hold for everyone and the
+    /// answer would gain `ok(2)` — with no diagnostic anywhere.
+    #[test]
+    fn a_relation_read_only_under_negation_is_still_evaluated() {
+        let src = "\
+p(1). p(2). p(3).
+blocked(2).
+banned(X) :- blocked(X).
+ok(X) :- p(X), not banned(X).
+?- ok(X).
+";
+        let result = run(src).expect("runs");
+        assert_eq!(result.answers, vec![vec!["ok(1).", "ok(3)."]]);
+    }
+
+    /// A relation read **only inside an aggregate goal** is still evaluated.
+    /// Pruning it would answer `n(0)`, silently.
+    #[test]
+    fn a_relation_read_only_inside_an_aggregate_is_still_evaluated() {
+        let src = "\
+item(1). item(2). item(3).
+big(X) :- item(X), X > 1.
+n(N) :- N = count { X | big(X) }.
+?- n(N).
+";
+        let result = run(src).expect("runs");
+        assert_eq!(result.answers, vec![vec!["n(2)."]]);
+    }
+
+    /// The permissive half of the ruling: a rule no goal depends on is not run,
+    /// so its runtime error cannot fail the run. Ask about it and it fails as it
+    /// always did — and a program with **no goals** prunes nothing, so it fails
+    /// too, which is what keeps `datalog p.dl` a load-and-run check.
+    #[test]
+    fn a_rule_no_goal_depends_on_cannot_fail_the_run() {
+        let rules = "\
+p(0). p(1).
+boom(X, Y) :- p(X), Y = 100 / X.
+fine(X) :- p(X).
+";
+        let result = run(&format!("{rules}?- fine(X).\n")).expect("boom is never evaluated");
+        assert_eq!(result.answers, vec![vec!["fine(0).", "fine(1)."]]);
+
+        for program in [format!("{rules}?- boom(X, Y).\n"), rules.to_string()] {
+            let errors = run(&program).expect_err("boom is evaluated and divides by zero");
+            assert!(
+                errors
+                    .iter()
+                    .any(|e| e.to_string().contains("division by zero")),
+                "{program}: {errors:?}"
+            );
+        }
+    }
+
+    /// Runs `src` twice, with and without pruning, and returns both.
+    fn pruned_and_full(
+        src: &str,
+        source_path: Option<&Path>,
+    ) -> (Result<RunResult, Vec<Error>>, Result<RunResult, Vec<Error>>) {
+        (
+            run_pruning(src, source_path, &mut |_| {}, true),
+            run_pruning(src, source_path, &mut |_| {}, false),
+        )
+    }
+
+    /// Does lowering `src` leave some rule's head outside the live set?
+    fn prunes_a_rule(src: &str, source_path: Option<&Path>) -> bool {
+        let Ok(ast) = parse(src) else { return false };
+        let Ok(resolved) = resolve_modules(ast, source_path) else {
+            return false;
+        };
+        let Ok(tables) = load_imports(&resolved.program) else {
+            return false;
+        };
+        let Ok(program) = lower_with_sources(&resolved.program, &tables) else {
+            return false;
+        };
+        let Some(live) = live_predicates(&program) else {
+            return false;
+        };
+        program
+            .rules
+            .iter()
+            .any(|rule| !live[rule.head.pred.0 as usize])
+    }
+
+    /// **B13 over the corpus** — every `tests/programs/*.dl` prints the same
+    /// answers, explanations and warnings with pruning on and off, or fails with
+    /// the same errors. `nonterminating.dl` is the one exclusion: it asks about
+    /// the rule that never finishes, so both runs would hang.
+    #[test]
+    fn b13_the_corpus_answers_the_same_pruned() {
+        let mut compared = 0;
+        let mut pruned = 0;
+        let mut paths: Vec<_> = std::fs::read_dir("tests/programs")
+            .expect("corpus directory")
+            .map(|entry| entry.expect("entry").path())
+            .filter(|path| path.extension().is_some_and(|e| e == "dl"))
+            .filter(|path| !path.ends_with("nonterminating.dl"))
+            .collect();
+        paths.sort();
+        for path in &paths {
+            let src = std::fs::read_to_string(path).expect("corpus file");
+            match pruned_and_full(&src, Some(path)) {
+                (Ok(a), Ok(b)) => {
+                    assert_eq!(a.answers, b.answers, "{}", path.display());
+                    assert_eq!(a.explanations, b.explanations, "{}", path.display());
+                    assert_eq!(a.warnings, b.warnings, "{}", path.display());
+                }
+                (Err(a), Err(b)) => {
+                    assert_eq!(format!("{a:?}"), format!("{b:?}"), "{}", path.display())
+                }
+                (a, b) => panic!(
+                    "{}: pruning changed acceptance: {:?} vs {:?}",
+                    path.display(),
+                    a.map(|r| r.answers),
+                    b.map(|r| r.answers)
+                ),
+            }
+            compared += 1;
+            if prunes_a_rule(&src, Some(path)) {
+                pruned += 1;
+            }
+        }
+        // Non-vacuity: the claim is only tested by a program that prunes.
+        assert!(compared >= 20, "only {compared} corpus programs compared");
+        assert!(pruned > 0, "no corpus program pruned a rule");
+    }
+
+    /// **B13's text-level non-vacuity guard**, against the property's sentence.
+    /// "Pruning changes no answer" is only tested where the walk could get it
+    /// wrong — so the generator must reach a case where `banned`'s tuples change
+    /// an answer, one where `big`'s do, and one that prunes a rule. Whether a
+    /// relation *mattered* is measured by deleting its rule from the text, which
+    /// touches neither the walk nor the generator's intent.
+    #[test]
+    fn b13_generator_reaches_both_silent_shapes() {
+        use proptest::strategy::{Strategy, ValueTree};
+        use proptest::test_runner::TestRunner;
+
+        let mut runner = TestRunner::deterministic();
+        let strategy = crate::testgen::arb_pruning_program();
+        let (mut negation, mut aggregate, mut pruned) = (0, 0, 0);
+        for _ in 0..300 {
+            let program = strategy
+                .new_tree(&mut runner)
+                .expect("strategy produces a value")
+                .current();
+            // Unpruned on purpose: a guard measured through the walk would go
+            // quiet under exactly the mutation it exists to make visible.
+            let full = |src: &str| {
+                run_pruning(src, None, &mut |_| {}, false)
+                    .expect("generated programs run")
+                    .answers
+            };
+            let answers = full(&program);
+            let without = |rule: &str| full(&program.replace(rule, ""));
+            if without("banned(K) :- n(K, V), V < 0.\n") != answers {
+                negation += 1;
+            }
+            if without("big(K, V) :- n(K, V), V > 0.\n") != answers {
+                aggregate += 1;
+            }
+            if prunes_a_rule(&program, None) {
+                pruned += 1;
+            }
+        }
+        assert!(negation > 0, "`banned` never changed an answer");
+        assert!(aggregate > 0, "`big` never changed an answer");
+        assert!(pruned > 0, "no generated program pruned a rule");
+    }
+
+    proptest! {
+        /// **B13** — rule pruning changes no answer, explanation or warning
+        /// (§15, §17 2026-09-12), over programs where a relation is reachable
+        /// only under `not` or only inside an aggregate goal.
+        ///
+        /// Mutation-verified: dropping `Dep::Negated` edges from
+        /// `live_predicates`'s closure reddens it, and so does dropping
+        /// `Dep::Aggregated` ones.
+        #[test]
+        fn b13_pruning_changes_no_answer(program in crate::testgen::arb_pruning_program()) {
+            let (pruned, full) = pruned_and_full(&program, None);
+            let (pruned, full) = (pruned.expect("pruned run"), full.expect("full run"));
+            prop_assert_eq!(pruned.answers, full.answers, "{}", &program);
+            prop_assert_eq!(pruned.explanations, full.explanations, "{}", &program);
+            prop_assert_eq!(pruned.warnings, full.warnings, "{}", &program);
+        }
     }
 
     proptest! {

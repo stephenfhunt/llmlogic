@@ -1683,6 +1683,57 @@ fn collect_stratum_edges(
     }
 }
 
+/// The predicates a program's goals depend on (§15): every predicate a query body
+/// or an explanation goal names, closed under the rules' dependency edges. A rule
+/// is evaluated only when its head is in the set — which is what lets a program
+/// carry a closure no goal reads without paying for it.
+///
+/// `None` when the program has **no goals**: nothing was asked, so nothing is
+/// pruned and every rule runs, which keeps `datalog p.dl` a load-and-run check
+/// that still surfaces a rule's runtime error (§17, 2026-09-12).
+///
+/// The closure follows **every** edge [`collect_stratum_edges`] emits —
+/// positive, negated, and inside an aggregate goal — and reusing it rather than
+/// walking positive atoms is the whole of soundness here. A relation read only
+/// under `not`, or only inside a set-builder, is a dependency like any joined
+/// one: prune it and `not banned(X)` succeeds for everyone and `count { … }`
+/// answers `0`, silently (`testing.md` **B13**, whose recorded mutations drop
+/// exactly those two edges below).
+pub fn live_predicates(program: &ir::Program) -> Option<Vec<bool>> {
+    if program.queries.is_empty() && program.explanations.is_empty() {
+        return None;
+    }
+    let mut edges = Vec::new();
+    for rule in &program.rules {
+        collect_stratum_edges(rule.head.pred, &rule.body, false, &mut edges);
+    }
+    let mut deps: Vec<Vec<ir::PredId>> = vec![Vec::new(); program.predicates.len()];
+    for &(head, body, _) in &edges {
+        deps[head.0 as usize].push(body);
+    }
+
+    // A query body goes through the same collector, so a goal that negates or
+    // aggregates reaches what it reads exactly as a rule body does. The head it
+    // is handed is a placeholder and is never read.
+    let mut roots = Vec::new();
+    for query in &program.queries {
+        collect_stratum_edges(ir::PredId(0), &query.body, false, &mut roots);
+    }
+    let mut pending: Vec<ir::PredId> = roots
+        .into_iter()
+        .map(|(_, body, _)| body)
+        .chain(program.explanations.iter().map(|goal| goal.goal.pred))
+        .collect();
+
+    let mut live = vec![false; program.predicates.len()];
+    while let Some(pred) = pending.pop() {
+        if !std::mem::replace(&mut live[pred.0 as usize], true) {
+            pending.extend(&deps[pred.0 as usize]);
+        }
+    }
+    Some(live)
+}
+
 /// Recovers a concrete cycle through a negative edge, for the stratification
 /// error. Only called once relaxation has diverged, which proves such a cycle
 /// exists: some negative edge `head → not body` closes back from `body` to

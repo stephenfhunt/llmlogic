@@ -320,7 +320,25 @@ pub fn eval(program: &Program) -> Result<Model> {
 /// for a run that will not be asked for a proof — which the surface decides from
 /// the program's own goals, and a library caller decides for itself.
 pub fn eval_with(program: &Program, provenance: Provenance) -> Result<Model> {
-    eval_capped(program, u32::MAX, provenance).map_err(|error| match error {
+    eval_pruned(program, provenance, None)
+}
+
+/// [`eval_with`], evaluating only the rules whose head predicate is `live`
+/// (§15, §17 2026-09-12); `None` evaluates every rule.
+///
+/// `live` is [`crate::lower::live_predicates`]: what the program's goals depend
+/// on. Every relation it contains is exactly the one the unpruned run computes,
+/// because a live rule reads only live relations — so every answer is too
+/// (`testing.md` **B13**). A pruned rule computes nothing, which means it also
+/// cannot fail the run or keep it from terminating. The strata still cover every
+/// rule and no `RuleId` is renumbered, so a proof or a message naming a rule
+/// reads the same either way.
+pub fn eval_pruned(
+    program: &Program,
+    provenance: Provenance,
+    live: Option<&[bool]>,
+) -> Result<Model> {
+    eval_capped(program, u32::MAX, provenance, live).map_err(|error| match error {
         Capped::Failed(error) => error,
         Capped::Diverged => unreachable!("u32::MAX rounds is not a cap anyone reaches"),
     })
@@ -352,6 +370,7 @@ pub(crate) fn eval_capped(
     program: &Program,
     max_rounds: u32,
     provenance: Provenance,
+    live: Option<&[bool]>,
 ) -> std::result::Result<Model, Capped> {
     validate(program).map_err(Capped::Failed)?;
     let mut model = Model::new(program.predicates.len(), provenance);
@@ -360,7 +379,15 @@ pub(crate) fn eval_capped(
     }
     let mut round = 0;
     for stratum in &program.strata {
-        round = eval_stratum(program, stratum, &mut model, round, max_rounds)?;
+        let stratum: Vec<RuleId> = match live {
+            Some(live) => stratum
+                .iter()
+                .copied()
+                .filter(|rule| live[program.rules[rule.0 as usize].head.pred.0 as usize])
+                .collect(),
+            None => stratum.clone(),
+        };
+        round = eval_stratum(program, &stratum, &mut model, round, max_rounds)?;
     }
     Ok(model)
 }
@@ -4544,7 +4571,7 @@ mod tests {
                 });
                 prop_assume!(!warned);
                 // Well above what any generated program needs: 4 nodes, 6 edges.
-                let model = match eval_capped(&program, 200, Provenance::Recorded) {
+                let model = match eval_capped(&program, 200, Provenance::Recorded, None) {
                     Ok(model) => model,
                     Err(Capped::Failed(_)) => return Ok(()),
                     Err(Capped::Diverged) => {
@@ -5514,8 +5541,8 @@ mod tests {
                 }
 
                 prop_assert_eq!(
-                    crate::api::absent_skip_warnings(&reports, &program),
-                    crate::api::absent_skip_warnings(&recorded, &program),
+                    crate::api::absent_skip_warnings(&reports, &program, None),
+                    crate::api::absent_skip_warnings(&recorded, &program, None),
                     "the reporting store changed a §9/§12 warning"
                 );
 
@@ -5783,6 +5810,78 @@ mod tests {
             assert!(
                 reached,
                 "arb_program_with_edb never produced a derived fact under a query"
+            );
+        }
+
+        proptest! {
+            /// **B13** — rule pruning changes nothing a goal can see (§15, §17
+            /// 2026-09-12). Evaluating only the rules whose head is live gives
+            /// every query the same answer, every live relation the same tuples,
+            /// and every live fact the same proof as evaluating all of them.
+            ///
+            /// The proof half is not free: a pruned rule no longer spends rounds,
+            /// so a later stratum's round stamps shift. They shift *uniformly*,
+            /// because a live rule reads only live relations, and proof
+            /// extraction compares stamps rather than reading them — which is
+            /// the claim this checks rather than argues.
+            ///
+            /// The negation and aggregate shapes the walk can get wrong are
+            /// `api::tests::b13_…`'s job; this generator draws no aggregates.
+            #[test]
+            fn b13_pruning_changes_no_live_relation(program in arb_program_with_edb()) {
+                let Some(live) = crate::lower::live_predicates(&program) else {
+                    return Ok(());
+                };
+                let full = eval_with(&program, Provenance::Recorded).unwrap();
+                let pruned = eval_pruned(&program, Provenance::Recorded, Some(&live)).unwrap();
+                for query in &program.queries {
+                    prop_assert_eq!(pruned.answer(query).unwrap(), full.answer(query).unwrap());
+                }
+                let restrict = |model: &Model| -> Vec<Fact> {
+                    model.facts().filter(|fact| live[fact.pred.0 as usize]).collect()
+                };
+                prop_assert_eq!(restrict(&pruned), restrict(&full));
+                for fact in restrict(&full) {
+                    prop_assert_eq!(
+                        ProofTree::explain(&pruned, &fact),
+                        ProofTree::explain(&full, &fact),
+                        "pruning changed the proof of a live fact"
+                    );
+                }
+            }
+        }
+
+        /// **B13's non-vacuity guard.** Checked against the sentence: the claim
+        /// is about live relations *beside* pruned rules, so what has to be
+        /// reached is a program where some rule is pruned and some live relation
+        /// still holds a derived fact.
+        #[test]
+        fn b13_generator_prunes_a_rule_beside_a_derived_live_fact() {
+            use proptest::strategy::{Strategy, ValueTree};
+            use proptest::test_runner::TestRunner;
+
+            let mut runner = TestRunner::deterministic();
+            let reached = (0..512).any(|_| {
+                let Ok(tree) = arb_program_with_edb().new_tree(&mut runner) else {
+                    return false;
+                };
+                let program = tree.current();
+                let Some(live) = crate::lower::live_predicates(&program) else {
+                    return false;
+                };
+                let pruned_a_rule = program
+                    .rules
+                    .iter()
+                    .any(|rule| !live[rule.head.pred.0 as usize]);
+                let model = eval(&program).unwrap();
+                pruned_a_rule
+                    && model
+                        .facts()
+                        .any(|fact| live[fact.pred.0 as usize] && !model.is_base(&fact))
+            });
+            assert!(
+                reached,
+                "arb_program_with_edb never pruned a rule beside a derived live fact"
             );
         }
 

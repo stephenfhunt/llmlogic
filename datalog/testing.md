@@ -214,6 +214,7 @@ it. A future audit starts here.
 | §10's std-builtin exemption | `ArithShape::StdBuiltin` | **C10**'s guard — the mutation lands on the classification, not the fixpoint |
 | Diagnostics as a branchable surface (§12) | `arb_corrupted_program_text` — the first generator that makes programs **fail** | **C16**, with `c16_generator_rejects_and_reaches_several_families`; the pinned set itself is `every_code_is_pinned_and_belongs_to_its_category` |
 | The physical access path (§15, evaluator-internal) | small collision-rich tuple pools with `absent`; prefixes drawn from the generated relation | **B12a/b/c**, with their three guards — the differential is blind to an over-yield, so these are what pin the seek |
+| Rule pruning (§15) | `arb_pruning_program` — a relation reachable only under `not` and one only inside an aggregate goal; `arb_program_with_edb`; the `tests/programs` corpus | **B13**, with a guard per level — the text level is the one either recorded mutation reddens |
 
 **The 2026-08-20 audit's lesson, for whoever reads this map next.** Every row
 above answers "is this operation exercised". The gaps that audit found were a
@@ -528,6 +529,28 @@ compared keyed by predicate *name*, not `PredId`.
   match on a non-empty prefix, plus `None` reached from a constant `absent` and
   from a slot bound to one); B12c's
   `b12c_generator_reaches_refutations_on_a_prefix_and_on_an_absent_key`.
+
+- [x] **B13** **Rule pruning changes no answer** (§15/engine, 2026-09-12) — a run
+  that evaluates only the rules a goal depends on (`lower::live_predicates`,
+  `engine::eval_pruned`) against one that evaluates all of them.
+  - `api::tests::b13_pruning_changes_no_answer` — same answers, explanations and
+    warnings over `arb_pruning_program`. *Mutations*: skip `Dep::Negated` edges
+    in `live_predicates`'s closure (minimal case: `n("a", -1)` under
+    `?- N = count { K | ok(K) }.`); skip `Dep::Aggregated` edges (`n("a", 1)`
+    under `?- total(S).`). Both redden it.
+  - `engine::…::b13_pruning_changes_no_live_relation` — same query answers,
+    live relations and proofs of live facts over `arb_program_with_edb`. The
+    proof half is the check that shifted round stamps change no proof. **Neither
+    mutation reddens it** in 256 cases: that generator's negated relations are
+    rarely derived and it draws no aggregates, which is why the text level
+    exists.
+  - `api::tests::b13_the_corpus_answers_the_same_pruned` — every
+    `tests/programs/*.dl` but `nonterminating.dl`, errors included.
+  - Guards: `b13_generator_reaches_both_silent_shapes` measures that `banned` and
+    `big` each change some answer by deleting the rule from the text and running
+    **unpruned** — its first draft ran pruned and went quiet under mutation 1,
+    the thing it guards; `b13_generator_prunes_a_rule_beside_a_derived_live_fact`;
+    the corpus test asserts some program prunes.
 
 ### Phase C — negation + type inference (roadmap step 4) — generalizes §16.2, §16.3
 

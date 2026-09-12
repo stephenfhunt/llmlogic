@@ -50,12 +50,13 @@ import "../facts/calls.jsonl"  as calls.
 Loading 27,957 facts across 15 JSONL files takes **0.32 s**. Import is not the
 expensive part.
 
-Evaluation is bottom-up: everything a program defines gets computed, whether the
-query touches it or not. A rule library spliced with `import "lib/graph.dl".`
-therefore charges every analysis for every closure in it. Splitting one library
-into `lib/callgraph.dl` and `lib/modgraph.dl` took the module-cycle analysis from
-11.5 s to 0.33 s — same question, same answer, 35x. **Import the closure you
-are about to use, not the library.**
+Evaluation is bottom-up, and it computes only what the program's goals depend
+on: a rule no `?-`, `?why` or `-q` reaches is never run. A rule library spliced
+with `import "lib/graph.dl".` therefore charges an analysis for the closures its
+questions read and nothing else — so one library can hold the cheap rules and the
+expensive ones side by side. A program with **no goals at all** computes
+everything it defines, which is what makes `datalog p.dl` a check that every rule
+runs.
 
 JSON `null` and an empty CSV cell both arrive as `absent`, and the same program
 over the same table as JSONL and as CSV gives byte-identical output — so a

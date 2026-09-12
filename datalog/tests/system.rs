@@ -628,6 +628,65 @@ fn a_nonterminating_program_warns_before_it_hangs() {
     assert!(first.contains("does not terminate"), "{first:?}");
 }
 
+#[test]
+fn a_rule_no_goal_depends_on_cannot_hang_the_run() {
+    // Rule pruning's permissive half (§17, 2026-09-12): `nat` never reaches a
+    // fixpoint, but nothing asks about it, so it is never evaluated and the run
+    // answers. The termination lint still warns — static warnings cover the
+    // whole program. If pruning regresses this hangs, so the child is polled and
+    // killed rather than waited on.
+    let mut child = Command::new(BIN)
+        .arg("-")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("binary spawns");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"nat(0).\nnat(N) :- nat(M), N = M + 1.\nedge(\"a\", \"b\").\n?- edge(X, Y).\n")
+        .unwrap();
+    let started = std::time::Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("child is waitable") {
+            break status;
+        }
+        if started.elapsed() > std::time::Duration::from_secs(30) {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("the run evaluated a rule no goal depends on, and hung");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
+    let mut stdout = String::new();
+    let mut stderr = String::new();
+    std::io::Read::read_to_string(&mut child.stdout.take().unwrap(), &mut stdout).unwrap();
+    std::io::Read::read_to_string(&mut child.stderr.take().unwrap(), &mut stderr).unwrap();
+    assert_eq!(status.code(), Some(0), "{stderr}");
+    assert_eq!(stdout, "edge(\"a\", \"b\").\n");
+    assert!(stderr.contains("value-creating recursion"), "{stderr}");
+}
+
+#[test]
+fn an_undefined_predicate_in_a_pruned_rule_still_warns() {
+    // Pruning happens at evaluation, after the whole-program lint, so a typo in a
+    // rule nothing asks about is still flagged (§17, 2026-09-12).
+    let out = run_stdin_args(
+        "edge(\"a\", \"b\").\nlonely(X) :- edgee(X, _).\n?- edge(X, Y).\n",
+        &[],
+    );
+    assert_eq!(out.code, 0, "{}", out.stderr);
+    assert_eq!(out.stdout, "edge(\"a\", \"b\").\n");
+    assert!(
+        out.stderr
+            .contains("predicate `edgee/2` is referenced but never defined"),
+        "{}",
+        out.stderr
+    );
+}
+
 // ---------------------------------------------------------------------------
 // The caller's contract (§14): the exit code answers the question.
 //
