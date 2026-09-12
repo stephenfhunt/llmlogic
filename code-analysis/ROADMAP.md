@@ -52,6 +52,11 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
   `modgraph.dl` would be simpler, and `cochange.dl` could import modgraph without
   thinking about it. _queued_ — do not unwind speculatively; the bench digest is
   what says the answers did not move.
+- **The decorator layer has never met a real subject** — `decorator` is zero rows
+  in every fact base on disk, and `implements` is 2 rows on `@grafana/ui`. A
+  decorator-saturated, nominally-typed codebase (NestJS, TypeORM, Angular) is the
+  next dogfood subject on shape grounds, not size. _queued_ —
+  `notes/code-facts.md` § Subjects, which also lists what each candidate adds.
 - **A public-API-surface relation.** "Is this symbol reachable from a published
   entry point" was rebuilt by hand three times in one session and was still not
   certainly complete (`export * from` chains, `export { x as default }`,

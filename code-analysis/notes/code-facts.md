@@ -430,6 +430,57 @@ among the tsconfigs given. The query could not have found it either way: a
 negative over a blind spot* is the failure mode the playbook names, and step 5 —
 open the source — is what caught it.
 
+## Subjects — what each one exercises, and what is still unexercised
+
+Kept because choosing the next dogfood subject by *size* is what hid the closure
+bug for a month: `vs/base` was picked as the big corpus and happens to have zero
+import cycles, so the library's one superlinear rule never ran. **Pick the next
+subject by the shape it adds, not the line count.**
+
+Run so far (✓ = exercised, — = present but thin, ✗ = zero rows):
+
+| subject | lines | cycles | monorepo | classes | decorators | history |
+|---|---|---|---|---|---|---|
+| tsdl | 24.5k | — | ✗ | ✗ (2) | ✗ | thin |
+| `experiments/` (Python) | 21.6k | — | ✗ | ✓ | ✗ | thin |
+| VS Code `vs/base` | 156k | **✗ zero** | ✗ | ✓ | ? | none extracted |
+| VS Code `src/` | 2.87M | ✗ zero runtime | ✗ | ✓ 15,007 | ? | none extracted |
+| `@grafana/ui` | 133k | ✓ 2 | ✓ | — (96) | ✗ | ✓ 20k commits |
+| Grafana frontend | 1.48M | ✓ **915 files, 27 SCCs** | ✓ 21 pkgs | ✓ 898 | ✗ | ✓ 20k commits |
+
+**What no subject has exercised yet**, from the fact bases on disk:
+
+- **`decorator` — zero rows, every extraction.** The whole decorator half of the
+  structure layer has never seen a real subject. A NestJS, Angular or TypeORM
+  codebase is the fix, and it is the largest untested surface the extractor has.
+  (VS Code's DI decorators may have covered it in the 2026-09-12 run; that fact
+  directory was not kept, so treat the `?` above as unknown, not as zero.)
+- **`implements` is thin** — 2 rows in `@grafana/ui`, 197 across the whole
+  frontend. CHA's virtual-call expansion (`callgraph.dl`, and traps 2–4) rests on
+  `implements`/`extends`, so a nominally-typed, interface-heavy codebase would
+  test the call graph far harder than React components do.
+- **Python at any scale** — the largest Python subject is 21.6k lines. Nothing has
+  stressed the Python frontend's LEGB/C3 resolution the way Grafana stressed the
+  TypeScript one.
+- **`flow`/`dataflow` above ~150k lines** — every layer fits at 133k and dies at
+  2.87M; the interesting middle is untried.
+
+**Candidates, surveyed 2026-09-12 but not run.** Sizes are GitHub language bytes,
+so they are an order of magnitude, not a measurement; none of the shape columns
+above is known for these until one is extracted.
+
+- **excalidraw** — ~8 MB TS, ~104 MB clone, a small packages monorepo, deep
+  history, many contributors. *Proposed this session and passed over for Grafana
+  because it adds no scale*, but it is the obvious pick when the question is the
+  exploring loop rather than the ceiling: every layer fits in a couple of GB, so
+  iteration is seconds and `flow`/`dataflow`/`pointsto` are all reachable.
+- **nestjs/nest** (~3.6 MB TS) or **typeorm** (~10.7 MB) — decorator-saturated
+  and class-heavy. Either closes the two gaps above in one run.
+- **vuejs/core** (~4.5 MB), **astro** (~7.9 MB) — mid-size, single-purpose,
+  useful as a second opinion on measures that looked odd on Grafana.
+- **kibana** (~450 MB TS) — the next ceiling if one is ever wanted. Roughly 3× the
+  whole Grafana frontend.
+
 ## Open
 
 - The intermittent `npm test` failure once listed here was P5's heap guard
