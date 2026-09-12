@@ -1,0 +1,9 @@
+{
+  "name": "oracle-parser",
+  "version": "1.0.0",
+  "private": true,
+  "description": "TypeScript, for the code_design oracle's parser. Pinned by lockfile; no third-party bytes are committed. The oracle uses ts.createSourceFile only — the syntax tree, never the checker — and implements resolution and every analysis itself, the way static_analysis/truth.py uses `ast`.",
+  "dependencies": {
+    "typescript": "6.0.3"
+  }
+}

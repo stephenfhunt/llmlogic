@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -240,7 +241,44 @@ VSCODE = GitCorpus(
 #: and only the engine arms extract at all.
 VSCODE_TYPES = NodePackages(name="vs-base-types", manifest=MANIFEST_ROOT / "vs-base-types")
 
-CORPORA: tuple[Corpus | GitCorpus | NodePackages, ...] = (SQLPARSE, VSCODE, VSCODE_TYPES)
+#: TypeScript, for the `code_design` **oracle**. `static_analysis`'s answer key
+#: is computed with `ast` and `code-facts`'s Python frontend also uses `ast`:
+#: oracle and extractor have shared a real parser since that pack shipped, and
+#: control 1 is about not calling *the thing under test*, not about
+#: re-implementing parsing. So the oracle parses with `ts.createSourceFile` —
+#: the syntax tree only, never the checker — and implements module resolution
+#: and every analysis itself.
+ORACLE_PARSER = NodePackages(name="oracle-parser", manifest=MANIFEST_ROOT / "oracle-parser")
+
+
+def parse_typescript(files: list[dict[str, str]], parser: Path) -> list[dict]:
+    """Run `parse.mjs` over `[{path, text}]` and return its syntax facts.
+
+    **This lives here, not in a `truth.py`.** Preparing a corpus already shells
+    out — `git clone`, `npm ci` — and is not an oracle; an answer key is, and
+    `tests/test_truth_independence.py` bans `subprocess` from every `truth.py`
+    outright so that "the oracle shelled out to the engine" cannot happen by
+    degrees. Parsing is corpus preparation: it turns source text into syntax,
+    decides nothing, and its output is the same whatever the questions are.
+    """
+    root = ORACLE_PARSER.require()
+    result = subprocess.run(
+        ["node", str(parser)],
+        input=json.dumps(files),
+        capture_output=True,
+        text=True,
+        env={**os.environ, "ORACLE_PARSER_ROOT": str(root)},
+        check=True,
+    )
+    return json.loads(result.stdout)
+
+
+CORPORA: tuple[Corpus | GitCorpus | NodePackages, ...] = (
+    SQLPARSE,
+    VSCODE,
+    VSCODE_TYPES,
+    ORACLE_PARSER,
+)
 
 
 def fetch(corpus: Corpus | GitCorpus | NodePackages, force: bool = False) -> Path:
