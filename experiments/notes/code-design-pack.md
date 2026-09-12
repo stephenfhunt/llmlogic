@@ -156,6 +156,17 @@ out, and H-CA1 would measure the timeout.
 
 ## Step 4 — questions and oracles
 
+> **Done 2026-09-11, and it narrowed.** Three templates, all over the import
+> graph — the only oracle that survives a diff against an independent extractor
+> exactly (2,039 edges, zero disagreement). **The cohesion questions in the
+> table below were built and dropped**: class LCOM4 disagreed with `cohesion.dl`
+> on 47 of 187 classes with no single cause, and reimplementing a *measure*
+> means reimplementing a long tail of TypeScript semantics
+> (`../decisions.md` 2026-09-11 later iv). The layering question was already
+> ruled out as CI-forced-empty. **28 paired items** after three degeneracy
+> rules, so the at-scale track is a **pilot** — `../hypotheses.md`, addendum of
+> the same date.
+
 Six to eight templates, each parametrized by target (per directory, per file,
 per class) to reach the item count, and each with a plain oracle that never
 imports `code-facts` or `lib/`:
@@ -178,6 +189,11 @@ differs between 1.137.0 and an adjacent release, so memory cannot be right by
 default. Record the threat in the addendum either way.
 
 ## Step 5 — sizing, then the addendum
+
+> **Done 2026-09-11.** `harness power`: 28 items supports ~+25 points at 80%
+> power, against the registered +10 which needs 155. The addendum is written and
+> names the pilot, the dropped cohesion questions, and the one contamination
+> check still outstanding.
 
 1. Count the items the templates actually produce; run `harness power` on that
    number. Short of 155 paired items → the run is a **pilot** under the

@@ -506,3 +506,62 @@ it has produced a number.
   3.11 on the cell's scrubbed `PATH`, checked by preflight; `code-facts` on each
   corpus passes `checks.dl` in the harness's own environment; and the
   `code-analysis` bundle is the one `package.sh` built, hashed into `run.json`.
+
+### 2026-09-11 (later) — H-CA1's at-scale track: built, sized, and a pilot
+
+The pack exists (`domains/code_design/`). This records what building it changed
+about the design registered above, **before any cell has run**, and nothing here
+is revised once one has.
+
+- **The corpus is VS Code 1.137.0 at `645f29cc`, scoped to `src/vs/base`** —
+  507 files, 161k lines, 1.36M facts — not the "pinned TypeScript package,
+  5–20k lines" registered above. Why, and what it cost:
+  `notes/code-design-pack.md`. The workspace is assembled rather than copied,
+  because `vs/base` reaches 11 files outside itself.
+- **The at-scale track is a PILOT: 28 paired items at haiku-4.5.** The primary
+  endpoint registered above — `code-analysis` − `engine`, McNemar, +10 points at
+  80% power — needs **155**. 28 supports about **+25**. Under the provenance
+  precedent this is therefore **descriptive: no p-value, no delta claimed** for
+  the at-scale track. Stated now, not after the numbers.
+- **Why 28 and not more.** Items come from parametrizing a template by
+  directory, and `vs/base` has 47 directories of ≥3 files. Of those crossings,
+  most fail one of three rules applied *before* any answer was read: the answer
+  must be 2–20 rows (a 800-row answer is one both arms always miss, and a
+  concordant pair tells McNemar nothing); no two items may share an answer; and
+  the answer may not be the whole universe it is drawn from. The last cost ten
+  items — every file of `browser/ui/selectBox` is in an import cycle.
+- **Three templates, all over the import graph**: files in an import cycle
+  within a directory; exported declarations no other file imports; exported
+  declarations no test file names.
+- **Cohesion questions were built and dropped, and this is why.** Class LCOM4
+  was implemented and checked against `cohesion.dl`: **47 of 187 classes
+  disagreed**, and 41 of those 47 shared no cause — not inheritance, not
+  parameter properties. An oracle that reimplements a *derived measure* takes on
+  a long tail of TypeScript semantics, and every gap is a silently wrong key in
+  both arms at once. The import graph survives the same check **exactly** (2,039
+  edges, zero disagreement), which is the whole reason the questions rest on it
+  and nothing else. So H-CA1 at scale tests the playbook on **structure**, and
+  says nothing about the cohesion libraries.
+- **The oracle parses with `ts.createSourceFile`** — syntax only, no checker, no
+  module resolution — and implements resolution and every analysis itself. That
+  is `static_analysis`'s arrangement (`truth.py` uses `ast`; the Python
+  extractor it grades uses `ast` too). Parsing lives in `harness.corpus`, not in
+  `truth.py`, because `tests/test_truth_independence.py` bans `subprocess` from
+  every oracle outright and that bluntness is worth keeping.
+- **The questions are syntactic and say so.** Type-only imports **count**: they
+  are visible in the source, and TypeScript's elision is not — measured, it
+  drops 19% of `vs/base`'s import statements because their bindings are only
+  *used* as types. A question defined on elision would grade a semantic judgement
+  no reader can make, and would punish the arm that reached for `runtime_dep`.
+- **Contamination, restated with what is now known.** The models have read VS
+  Code. Answers are exact sets at the pinned commit; no question here is one VS
+  Code's CI forces empty (the layering question was dropped for that reason);
+  and the three templates ask about *this* commit's directory contents, which no
+  release note carries. **Not yet done:** the registered check that at least one
+  question's answer differs between 1.137.0 and an adjacent release. It must run
+  before the grid, and if it cannot be satisfied the contamination caveat is
+  reported as unmitigated rather than quietly dropped.
+- **Still missing before any cell can run**, and neither is a design change: a
+  reference program answering every task (`tests/test_reference_corpus.py`), and
+  the **`code-analysis` arm itself**, which the endpoint above is defined over.
+  The pack is installed and deliberately not in `SLATE` until both exist.

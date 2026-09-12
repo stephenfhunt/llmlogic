@@ -15,6 +15,40 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-09-11 (later iv)** — **A `truth.py` may reimplement a *graph*; it may
+  not reimplement a *measure*.** Both were built for `code_design` and checked
+  against `code-facts` the way `testing.md`'s P8 checks elision — two copies
+  that agree are evidence, one copy is a guess.
+  - **The import graph agrees exactly**: 2,039 edges over `vs/base`, no
+    disagreement, once the parser learned `await import()` and `import('x').T`.
+    The diff found those, not review.
+  - **Class LCOM4 does not**: **47 of 187** classes disagree, and 41 of the 47
+    share no cause — not inheritance, not parameter properties. Fixing the one
+    cause that *was* identifiable (a getter and setter share a name, so keying
+    methods by name merged them and leaked `touches` between them) moved
+    agreement by a single class.
+  - **So the cohesion questions were dropped and the code deleted**, and H-CA1
+    at scale tests the playbook on structure only. A measure is a long tail of
+    the language's semantics; a graph is not, and a silently wrong key is wrong
+    in both arms at once.
+  - ***Rejected:* narrowing the cohesion question until the two agree.** The
+    restriction would itself be an unvalidated rule, and the question text pays
+    for it. ***Rejected:* stating the oracle's rule and letting it stand** —
+    that penalises the `code-analysis` arm for using the library the skill
+    documents, the same trap avoided by not defining cycles on `runtime_dep`.
+
+- **2026-09-11 (later v)** — **The oracle parses with a real parser, and
+  parsing is corpus preparation.** `static_analysis`'s key uses `ast` and so
+  does the Python extractor it grades: control 1 forbids an oracle that calls
+  *the thing under test*, never one that uses a parser, and a hand-rolled
+  TypeScript scanner would have traded `code-facts`' bugs for its own.
+  - **`tests/test_truth_independence.py` caught the first attempt**, which put
+    `subprocess` in `truth.py`. The ban is blunt on purpose — so that "the
+    oracle shelled out to the engine" cannot happen by degrees — and the fix was
+    to move parsing to `harness.corpus`, which already shells out for `git
+    clone` and `npm ci` and decides nothing. The control was worth more than the
+    convenience.
+
 - **2026-09-11 (later ii)** — **A corpus is pinned by what its kind can
   promise.** `GitCorpus` pins a **commit**, not an archive hash: GitHub
   generates a tarball per request and guarantees nothing about its bytes, so a
