@@ -58,6 +58,16 @@ def blocked() -> dict[str, str]:
     return reasons
 
 
+def unslated() -> list[str]:
+    """Packs that are installed but not in `SLATE`, alphabetically.
+
+    A pack under construction — its fixture built, its questions not — is
+    importable and must not be drawn by a grid. Naming it is what keeps *not
+    drawn* distinguishable from *not there*.
+    """
+    return sorted(_installed() - set(SLATE))
+
+
 def available() -> list[str]:
     """Packs that exist *and* can run, in slate order."""
     present = _installed() - set(blocked())

@@ -884,6 +884,13 @@ def cmd_domains(_: argparse.Namespace) -> int:
         count = len(domains.load(name)) if name in present else 0
         note = f"  — {blocked[name]}" if name in blocked else ""
         print(f" {mark} {name:<18} {count or '':>2} tasks{note}")
+    # A pack can exist and not be slated — one being built, whose fixture is
+    # ready and whose questions are not. Printing only `SLATE` would hide it,
+    # and "a grid that is smaller than it looks" is the failure this command
+    # exists to prevent, from the other direction.
+    for name in domains.unslated():
+        note = f"  — {blocked[name]}" if name in blocked else ""
+        print(f" · {name:<18} {'':>2} not in the slate{note}")
     return 0
 
 
