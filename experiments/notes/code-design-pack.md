@@ -128,6 +128,17 @@ out, and H-CA1 would measure the timeout.
 
 ## Step 3 — the corpus in the harness
 
+> **Done 2026-09-11.** `GitCorpus` pins VS Code by commit and `NodePackages`
+> pins the type install by lockfile (`decisions.md` 2026-09-11 later ii);
+> `domains/code_design/fixture.py` assembles the workspace, and
+> `tests/test_code_design_fixture.py` re-derives `REACHED_OUT` from the import
+> text. Materialized through `arms.build` and extracted it is identical to the
+> whole checkout — `ref` 120,179, `call_site` 53,741, 286 unresolved — and
+> `checks.dl` is clean on it. The pack is **installed and not in `SLATE`**;
+> `harness domains` prints it as such. Item 3's worry did not bite: the prompt
+> summarizes an asset tree in one line per root, so 161k lines is never inlined,
+> and a cell workspace materializes in under two seconds.
+
 1. **Pin by commit, not by archive.** `corpus.py` pins a sha256 of a tarball;
    GitHub's generated tarballs are not guaranteed byte-stable, so a `GitCorpus`
    (shallow clone of a tag, verified with `git rev-parse HEAD` against a pinned

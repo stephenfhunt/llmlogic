@@ -69,9 +69,10 @@ what makes the result readable, and a grid of one domain measures one domain.
   `domains.NO_GENERATOR` says why: there is nothing to seed.
 - **`code_design` — H-CA1** — three arms (`prose`, `engine` with `code-facts`
   undocumented, `code-analysis`) over sqlparse and VS Code `vs/base`,
-  design-level questions with independent oracles. _designing_ — the build plan
-  is `notes/code-design-pack.md`; pre-registered in `hypotheses.md` 2026-09-11,
-  `decisions.md` 2026-09-11 (later). post-v1.
+  design-level questions with independent oracles. _building_ — corpus and
+  fixture shipped (steps 1–3), **not in `SLATE`** until its questions exist. The
+  build plan is `notes/code-design-pack.md`; pre-registered in `hypotheses.md`
+  2026-09-11, `decisions.md` 2026-09-11 (later, later ii, later iii). post-v1.
 - **`controls`** — _shipped._ Four tasks: two single-hop lookups, two one-step.
   Without them a null result is indistinguishable from a broken instrument.
   Generated, but flat: no `at-scale`, and a row ceiling — a control that gets

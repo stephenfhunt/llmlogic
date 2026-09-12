@@ -15,6 +15,41 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-09-11 (later ii)** — **A corpus is pinned by what its kind can
+  promise.** `GitCorpus` pins a **commit**, not an archive hash: GitHub
+  generates a tarball per request and guarantees nothing about its bytes, so a
+  sha256 would fail for a reason that is not the one the pin exists to catch.
+  The tag is fetched, `git rev-parse HEAD` is verified, and a moved tag fails
+  loudly. `NodePackages` pins a **lockfile** — `npm ci` checks an integrity hash
+  per package, transitive ones included, which hand-written tarball hashes would
+  not. `test_every_corpus_is_pinned_by_version_and_hash` asks each kind for its
+  own pin and **fails on a kind it does not recognise**, so a fourth cannot
+  arrive unpinned.
+  - **No third-party bytes are committed**, only the manifest — 2026-08-22's
+    licensing reason for fetching sqlparse rather than vendoring it, applied to
+    the type packages.
+
+- **2026-09-11 (later iii)** — **The `code_design` workspace is assembled, not
+  copied**, and the two facts that forced it are in
+  `corpora/vs-base-types/README.md`. A TypeScript project is what its `tsconfig`
+  includes *plus everything that resolves from there*, so shipping a directory
+  would not ship the project: **`vs/base` reaches 11 files outside itself**, and
+  without them the extraction is 1,336,528 facts and 463 unresolved names rather
+  than 1,363,422 and 286. `node_modules` goes at the **workspace root** so
+  resolution walks up to it and no `paths` mapping is needed.
+  - **`REACHED_OUT` is stated in the source and re-derived in the tests** from
+    the import text, never from `code-facts` — control 1 applied to a fixture
+    invariant rather than to an answer, because the tool under test in this pack
+    is the extractor.
+  - **The type packages are not the answer key's business.** They change **one**
+    cross-file reference edge in 4,475 and no import cycle, no `module_lcom4`,
+    no project symbol count. They are in the workspace because only the *engine*
+    arms extract, and an arm reading "12,061 unresolved names" off `orient.dl`
+    behaves differently for a reason that is not the skill under test.
+  - **The manifest does not travel into the workspace**: a cell has no network,
+    and a `package.json` naming only `@types` would make `packages.dl` report
+    every dependency unused.
+
 - **2026-09-11 (later)** — **H-CA1 is measured by this harness, as a new pack
   with three arms, and designed before it is built** (`hypotheses.md` addendum
   of the same date). The alternative — measuring the code-analysis skill inside

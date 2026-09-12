@@ -86,14 +86,37 @@ down with it.
   extraction is 1,336,528 facts and 463 unresolved rather than 1,363,422 and 286.
 - **111 tool tests.**
 
+**Then step 3, the same day** — the corpus in the harness, **1,667 harness tests**
+- **A corpus is pinned by what its kind can promise.** `GitCorpus` pins a
+  commit, because GitHub's generated tarballs guarantee no bytes; `NodePackages`
+  pins a lockfile, because `npm ci` hashes the transitive tree. The pin test
+  fails on a kind it does not recognise.
+- **`domains/code_design/fixture.py` assembles the workspace** — `vs/base`, the
+  11 files it reaches, `src/typings`, the pack's tsconfig, and
+  `node_modules/@types` at the workspace root. Materialized through `arms.build`
+  and extracted it is **identical to the whole checkout** (`ref` 120,179,
+  `call_site` 53,741, 286 unresolved), and `checks.dl` is clean on it.
+- **`REACHED_OUT` is re-derived in the tests from import text, not from
+  `code-facts`** — control 1 pointed at a fixture invariant, since the extractor
+  is the tool under test here. It caught its own bug: a `.css` target is a real
+  file and still not in the program.
+- **The type packages change one cross-file edge in 4,475** and no cycle, no
+  `module_lcom4`. They are in the workspace for the *arms*, not the answer key:
+  only the engine arms extract, and one reading "12,061 unresolved" off
+  `orient.dl` behaves differently for a reason that is not the skill.
+- **The asset catalogue now reports one line per root** — a single-root fixture
+  renders byte-identically, so no archived prompt moved.
+- **Installed, not in `SLATE`**; `harness domains` prints it as such.
+
 **Next up**
-- **Pack step 3**: the corpus in the harness — `GitCorpus` pinned by commit, the
-  `vs/base` subtree plus those 11 files, and the `at-scale` fixture path checked
-  (`task.Fixture` writes files to disk and the catalogue summarizes an asset tree
-  in one line, so 156k lines is not inlined — but confirm `domains.load_all()`
-  and `test_controls_hold` still run at that size).
-- **Step 4's questions must avoid the 286**: Electron's generated typings,
-  `sqlite3`, `process.env` index reads.
+- **Pack step 4**: six to eight question templates and their oracles, each a
+  plain `truth.py` that never imports `code-facts` or `lib/`. **Avoid the 286
+  unresolved** — Electron's generated typings, `sqlite3`, `process.env` index
+  reads — and avoid `callreach`, `flow`, `dominators` and `pointsto`, which at
+  this scale are minutes or do not fit.
+- **Contamination is the live threat** (the note's step 4): exact sets at the
+  pinned commit, nothing VS Code's own CI already forces empty, and at least one
+  question whose answer differs between 1.137.0 and an adjacent release.
 - **The flow-layer libraries are now measured too** (`flow` 104 s,
   `dominators` 51 s, `pointsto` does not fit); the playbook says so.
 - Still open from the last session: a test file's process dying under load.
