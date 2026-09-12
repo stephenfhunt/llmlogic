@@ -51,3 +51,10 @@ duckdb = { version = "1", features = ["bundled", "json", "parquet"], optional = 
 
 [dev-dependencies]
 proptest = "1.11.0"
+
+# A release build with line tables, for heaptrack/valgrind/perf stacks. Its own
+# profile so it lands in `target/profiling/` and never replaces the
+# `target/release/datalog` that `code-analysis`'s tests and bench run.
+[profile.profiling]
+inherits = "release"
+debug = "line-tables-only"
