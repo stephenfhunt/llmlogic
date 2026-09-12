@@ -5,7 +5,7 @@ severity: usability
 area: import
 spec: ["§12"]
 found: 2026-09-12
-resolution:
+resolution: fixed 2026-09-12, with relation pruning (ROADMAP § Performance)
 ---
 
 The program is parsed and checked *after* its imports are materialised, so a
@@ -66,3 +66,26 @@ Nothing recorded depends on the current order. It raises the value of the
 decide which relations to open from the rule graph, which means the program is
 already parsed and checked when the first file is read. This closes as a side
 effect of that item; it does not need its own fix.
+
+## Resolution
+
+**Fixed 2026-09-12**, by *load only the relations the program names* (§17 that
+date). With every data import under an explicit schema, the program is parsed,
+resolved and **lowered** before any import is read, and only the imports a goal
+reaches are read after that.
+
+**The diagnosis held for semantic errors and not for syntax errors.** Parsing
+has always run before loading: on `vs/base` the unchanged binary reports a
+missing period in 0.00 s, and the 10.9 s repro above could not be reproduced. A
+lowering error did pay — an unknown field, 5.5 s / 1.10 GB — and now costs
+0.00 s / 8 MB.
+
+**The acceptance criterion was narrowed, deliberately** (the user's call, same
+day): the early check is lowering, not typecheck. "Nothing in the semantic check
+needs a single fact" is false for types. A declared column type is not an
+inference constraint, so a fact-free typecheck rejects valid programs
+(`bugs/014`). A type error still waits for the load, which is now only the
+reached relations, and a rejection over that partial load is re-checked over a
+full one. The test is `tests/system.rs`
+`a_program_error_arrives_before_any_fact_is_read`, over a mode-000 fact file, for
+a syntax error and a lowering error.
