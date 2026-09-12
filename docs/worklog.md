@@ -24,6 +24,56 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-12 (evening) — memory at Grafana scale: an import held three times, a proof built for nothing
+
+Asked to profile `orient.dl` on a Grafana-sized base and find what else is
+memory-gated, without fitting Grafana. heaptrack (installed this session) over a
+new `profiling` cargo profile; a frozen binary per stage; two shapes of base —
+Grafana's frontend (4.04M facts) and `vs/base` (1.33M, zero import cycles).
+
+**Done** — datalog 615 tests, clippy both feature sets, fmt; code-facts `npm test`;
+bench digests identical on every `vs/base` library
+- **Found**: `finalize` held an import three times (`symbol`: 2.28 GB of heap for
+  489 MB of JSONL); lowering and evaluation each cloned the base facts; every match
+  built a `Derivation` that `Unrecorded` then dropped (~2.9 GB of the closure's 6.7).
+- **Four fixes**: typing consumes the raw rows; `lower_with_sources` consumes the
+  tables and `eval_pruned_moving_facts` the facts; a derivation is built only if
+  kept; a match whose fact is already held is not pending.
+- **Grafana `orient.dl` 224 s / 9.46 GB → 87 s / 4.94 GB**, answers byte-identical;
+  `modgraph` with cycles 9.3 → 5.1 GB; `coupling` 9.3 → 3.8, `coupling_kinds`
+  9.1 → 6.1, `checks` 6.2 → 3.2.
+  First runs there: `callreach` 18 s / 1.4 GB, `cochange` 337 s / 2.0 GB.
+  `vs/base`: `callreach` 3.5 → 0.7 GB, `cohesion` 1.9 → 0.4.
+- **Still memory-gated**: `pointsto.dl` (killed above 14 GB at 130 s on `vs/base`)
+  and the extractor (16.8 GB on Grafana).
+- **Measured for later**: column projection (`symbol`, 4 of 18 columns: 582 MB
+  against 1,374); interning (263 MB of its text, 96 MB distinct).
+- `datalog/notes/memory-profile-2026-09-12.md`; `code-analysis/notes/code-facts.md`
+  § Re-measured after the engine stopped copying.
+
+**Decided** (`datalog/spec.md` §17 2026-09-12, first entry; `code-analysis/decisions.md`
+2026-09-12 evening — the user's)
+- **Real profilers**, not an allocator counter in the engine.
+- **No size gate on `orient.dl` and no size or cost guidance in the skill**: the
+  tool is made usable instead. The engine stays generic — nothing special to one
+  library — and a library workaround is engine debt (`lib/keys.dl` reopened).
+- **A program with an explanation keeps its copy of the facts** (`?whynot`
+  evaluates twice).
+
+**Removed**
+- The three-copy load path and `type_column`; every size and cost note from
+  `SKILL.md`, both language references (timing columns, the join-key rule) and
+  seven library headers; the queued `orient.dl` gate; the oldest worklog entry.
+
+**Next up**
+- **Profile `pointsto.dl` as an engine vehicle** (datalog ROADMAP § Performance)
+  and **profile the TypeScript extractor** (16.8 GB on Grafana) — both queued.
+- **A non-leading bound column still scans** — with re-keying gone from the
+  skill, the engine item that retires `lib/keys.dl`. **Column projection**, then
+  **interning**: design sessions, measured.
+- Re-learned: measure with the repository's `lib/`, never a fact directory's copy.
+- **Open**: `datalog/bugs/009`, `013`, `014`; `code-analysis/bugs/001`–`005`.
+
 ## 2026-09-12 (later) — rule and relation pruning: a run pays for what its goals reach
 
 Picked up the two § Performance items the Grafana dogfood ruled next. Both
@@ -131,117 +181,3 @@ explored by a fresh agent holding only `SKILL.md` and `reference/`.
   and magic sets are the bigger chunk behind them, deliberately not next.
 - **Open**: `code-analysis/bugs/001`–`005`, `datalog/bugs/012`–`013`. H-CA1 still
   needs its reference program and the `code-analysis` arm.
-
-## 2026-09-11 (later still) — the library at a million facts: it was the seek, not the aggregates
-
-Picked up the `code_design` pack at step 1. The sizing spike blamed the
-aggregates; the measurement said otherwise, and the plan's own hypothesis went
-down with it.
-
-**Done** — **datalog 598 tests**, code-facts **108**, clippy and fmt clean
-- **It is the seek's leading-prefix rule.** `seek::bound_prefix` stops at the
-  first unbound column, so an atom binding a column its relation does not lead
-  with scans the whole relation once per outer row:
-  `count { E | flow_node(id: E, fn: F, kind: entry) }` is 108,597 rows × 13,983
-  functions. Every library over 30 s was over it for this and nothing else.
-- **The fix is one rule per re-keying, in the library** — `lib/keys.dl` (`child`)
-  plus `file_member`, `called_by`, `entry_node`, `alloc_of`, `decl_file`,
-  `access_of`, `used_at`, `touched_by`, `contains`. **`checks.dl` 199.6 s → 13.7 s
-  on two of them**, answers byte-identical.
-- **`Provenance::Reports`** (`datalog/`): an aggregate or a cast in any rule body
-  provisioned the *full* derivation store for the whole program to carry two
-  counts. Now it keeps only the derivations those counts are read from.
-- **`tools/code-facts/bench/`** times each library over a fact directory and
-  **digests its answers** — the guard that a speed-up did not move a row. It
-  did not, across every change here.
-- **On `vs/base` (1.33M facts):** `checks` 196 → **9.3 s**, `coupling` 330 →
-  **27.2**, `cohesion` 404 → **28.2**, `coupling_kinds` >289 → **24.6**,
-  `metrics` >79 → **6.6**, `orient` 7.5 → **4.9**. Table in
-  `code-analysis/notes/code-facts.md` § At a million facts.
-- **`callreach.dl` is the exception at 38 s / 4.1 GB** — a whole-project call
-  closure is quadratic in the graph's density and no re-keying touches it;
-  `callreach_seeded.dl` is the seeded form, `taint.dl`'s idiom.
-
-**Decided** (`datalog/spec.md` §17, `code-analysis/decisions.md`, both 2026-09-11)
-- **Secondary indexes stay rejected.** The rejected case is exactly what a real
-  corpus hit — and a program can re-key itself in one rule, which is cheaper than
-  a second copy of every relation. `keys.dl` states the rule for a reader.
-- **A re-keying is not free**; it pays only where the scan it replaces is
-  quadratic. `comp_edge_to` was written, measured at no gain, removed.
-- **`Reports` buys memory, not always time** — `cohesion` 35.3 → 28.2 s and
-  4.2 → 2.3 GB, but `coupling` 23.0 → 27.5 s for half the residency. A 900 s,
-  4 GB cell is short of the memory.
-- **E9's third claim is stated over the warnings, not over the predicate under
-  test** — an oracle built from `Derivation::reports` stayed green under its own
-  mutation.
-
-**Removed**
-- `comp_edge_to` (measured at no gain); the static per-rule gate on the reporting
-  walk (measured as noise, 9.4 → 9.3 s); from `checks.dl`, `coupling.dl`,
-  `cohesion.dl`, `metrics.dl` and `coupling_kinds.dl`, every scan-shaped join.
-
-**Then step 2, the same day** — **`checks.dl` is clean on `vs/base`**, the gate
-- **Asset imports resolve through a wildcard `declare module`**, so
-  `imports.target_ambient` names the pattern. Putting the declaring `.d.ts` in
-  `target_file` is the obvious fix and is wrong — every stylesheet-importing file
-  would gain an import edge that does not exist at run time. A new `assets`
-  fixture caught a second bug on the way: `bundler!./x.css` was becoming
-  `target_package` `"bundler!."`.
-- **Type packages pinned by lockfile** (`experiments/corpora/vs-base-types/`, no
-  vendored bytes): unresolved names **12,061 → 286**, `ref` 99,881 → 120,179,
-  `diagnostic` 3,134 → 62, `any_site` 13,225 → 1,369.
-- **`vs/base` is not self-contained** — 11 files outside it, without which the
-  extraction is 1,336,528 facts and 463 unresolved rather than 1,363,422 and 286.
-- **111 tool tests.**
-
-**Then step 3, the same day** — the corpus in the harness, **1,667 harness tests**
-- **A corpus is pinned by what its kind can promise.** `GitCorpus` pins a
-  commit, because GitHub's generated tarballs guarantee no bytes; `NodePackages`
-  pins a lockfile, because `npm ci` hashes the transitive tree. The pin test
-  fails on a kind it does not recognise.
-- **`domains/code_design/fixture.py` assembles the workspace** — `vs/base`, the
-  11 files it reaches, `src/typings`, the pack's tsconfig, and
-  `node_modules/@types` at the workspace root. Materialized through `arms.build`
-  and extracted it is **identical to the whole checkout** (`ref` 120,179,
-  `call_site` 53,741, 286 unresolved), and `checks.dl` is clean on it.
-- **`REACHED_OUT` is re-derived in the tests from import text, not from
-  `code-facts`** — control 1 pointed at a fixture invariant, since the extractor
-  is the tool under test here. It caught its own bug: a `.css` target is a real
-  file and still not in the program.
-- **The type packages change one cross-file edge in 4,475** and no cycle, no
-  `module_lcom4`. They are in the workspace for the *arms*, not the answer key:
-  only the engine arms extract, and one reading "12,061 unresolved" off
-  `orient.dl` behaves differently for a reason that is not the skill.
-- **The asset catalogue now reports one line per root** — a single-root fixture
-  renders byte-identically, so no archived prompt moved.
-- **Installed, not in `SLATE`**; `harness domains` prints it as such.
-
-**Then step 4, the same day** — **28 questions, and the ones that were dropped**
-- **The user pushed back on a hand-rolled TypeScript parser, and was right.**
-  `static_analysis`'s key uses `ast` and the extractor it grades uses `ast` too:
-  control 1 forbids an oracle that calls *the thing under test*, never one that
-  uses a parser. The oracle now parses with `ts.createSourceFile` — syntax only.
-- **`tests/test_truth_independence.py` then caught the design**: `truth.py` may
-  not `import subprocess`, bluntly, so parsing moved to `harness.corpus` beside
-  `git clone` and `npm ci`.
-- **A `truth.py` may reimplement a graph; it may not reimplement a measure.**
-  The import graph agrees with `code-facts` **exactly** (2,039 edges); class
-  LCOM4 disagrees on **47 of 187** classes with no single cause. The cohesion
-  questions were built, measured, and deleted.
-- **Three templates, 28 paired items** after three degeneracy rules — the last
-  of which (the answer may not be the universe) cost ten items and caught
-  `browser/ui/selectBox`, where every file is in a cycle.
-- **The at-scale track is a pilot** — 28 items supports ~+25 points; the
-  registered +10 needs 155. Addendum written before any cell ran.
-
-**Next up**
-- **Two things stand between the pack and a run**, both their own work: a
-  **reference program** answering every task (`tests/test_reference_corpus.py`)
-  and the **`code-analysis` arm**, which H-CA1's endpoint is defined over. The
-  pack is installed and deliberately not in `SLATE` until both exist.
-- **One contamination check is outstanding**: at least one question whose answer
-  differs between 1.137.0 and an adjacent release. If it cannot be satisfied,
-  report the caveat as unmitigated rather than dropping it.
-- **The flow-layer libraries are now measured too** (`flow` 104 s,
-  `dominators` 51 s, `pointsto` does not fit); the playbook says so.
-- Still open from the last session: a test file's process dying under load.
