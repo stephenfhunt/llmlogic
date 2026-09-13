@@ -4061,10 +4061,10 @@ mod tests {
         use crate::lower::lower;
         use crate::provenance::ProofTree;
         use crate::testgen::{
-            ArithShape, arb_comparison_program, arb_extension_pair, arb_neg_shift_spellings,
-            arb_parent_edges, arb_program_with_edb, arb_recursive_arithmetic_program, arb_value,
-            arb_well_typed_program, with_duplicated_facts, with_extra_fact, with_swapped_body,
-            with_swapped_stratum_rules,
+            ArithShape, Tier, arb_comparison_program, arb_extension_pair, arb_neg_shift_spellings,
+            arb_parent_edges, arb_program_with_edb, arb_program_with_edb_at,
+            arb_recursive_arithmetic_program, arb_value, arb_well_typed_program,
+            with_duplicated_facts, with_extra_fact, with_swapped_body, with_swapped_stratum_rules,
         };
         use crate::typecheck::typecheck;
 
@@ -4300,6 +4300,206 @@ mod tests {
                 }
             }
             Ok(())
+        }
+
+        /// What one recorded run reached — the axes a sized generator claims to
+        /// grow, read off the model rather than the program text (`testing.md`
+        /// rule 2): a text can name a four-atom body that never fires.
+        #[derive(Debug, Default, Clone, Copy)]
+        struct RunStats {
+            /// The last round any fact was first derived in.
+            rounds: u32,
+            /// Facts the rules derived, beyond the base.
+            derived: usize,
+            /// The most tuples any one relation holds.
+            largest_relation: usize,
+            /// Strata in which some rule derived a fact.
+            strata_deriving: usize,
+            /// The longest body among the rules that derived a fact.
+            longest_fired_body: usize,
+            /// Whether some derivation of three or more premises has its first
+            /// premise and a later one derived in the same round with only older
+            /// premises between — the instance a semi-naive round must find from
+            /// its later delta position (`testing.md` **B1**'s shape note).
+            split_instance: bool,
+        }
+
+        /// [`RunStats`] for a model evaluated with its derivations recorded.
+        fn run_stats(program: &Program, model: &Model) -> RunStats {
+            let mut stats = RunStats::default();
+            let mut fired = vec![false; program.rules.len()];
+            for fact in model.facts() {
+                if model.is_base(&fact) {
+                    continue;
+                }
+                stats.derived += 1;
+                stats.rounds = stats.rounds.max(model.first_round(&fact).unwrap_or(0));
+                for derivation in model.derivations_of(&fact) {
+                    fired[derivation.rule.0 as usize] = true;
+                    let rounds: Vec<Option<u32>> = derivation
+                        .premises
+                        .iter()
+                        .map(|premise| match premise {
+                            Premise::Fact(fact) if !model.is_base(fact) => model.first_round(fact),
+                            _ => None,
+                        })
+                        .collect();
+                    stats.split_instance |= rounds.len() >= 3
+                        && (2..rounds.len()).any(|k| match (rounds[0], rounds[k]) {
+                            (Some(first), Some(later)) if first == later => {
+                                rounds[1..k].iter().all(|r| r.is_none_or(|r| r < first))
+                            }
+                            _ => false,
+                        });
+                }
+            }
+            stats.largest_relation = (0..program.predicates.len())
+                .map(|pred| model.relation(crate::ir::PredId(pred as u32)).len())
+                .max()
+                .unwrap_or(0);
+            stats.strata_deriving = program
+                .strata
+                .iter()
+                .filter(|stratum| stratum.iter().any(|rule| fired[rule.0 as usize]))
+                .count();
+            stats.longest_fired_body = program
+                .rules
+                .iter()
+                .zip(&fired)
+                .filter(|(_, fired)| **fired)
+                .map(|(rule, _)| rule.body.len())
+                .max()
+                .unwrap_or(0);
+            stats
+        }
+
+        /// Samples `count` programs from a strategy on the deterministic runner,
+        /// for the growth guards.
+        fn sample<S: proptest::strategy::Strategy>(strategy: S, count: usize) -> Vec<S::Value> {
+            use proptest::strategy::ValueTree;
+            let mut runner = proptest::test_runner::TestRunner::deterministic();
+            (0..count)
+                .map(|_| {
+                    strategy
+                        .new_tree(&mut runner)
+                        .expect("strategy produces a value")
+                        .current()
+                })
+                .collect()
+        }
+
+        /// **B1** for one program: the naive oracle's model is the engine's.
+        /// The source text is printed on failure — at `Tier::Large` the IR of a
+        /// counterexample is unreadable.
+        fn b1_holds(src: &str, program: &Program) -> std::result::Result<(), TestCaseError> {
+            let model = capped(program, Provenance::Recorded)?;
+            prop_assert_eq!(model_facts(&model), naive_eval(program).unwrap(), "{}", src);
+            Ok(())
+        }
+
+        /// The growth guard for [`arb_program_with_edb_at`] (`testing.md` rule 2):
+        /// each tier reaches, on the recorded run, what the tier below does not —
+        /// deeper fixpoints (rounds, strata), larger models (derived facts, the
+        /// largest relation) and broader rules (the longest body that fired) — and
+        /// the split instance B1's shape note is about.
+        ///
+        /// Each floor is a count of 48 deterministic samples reaching a threshold
+        /// the tier below does not reach in the median, set at about two thirds of
+        /// what the tier measured (the numbers in the failure message). `Deep` is
+        /// checked only in the deep run, which is the only one that uses it.
+        #[test]
+        fn tiered_evaluation_generator_grows_on_every_axis() {
+            type Axis = (&'static str, fn(&RunStats) -> usize, usize, usize);
+            let axes: &[(Tier, &[Axis])] = &[
+                (
+                    Tier::Medium,
+                    &[
+                        ("rounds >= 2", |s| s.rounds as usize, 2, 14),
+                        ("derived >= 4", |s| s.derived, 4, 8),
+                        ("largest relation >= 8", |s| s.largest_relation, 8, 9),
+                        ("fired body >= 3", |s| s.longest_fired_body, 3, 6),
+                        ("strata deriving >= 2", |s| s.strata_deriving, 2, 3),
+                        ("split instance", |s| s.split_instance as usize, 1, 1),
+                    ],
+                ),
+                (
+                    Tier::Large,
+                    &[
+                        ("rounds >= 4", |s| s.rounds as usize, 4, 10),
+                        ("derived >= 13", |s| s.derived, 13, 8),
+                        ("largest relation >= 19", |s| s.largest_relation, 19, 8),
+                        ("fired body >= 4", |s| s.longest_fired_body, 4, 9),
+                        ("strata deriving >= 2", |s| s.strata_deriving, 2, 14),
+                        ("split instance", |s| s.split_instance as usize, 1, 3),
+                    ],
+                ),
+                (
+                    Tier::Deep,
+                    &[
+                        ("rounds >= 7", |s| s.rounds as usize, 7, 1),
+                        ("derived >= 50", |s| s.derived, 50, 1),
+                        ("largest relation >= 50", |s| s.largest_relation, 50, 1),
+                        ("fired body >= 5", |s| s.longest_fired_body, 5, 1),
+                        ("strata deriving >= 3", |s| s.strata_deriving, 3, 1),
+                        ("split instance", |s| s.split_instance as usize, 1, 1),
+                    ],
+                ),
+            ];
+            let mut short = Vec::new();
+            for (tier, axes) in axes {
+                if *tier == Tier::Deep && !crate::testgen::deep_run() {
+                    continue;
+                }
+                let stats: Vec<RunStats> = sample(arb_program_with_edb_at(*tier), 48)
+                    .iter()
+                    .map(|program| run_stats(program, &eval(program).unwrap()))
+                    .collect();
+                for (name, read, threshold, floor) in axes.iter() {
+                    let reached = stats.iter().filter(|s| read(s) >= *threshold).count();
+                    eprintln!("{tier:?}: {reached} of 48 reach {name}");
+                    if reached < *floor {
+                        short.push(format!(
+                            "{tier:?}: {reached} of 48 reach {name} (floor {floor})"
+                        ));
+                    }
+                }
+            }
+            assert!(
+                short.is_empty(),
+                "a tier stopped growing:\n{}",
+                short.join("\n")
+            );
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig::with_cases(crate::testgen::cases(64)))]
+
+            /// **B1 at `Tier::Medium`** — and `Large` in the deep run.
+            #[test]
+            fn b1_agrees_at_medium(
+                generated in crate::testgen::arb_program_text_at(Tier::Medium.scaled()),
+            ) {
+                b1_holds(&generated.0, &generated.1)?;
+            }
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig {
+                cases: crate::testgen::cases(48),
+                max_shrink_time: 60_000,
+                ..ProptestConfig::default()
+            })]
+
+            /// **B1 at `Tier::Large`** — exactly, not scaled: the naive oracle
+            /// re-joins every relation every iteration, and `Deep`'s slowest
+            /// programs already take seconds in the engine. The deep run gives this
+            /// four times the cases instead.
+            #[test]
+            fn b1_agrees_at_large(
+                generated in crate::testgen::arb_program_text_at(Tier::Large),
+            ) {
+                b1_holds(&generated.0, &generated.1)?;
+            }
         }
 
         /// Facts keyed by predicate *name*, for comparing programs whose
@@ -5952,9 +6152,7 @@ mod tests {
             fn b1_shaped_programs_agree(
                 generated in crate::testgen::arb_shaped_program(crate::testgen::SHAPED_LARGE),
             ) {
-                let (src, program) = generated;
-                let model = capped(&program, Provenance::Recorded)?;
-                prop_assert_eq!(model_facts(&model), naive_eval(&program).unwrap(), "{}", src);
+                b1_holds(&generated.0, &generated.1)?;
             }
 
             /// **E9 over analysis-shaped programs.** Generated programs elsewhere

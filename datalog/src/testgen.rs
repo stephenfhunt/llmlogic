@@ -153,10 +153,10 @@ struct ArgSpec {
     selected: bool,
 }
 
-fn arb_arg_spec() -> impl Strategy<Value = ArgSpec> {
+fn arb_arg_spec(dense_symbols: usize, var_weight: f64) -> impl Strategy<Value = ArgSpec> {
     (
-        proptest::option::weighted(0.6, 0u8..6),
-        arb_constant(),
+        proptest::option::weighted(var_weight, 0u8..6),
+        arb_spec_constant(dense_symbols),
         proptest::bool::weighted(0.7),
     )
         .prop_map(|(var, constant, selected)| ArgSpec {
@@ -174,13 +174,15 @@ struct HeadArgSpec {
     constant: Constant,
 }
 
-fn arb_head_arg_spec() -> impl Strategy<Value = HeadArgSpec> {
-    (proptest::option::weighted(0.7, 0u8..8), arb_constant()).prop_map(
-        |(body_var_index, constant)| HeadArgSpec {
+fn arb_head_arg_spec(dense_symbols: usize) -> impl Strategy<Value = HeadArgSpec> {
+    (
+        proptest::option::weighted(0.7, 0u8..8),
+        arb_spec_constant(dense_symbols),
+    )
+        .prop_map(|(body_var_index, constant)| HeadArgSpec {
             body_var_index,
             constant,
-        },
-    )
+        })
 }
 
 /// One body atom: predicate selector, named-form flag, negated flag, args.
@@ -204,6 +206,9 @@ type ProgramSpec = (Vec<PredSpec>, Vec<FactSpec>, Vec<RuleSpec>, Vec<QuerySpec>)
 /// Size bounds for [`arb_program_spec`]. Spec argument vectors are always
 /// generated at [`MAX_ARITY`] length and truncated to the predicate's arity
 /// during building, so `max_arity` only needs to stay ≤ `MAX_ARITY`.
+///
+/// Every field is an upper bound proptest draws within, so a tier's programs
+/// still shrink toward small ones; the tier sets how large a run *reaches*.
 struct SpecBounds {
     predicates: std::ops::RangeInclusive<usize>,
     max_arity: u32,
@@ -211,6 +216,92 @@ struct SpecBounds {
     rules: std::ops::RangeInclusive<usize>,
     body_len: std::ops::RangeInclusive<usize>,
     queries: std::ops::RangeInclusive<usize>,
+    /// The highest predicate level (see [`PredSpec`]): how many strata a
+    /// program can stack negation across.
+    max_level: u8,
+    /// Width of a pool of symbols `n0…` that replaces the typed constants, or 0
+    /// to keep them. The typed pools collide about one draw in twenty, which at
+    /// six facts is collision-rich and at sixty leaves every chain two joins
+    /// long; and their thirty-odd values are a domain in which a recursive
+    /// arity-3 relation closes over 10⁵ tuples. The width is the domain, so it
+    /// bounds a relation at `width^arity` — the evaluator sees one type either
+    /// way, since this generator is `monotype`d.
+    dense_symbols: usize,
+    /// How often a body argument is a variable rather than a constant. A
+    /// constant filters its atom to about one value in the pool, so at four
+    /// atoms of arity three the untiered 0.6 leaves almost no rule firing.
+    var_weight: f64,
+}
+
+/// A size tier for the generators that have one (`testing.md` § Generator
+/// sizes). A property runs at `tier.scaled()`; a growth guard reads a tier
+/// exactly, since its thresholds are measured there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Tier {
+    /// Today's bounds: many cases, and the naive oracle affordable.
+    Small,
+    /// Several times the facts and rules, deeper strata, longer bodies.
+    Medium,
+    /// The per-commit ceiling: metamorphic and independent oracles only.
+    Large,
+    /// Outside the per-commit budget, reached only under `DATALOG_PBT=deep`.
+    Deep,
+}
+
+impl Tier {
+    /// This tier, or the next one up when the deep run is on
+    /// ([`deep_run`]) — so the deep run is every tiered property one size
+    /// larger, with no second copy of any property.
+    pub(crate) fn scaled(self) -> Tier {
+        if !deep_run() {
+            return self;
+        }
+        match self {
+            Tier::Small => Tier::Medium,
+            Tier::Medium => Tier::Large,
+            Tier::Large | Tier::Deep => Tier::Deep,
+        }
+    }
+}
+
+/// Whether this is the deep run: `DATALOG_PBT=deep`. Any other value is a
+/// typo that would silently run the per-commit sizes, so it panics.
+pub(crate) fn deep_run() -> bool {
+    match std::env::var("DATALOG_PBT") {
+        Err(std::env::VarError::NotPresent) => false,
+        Ok(value) if value == "deep" => true,
+        other => panic!("DATALOG_PBT must be unset or `deep`, not {other:?}"),
+    }
+}
+
+/// A tiered property's case count: `per_commit`, or four times it in the deep
+/// run.
+pub(crate) fn cases(per_commit: u32) -> u32 {
+    if deep_run() {
+        per_commit * 4
+    } else {
+        per_commit
+    }
+}
+
+/// A constant for a rule, query or fact argument in [`arb_program_spec`]:
+/// [`arb_constant`], or the dense symbol pool when there is one.
+fn arb_spec_constant(dense_symbols: usize) -> BoxedStrategy<Constant> {
+    if dense_symbols == 0 {
+        return arb_constant().boxed();
+    }
+    (0..dense_symbols)
+        .prop_map(|i| Constant::Symbol(format!("n{i}")))
+        .boxed()
+}
+
+/// [`arb_spec_constant`] for a fact, where `absent` can appear (see
+/// [`arb_fact_constant`]).
+fn arb_spec_fact_constant(dense_symbols: usize) -> BoxedStrategy<Constant> {
+    if dense_symbols == 0 {
+        return arb_fact_constant().boxed();
+    }
+    prop_oneof![9 => arb_spec_constant(dense_symbols), 1 => Just(Constant::Absent)].boxed()
 }
 
 fn arb_program_spec(bounds: SpecBounds) -> impl Strategy<Value = ProgramSpec> {
@@ -218,39 +309,48 @@ fn arb_program_spec(bounds: SpecBounds) -> impl Strategy<Value = ProgramSpec> {
         (
             1u32..=bounds.max_arity,
             proptest::bool::weighted(0.5),
-            0u8..=2,
+            0u8..=bounds.max_level,
         ),
         bounds.predicates,
     );
     let facts = proptest::collection::vec(
         (
             any::<u8>(),
-            proptest::collection::vec(arb_fact_constant(), MAX_ARITY),
+            proptest::collection::vec(arb_spec_fact_constant(bounds.dense_symbols), MAX_ARITY),
         ),
         bounds.facts,
     );
     let rules = proptest::collection::vec(
         (
-            proptest::collection::vec(arb_body_atom_spec(), bounds.body_len.clone()),
+            proptest::collection::vec(
+                arb_body_atom_spec(bounds.dense_symbols, bounds.var_weight),
+                bounds.body_len.clone(),
+            ),
             any::<u8>(),
             proptest::bool::weighted(0.4),
-            proptest::collection::vec(arb_head_arg_spec(), MAX_ARITY),
+            proptest::collection::vec(arb_head_arg_spec(bounds.dense_symbols), MAX_ARITY),
         ),
         bounds.rules,
     );
     let queries = proptest::collection::vec(
-        proptest::collection::vec(arb_body_atom_spec(), bounds.body_len),
+        proptest::collection::vec(
+            arb_body_atom_spec(bounds.dense_symbols, bounds.var_weight),
+            bounds.body_len,
+        ),
         bounds.queries,
     );
     (arities, facts, rules, queries)
 }
 
-fn arb_body_atom_spec() -> impl Strategy<Value = BodyAtomSpec> {
+fn arb_body_atom_spec(
+    dense_symbols: usize,
+    var_weight: f64,
+) -> impl Strategy<Value = BodyAtomSpec> {
     (
         any::<u8>(),
         proptest::bool::weighted(0.4),
         proptest::bool::weighted(0.3),
-        proptest::collection::vec(arb_arg_spec(), MAX_ARITY),
+        proptest::collection::vec(arb_arg_spec(dense_symbols, var_weight), MAX_ARITY),
     )
 }
 
@@ -263,6 +363,9 @@ fn lowering_bounds() -> SpecBounds {
         rules: 0..=5,
         body_len: 1..=3,
         queries: 0..=2,
+        max_level: 2,
+        dense_symbols: 0,
+        var_weight: 0.6,
     }
 }
 
@@ -270,13 +373,58 @@ fn lowering_bounds() -> SpecBounds {
 /// cost grows much faster than lowering cost (joins, fixpoints), so keep
 /// arities and bodies small while staying collision-rich.
 fn eval_bounds() -> SpecBounds {
-    SpecBounds {
-        predicates: 2..=3,
-        max_arity: 2,
-        facts: 0..=6,
-        rules: 0..=4,
-        body_len: 1..=2,
-        queries: 0..=2,
+    eval_bounds_at(Tier::Small)
+}
+
+/// [`eval_bounds`] at a tier. `Small` is the bounds every untiered evaluation
+/// property has always run at, unchanged, so the mutations recorded against
+/// them still describe them.
+fn eval_bounds_at(tier: Tier) -> SpecBounds {
+    match tier {
+        Tier::Small => SpecBounds {
+            predicates: 2..=3,
+            max_arity: 2,
+            facts: 0..=6,
+            rules: 0..=4,
+            body_len: 1..=2,
+            queries: 0..=2,
+            max_level: 2,
+            dense_symbols: 0,
+            var_weight: 0.6,
+        },
+        Tier::Medium => SpecBounds {
+            predicates: 2..=5,
+            max_arity: 3,
+            facts: 0..=24,
+            rules: 1..=7,
+            body_len: 1..=3,
+            queries: 0..=3,
+            max_level: 3,
+            dense_symbols: 6,
+            var_weight: 0.85,
+        },
+        Tier::Large => SpecBounds {
+            predicates: 3..=7,
+            max_arity: 3,
+            facts: 8..=64,
+            rules: 3..=12,
+            body_len: 1..=4,
+            queries: 1..=4,
+            max_level: 4,
+            dense_symbols: 10,
+            var_weight: 0.85,
+        },
+        Tier::Deep => SpecBounds {
+            predicates: 4..=10,
+            max_arity: 3,
+            facts: 32..=200,
+            rules: 6..=24,
+            body_len: 1..=5,
+            queries: 1..=6,
+            max_level: 6,
+            dense_symbols: 14,
+            var_weight: 0.85,
+        },
     }
 }
 
@@ -398,10 +546,26 @@ pub(crate) fn arb_statement_permutation() -> impl Strategy<Value = (Program, Pro
 /// total on safe-by-construction programs (property A11), so the `expect`
 /// never fires.
 pub(crate) fn arb_program_with_edb() -> impl Strategy<Value = ir::Program> {
-    arb_program_spec(eval_bounds())
-        .prop_map(build_program)
+    arb_program_with_edb_at(Tier::Small)
+}
+
+/// [`arb_program_with_edb`] at a size [`Tier`] — exactly that tier; a property
+/// passes `tier.scaled()`.
+pub(crate) fn arb_program_with_edb_at(tier: Tier) -> impl Strategy<Value = ir::Program> {
+    arb_program_text_at(tier).prop_map(|(_, program)| program)
+}
+
+/// [`arb_program_with_edb_at`] with the program's source text beside it: a
+/// counterexample at `Large` is unreadable as IR, and the text is what a
+/// failing case should print.
+pub(crate) fn arb_program_text_at(tier: Tier) -> impl Strategy<Value = (String, ir::Program)> {
+    arb_program_spec(eval_bounds_at(tier))
+        .prop_map(move |spec| build_program_connected(spec, tier != Tier::Small))
         .prop_map(monotype)
-        .prop_map(|ast| crate::lower::lower(&ast).expect("safe-by-construction programs lower"))
+        .prop_map(|ast| {
+            let program = crate::lower::lower(&ast).expect("safe-by-construction programs lower");
+            (crate::print::print_program(&ast), program)
+        })
 }
 
 /// Size knobs for [`arb_shaped_program`].
@@ -2023,6 +2187,7 @@ fn build_body(
     positive_pool: &[usize],
     negative_pool: &[usize],
     arities: &[PredSpec],
+    connected: bool,
 ) -> (Vec<crate::ast::Literal>, Vec<u8>) {
     let pred_name = |index: usize| format!("p{index}");
     let pred_arity = |index: usize| arities[index].0 as usize;
@@ -2040,7 +2205,26 @@ fn build_body(
         let index = positive_pool[sel as usize % positive_pool.len()];
         let arity = pred_arity(index);
         let named = named && has_schema(index);
-        let specs: Vec<ArgSpec> = arg_specs.into_iter().take(arity).collect();
+        let mut specs: Vec<ArgSpec> = arg_specs.into_iter().take(arity).collect();
+
+        // A connected body (the sized tiers): an atom sharing no variable with
+        // the atoms before it is a Cartesian product, and at `Tier::Large` four
+        // of them over a growing relation do not finish. Its first kept argument
+        // joins an earlier variable instead. Unconnected bodies stay in the
+        // untiered generator, where products are cheap and B1 covers them.
+        if connected && !body_vars.is_empty() {
+            let kept = |position: usize, spec: &ArgSpec| {
+                !named || spec.selected || specs.iter().all(|s| !s.selected) && position == 0
+            };
+            let first_kept = (0..specs.len()).find(|&i| kept(i, &specs[i]));
+            let joins = specs
+                .iter()
+                .enumerate()
+                .any(|(i, spec)| kept(i, spec) && spec.var.is_some_and(|v| body_vars.contains(&v)));
+            if let (Some(position), false) = (first_kept, joins) {
+                specs[position].var = Some(body_vars[sel as usize % body_vars.len()]);
+            }
+        }
 
         // Partial selection keeps at least one field: `p()` is not
         // grammatical (§5, `named` needs one or more pairs).
@@ -2136,7 +2320,16 @@ fn build_body(
     (body, body_vars)
 }
 
-fn build_program((arities, facts, rules, queries): ProgramSpec) -> Program {
+fn build_program(spec: ProgramSpec) -> Program {
+    build_program_connected(spec, false)
+}
+
+/// [`build_program`], with every rule and query body connected when
+/// `connected` (see [`build_body`]).
+fn build_program_connected(
+    (arities, facts, rules, queries): ProgramSpec,
+    connected: bool,
+) -> Program {
     let pred_name = |index: usize| format!("p{index}");
     let pred_arity = |index: usize| arities[index].0 as usize;
     // Only `declare`d predicates may be used with named arguments (§4).
@@ -2185,7 +2378,13 @@ fn build_program((arities, facts, rules, queries): ProgramSpec) -> Program {
             .filter(|&i| level(i) < level(head_index))
             .collect();
 
-        let (body, body_vars) = build_body(body_specs, &positive_pool, &negative_pool, &arities);
+        let (body, body_vars) = build_body(
+            body_specs,
+            &positive_pool,
+            &negative_pool,
+            &arities,
+            connected,
+        );
 
         // A named head must supply every field (§4), so head arguments are
         // built at full arity either way.
@@ -2225,7 +2424,7 @@ fn build_program((arities, facts, rules, queries): ProgramSpec) -> Program {
     // nullary corner isn't worth generating.
     let all_preds: Vec<usize> = (0..arities.len()).collect();
     for body_specs in queries {
-        let (body, body_vars) = build_body(body_specs, &all_preds, &all_preds, &arities);
+        let (body, body_vars) = build_body(body_specs, &all_preds, &all_preds, &arities, connected);
         if body_vars.is_empty() {
             continue;
         }

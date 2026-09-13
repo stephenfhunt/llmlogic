@@ -166,6 +166,53 @@ Design rules (Csmith lessons):
   queries — without these, A13/C1/C3/B8 could pass vacuously if generation
   silently regressed.
 
+### Generator sizes
+
+Proptest has no size parameter that rises across a run, so growth is designed
+in (§17 2026-09-12; plan in `notes/growing-inputs.md`). A sized generator takes a
+`testgen::Tier` — `Small`, `Medium`, `Large`, `Deep` — whose bounds are **upper
+bounds proptest draws within**, so a tier sets how large a run reaches and a
+failing case still shrinks toward small.
+
+- **A property runs at `tier.scaled()`**, one `proptest!` entry per tier over one
+  shared checker (`b1_holds`, `e9_holds`). A growth guard reads a tier exactly.
+- **The deep run is `DATALOG_PBT=deep cargo test --lib`**: every `scaled()` tier
+  moves up one and `testgen::cases` multiplies case counts by four. Any other
+  value of the variable panics rather than silently running the per-commit
+  sizes. It runs on demand, and **before and after every ROADMAP § Performance
+  item** (the user's, 2026-09-12).
+- **Budget: the per-commit `cargo test --lib` stays under 60 s** (the user's,
+  2026-09-12). Measured 12.2 s before any tier, 10.0 s with B1's two tiers —
+  under load the same suite has measured 54 s, so compare quiet runs.
+- **Growth is proven on the run** (rule 2): `RunStats` reads rounds, derived
+  facts, the largest relation, strata that derived something, the longest body
+  that fired, and B1's split instance off a recorded model. A tier's guard
+  counts how many of 48 deterministic samples reach thresholds the tier below
+  does not reach in the median, with floors at about two thirds of what was
+  measured.
+
+`arb_program_with_edb_at(tier)` (and `arb_program_text_at`, which returns the
+source text a counterexample prints) grows on every axis the untiered bounds
+fix: predicates, arity, facts, rules, body length, queries, **strata depth**
+(`max_level`), a **dense symbol pool** that replaces the typed constants, and the
+weight of variables over constants. Two of those are forced, not chosen — both
+found calibrating `Large`:
+
+- **The dense pool is the domain.** The typed pools' thirty-odd values collide
+  one draw in twenty, so at sixty facts every chain was two joins long; and they
+  are a domain over which a recursive arity-3 relation closed on 10⁵ tuples and
+  was OOM-killed. The width bounds a relation at `width^arity`. Nothing is lost
+  to the evaluator: this generator is `monotype`d, so it only ever saw symbols.
+- **Bodies are connected above `Small`** — each positive atom shares a variable
+  with an earlier one. Four disconnected atoms over a growing relation did not
+  finish. `Small` keeps Cartesian products, which B1 covers there cheaply.
+
+Measured over 48 samples (median / max): rounds 0/3 · 1/4 · 3/14 · 6/12, derived
+facts 0/3 · 1/19 · 5/271 · 29/492, from `Small` to `Deep`; split instances
+0 · 2 · 5 · 15. `Deep`'s slowest programs take 6–7 s in a debug build with under
+500 derived facts — five-atom self-joins over arity-3 relations — which makes
+them performance vehicles as well as test cases.
+
 **Policy — generators vs. the no-DSL rule.** The no-macro-DSL/no-builder rule
 (the pyramid, item 1) is about ergonomic sugar for hand-written tests;
 generators are *coverage machinery* that construct plain `ast::`/`ir::` values
@@ -395,9 +442,19 @@ compared keyed by predicate *name*, not `PredId`.
   `shaped_generator_reaches_deep_rounds_and_a_split_instance` (15 of 48 programs
   match that instance, 15 run 8+ rounds; asserted ≥ 10) and
   `shaped_generator_is_well_typed` (rule 4). *Mutation (killed, 3 of 3 runs):* the
-  `Old` read above reddens `b1_shaped_programs_agree`, and nothing else. B1 and E9
+  `Old` read above reddens `b1_shaped_programs_agree`, and no untiered property. B1 and E9
   now evaluate under a round cap (`ROUND_CAP`), so a fixpoint that stops
   converging fails a case instead of hanging the suite.
+
+  **Sized, the same lesson a third time.** `arb_shaped_program` caught the `Old`
+  read by building its shape on purpose; the general generator could not reach
+  it at any seed. Over `arb_program_with_edb_at` (§ Generator sizes),
+  `b1_agrees_at_medium` (`Large` in the deep run) and `b1_agrees_at_large`
+  (exact: the naive oracle does not fit `Deep`) now do, without being told the
+  shape. *Mutation (killed, 2 of 2 runs):* the `Old` read above reddens both,
+  and `b1_shaped_programs_agree`; `b1_naive_matches_seminaive` stays green. At
+  `Large` the counterexample shrank in 2.9 s to 8 facts, 6 rules and 3 queries.
+  Guard: `tiered_evaluation_generator_grows_on_every_axis`.
 - [x] **B2** Fixpoint idempotence: re-running with `facts ∪ output` derives
   nothing new.
 - [x] **B3** Set semantics: duplicating any subset of input facts leaves
