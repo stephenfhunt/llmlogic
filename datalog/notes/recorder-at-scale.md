@@ -217,6 +217,52 @@ fact keys and `api::run`'s copy of the program's facts all hold one allocation.
 The one-derivation-per-fact question is untouched: this removes the constant,
 not the count.
 
+## Shared tuples, measured
+
+*Built as `5035215` later on 2026-09-13, then reverted.* Proofs were byte-identical
+to `7e3f9ef` on 33 corpus goals and both `@grafana/ui` goals. Release CLI,
+`/usr/bin/time`, no goals unless marked:
+
+| binary | `pointsto.dl` | `pointsto.dl` `?why` | `callreach.dl` `?why` | `sparse_800` |
+|---|---|---|---|---|
+| `7e3f9ef` (copies) | 8.4 s / 361 MB | 9.2 s / 836 MB | 1.44 s / 389 MB | 1.83 s |
+| `5035215` (`Rc<[Value]>`) | 12.7 s / 409 MB | 12.2 s / 474 MB | 1.10 s / 196 MB | 2.19 s |
+
+**`perf stat`:**
+- `pointsto.dl`: 83.3 → 85.7 G instructions, 37.7 → 57.4 G cycles, 175 → 320 M
+  cache misses.
+- `sparse_800`: 20.8 → 17.9 G instructions, 22.6 → 31.9 M misses. It did less
+  work and took longer.
+- The profile's new cost was glibc walking free lists (`unlink_chunk` from
+  `_int_malloc`, 19% of misses). That is a symptom: our code changed what it
+  allocates and frees.
+
+**Experiments**, each a scratch build on `5035215`:
+
+| change | `pointsto.dl` | `sparse_800` | reading |
+|---|---|---|---|
+| seek prefix built at its known length, one allocation | 12.7 s | — | not it |
+| no fact premise built in an unrecorded run | 12.6 s | — | count traffic is not it |
+| seek by `&[Value]` (`Tuple: Borrow<[Value]>`), no prefix tuple | 12.5 s | 2.17 s | 13.7 M prefix allocations are churn, not the cost |
+| each new fact copied into a fresh tuple at apply | 12.6 s | 2.40 s | placement at apply is not it |
+| `Box<[Value]>`: the layout without sharing | 9.1 s | 2.13 s | `Rc` alone costs `pointsto.dl` ~3.6 s; the layout costs `sparse_800` |
+| imported rows copied and their `Vec`s leaked, not freed | **6.55 s** / 604 MB | — | **the `Rc` cost on `pointsto.dl`** |
+
+**Counts on `pointsto.dl`:**
+
+| tuples made at | count |
+|---|---|
+| a seek prefix | 13,702,174 |
+| a new head | 128,080 |
+| a head already held | 6,698 |
+| an imported row (`Tuple::from`) | 508,351 |
+
+**What it says.** A row was built as a `Vec`, copied into a shared block, and its
+buffer freed. That left 508 K holes among live data for every later allocation to
+land in. Nothing in the engine decides where a fact lives or who owns it. The next
+design is a store with one owner, which everything else refers back to
+(`notes/fact-store.md`).
+
 ## Questions for the design session
 
 1. Is "all derivations" a capability to keep stored, or to recover on demand?

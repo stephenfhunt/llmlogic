@@ -433,8 +433,10 @@ them. Except where noted these are documented v1 limits rather than defects.
   - **Dense generated programs** still store up to 5.4 GB for a model under 1 MB.
     93–99% of stored derivations are later-round rediscoveries, each mostly
     cloned premise tuples.
-  - **Fact references: designed 2026-09-13, building.** A tuple is shared,
-    not an id, and the join borrows its premises (§17 2026-09-13 (later iii)).
+  - **Fact references: shared tuples built and reverted 2026-09-13** — a `?why`
+    43–50% smaller, runs up to 50% slower (§17 2026-09-13 (later iii),
+    ***Falsified***). **Next: a fact store with one owner** (the user's), designed
+    and prototyped before trunk (`notes/fact-store.md`).
   - **Raised, not decided:** one derivation per fact, chosen when the fact is
     established (the code shows printed proofs unchanged); no fact copy for
     `?whynot`.

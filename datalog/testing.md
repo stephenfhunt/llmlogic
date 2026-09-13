@@ -1445,14 +1445,6 @@ and the asking form, which is also what unblocked E5.
   - *Mutations (both killed, with E1 and E2):* `insert_base` stamps round 0;
     a rediscovered fact is stamped. Non-vacuity: a guard pins that the generator
     re-derives an asserted fact, the case the second mutation is about (4 of 48).
-- [x] **E12** **A recorded fact premise is its relation's tuple, not a copy.** A
-  tuple is shared (§17 2026-09-13 (later iii)), and every other property compares
-  tuples by value, so a copy would pass them all: only `Rc::ptr_eq` against the
-  relation's own tuple can tell. Over `arb_program_with_edb`, and at
-  `Tier::Medium` (`Large` in the deep run).
-  - *Mutation (killed, by E12 alone at both tiers):* rebuild each kept premise's
-    tuple into a fresh allocation in `collect_rule_matches`. Non-vacuity: a guard
-    pins that the generator records a fact premise (12 of 48; floor 8).
 
 ### Phase F — §13 imports (roadmap step 7) — generalizes §16.5, §16.7
 

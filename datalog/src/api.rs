@@ -757,7 +757,7 @@ impl Scan {
         model
             .relation(self.pred)
             .iter()
-            .map(|tuple| &*tuple.0)
+            .map(|tuple| tuple.0.as_slice())
             .filter(move |tuple| {
                 self.constants
                     .iter()

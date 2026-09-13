@@ -1067,7 +1067,7 @@ mod tests {
         for (name, years) in [("alice", 30), ("bob", 15)] {
             program.facts.push(Fact {
                 pred: age,
-                tuple: Tuple::from(vec![Value::String(name.to_string()), Value::Int(years)]),
+                tuple: Tuple(vec![Value::String(name.to_string()), Value::Int(years)]),
             });
         }
         program.rules.push(Rule {
@@ -1102,11 +1102,11 @@ mod tests {
         let age = program.intern_pred("age", 2);
         program.facts.push(Fact {
             pred: age,
-            tuple: Tuple::from(vec![Value::String("bob".to_string()), Value::Int(30)]),
+            tuple: Tuple(vec![Value::String("bob".to_string()), Value::Int(30)]),
         });
         program.facts.push(Fact {
             pred: age,
-            tuple: Tuple::from(vec![
+            tuple: Tuple(vec![
                 Value::String("carol".to_string()),
                 Value::String("old".to_string()),
             ]),
@@ -1129,11 +1129,11 @@ mod tests {
         let r = program.intern_pred("r", 1);
         program.facts.push(Fact {
             pred: p,
-            tuple: Tuple::from(vec![Value::Int(1)]),
+            tuple: Tuple(vec![Value::Int(1)]),
         });
         program.facts.push(Fact {
             pred: q,
-            tuple: Tuple::from(vec![Value::String("x".to_string())]),
+            tuple: Tuple(vec![Value::String("x".to_string())]),
         });
         program.rules.push(Rule {
             head: atom(r, vec![Term::Var(Var(0))]),
@@ -1157,7 +1157,7 @@ mod tests {
         let t = program.intern_pred("t", 2);
         program.facts.push(Fact {
             pred: seed,
-            tuple: Tuple::from(vec![Value::Float(ir::F64::new(1.5).unwrap())]),
+            tuple: Tuple(vec![Value::Float(ir::F64::new(1.5).unwrap())]),
         });
         program.rules.push(Rule {
             head: atom(t, vec![Term::Var(Var(0)), Term::Var(Var(1))]),
@@ -1195,7 +1195,7 @@ mod tests {
         let t = program.intern_pred("t", 1);
         program.facts.push(Fact {
             pred: p,
-            tuple: Tuple::from(vec![Value::String("x".to_string())]),
+            tuple: Tuple(vec![Value::String("x".to_string())]),
         });
         program.rules.push(Rule {
             head: atom(t, vec![Term::Var(Var(0))]),
@@ -1224,7 +1224,7 @@ mod tests {
         let t = program.intern_pred("t", 1);
         program.facts.push(Fact {
             pred: p,
-            tuple: Tuple::from(vec![Value::String("x".to_string())]),
+            tuple: Tuple(vec![Value::String("x".to_string())]),
         });
         program.rules.push(Rule {
             head: atom(t, vec![Term::Var(Var(0))]),
@@ -1268,7 +1268,7 @@ mod tests {
         let person = program.intern_pred("person", 2);
         program.facts.push(Fact {
             pred: person,
-            tuple: Tuple::from(vec![Value::String("alice".to_string()), Value::Int(30)]),
+            tuple: Tuple(vec![Value::String("alice".to_string()), Value::Int(30)]),
         });
         declare_schema(
             &mut program,
@@ -1291,7 +1291,7 @@ mod tests {
         let person = program.intern_pred("person", 2);
         program.facts.push(Fact {
             pred: person,
-            tuple: Tuple::from(vec![Value::String("alice".to_string()), Value::Int(30)]),
+            tuple: Tuple(vec![Value::String("alice".to_string()), Value::Int(30)]),
         });
         declare_schema(
             &mut program,
@@ -1319,7 +1319,7 @@ mod tests {
         let person = program.intern_pred("person", 2);
         program.facts.push(Fact {
             pred: person,
-            tuple: Tuple::from(vec![Value::String("alice".to_string()), Value::Int(30)]),
+            tuple: Tuple(vec![Value::String("alice".to_string()), Value::Int(30)]),
         });
         declare_schema(&mut program, person, &[("name", None), ("age", None)]);
         let env = typecheck(&program).expect("untyped declaration adds no constraint");

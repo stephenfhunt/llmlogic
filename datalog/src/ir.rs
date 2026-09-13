@@ -42,7 +42,6 @@
 //! columns, and those passes run over the IR with no access to the AST.
 
 use std::hash::{Hash, Hasher};
-use std::rc::Rc;
 
 use crate::ast::{AggOp, ArithOp, CmpOp, Span, TypeName};
 use crate::error::{Error, ErrorCode};
@@ -270,20 +269,8 @@ impl Value {
 }
 
 /// A ground tuple: one row of a relation.
-///
-/// **Shared, not copied.** A tuple is held by its relation, by the round's
-/// delta, and by every recorded premise that matched it, and all of them are the
-/// one allocation: cloning a tuple is a count (§17 2026-09-13 (later iii)).
-/// Equality, order and hash are still the values', so which tuple is the
-/// `Ord`-least, and so which proof prints, never depends on the sharing.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct Tuple(pub Rc<[Value]>);
-
-impl From<Vec<Value>> for Tuple {
-    fn from(values: Vec<Value>) -> Tuple {
-        Tuple(values.into())
-    }
-}
+pub struct Tuple(pub Vec<Value>);
 
 /// A ground fact — the set member of set semantics (§17): a fact derived
 /// multiple ways is one fact with multiple derivations.
@@ -580,14 +567,14 @@ pub(crate) mod fixtures {
     pub(crate) fn fact2(pred: PredId, a: &str, b: &str) -> Fact {
         Fact {
             pred,
-            tuple: Tuple::from(vec![string_value(a), string_value(b)]),
+            tuple: Tuple(vec![string_value(a), string_value(b)]),
         }
     }
 
     pub(crate) fn fact1(pred: PredId, a: &str) -> Fact {
         Fact {
             pred,
-            tuple: Tuple::from(vec![string_value(a)]),
+            tuple: Tuple(vec![string_value(a)]),
         }
     }
 
@@ -840,7 +827,7 @@ pub(crate) mod fixtures {
             ],
             facts: vec![Fact {
                 pred: person,
-                tuple: Tuple::from(vec![string_value("alice"), Value::Int(30)]),
+                tuple: Tuple(vec![string_value("alice"), Value::Int(30)]),
             }],
             rules: vec![
                 // manager_name(N) :- employee(name: N, title: "manager").
@@ -1107,7 +1094,7 @@ mod tests {
                     .into_iter()
                     .map(|(pred, values)| Fact {
                         pred: PredId(pred),
-                        tuple: Tuple::from(values),
+                        tuple: Tuple(values),
                     })
                     .collect();
                 let hashed: HashSet<Fact> = facts.iter().cloned().collect();

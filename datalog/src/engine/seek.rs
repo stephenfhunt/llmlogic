@@ -99,7 +99,7 @@ pub(crate) fn bound_prefix(atom: &Atom, bindings: &[Option<Value>]) -> Option<Tu
             None => extending = false,
         }
     }
-    Some(Tuple::from(prefix))
+    Some(Tuple(prefix))
 }
 
 /// The closed prefix of a refutation pattern — its leading slots that a
@@ -123,7 +123,7 @@ mod tests {
     use proptest::prelude::*;
 
     fn tuple(values: &[Value]) -> Tuple {
-        Tuple::from(values.to_vec())
+        Tuple(values.to_vec())
     }
 
     fn sym(s: &str) -> Value {
@@ -174,12 +174,12 @@ mod tests {
             0u8..4,
         )
             .prop_map(|(rows, pick, take, free, use_free)| {
-                let set: BTreeSet<Tuple> = rows.iter().map(|r| Tuple::from(r.clone())).collect();
+                let set: BTreeSet<Tuple> = rows.iter().map(|r| Tuple(r.clone())).collect();
                 let prefix = if use_free == 0 || rows.is_empty() {
-                    Tuple::from(free)
+                    Tuple(free)
                 } else {
                     let row = &rows[pick.index(rows.len())];
-                    Tuple::from(row[..take.min(row.len())].to_vec())
+                    Tuple(row[..take.min(row.len())].to_vec())
                 };
                 (set, prefix)
             })
@@ -257,7 +257,7 @@ mod tests {
                         args,
                     },
                     bindings,
-                    Tuple::from(cells),
+                    Tuple(cells),
                 )
             })
     }
@@ -358,7 +358,7 @@ mod tests {
                         pred: PredId(0),
                         args,
                     },
-                    Tuple::from(cells),
+                    Tuple(cells),
                 )
             })
     }
@@ -422,7 +422,7 @@ mod tests {
     #[test]
     fn an_empty_prefix_yields_the_whole_relation() {
         let set = relation(&[&[sym("a")], &[sym("b")], &[Value::Absent]]);
-        let everything = Tuple::from(Vec::new());
+        let everything = Tuple(Vec::new());
         let all: Vec<&Tuple> = tuples_with_prefix(&set, &everything).collect();
         assert_eq!(all, set.iter().collect::<Vec<_>>());
     }
@@ -437,7 +437,7 @@ mod tests {
             &[sym("a"), Value::Int(2)],
             &[sym("b"), Value::Int(1)],
         ]);
-        let prefix = Tuple::from(vec![sym("a")]);
+        let prefix = Tuple(vec![sym("a")]);
         let sought: Vec<&Tuple> = tuples_with_prefix(&set, &prefix).collect();
         assert_eq!(
             sought,
@@ -491,7 +491,7 @@ mod tests {
         };
         assert_eq!(
             bound_prefix(&atom, &[None, Some(Value::Int(7))]),
-            Some(Tuple::from(vec![sym("a")]))
+            Some(Tuple(vec![sym("a")]))
         );
     }
 
@@ -524,7 +524,7 @@ mod tests {
             pred: PredId(0),
             args: vec![Some(sym("a")), None, Some(sym("b"))],
         };
-        assert_eq!(closed_prefix(&pattern), Tuple::from(vec![sym("a")]));
+        assert_eq!(closed_prefix(&pattern), Tuple(vec![sym("a")]));
     }
 
     #[test]
@@ -535,12 +535,12 @@ mod tests {
             pred: PredId(0),
             args: vec![Term::Var(Var(0)), Term::Var(Var(0))],
         };
-        assert_eq!(bound_prefix(&atom, &[None]), Some(Tuple::from(Vec::new())));
+        assert_eq!(bound_prefix(&atom, &[None]), Some(Tuple(Vec::new())));
 
         // Bound, both occurrences are known and the prefix covers both.
         assert_eq!(
             bound_prefix(&atom, &[Some(sym("a"))]),
-            Some(Tuple::from(vec![sym("a"), sym("a")]))
+            Some(Tuple(vec![sym("a"), sym("a")]))
         );
     }
 }

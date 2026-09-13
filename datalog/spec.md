@@ -2608,6 +2608,19 @@ never say.
   designed: a shared tuple's pointer and length have no spare bits for the enum's
   tag, where a `Vec`'s capacity had. Ids would save 16 bytes a premise, not 8.
   `a_premise_is_a_fact_wide` now allows the tag.
+  ***Falsified 2026-09-13 (later iii)*** — **sharing did not come free: the
+  premise that the copies were the cost was wrong, and `5035215` is reverted.**
+  `pointsto.dl` with no goals went 8.4 → 12.7 s and `sparse_800` 1.83 → 2.19 s,
+  on equal instructions and 83% more cache misses; a `?why` got 43–50% smaller.
+  Three causes were measured and ruled out (the seek prefix's allocation, count
+  traffic in the join, placement at apply). On `pointsto.dl` the cost was imported
+  rows copied into shared blocks and their originals freed. Leaking them instead
+  gave 6.55 s. `sparse_800`'s cost is not explained.
+  - **What the failure showed** (the user's reading): no one owns a fact. The
+    allocation that survives becomes the fact, and shared ownership made every
+    holder a co-owner. Next is a fact store with one owner, designed first
+    (`notes/fact-store.md`). The experiments are in `notes/recorder-at-scale.md`
+    § Shared tuples, measured.
 - **2026-09-13 (later ii)** — **A diagnostic carries related locations: the other
   side of a conflict, labelled and located** (§12; `error::Related`,
   `ir::Program::fact_spans`; `testing.md` **C18**; closes `bugs/009`, with the

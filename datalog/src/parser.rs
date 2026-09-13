@@ -1900,7 +1900,7 @@ adult(N) :- person(name: N, age: A), A >= 18.
                 let got: BTreeSet<(String, Vec<ir::Value>)> = lowered
                     .facts
                     .iter()
-                    .map(|f| (lowered.pred_info(f.pred).name.clone(), f.tuple.0.to_vec()))
+                    .map(|f| (lowered.pred_info(f.pred).name.clone(), f.tuple.0.clone()))
                     .collect();
                 // Set semantics: duplicate input facts collapse, so compare sets.
                 let want: BTreeSet<(String, Vec<ir::Value>)> = facts.into_iter().collect();

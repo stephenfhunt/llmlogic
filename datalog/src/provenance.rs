@@ -53,7 +53,7 @@ impl NoMatchPattern {
             && self
                 .args
                 .iter()
-                .zip(tuple.0.iter())
+                .zip(&tuple.0)
                 .all(|(pattern, value)| pattern.as_ref().is_none_or(|expected| expected == value))
     }
 }
@@ -61,12 +61,12 @@ impl NoMatchPattern {
 /// One premise of a derivation, aligned with its body literal
 /// ([`crate::ir::BodyIdx`]).
 ///
-/// Every kind but [`Premise::Fact`] is boxed, so a premise is a [`Fact`] and a
-/// tag wide. A recorded run holds one premise per body literal of every
-/// derivation, and fact premises are nearly all of them; sized for the widest
-/// kind, every slot cost 80 bytes. A fact is a predicate and a shared tuple, and
-/// neither has spare bits for the enum's tag, so the tag is the one width a
-/// premise adds.
+/// Every kind but [`Premise::Fact`] is boxed, so a premise is a [`Fact`] wide.
+/// A recorded run holds one premise per body literal of every derivation, and
+/// fact premises are nearly all of them; sized for the widest kind, every slot
+/// cost 80 bytes where a fact needs 32. A no-match pattern is no wider than a
+/// fact, but two inline variants of the same shape leave the enum no spare bits
+/// for its tag, which costs every slot another 8.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Premise {
     /// The fact that matched a positive literal.
@@ -453,15 +453,12 @@ mod tests {
     use crate::ir::PredId;
     use crate::ir::fixtures::{example_16_1, fact2};
 
-    /// A premise is a fact wide, plus its tag: a recorded run holds one per body
-    /// literal of every derivation, so a payload wider than a [`Fact`] belongs
-    /// behind a box like the self-justifying kinds, not inline.
+    /// A premise is a fact wide: a recorded run holds one per body literal of
+    /// every derivation, so a payload wider than a [`Fact`] belongs behind a box
+    /// like the three self-justifying kinds, not inline.
     #[test]
     fn a_premise_is_a_fact_wide() {
-        assert!(
-            std::mem::size_of::<Premise>()
-                <= std::mem::size_of::<Fact>() + std::mem::size_of::<usize>()
-        );
+        assert_eq!(std::mem::size_of::<Premise>(), std::mem::size_of::<Fact>());
     }
 
     #[test]
