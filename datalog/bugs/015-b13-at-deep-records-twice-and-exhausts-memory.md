@@ -89,3 +89,6 @@ testing-first ruling this gates, so the choice is theirs.
   - Two reruns passed: 52 s / 78 MB, and 23 s / 153 MB.
   - Which test is not known. If it recurs, the per-commit suite has the same
     exposure as the deep run.
+- **Ruled again after the cuts** (the user's): no cap on the `Deep` generator
+  either. This file waits on the recorder design, where fact references come
+  first.

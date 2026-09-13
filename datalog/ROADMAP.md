@@ -433,9 +433,11 @@ them. Except where noted these are documented v1 limits rather than defects.
   - **Dense generated programs** still store up to 5.4 GB for a model under 1 MB.
     93–99% of stored derivations are later-round rediscoveries, each mostly
     cloned premise tuples.
-  - **Directions raised, not decided:** one derivation per fact, chosen when the
-    fact is established (the code shows printed proofs unchanged); premises as
-    fact references; no fact copy for `?whynot`.
+  - **Next: premises as fact references** (the user's, 2026-09-13), designed
+    first, since stable ids reach into evaluator storage.
+  - **Raised, not decided:** one derivation per fact, chosen when the fact is
+    established (the code shows printed proofs unchanged); no fact copy for
+    `?whynot`.
   - Reopens §17 2026-07-19, and gates `bugs/015` and so the deep run.
 
   _design session — its own_ (the user's). — §11/engine.

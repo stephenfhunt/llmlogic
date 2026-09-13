@@ -55,16 +55,19 @@ hits. It is not. Planned, approved, and steps 1–3 built.
 - datalog §17 2026-07-19 ***Consequences 2026-09-13 (later)***: the reopening
   stands, narrowed to what all-derivations costs a dense program.
 - One derivation per fact is not built; the plan was the user's.
+- The user's, after the measurements: fact references come next, designed first;
+  `bugs/015` keeps waiting on the recorder design rather than a generator cap.
 
 **Removed** — `Model::base`; base facts' round-0 stamps; `Premise`'s inline
 payloads; the note's unverified `base` direction; the oldest worklog entry.
 
 **Next up**
-- **The user's calls** (note § After the first two cuts):
-  - premises as fact references — stable ids into evaluator storage, the
-    remaining constant;
-  - dropping `api::run`'s fact copy for a `?why` (233 MB on `pointsto.dl`);
-  - whether `bugs/015` needs the count question after all.
+- **Fact references next, as a design pass** (the user's). Stable ids reach into
+  evaluator storage: `BTreeSet<Tuple>` relations, the seek, the deltas. The
+  numbers are in the note's § After the first two cuts.
+- **`bugs/015` waits on the recorder design** (the user's): no generator cap.
+- Not chosen for now: dropping `api::run`'s fact copy for a `?why` (233 MB on
+  `pointsto.dl`).
 - Re-learned: `ps -C cc,c++` misses DuckDB's `clang++` workers, so a working
   release build looked hung and was killed once.
 - **Open**: `datalog/bugs/015`.
