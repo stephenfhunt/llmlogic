@@ -47,9 +47,6 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
 - **Profile the TypeScript extractor** — attributed by phase; tsconfigs share
   parsed files, keys are compact, numstat is parallel, output byte-identical.
   _shipped_ — `decisions.md` 2026-09-13, `notes/code-facts.md` § The extractor's own cost.
-- **The extractor's peak is now its type checkers** — the emit's forced check
-  (+3.7 GB on Grafana), one checker per tsconfig, V8's slack over live heap;
-  VS Code's `src/` still exhausts 12 GB in `dataflow`. _queued_ — same §.
 - **`pointsto.dl` does not fit `vs/base`** — profiled as an engine vehicle
   2026-09-12. A 70% cut now finishes evaluating (6.8 GB); the full base does not,
   and `@grafana/ui` runs in 9 s. _open_ — `../datalog/ROADMAP.md` § Performance,

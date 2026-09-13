@@ -578,9 +578,10 @@ and digests are not):
 | frontend, `refs,quality,git` | 382 s / 19.35 GB | **361 s / 16.37 GB** |
 | `@grafana/ui`, every layer | 67.3 s / 2.26 GB | **37.0 s / 2.05 GB** |
 
-The peak now sits in `structure` and `refs`, with one checker per tsconfig. On
-trunk RSS peaked 6 GB above the live heap. VS Code's `src/` is one tsconfig and
-was not re-measured: there is no checkout on disk.
+The peak now sits in `structure` and `refs`, with one checker per tsconfig. That
+is TypeScript's own cost, which the project's compiler pays too, and it is not
+worked around (`../decisions.md` 2026-09-13, amended). VS Code's `src/` is one
+tsconfig and was not re-measured: there is no checkout on disk.
 
 ## Subjects — what each one exercises, and what is still unexercised
 

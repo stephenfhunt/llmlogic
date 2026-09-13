@@ -29,7 +29,11 @@ with the long form in [`notes/code-facts.md`](notes/code-facts.md).
     a synchronous caller blocked on a worker that fails to load hangs forever,
     while a failed child is an exit code. 38 → 7.5 s on Grafana, output identical.
   - Not taken: the emit's full type check and the per-program checkers — the
-    peak now — need more than a cache (ROADMAP).
+    peak now — need more than a cache.
+    ***Amended 2026-09-13*** — and not queued. The user's ruling: the extractor
+    does not work around TypeScript's own cost. Anyone running it compiles the
+    project too, so similar cost is no surprise; what code-facts adds on top of
+    `tsc` is what gets optimised.
 
 - **2026-09-12 (evening)** — **The tool is made usable at size, not documented
   around it.** The user's rulings, on the engine's memory work

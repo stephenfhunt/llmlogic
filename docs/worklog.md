@@ -62,9 +62,9 @@ extraction by `sha256sum facts/*.jsonl`.
   before commit; the oldest worklog entry.
 
 **Next up**
-- **The extractor's peak is its checkers**: the emit's forced type check (+3.7 GB),
-  one checker per tsconfig, and V8's slack over live heap (ROADMAP). VS Code
-  `src/` is not re-measured (no checkout).
+- **The extractor's remaining peak is TypeScript's checkers — not queued.** The
+  user's ruling: no working around TypeScript's cost, since users compile the
+  project anyway (`code-analysis/decisions.md` 2026-09-13, amended).
 - **`datalog/bugs/015`** — still the user's call; the § Performance gate waits on it.
 - **Open**: `datalog/bugs/009`, `013`, `014`, `015`; `code-analysis/bugs/001`–`005`.
 
