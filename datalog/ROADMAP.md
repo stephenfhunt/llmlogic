@@ -46,12 +46,13 @@ each; detail in §17 and `docs/worklog.md`.
 ## Open backlog
 
 > **Testing comes first** (the user's, §17 2026-09-12): property tests grow their
-> inputs before more refactoring or performance work — § Testing. Answer
-> streaming and every § Performance item wait on it. Every § Performance item is
+> inputs before more refactoring or performance work — § Testing. Every
+> § Performance item waits on it; printing an answer from the model went ahead,
+> guarded by its own property (§17 2026-09-13). Every § Performance item is
 > gated by a deep run (`DATALOG_PBT=deep cargo test --lib`) before and after it
-> (the user's).
+> (the user's) — which does not currently finish on a 30 GB machine (`bugs/015`).
 >
-> **Open defects live in [`bugs/`](bugs/)** — `013` opened 2026-09-12, `014` the same day.
+> **Open defects live in [`bugs/`](bugs/)** — `013` opened 2026-09-12, `014` the same day, `015` 2026-09-13.
 > **No design session blocks anything** either: §6's extension, the last one,
 > shipped 2026-08-18.
 >
@@ -383,8 +384,9 @@ them. Except where noted these are documented v1 limits rather than defects.
   same-round premise sat on a redundant rediscovery. A sequence number would admit
   those and change which proof is printed, for no correctness gain (§17,
   ***Falsified 2026-08-16***). What remains is a **forward risk, not an item**:
-  interleaving collection with insertion — streaming, or the parallelism item below
-  — breaks the round bound silently. E1 is the test that fires, and
+  interleaving collection with insertion — the parallelism item below, or any
+  evaluation that applies a match before its round ends — breaks the round bound
+  silently. Printing an answer from the finished model does not. E1 is the test that fires, and
   `eval_stratum`'s apply loop now says so. _rejected._ — §11.
 - **Provenance as facts.** A proof tree is not a fact, so emitting it as ground
   derivation-edge facts either invents relations the program never declared or
@@ -517,10 +519,12 @@ join is executed changes.
   (§17 that date; [`notes/pointsto-profile-2026-09-12.md`](notes/pointsto-profile-2026-09-12.md),
   which ranks what is left). A round's unkept facts are a set (E9): on a 35% cut
   of `vs/base` evaluation takes 2.67 → 0.97 GB, and the 70% cut now finishes. The full base still does not fit. — §15/engine.
-- **Stream a query's answer rather than copying it out of the model** — _queued,
-  after § Testing_ (the user's). Printing 3.40M rows holds them twice more:
-  `Model::answer`'s owned rows and `RunResult.answers`' lines, ~820 MB of a 1.69 GB
-  peak. Both are API shapes, so a short design pass first. — §14/api.
+- **Print a query's answer from the model, not a copy of it** — **shipped ✅
+  2026-09-13** (§17 that date; `testing.md` **D6**). A bare atom walks its relation,
+  any other query keeps its row set, and a line exists only while it is written.
+  `pointsto.dl` printing 3.40M rows at the 0.35 cut: **36.5 s / 1,978 MB → 33.3 s /
+  978 MB**, stdout identical ([`notes/pointsto-profile-2026-09-12.md`](notes/pointsto-profile-2026-09-12.md)).
+  — §14/api.
 
 - **Real pushdown: column projection, then demand transformation** — _designing,
   post-v1._ The two items above are pruning — they decide *whether* to read a

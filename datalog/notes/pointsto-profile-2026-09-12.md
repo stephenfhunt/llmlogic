@@ -139,6 +139,11 @@ held before the first line is written.
    two printing changes, 3.40M printed rows still hold `Model::answer`'s owned
    rows (278 MB) and `RunResult.answers`' lines (289 MB) at once, plus ~250 MB of
    their `Vec`s: ~820 MB of a 1.69 GB heap peak at 0.35.
+   **Shipped 2026-09-13** (§17 that date): a bare atom's answer is walked out
+   of its relation while printing. At 0.35, printing `pts`, `heap` and `target`,
+   release binaries, trunk `144bb9e` against the change: **36.5 s / 1,978 MB →
+   33.3 s / 978 MB**, the same 3,402,032 lines, stdout sha256 identical. The run
+   that prints now peaks where evaluation alone did (0.97 GB above).
 
 ## On Grafana
 

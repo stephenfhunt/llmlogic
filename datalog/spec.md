@@ -1763,6 +1763,11 @@ itself**:
   property that makes jq effective for agents, mechanically checked by
   `testing.md` D1). Implemented by the canonical printer (`src/print.rs`) and
   the `run` pipeline (`src/api.rs`), 2026-07-22.
+  A run holds each answer where it already is — a bare atom's answer is its
+  relation in the model, any other query's is its sorted row set — and renders
+  a line only as it writes it. Every error a run can raise comes before the
+  first byte, so stdout carries a whole answer or none (§17, 2026-09-13;
+  `testing.md` D6).
 
 **Canonical output form** (resolved 2026-07-22). Values print in the §4
 cross-type order (symbol < string < int < float < bool < date < timestamp <
@@ -1955,8 +1960,9 @@ now only the unnamed case. Also not covered: **naming is never required**, so an
 unnameable projection is not an error (§17, 2026-08-17 — a bare `?-` stays total,
 and making it strict is affordable only now that a name exists). Also not covered: a
 `--format json` data path (deferred as low-value; JSON stays at the
-machine-readable edges), `serde` on the API types, and streaming or cursored
-results. Also not covered: **an exit code survives a pipe only if the caller asks
+machine-readable edges), `serde` on the API types, and a cursor over
+results — printing reads an answer out of the model, but an in-process caller
+still receives each answer whole (`RunResult::answer_lines`). Also not covered: **an exit code survives a pipe only if the caller asks
 it to.** The code above is the one channel carrying the difference between "no
 rows" and "could not answer", and a downstream `datalog - -q '…'` sees **only**
 stdout — so `datalog a.dl | datalog - -q '…'` reads a run that failed exactly as it
@@ -2566,6 +2572,28 @@ never say.
 
 ### Decisions
 
+- **2026-09-13** — **A query's answer is printed from the model, lazily, and
+  every error still comes before the first byte** (§14; `api::RunResult`,
+  `testing.md` **D6**; ROADMAP § Performance, from
+  `notes/pointsto-profile-2026-09-12.md` § Ranking 5).
+  - **`RunResult` holds answers, not lines.** A body that is one atom and
+    nothing else is a filtered walk of its relation at write time — constants and
+    a repeated variable filter, and wildcards after every variable leave
+    duplicates adjacent. Any other body keeps `Model::answer`'s row set, the one
+    copy its sort and dedup need. Lines exist only inside `write_output`.
+  - **The user's question shaped it**: *why does printing copy at all?* The
+    copies were API shapes; a relation already is its answer in canonical order.
+  - **Measured**: `pointsto.dl` printing 3.40M rows at the 0.35 cut, 36.5 s /
+    1,978 MB → 33.3 s / 978 MB, stdout identical — evaluation's own peak.
+  - **Order: before § Testing finished** (the user's). Printing is not
+    evaluation, so the untiered B/C/E properties do not guard it; D6 does, at
+    every tier, against the eager renderer kept as its oracle.
+  - *Rejected:* a sink that `run` writes each query into as it is answered. A
+    later query or `?whynot` that fails would exit 2 after partial stdout, which
+    a pipe without pipefail reads as an answer (`notes/callers-contract.md` § C);
+    and it would save only the time between queries, the fixpoint coming first.
+  - *Parked:* a row set of `&Value` — the join clones its bindings.
+
 - **2026-09-12** — **Sized generators: tiers with a drawn size, one checker per
   claim, and a deep run** (`testing.md` § Generator sizes; answers
   `notes/growing-inputs.md` questions 1, 3 and 4).
@@ -2583,6 +2611,11 @@ never say.
     read no untiered property sees reddens B1 and B5 at `Medium` and `Large`.
   - *Rejected:* `#[ignore]` twins for the deep tier — two copies of each property.
 
+  ***Consequences 2026-09-13*** — the deep run is not reliably green: B13 at
+  `Deep` records twice and one draw ran past 14.9 GB (`bugs/015`). The recorded
+  1.5 GB was a seed, not a bound; *records only if its claim reads it* covers B5
+  and not a claim that compares proofs.
+
 - **2026-09-12** — **Property tests grow their inputs before more refactoring or
   performance work** (the user's: "it's paramount that we have proper and complete
   testing"; `testing.md`; plan in `notes/growing-inputs.md`).
@@ -2595,6 +2628,10 @@ never say.
   - **Order:** § Testing in the ROADMAP before answer streaming and every
     § Performance item. Tiers or a drawn size, oracles that scale, and budgets
     are open (the note).
+
+  ***Amended 2026-09-13*** — answer streaming went ahead of the rest of
+  § Testing (the user's), guarded by its own tiered property, D6: it changes
+  printing, which no unfinished tier guards. See that date's entry.
 
 - **2026-09-12** — **A round holds each unkept fact once, and an answer is not
   copied to be sorted or printed** (§14/§15; `engine::Pending`,
