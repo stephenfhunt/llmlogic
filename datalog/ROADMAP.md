@@ -453,13 +453,14 @@ deferred until a consumer needs them (§8's *Not covered*). — §13,
   179,748 `var` rows 0.71 s / 0.21 GB. What is left is a reached relation read
   whole to answer a few of its rows. _queued — **post-v1**._
   — §13.
-- **A column's type is known before its rows** — a declared type (`declare`, or
-  an import's `as rel(f: t)`) is checked after inference, never used by it, so
-  only a fact fixes a column's type; that is `bugs/014`, and it is why checking a
-  program before its facts load stops at lowering. Declarations as constraints
-  first; a source's own types second (a Parquet footer is free, JSONL/CSV a
-  streaming pass). Changes what `bugs/resolved/008`'s wording rests on.
-  _design session — post-v1._ — §4/§12/§13.
+- **A column's type is known before its rows** — declarations as constraints
+  **shipped ✅ 2026-09-13** (§17 that date, `testing.md` **C17**, closes
+  `bugs/014`): a declared type types a column inference left untyped, so a
+  fully declared program's verdict does not depend on its facts. Left: moving
+  the early check past lowering now that a fact-free typecheck is authoritative
+  for such a program, and a source's own types for a schema without them (a
+  Parquet footer is free, JSONL/CSV a streaming pass). _queued — post-v1._
+  — §4/§12/§13.
 - **Module namespacing** — v1 module imports share one global namespace;
   qualified names / visibility deferred until needed. _queued — **post-v1**._ — §13.
 

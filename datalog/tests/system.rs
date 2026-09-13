@@ -751,9 +751,9 @@ fn a_missing_import_is_an_error_even_when_no_goal_reaches_it() {
 #[test]
 #[cfg(feature = "duckdb")]
 fn a_skipped_relation_cannot_turn_a_program_into_a_type_error() {
-    // `ev` is unreached, so its row is not loaded, and without it `A + @1d`
-    // over a declared timestamp is `bugs/014`'s false type error. A rejection
-    // over a partial load is re-checked over a full one, so this answers.
+    // `ev` is unreached, so its row is not loaded. Before `bugs/014` was fixed,
+    // `A + @1d` over the declared timestamp was then a false type error that only
+    // the re-check over a full load rescued; the declaration types it now.
     let dir = pruning_dir("fallback");
     let out = run_in(
         &dir,
@@ -762,6 +762,27 @@ fn a_skipped_relation_cannot_turn_a_program_into_a_type_error() {
     );
     assert_eq!(out.code, 0, "{}", out.stderr);
     assert_eq!(out.stdout, "u(7).\n");
+}
+
+#[test]
+#[cfg(feature = "duckdb")]
+fn an_empty_import_is_typed_by_its_schema() {
+    // `bugs/014`'s acceptance: the extraction whose layer came out empty. The
+    // same program over one row answers; over none it must still type.
+    let dir = pruning_dir("empty");
+    std::fs::write(dir.join("empty.jsonl"), "").expect("write");
+    let program = |file: &str| {
+        format!(
+            "import \"{file}\" as ev(at: timestamp).\nlater(T) :- ev(at: A), T = A + @1d.\n?- later(T).\n"
+        )
+    };
+    let one = run_in(&dir, &program("ev.jsonl"));
+    assert_eq!(one.code, 0, "{}", one.stderr);
+    assert_eq!(one.stdout, "later(@2026-01-02T00:00:00).\n");
+    let empty = run_in(&dir, &program("empty.jsonl"));
+    assert_ne!(empty.code, 2, "{}", empty.stderr);
+    assert_eq!(empty.stdout, "");
+    assert!(!empty.stderr.contains("error"), "{}", empty.stderr);
 }
 
 #[test]

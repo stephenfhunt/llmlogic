@@ -456,9 +456,12 @@ predicates; imported relations get field names from their source automatically.
 documentation and earlier, clearer errors, not new obligations. Fields may be named
 without types; a type always follows a field name. A declared type that contradicts
 what inference derives for that column (e.g. `age` declared `string` while a fact
-supplies `30`) is a structured type error naming the column; a declared type
-inference never otherwise constrains is simply left unrefuted (and seeds the
-column's type). Two schemas for one predicate that disagree on declared types
+supplies `30`) is a structured type error naming the column. A declared type
+inference leaves unconstrained is **a constraint, not only a check**: it types the
+column before §8's arithmetic is resolved, so `T = A + @1d` over a declared
+`timestamp` with no rows is a point plus a duration, and two differently declared
+columns a rule joins clash with or without facts. A program whose facts agree
+with its declarations gets the same verdict without them (§17, 2026-09-13). Two schemas for one predicate that disagree on declared types
 conflict, naming both origins.
 
 ### Positional and named arguments
@@ -2572,6 +2575,25 @@ never say.
 
 ### Decisions
 
+- **2026-09-13 (later)** — **A declared column type constrains inference where
+  inference left the column untyped** (§4; `typecheck::seed_declared`;
+  `testing.md` **C17**; closes `bugs/014`, with the user's go-ahead to design
+  and build it this session).
+  - **Declarations seed after every fact, rule and query has constrained the
+    program, and before §8's deferred arithmetic resolves.** A class inference
+    already typed is left to the declared-vs-inferred sweep, so every program
+    inference could type reports exactly what it did — `bugs/resolved/008`'s
+    wording, C15 and the pinned corpus are untouched.
+  - **Two declarations seeding one class with different types are a
+    `type-clash`**, at the second declaration: the error a row in each column
+    would have raised. Before, with no rows, that program was accepted.
+  - ***Rejected:*** seeding before rules. A rule contradicting a declaration
+    (`bugs/resolved/008`'s second case) would turn from `declared-type-mismatch`
+    into `type-clash` — a code change for programs that already worked.
+  - **C17 compares verdicts, not codes**: the same contradiction reached first
+    through a fact is a `type-clash`, and through a declaration can be the sweep's.
+  - The partial-load re-check (2026-09-12) stays, for columns typed by rows alone.
+
 - **2026-09-13** — **A query's answer is printed from the model, lazily, and
   every error still comes before the first byte** (§14; `api::RunResult`,
   `testing.md` **D6**; ROADMAP § Performance, from
@@ -2686,6 +2708,10 @@ never say.
     declared type is not an inference constraint, so a fact-free typecheck
     rejects `T = A + @1d` over a declared `timestamp` that one fact makes valid
     (`bugs/014`). Declarations as constraints is a ROADMAP design item.
+    ***Amended 2026-09-13 (later)*** — declarations now constrain (§17 that
+    date), so a fact-free typecheck is authoritative for a program whose facts
+    agree with its declarations (C17). The early check still stops at lowering:
+    moving it is the ROADMAP item's remaining half, not done here.
   - **A rejection over a partial load is re-checked over a full one.** Fewer
     facts can only make typecheck reject more, so a pruned run accepts and
     rejects exactly what a full load does.

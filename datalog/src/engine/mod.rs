@@ -4176,6 +4176,88 @@ mod tests {
             claims
         }
 
+        /// C17's program pair: every column of a well-typed program declared
+        /// with the type the facts-included typecheck gave it, and optionally
+        /// one column's declaration changed — in which case that predicate's
+        /// facts are dropped, so the facts still agree with every declaration.
+        /// Returns (with facts, without facts).
+        fn declared_pair(
+            program: &crate::ir::Program,
+            change: Option<(proptest::sample::Index, proptest::sample::Index)>,
+        ) -> (crate::ir::Program, crate::ir::Program) {
+            let env = typecheck(program).expect("well-typed program");
+            let mut with_facts = program.clone();
+            for p in 0..with_facts.predicates.len() {
+                let arity = with_facts.predicates[p].arity as usize;
+                let pred = crate::ir::PredId(p as u32);
+                with_facts.predicates[p].fields =
+                    Some((0..arity).map(|c| format!("f{c}")).collect());
+                with_facts.predicates[p].field_types =
+                    Some((0..arity).map(|c| env.column_type(pred, c)).collect());
+            }
+            let typed: Vec<(usize, usize)> = (0..with_facts.predicates.len())
+                .flat_map(|p| (0..with_facts.predicates[p].arity as usize).map(move |c| (p, c)))
+                .filter(|&(p, c)| {
+                    with_facts.predicates[p].field_types.as_ref().unwrap()[c].is_some()
+                })
+                .collect();
+            if let (Some((_, pick)), false) = (change, typed.is_empty()) {
+                let (p, c) = typed[pick.index(typed.len())];
+                let types = with_facts.predicates[p].field_types.as_mut().unwrap();
+                types[c] = types[c].map(a_different_type);
+                with_facts.facts.retain(|fact| fact.pred.0 as usize != p);
+            }
+            let mut without_facts = with_facts.clone();
+            without_facts.facts.clear();
+            (with_facts, without_facts)
+        }
+
+        /// C17's non-vacuity guard, against its sentence: the verdict must be
+        /// observed both ways, and a rejection must be one the facts-free
+        /// program can only reach through its declarations — a program no
+        /// declaration constrains accepts without facts whatever it does with
+        /// them, which is `bugs/014`'s shape.
+        #[test]
+        fn c17_generator_rejects_and_accepts_through_declarations() {
+            use proptest::strategy::{Strategy, ValueTree};
+            use proptest::test_runner::TestRunner;
+
+            let mut runner = TestRunner::deterministic();
+            let strategy = (
+                arb_well_typed_program(),
+                proptest::option::of(any::<(proptest::sample::Index, proptest::sample::Index)>()),
+            );
+            let (mut accepted, mut rejected, mut undeclared_accepts) = (0, 0, 0);
+            for _ in 0..200 {
+                let (program, change) = strategy
+                    .new_tree(&mut runner)
+                    .expect("strategy produces a value")
+                    .current();
+                let (with_facts, without_facts) = declared_pair(&program, change);
+                if typecheck(&with_facts).is_ok() {
+                    accepted += 1;
+                } else {
+                    rejected += 1;
+                    let mut bare = without_facts.clone();
+                    for info in &mut bare.predicates {
+                        info.fields = None;
+                        info.field_types = None;
+                    }
+                    if typecheck(&bare).is_ok() {
+                        undeclared_accepts += 1;
+                    }
+                }
+            }
+            eprintln!(
+                "C17: {accepted} accepted, {rejected} rejected, {undeclared_accepts} of them accepted undeclared"
+            );
+            assert!(accepted > 0 && rejected > 0, "C17 sees one verdict only");
+            assert!(
+                undeclared_accepts > 0,
+                "no rejection depended on a declaration — C17 cannot see bugs/014"
+            );
+        }
+
         /// C15's non-vacuity guard, read against the property's sentence. What
         /// the property claims is about *"its values are"* messages, so what
         /// has to be non-zero is how many of those a run produced — not how
@@ -5312,6 +5394,28 @@ mod tests {
                         claimed.keyword()
                     );
                 }
+            }
+
+            /// C17 — a declared column type is a constraint, not a check: over
+            /// programs whose every column is declared and whose facts agree
+            /// with the declarations, typecheck accepts with the facts exactly
+            /// when it accepts without them (`bugs/014`). The verdict, not the
+            /// code: one contradiction reached first through a fact is a
+            /// `type-clash`, and through a declaration can be the sweep's.
+            #[test]
+            fn c17_the_facts_do_not_change_a_declared_programs_verdict(
+                program in arb_well_typed_program(),
+                change in proptest::option::of(any::<(proptest::sample::Index, proptest::sample::Index)>()),
+            ) {
+                let (with_facts, without_facts) = declared_pair(&program, change);
+                let (with, without) = (typecheck(&with_facts), typecheck(&without_facts));
+                prop_assert_eq!(
+                    with.is_ok(),
+                    without.is_ok(),
+                    "with facts: {:?}\nwithout: {:?}",
+                    with.err(),
+                    without.err()
+                );
             }
 
             /// C4 — inference soundness: a type-checked program evaluates

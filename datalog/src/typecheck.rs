@@ -817,9 +817,65 @@ impl<'a> TypeChecker<'a> {
         self.numeric.push((constraint.value, constraint.at));
     }
 
+    /// Declared column types (§4) constrain the classes inference left untyped
+    /// (`bugs/014`, §17 2026-09-13).
+    ///
+    /// Runs once every fact, rule and query has constrained the program, and
+    /// before §8's deferred arithmetic resolves — so `A + @1d` over a declared
+    /// `timestamp` column with no rows reads a point plus a duration. A class
+    /// inference already typed is left to the declared-vs-inferred sweep, so a
+    /// program inference could type reports exactly what it did before. Two
+    /// declarations seeding one class with different types are the clash a fact
+    /// in each column would have been.
+    fn seed_declared(&mut self) {
+        let program = self.program;
+        let mut seeded: std::collections::HashMap<usize, (usize, usize)> =
+            std::collections::HashMap::new();
+        for (p, info) in program.predicates.iter().enumerate() {
+            let Some(declared) = &info.field_types else {
+                continue;
+            };
+            for (col, declared_ty) in declared.iter().enumerate() {
+                let Some(declared_ty) = *declared_ty else {
+                    continue;
+                };
+                let root = self.find(self.col_base[p] + col);
+                match (
+                    self.ty[root].as_ref().map(|fixed| fixed.ty),
+                    seeded.get(&root),
+                ) {
+                    (None, _) => {
+                        self.ty[root] = Some(Fixed {
+                            ty: declared_ty,
+                            witness: None,
+                        });
+                        seeded.insert(root, (p, col));
+                    }
+                    (Some(first_ty), Some(&(q, q_col))) if first_ty != declared_ty => {
+                        let message = format!(
+                            "{} is declared as {} but {}, used as the same column, is declared \
+                             as {}",
+                            column_label(&program.predicates[q], q_col),
+                            type_label(first_ty),
+                            column_label(info, col),
+                            type_label(declared_ty),
+                        );
+                        self.at = info.decl_span;
+                        self.raise(ErrorCode::TypeClash, message);
+                    }
+                    // Typed by inference — the sweep's to judge — or seeded
+                    // the same way already.
+                    _ => {}
+                }
+            }
+        }
+        self.at = None;
+    }
+
     /// Runs the deferred numeric checks and builds the [`TypeEnv`], or returns
     /// the deduplicated type errors.
     fn finish(mut self) -> std::result::Result<TypeEnv, Vec<Error>> {
+        self.seed_declared();
         self.resolve_deferred();
         for (node, at) in std::mem::take(&mut self.numeric) {
             let root = self.find(node);
@@ -885,13 +941,10 @@ impl<'a> TypeChecker<'a> {
                 (0..info.arity as usize)
                     .map(|col| {
                         let root = self.find(self.col_base[p] + col);
-                        // Fall back to the declared type for a column inference
-                        // left unconstrained, so a declared-only column still
-                        // reports its asserted type.
-                        self.ty[root]
-                            .as_ref()
-                            .map(|fixed| fixed.ty)
-                            .or_else(|| info.field_types.as_ref().and_then(|types| types[col]))
+                        // A declared column is typed by now: `seed_declared`
+                        // gave an untyped class its declared type, and a typed
+                        // one that disagrees failed the sweep.
+                        self.ty[root].as_ref().map(|fixed| fixed.ty)
                     })
                     .collect()
             })

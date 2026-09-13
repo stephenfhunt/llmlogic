@@ -1113,3 +1113,36 @@ fn an_unsafe_alternative_of_a_split_rule_names_the_split() {
         assert!(rendered.contains(&format!("(at 2:{column})")), "{rendered}");
     }
 }
+
+/// `bugs/014` — a declared column type constrains inference, so a relation with
+/// no rows is typed by its declaration. `A + @1d` over a declared timestamp was
+/// "cannot tell what `+` means here" until a fact supplied the type.
+#[test]
+fn a_declared_temporal_column_types_arithmetic_without_facts() {
+    let src = "declare ev(at: timestamp).\nlater(T) :- ev(at: A), T = A + @1d.\n?- later(T).\n";
+    let result = datalog::run(src);
+    assert!(result.is_ok(), "{:#?}", result.err());
+    // …and the same arithmetic over a declared `int` still is not temporal.
+    let wrong = "declare ev(at: int).\nlater(T) :- ev(at: A), T = A + @1d.\n?- later(T).\n";
+    assert!(datalog::run(wrong).is_err(), "int + duration was accepted");
+}
+
+/// `bugs/014`'s other face: two declared columns of different types joined by a
+/// rule were accepted with no facts (nothing typed either class) and rejected
+/// as soon as each had a row. Declarations now clash the way the rows would.
+#[test]
+fn two_declarations_joined_as_one_column_clash_without_facts() {
+    let src = "declare p(x: int).\ndeclare q(y: string).\nr(X) :- p(x: X), q(y: X).\n?- r(X).\n";
+    let errors = datalog::run(src).expect_err("int joined with string");
+    let clash = errors
+        .iter()
+        .find(|e| e.code == ErrorCode::TypeClash)
+        .unwrap_or_else(|| panic!("no type clash: {errors:#?}"));
+    let rendered = clash.to_string();
+    assert!(rendered.contains("`p.x` is declared as int"), "{rendered}");
+    assert!(rendered.contains("`q.y`"), "{rendered}");
+    assert!(rendered.contains("(at 2:1)"), "{rendered}");
+    // With a row in each, the verdict is the same.
+    let with_rows = format!("{src}p(1).\nq(\"a\").\n");
+    assert!(datalog::run(&with_rows).is_err());
+}

@@ -70,3 +70,34 @@ without their fact tables (`testing.md`'s rejection-claim corollary).
 - Making declarations constrain changes what `bugs/resolved/008`'s wording rests
   on — its message re-derives a column's type from the facts before claiming it —
   so the fix is a design decision with a §17 entry, not a patch.
+
+## Resolution
+
+**Fixed 2026-09-13**, designed and built the same session (§17 2026-09-13
+(later)). `typecheck::seed_declared` runs in `finish`, after `gather` and before
+`resolve_deferred`. It gives each declared column's class its declared type
+**where inference left the class untyped**. A class that two declarations seed
+differently is a `type-clash` at the second declaration. The `TypeEnv`
+declared-type fallback became dead and is gone. The repro answers over an empty
+JSONL and over a bare `declare`.
+
+**The diagnosis held.** "Declared types enter only after inference" was the
+cause, and `fall_back_binary` ran before either use.
+
+**Which seeding point, and why:** before rules was rejected. It would turn
+`bugs/resolved/008`'s rule-contradicts-declaration case from
+`declared-type-mismatch` into `type-clash` for programs that already typed. After
+inference, every such program reports what it did: C15, the pinned corpus and 008
+are unchanged.
+
+**Also fixed**, found while designing: two differently declared columns joined by
+a rule were **accepted** with no facts, the same shape.
+
+**The property, as this file asked**: C17 is a biconditional over fully declared
+programs whose facts agree with their declarations. The verdict is compared, not
+the code. *Mutation*: skip the seeding → C17 red.
+
+**Cost elsewhere**: the 2026-09-12 early-check decision is amended. A fact-free
+typecheck is now authoritative for such programs, but moving the check past
+lowering stays the ROADMAP item. The partial-load re-check stays, for columns
+typed by rows alone.

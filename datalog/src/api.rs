@@ -356,9 +356,10 @@ fn run_pruning(
 /// header, so a program with one loads every import first.
 ///
 /// **Typecheck runs after the load, and a rejection over a partial load is not
-/// the verdict.** Facts pin column types and a declared type does not
-/// (`bugs/014`), so leaving facts out can make typecheck reject a program it
-/// would accept — never accept one it would reject. A partial load that fails
+/// the verdict.** A declared column type constrains inference (`bugs/014`, §17
+/// 2026-09-13), so a column typed by its schema is typed with or without its
+/// rows; but a column typed by rows alone is not, so leaving facts out can
+/// still make typecheck reject a program it would accept. A partial load that fails
 /// typecheck is redone over every import, and that answer stands: a pruned run
 /// accepts and rejects exactly the programs a full load does, and only a run
 /// already headed for a type error pays the difference.

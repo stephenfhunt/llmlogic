@@ -320,6 +320,16 @@ rule", not "unverified".
 
 Value layer (`src/ir.rs`):
 
+- [x] **C17** A declared column type is a constraint, not only a check
+  (`bugs/014`, 2026-09-13): over `arb_well_typed_program` with every column
+  declared as the facts-included typecheck typed it — and, drawn, one
+  declaration changed and that predicate's facts dropped, so the facts still
+  agree with every declaration — typecheck accepts with the facts exactly when it
+  accepts without them. Verdicts, not codes (§17 2026-09-13 (later)). Guard:
+  `c17_generator_rejects_and_accepts_through_declarations` — both verdicts occur
+  (126 / 74 of 200), and a rejection that only a declaration can reach without
+  facts (74). *Mutation (killed)*: skip `seed_declared` — C17 red, and
+  `a_declared_temporal_column_types_arithmetic_without_facts`.
 - [x] **A1** F64 order is total; `Ord` agrees with `PartialOrd`; sorting is
   deterministic.
 - [x] **A2** `a == b ⇒ hash(a) == hash(b)` (bit-hash + `-0.0` normalization).
