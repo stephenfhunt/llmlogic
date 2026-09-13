@@ -24,6 +24,56 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-13 (late night) — fact references: shared tuples built, slower, reverted; a store with one owner designed
+
+Asked to start the fact references design. The user asked why a premise had to be
+an id and not a `&`, chose design then build, and after the regression named the
+defect: nothing owns a fact.
+
+**Done** — datalog `cargo test`, clippy, fmt green at every commit
+- `aa1ae1d` designed shared tuples (`Rc<[Value]>`), not ids (§17 2026-09-13
+  (later iii)). `5035215` built them, with E12 and a killed mutation:
+  - `?why` byte-identical on 33 corpus goals and both `@grafana/ui` goals;
+  - `pointsto.dl` `?why` 836 → 474 MB, `callreach.dl` 389 → 196 MB.
+- **Measured only after committing, and slower.** `pointsto.dl` with no goals
+  went 8.4 → 12.7 s and `sparse_800` 1.83 → 2.19 s, on equal instructions and
+  83% more cache misses.
+- **Diagnosed** (`notes/recorder-at-scale.md` § Shared tuples, measured):
+  - ruled out: the seek prefix's allocation, count traffic, placement at apply;
+  - `Box<[Value]>` split the layout cost from sharing's;
+  - leaking imported rows' freed buffers gave 6.55 s, which is `pointsto.dl`'s
+    cost. `sparse_800`'s is not explained.
+- `efcda71` reverts the code and E12; §17 keeps the entry, ***Falsified***.
+- `notes/fact-store.md`:
+  - each relation owns its facts in a flat, append-only store, written once;
+  - everything else holds a `FactRef`, and order is kept as sorted runs of rows;
+  - a measurement gate, and six questions for review.
+
+**Decided**
+- The user's: the defect is ownership. Facts need *a single source of truth that
+  everything else refers back to*, designed and prototyped before trunk.
+- The user's: revert `5035215` rather than keep its memory win.
+- §17 2026-09-13 (later iii): ***Amended*** (a premise stays 32 bytes), then
+  ***Falsified***.
+
+**Removed** — `5035215`'s code and E12; the shared-tuple direction; the note's
+zero-arity question (v1 has no nullary predicates); the oldest worklog entry.
+
+**Next up**
+- **Review `notes/fact-store.md`'s six questions with the user first:**
+  - runs or a B-tree;
+  - membership;
+  - imports written into the store;
+  - `Program.facts`;
+  - the `?whynot` copy;
+  - scope (storage before provenance, recommended).
+- **Prototype in `~/.cache/recorder-wt`** against a frozen `efcda71` release
+  binary. The proof harness is in `~/.cache/recorder-wt/harness/`.
+- **Measure time, `perf stat` and memory before any commit.**
+- Re-learned: `cargo build | grep | tail && cp` copied a stale binary after a
+  failed build. Use `set -o pipefail`.
+- **Open**: `datalog/bugs/015`.
+
 ## 2026-09-13 (later that night) — the recorder cut by constants: `pointsto.dl` `?why` 1,428 → 848 MB, every derivation kept
 
 Asked where the derivation-tracking changes stood: references rather than copies
@@ -121,53 +171,3 @@ files and scratch worktree; the oldest worklog entry.
   bugs.
 - Queued on code-analysis ROADMAP: quality-layer libraries, structure recovery,
   an eval of open-ended analysis. **Open**: `datalog/bugs/015`.
-
-## 2026-09-13 (evening) — the dogfood bugs: eight closed with their properties; the ninth found the recorder
-
-Asked to work the bugs Grafana and VS Code filed and to build quality into the
-tooling. Planned. The user ruled on four choices: 003 as a library, 009 and 014
-designed then built, 002's weaker relation, and 015's option. The session then
-withdrew 015's option.
-
-**Done**
-- **code-analysis** (`npm test` 126/126): `dd72fef` 001 file-name
-  `is_generated`; `3735f44` 002 `unresolved_package` / `unresolved_bare`;
-  `3d045a5` 003 `lib/exports.dl`; `c4ed45d` + `687163f` 004
-  `uncounted_dependent`; `552e11c` 005 docs only.
-- **datalog** (pinned `.err` byte-identical throughout):
-  - `2e05fb3` 013: one error per unsafe `;`-alternative; **A16**.
-  - `f793822` 014: declared types seed untyped classes; **C17**.
-  - `597117d` 009: `Error.related`, `fact_spans`; **C18**.
-  - `e678579` B13 compares proofs one step per live fact (`ProofTree::step`),
-    exactly as strong as trees by induction on first round. 015 stays open.
-  - `c4e27d8` `datalog/notes/recorder-at-scale.md`, measured in a scratch
-    worktree (`~/.cache/recorder-wt`, kept for the design session).
-- **Caught on the subject, not the fixture:** 004's first fix was green and empty
-  on `@grafana/ui`. A re-export makes no `ref`.
-
-**Decided**
-- datalog §17 2026-09-13 (later): declarations constrain inference, seeded after
-  `gather`.
-- datalog §17 2026-09-13 (later ii): related locations, on the column form only.
-- code-analysis 2026-09-13 (later): an unresolved import claims no package.
-- **015 gets no test budget** (the user's): the recorder is the defect. §17
-  2026-07-19 all-derivations is ***Reopened***.
-- Withdrawn: B13 unrecorded at `Deep`. Its justification, E9, is not tiered.
-
-**Removed** — `unplaced_dependent`; the `TypeEnv` declared-type fallback; the
-hand-written dead-export recipe; ROADMAP's hand count of resolved bugs; 009's
-`#[ignore]`s; the oldest worklog entry.
-
-**Next up**
-- **The recorder design session** (datalog ROADMAP § Provenance surface; the
-  note's five questions). What it has to work from:
-  - real library programs store about 1.1 derivations per fact but pay 4.5–5.5×
-    in copies and base-fact bookkeeping (a `?why` holds base facts four times);
-  - dense `Deep` programs are 93–99% later-round rediscoveries;
-  - the directions raised are one derivation per fact chosen at establishment,
-    and premises as references.
-- Until then the deep run does not finish, and § Performance's gate waits.
-- Move the early check past lowering for fully declared programs; tier the rest.
-- Re-learned: `systemd-run --user -p MemoryMax` is not enforced here; use
-  `prlimit --as`.
-- **Open**: `datalog/bugs/015`.

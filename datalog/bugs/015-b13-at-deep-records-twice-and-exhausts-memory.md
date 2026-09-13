@@ -92,3 +92,12 @@ testing-first ruling this gates, so the choice is theirs.
 - **Ruled again after the cuts** (the user's): no cap on the `Deep` generator
   either. This file waits on the recorder design, where fact references come
   first.
+
+## 2026-09-13 (later iii) — shared tuples reverted; still open
+
+- **Fact references built as shared tuples** (`5035215`) cut a `?why`'s memory by
+  43–50%, made runs up to 50% slower, and were reverted (`efcda71`). The deep run
+  was not re-measured on them.
+- **This file waits on the fact store with one owner** (`notes/fact-store.md`).
+  Its premises are row references, which removes the cloned premise tuples a
+  recorded `Deep` run spends most of its store on.
