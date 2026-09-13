@@ -69,3 +69,23 @@ testing-first ruling this gates, so the choice is theirs.
 - **Correction to this session's measurements:** `systemd-run --user -p
   MemoryMax` is not enforced on this machine, whose user cgroups delegate only
   `pids`. `prlimit --as` is.
+
+## 2026-09-13 (later) — the recorder cut by constants; still open
+
+- **Two cuts that keep every derivation** (`91b730a`, `ef82398`;
+  `notes/recorder-at-scale.md` § After the first two cuts):
+  - idx 129 now records at 5.43 GB peak live, down from 6.96 GB;
+  - idx 119 at 2.78 GB, down from 3.58 GB.
+- **The deep run on `ef82398` still does not finish.**
+  - Under `prlimit --as=20000000000` it failed an allocation at 372 s, with
+    18.1 GB peak RSS.
+  - B1, B5 and B13 at their deep tiers and `d6_printing_is_the_eager_rendering_at_large`
+    were each past 60 s. Which test held the memory is not established.
+  - A smaller constant does not close this file.
+- **Seen once at the per-commit tiers.** A plain `cargo test` of the tree that
+  became `ef82398` held one `engine::tests` property at 16.4 GB RSS for
+  10 minutes, until it was stopped.
+  - It had not failed, so no seed was saved.
+  - Two reruns passed: 52 s / 78 MB, and 23 s / 153 MB.
+  - Which test is not known. If it recurs, the per-commit suite has the same
+    exposure as the deep run.

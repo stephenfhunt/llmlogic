@@ -24,6 +24,51 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-13 (later that night) — the recorder cut by constants: `pointsto.dl` `?why` 1,428 → 848 MB, every derivation kept
+
+Asked where the derivation-tracking changes stood: references rather than copies
+a clear win, one derivation per fact held back unless it is what code-analysis
+hits. It is not. Planned, approved, and steps 1–3 built.
+
+**Done** — datalog `cargo test` (every binary), clippy, fmt; each commit green
+- **The answer.** Library programs store 1.11–1.12 derivations per fact, 95–97%
+  of them first-round. They pay for representation and base-fact bookkeeping,
+  not count, and the base set does not need the one-derivation direction.
+- `91b730a` — no base set: a held fact with no round stamp is base. **E11**,
+  stated from `program.facts`. Mutations killed: `insert_base` stamps round 0; a
+  rediscovered fact is stamped. Guard: 4 of 48.
+- `ef82398` — a premise is a fact wide (80 → 32 bytes). Every kind but `Fact` is
+  boxed, `NoMatch` too, since two inline variants of one shape leave no niche for
+  the tag (40). Pinned by `a_premise_is_a_fact_wide`.
+- Against a frozen `8c6bc91` release binary:
+  - `?why` is byte-identical on 43 §16-corpus goals and both `@grafana/ui` goals;
+  - `pointsto.dl` 1,428 MB / 14.7 s → 848 MB / 9.1 s;
+  - `callreach.dl` 466 → 389 MB.
+- `Deep` draws, with the note's harness rebased in `~/.cache/recorder-wt`:
+  idx 129 6.96 → 5.43 GB, idx 119 3.58 → 2.78 GB. Most of what remains is cloned
+  premise tuples (3.06 GB on idx 129).
+- **The deep run still does not finish**: it failed an allocation at 372 s and
+  18.1 GB under a 20 GB cap. In `bugs/015`, with a 16 GB per-commit-tier draw
+  seen once and not reproduced.
+
+**Decided**
+- datalog §17 2026-07-19 ***Consequences 2026-09-13 (later)***: the reopening
+  stands, narrowed to what all-derivations costs a dense program.
+- One derivation per fact is not built; the plan was the user's.
+
+**Removed** — `Model::base`; base facts' round-0 stamps; `Premise`'s inline
+payloads; the note's unverified `base` direction; the oldest worklog entry.
+
+**Next up**
+- **The user's calls** (note § After the first two cuts):
+  - premises as fact references — stable ids into evaluator storage, the
+    remaining constant;
+  - dropping `api::run`'s fact copy for a `?why` (233 MB on `pointsto.dl`);
+  - whether `bugs/015` needs the count question after all.
+- Re-learned: `ps -C cc,c++` misses DuckDB's `clang++` workers, so a working
+  release build looked hung and was killed once.
+- **Open**: `datalog/bugs/015`.
+
 ## 2026-09-13 (night) — code-analysis from the user's chair: the playbook investigates, and its texts stop leaking
 
 Asked what the skill tells a user, what it won't, and whether agents dig or only
@@ -123,47 +168,3 @@ hand-written dead-export recipe; ROADMAP's hand count of resolved bugs; 009's
 - Re-learned: `systemd-run --user -p MemoryMax` is not enforced here; use
   `prlimit --as`.
 - **Open**: `datalog/bugs/015`.
-
-## 2026-09-13 (later) — the TypeScript extractor profiled: 19.35 → 16.37 GB on Grafana, facts identical
-
-Asked to profile the TypeScript extractor for memory, giving up no fact data,
-and take any low-hanging fruit. Planned from a by-phase profile (forced GC per
-phase), then shipped in three commits, each checked against a frozen trunk
-extraction by `sha256sum facts/*.jsonl`.
-
-**Done** — code-facts `npm test`, typecheck; each intermediate tree tested on its own
-- **`8adb540`** — programs share each parsed file where their settings would parse
-  and bind it the same. On Grafana's 16 tsconfigs, 44,954 `SourceFile`s had held
-  13,768 paths: load **7,043 → 2,710 MB** retained, 36.5 → 15 s. **P9**: output
-  identical with sharing on and off.
-- **`2c76fe6`** — declaration keys name a file by an integer: `ids` +742 → +529 MB.
-- **`444c97b`** — numstat as parallel `git log --no-walk` jobs via a child
-  process: git layer 43 → 11 s. A test compares rows across job counts.
-- **End to end** (single runs): frontend `refs,quality,git` **382 s / 19.35 GB →
-  361 s / 16.37 GB**; `@grafana/ui` **67.3 s / 2.26 GB → 37.0 s / 2.05 GB**. Both
-  digests identical. Measurements: `code-analysis/notes/code-facts.md` § The
-  extractor's own cost.
-- **Mutations**: keying the share on file name alone was **green at first**. Under
-  `nodenext` the default `moduleDetection` binds every `.ts` file as a module, so
-  only `legacy` differs, and a randomly placed witness hit 4% of runs. Pinned, it
-  is 49%, and the mutant is red 3 of 3. Dropping a chunk's last commit → red.
-  Ignoring the pathspec in numstat stayed green; it is output-invisible.
-
-**Decided** (`code-analysis/decisions.md` 2026-09-13; the first the user's)
-- **The extractor represents the project as its tsconfigs configure it** — no
-  setting of its own; an optimisation must equal per-tsconfig output.
-- The share key is TypeScript's `DocumentRegistry` key without `pathsBasePath`.
-- Numstat uses a child process, not a worker thread, because a synchronous
-  caller blocked on a worker that fails to load hangs.
-- Compact keys only if they measured ≥100 MB — they did.
-
-**Removed**
-- The single-pass `git log --numstat`; a worker-thread draft of it, replaced
-  before commit; the oldest worklog entry.
-
-**Next up**
-- **The extractor's remaining peak is TypeScript's checkers — not queued.** The
-  user's ruling: no working around TypeScript's cost, since users compile the
-  project anyway (`code-analysis/decisions.md` 2026-09-13, amended).
-- **`datalog/bugs/015`** — still the user's call; the § Performance gate waits on it.
-- **Open**: `datalog/bugs/009`, `013`, `014`, `015`; `code-analysis/bugs/001`–`005`.

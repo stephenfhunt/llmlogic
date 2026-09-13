@@ -427,14 +427,15 @@ them. Except where noted these are documented v1 limits rather than defects.
   prints (§16.6 and E7/E8 pin it byte for byte). _parked — **post-v1**._ — §11/engine.
 - **The recorder holds what no proof reads** — measured 2026-09-13
   ([`notes/recorder-at-scale.md`](notes/recorder-at-scale.md)).
-  - **Real library programs pay 4.5–5.5×**, mostly copies and base-fact
-    bookkeeping: `first_round`, `base`, and the program's own facts. A `?why`
-    holds every base fact four times.
-  - **Dense generated programs pay up to ~17,000×**, where 93–99% of stored
-    derivations are later-round rediscoveries.
+  - **Real library programs**: base facts are held in their relation only, and a
+    premise is a fact wide. `pointsto.dl`'s `?why` on `@grafana/ui` is 848 MB
+    RSS. `api::run` still copies the program's facts for a `?why`.
+  - **Dense generated programs** still store up to 5.4 GB for a model under 1 MB.
+    93–99% of stored derivations are later-round rediscoveries, each mostly
+    cloned premise tuples.
   - **Directions raised, not decided:** one derivation per fact, chosen when the
     fact is established (the code shows printed proofs unchanged); premises as
-    references.
+    fact references; no fact copy for `?whynot`.
   - Reopens §17 2026-07-19, and gates `bugs/015` and so the deep run.
 
   _design session — its own_ (the user's). — §11/engine.

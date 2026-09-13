@@ -122,9 +122,8 @@ Live bytes at the end of a recorded run, measured by emptying each map in turn:
   - Removes the count term: idx 129 goes from 8.2 M stored to 2,257.
   - Printed proofs are unchanged by fact 1.
   - Retires `first_round`, which exists only to make the choice later.
-  - May retire `base`: base facts are inserted before evaluation, so a derivation
-    of one is a rediscovery and never becomes its step. "Held, with no step" would
-    mean "base". Unverified.
+  - `base` does not need this direction: it is retired already (§ After the first
+    two cuts). A held fact with no round stamp is base.
   - **What becomes wrong:** warning counts would under-report unless the
     reporting store is kept alongside; E3's coverage narrows to one derivation
     per fact; `derivations_of` changes meaning; §11's "one fact, many proofs"
@@ -132,13 +131,53 @@ Live bytes at the end of a recorded run, measured by emptying each map in turn:
     its rules with the head bound against the final model, as `?whynot` does.
 - **Premises as references, dancing-links style.**
   - Removes the per-derivation constant.
-  - Cheap form: box the rare `Premise` variants (80 → ~32-byte slots).
+  - Cheap form: box the rare `Premise` variants (80 → 32-byte slots). Built; see
+    § After the first two cuts.
   - Structural form: stable per-fact ids in an append-only store per relation, so
     a premise is `(PredId, u32)`. The chosen derivations then *are* the proof
     graph `explain` walks.
   - Cost: relations are `BTreeSet<Tuple>` read by the joins and the prefix seek,
     so stable ids reach into evaluator storage.
 - **Adjacent:** symbol interning. Every symbol clone allocates, in relations too.
+
+## After the first two cuts
+
+*Measured later on 2026-09-13.* Two cuts that keep every derivation were built
+before the count question, because the library programs do not pay for count:
+
+- `91b730a` retires `base` and base facts' entries in `first_round`. A held fact
+  with no round stamp is base (`testing.md` **E11**).
+- `ef82398` makes a premise a fact wide: every kind but `Fact` is boxed, `NoMatch`
+  included, since two inline variants of the same shape leave no niche for the
+  tag (40 bytes otherwise).
+
+`?why` output is byte-identical to `8c6bc91` on both `@grafana/ui` goals and on
+43 goals over the §16 corpus.
+
+| program | before | after `91b730a` | after `ef82398` |
+|---|---|---|---|
+| `callreach.dl` `?why`, release CLI RSS | 466 MB | 401 MB | 389 MB |
+| `pointsto.dl` `?why`, release CLI RSS | 1,428 MB / 14.7 s | 854 MB / 9.5 s | 848 MB / 9.1 s |
+| `Deep` idx 18, peak live | 76 MB | — | 57 MB |
+| `Deep` idx 17 | 573 MB | — | 422 MB |
+| `Deep` idx 16 | 705 MB | — | 562 MB |
+| `Deep` idx 119 | 3.58 GB | — | 2.78 GB |
+| `Deep` idx 129 | 6.96 GB (RSS 10 GB) | — | 5.43 GB (RSS 8.5 GB) |
+
+The `Deep` rows use this note's harness, rebased onto `ef82398` in the same
+scratch worktree.
+
+- **The base-fact cut is the library programs' win**: `pointsto.dl` is 41% smaller
+  and 38% faster.
+- **The premise cut is the dense programs'**, 20–26% each. On idx 129 a
+  derivation now costs 627 bytes rather than 814. What is left of its store is
+  premise *content*: 3.06 GB of cloned tuples and 596 MB of cloned symbol
+  strings, against 1.02 GB of premise slots. The copies are the remaining
+  constant, so fact references are what would move it next.
+- **The deep run still does not finish.** On `ef82398`, under
+  `prlimit --as=20000000000`, it failed an allocation at 372 s and 18.1 GB peak
+  RSS. A smaller constant moves the tail and does not bound it, so `bugs/015`
+  still waits on question 1 below.
 
 ## Questions for the design session
 

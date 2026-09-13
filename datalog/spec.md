@@ -4657,6 +4657,17 @@ never say.
   round, so it could be fixed when the fact is established. Not to be built on
   until the recorder design session answers the note's questions; `bugs/015`
   waits on it.
+  ***Consequences 2026-09-13 (later)*** — **count is the dense programs' cost, not
+  the libraries'**, so two cuts that keep every derivation came first (note,
+  § After the first two cuts):
+  - The base set went without the one-derivation direction: a held fact with no
+    round stamp is base (`testing.md` E11).
+  - A premise is a fact wide (`a_premise_is_a_fact_wide`).
+  - `pointsto.dl`'s `?why` on `@grafana/ui` went from 1,428 MB to 848 MB, with
+    proofs byte-identical. The densest `Deep` draw went only from 6.96 GB to
+    5.43 GB, and the deep run still fails an allocation at 18 GB.
+  - The reopening stands, narrowed to what all-derivations costs a dense
+    program.
 - **2026-07-19** — **Step-2 comparison policy**: the core evaluator reports
   comparison literals as a structured "not yet supported" error (the same
   pattern lowering uses for negation and named arguments). §8 semantics —
