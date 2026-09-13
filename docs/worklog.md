@@ -24,6 +24,56 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-13 (evening) — the dogfood bugs: eight closed with their properties; the ninth found the recorder
+
+Asked to work the bugs Grafana and VS Code filed and to build quality into the
+tooling. Planned. The user ruled on four choices: 003 as a library, 009 and 014
+designed then built, 002's weaker relation, and 015's option. The session then
+withdrew 015's option.
+
+**Done**
+- **code-analysis** (`npm test` 126/126): `dd72fef` 001 file-name
+  `is_generated`; `3735f44` 002 `unresolved_package` / `unresolved_bare`;
+  `3d045a5` 003 `lib/exports.dl`; `c4ed45d` + `687163f` 004
+  `uncounted_dependent`; `552e11c` 005 docs only.
+- **datalog** (pinned `.err` byte-identical throughout):
+  - `2e05fb3` 013: one error per unsafe `;`-alternative; **A16**.
+  - `f793822` 014: declared types seed untyped classes; **C17**.
+  - `597117d` 009: `Error.related`, `fact_spans`; **C18**.
+  - `e678579` B13 compares proofs one step per live fact (`ProofTree::step`),
+    exactly as strong as trees by induction on first round. 015 stays open.
+  - `c4e27d8` `datalog/notes/recorder-at-scale.md`, measured in a scratch
+    worktree (`~/.cache/recorder-wt`, kept for the design session).
+- **Caught on the subject, not the fixture:** 004's first fix was green and empty
+  on `@grafana/ui`. A re-export makes no `ref`.
+
+**Decided**
+- datalog §17 2026-09-13 (later): declarations constrain inference, seeded after
+  `gather`.
+- datalog §17 2026-09-13 (later ii): related locations, on the column form only.
+- code-analysis 2026-09-13 (later): an unresolved import claims no package.
+- **015 gets no test budget** (the user's): the recorder is the defect. §17
+  2026-07-19 all-derivations is ***Reopened***.
+- Withdrawn: B13 unrecorded at `Deep`. Its justification, E9, is not tiered.
+
+**Removed** — `unplaced_dependent`; the `TypeEnv` declared-type fallback; the
+hand-written dead-export recipe; ROADMAP's hand count of resolved bugs; 009's
+`#[ignore]`s; the oldest worklog entry.
+
+**Next up**
+- **The recorder design session** (datalog ROADMAP § Provenance surface; the
+  note's five questions). What it has to work from:
+  - real library programs store about 1.1 derivations per fact but pay 4.5–5.5×
+    in copies and base-fact bookkeeping (a `?why` holds base facts four times);
+  - dense `Deep` programs are 93–99% later-round rediscoveries;
+  - the directions raised are one derivation per fact chosen at establishment,
+    and premises as references.
+- Until then the deep run does not finish, and § Performance's gate waits.
+- Move the early check past lowering for fully declared programs; tier the rest.
+- Re-learned: `systemd-run --user -p MemoryMax` is not enforced here; use
+  `prlimit --as`.
+- **Open**: `datalog/bugs/015`.
+
 ## 2026-09-13 (later) — the TypeScript extractor profiled: 19.35 → 16.37 GB on Grafana, facts identical
 
 Asked to profile the TypeScript extractor for memory, giving up no fact data,
@@ -112,53 +162,3 @@ widened. Shipped in three commits, each verified.
 - Re-learned: a "baseline" that recompiles picks up uncommitted tests — the
   second trunk deep run was not trunk. Freeze binaries before measuring.
 - **Open**: `datalog/bugs/009`, `013`, `014`, `015`; `code-analysis/bugs/001`–`005`.
-
-## 2026-09-12 (late night) — property tests that grow: tiers, a deep run, the `Old` read caught unprompted
-
-Asked to plan and start an ambitious expansion of the property tests, sized for
-program shape and scale, so they can carry the performance refactors. Plan
-approved; Step 1 and the first tiered properties shipped.
-
-**Done** — datalog 495 lib tests, full suite, clippy, fmt
-- **`c9422a7`** — `testgen::Tier` (`Small` = the old `eval_bounds`, unchanged),
-  `arb_program_with_edb_at` / `arb_program_text_at`, `DATALOG_PBT=deep`,
-  `testgen::cases`, `RunStats` read off the recorded run, a growth guard with
-  measured floors; **B1 at `Medium` and `Large`**.
-- **Calibration forced two shapes**: above `Small`, bodies are connected (a
-  four-atom product at `Large` did not finish) and constants come from a dense
-  pool (an arity-3 recursion over the typed pools was OOM-killed at `Deep`).
-- **The 2026-09-12 `Old` read now reddens B1 and B5 at `Medium` and `Large`**
-  (2 of 2 runs) with no shape built for it; every untiered property stays green.
-  At `Large` it shrank to 8 facts and 6 rules in 2.9 s.
-- **`a03a20c`** — B5 permuting every body (`with_permuted_bodies`) and B13 over
-  a query mask (`keep_queries`) at both tiers. Skipping `Dep::Negated` reddens
-  B13 at `Medium` in 2 of 3 runs, at `Large` in none.
-- **Lib suite 12.2 → 18.1 s**: the tiered tests ~4.7 s; `b1_shaped_programs_agree`
-  alone is 12.3 s. **Deep run: 134 s, 1.5 GB peak, green**; `Deep`'s floors set from it. The
-  first deep run was killed for memory in B5 at `Deep`, recording derivations a
-  fact claim never reads; `Unrecorded`, it peaks at 55 MB.
-- `Deep`'s slowest programs take 6–7 s (debug) for under 500 derived facts —
-  five-atom self-joins over arity-3 relations: performance vehicles too.
-
-**Decided** (`datalog/spec.md` §17 2026-09-12, *sized generators*; two the user's)
-- **Per-commit `cargo test --lib` under 60 s**; **a deep run before and after
-  every § Performance item**, and on demand.
-- Tiers are upper bounds; one shared `*_holds` checker per claim, one
-  `proptest!` entry per tier; the naive oracle runs to `Large`, not `Deep`; no
-  `#[ignore]` twins.
-
-**Removed**
-- The duplicated bodies of shaped B1 and engine B13 (now `b1_holds`,
-  `b13_holds`); the temporary calibration test; the oldest worklog entry.
-
-**Next up**
-- **The generator audit** (plan Step 0's table, into `testing.md` § Generator
-  sizes) — measured the baseline, did not write the table.
-- **Tier the rest** through `*_holds`: B2–B4, B6, B8, C11, C13, C14, E1–E10.
-- **A tiered shaped generator** (mutual recursion, strata layers, arithmetic,
-  named arguments, temporal), then **the scaling oracles** — all-paths
-  differential, staged evaluation, renaming / disjoint union, first-round
-  oracle, an Andersen points-to solver — and imports, seek and parser at size.
-- The plan: `~/.claude/plans/let-s-plan-and-start-quirky-pancake.md` (local);
-  its substance is in `datalog/notes/growing-inputs.md` § Sequence.
-- **Open**: `datalog/bugs/009`, `013`, `014`; `code-analysis/bugs/001`–`005`.
