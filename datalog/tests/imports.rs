@@ -561,11 +561,17 @@ fn worked_example_16_8_sparse_nutrient_table() {
         csv.to_str().unwrap()
     );
     let result = datalog::run(&src).unwrap_or_else(|e| panic!("run: {e:?}"));
-    assert_eq!(result.answers[0], vec!["high_iron(\"beef\").".to_string()]);
-    assert_eq!(result.answers[1], vec!["missing(\"spinach\").".to_string()]);
+    assert_eq!(
+        result.answer_lines()[0],
+        vec!["high_iron(\"beef\").".to_string()]
+    );
+    assert_eq!(
+        result.answer_lines()[1],
+        vec!["missing(\"spinach\").".to_string()]
+    );
     // Every row returns; the gap round-trips as `absent`.
     assert_eq!(
-        result.answers[2],
+        result.answer_lines()[2],
         vec![
             "recorded(\"beef\", 8).".to_string(),
             "recorded(\"bread\", 3).".to_string(),
@@ -665,7 +671,7 @@ fn named_access_to_a_schema_less_import_works() {
         path.to_str().unwrap()
     );
     let result = datalog::run(&program).unwrap_or_else(|e| panic!("run: {e:?}"));
-    let answers: Vec<String> = result.answers.into_iter().flatten().collect();
+    let answers: Vec<String> = result.answer_lines().into_iter().flatten().collect();
     assert_eq!(
         answers,
         vec!["manager_name(\"alice\").", "manager_name(\"carol\")."]

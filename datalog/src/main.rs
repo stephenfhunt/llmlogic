@@ -109,13 +109,15 @@ fn main() -> ExitCode {
             // answer to anything and the run reports success (§14) — which is
             // what keeps `datalog p.dl` usable as a plain load-and-run check.
             //
-            // **Only `answers` is read, and that is the ruling, not an
-            // accident** (§17, 2026-08-21): an explanation is commentary, not a
-            // row, so appending `?why` to `datalog roster.dl -q '…' && deploy`
+            // **Only the queries' answers are read, and that is the ruling, not
+            // an accident** (§17, 2026-08-21): an explanation is commentary, not
+            // a row, so appending `?why` to `datalog roster.dl -q '…' && deploy`
             // cannot change which way the pipeline branches. It is the
             // exit-code half of E5's comment-stripping guard, and a run whose
             // only goals are explanations exits 0 for the reason above.
-            if result.answers.is_empty() || result.answers.iter().any(|rows| !rows.is_empty()) {
+            let mut answered = result.answered().peekable();
+            let asked_nothing = answered.peek().is_none();
+            if asked_nothing || answered.any(|rows| rows) {
                 ExitCode::SUCCESS
             } else {
                 ExitCode::from(NO_ROWS)

@@ -217,6 +217,20 @@ impl Model {
         query: &Query,
         report: &mut dyn FnMut(&[Option<Premise>]),
     ) -> Result<Vec<Vec<Value>>> {
+        Ok(self
+            .answer_set_reporting(query, report)?
+            .into_iter()
+            .collect())
+    }
+
+    /// [`answer_reporting`](Self::answer_reporting) as the set the rows are
+    /// collected into: already sorted and deduplicated, so a caller that only
+    /// walks them pays for no second copy of the answer (§17, 2026-09-13).
+    pub fn answer_set_reporting(
+        &self,
+        query: &Query,
+        report: &mut dyn FnMut(&[Option<Premise>]),
+    ) -> Result<BTreeSet<Vec<Value>>> {
         validate_body(&query.body, &query.var_names)?;
         let views = vec![AtomView::Full; query.body.len()];
         let cx = JoinCx {

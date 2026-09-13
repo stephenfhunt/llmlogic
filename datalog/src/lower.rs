@@ -3661,7 +3661,7 @@ mod tests {
         let answers = |src: &str| {
             crate::api::run(src)
                 .unwrap_or_else(|e| panic!("runs: {e:?}"))
-                .answers
+                .answer_lines()
         };
         assert_eq!(answers(&before), vec![vec!["g(1, 1).", "g(2, 2)."]]);
         assert_eq!(answers(&before), answers(&after));
@@ -4003,9 +4003,9 @@ lookup(N) :- usr(N, _).
 
     /// Answers of the single query in `src`.
     fn answers_of(src: &str) -> Vec<String> {
-        let mut result = crate::api::run(src).unwrap_or_else(|e| panic!("runs: {e:?}"));
-        assert_eq!(result.answers.len(), 1, "expected exactly one query");
-        result.answers.pop().expect("one query")
+        let result = crate::api::run(src).unwrap_or_else(|e| panic!("runs: {e:?}"));
+        assert_eq!(result.answer_lines().len(), 1, "expected exactly one query");
+        result.answer_lines().pop().expect("one query")
     }
 
     /// The name reaches the output as a **relation**, not a label: the answer
@@ -4038,8 +4038,8 @@ grown(N) :- adult(N, _).
 ?- grown(N).
 ";
         let result = crate::api::run(src).expect("runs");
-        assert_eq!(result.answers[0], vec!["adult(\"alice\", 30)."]);
-        assert_eq!(result.answers[1], vec!["grown(\"alice\")."]);
+        assert_eq!(result.answer_lines()[0], vec!["adult(\"alice\", 30)."]);
+        assert_eq!(result.answer_lines()[1], vec!["grown(\"alice\")."]);
     }
 
     /// Arity is the projection's length — the columns `answer/N` would have
@@ -4106,7 +4106,7 @@ mentions(N) :- age(N, _), not adult(N, _).
 ?- adult: age(N, A), A >= 18.
 ";
         let result = crate::api::run(src).expect("a referenced-only name is free to take");
-        assert_eq!(result.answers[0], vec!["adult(\"alice\", 30)."]);
+        assert_eq!(result.answer_lines()[0], vec!["adult(\"alice\", 30)."]);
     }
 
     /// Arity is still checked against other uses of the name, because the

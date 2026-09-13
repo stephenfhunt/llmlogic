@@ -56,16 +56,16 @@ use crate::sources::{LoadedTable, load_imports, load_imports_where};
 use crate::typecheck::typecheck;
 
 /// The result of a successful [`run`]: the least model plus each query's
-/// canonical answer lines, in program (statement) order.
+/// answer, in program (statement) order.
 #[derive(Debug, Clone)]
 pub struct RunResult {
     pub model: Model,
-    /// One entry per query, each a list of canonical fact lines (no trailing
-    /// newline).
-    pub answers: Vec<Vec<String>>,
+    /// One entry per query, held in the form printing reads rather than as
+    /// lines ([`Answer`]).
+    queries: Vec<Answer>,
     /// One entry per explanation goal (§11), each a block of `%`-comment lines.
     ///
-    /// Kept apart from `answers` because an explanation is **not a row**: it
+    /// Kept apart from the answers because an explanation is **not a row**: it
     /// rides in the same text stream and is invisible to the exit code, so
     /// appending `?why` to a check cannot change what the check answers (§17,
     /// 2026-08-21). Stripping these lines leaves the fact stream byte for byte
@@ -77,6 +77,32 @@ pub struct RunResult {
 }
 
 impl RunResult {
+    /// Each query's canonical fact lines (no trailing newline), in program
+    /// order. This renders them all at once; the binary prints through
+    /// [`write_output`](Self::write_output), which holds a line only while it
+    /// writes it.
+    pub fn answer_lines(&self) -> Vec<Vec<String>> {
+        self.queries
+            .iter()
+            .map(|answer| {
+                let mut lines = Vec::new();
+                answer
+                    .for_each_line(&mut |line| {
+                        lines.push(line);
+                        Ok(())
+                    })
+                    .expect("collecting lines cannot fail");
+                lines
+            })
+            .collect()
+    }
+
+    /// Whether each query, in program order, answered at least one row — what
+    /// the exit code reads (§14), known without rendering a line.
+    pub fn answered(&self) -> impl Iterator<Item = bool> + '_ {
+        self.queries.iter().map(Answer::answered)
+    }
+
     /// All answer lines across every query, then every explanation block,
     /// joined with newlines (a trailing newline is added iff there is any
     /// output). This is the binary's stdout.
@@ -90,16 +116,20 @@ impl RunResult {
         String::from_utf8(out).expect("answer and explanation lines are UTF-8")
     }
 
-    /// [`output`](Self::output), written to `out` line by line instead of
-    /// joined into one string first. This is what the binary prints through: a
-    /// large answer is already held once in [`answers`](Self::answers), and
-    /// joining it held it twice (`notes/pointsto-profile-2026-09-12.md`).
+    /// [`output`](Self::output), rendered and written one line at a time. This
+    /// is what the binary prints through: an answer is held once, in the form
+    /// [`Answer`] describes, and no line outlives its write
+    /// (`notes/pointsto-profile-2026-09-12.md`, §17 2026-09-13).
     pub fn write_output(&self, out: &mut impl std::io::Write) -> std::io::Result<()> {
-        for lines in self.answers.iter().chain(&self.explanations) {
-            for line in lines {
+        for answer in &self.queries {
+            answer.for_each_line(&mut |line| {
                 out.write_all(line.as_bytes())?;
-                out.write_all(b"\n")?;
-            }
+                out.write_all(b"\n")
+            })?;
+        }
+        for line in self.explanations.iter().flatten() {
+            out.write_all(line.as_bytes())?;
+            out.write_all(b"\n")?;
         }
         Ok(())
     }
@@ -198,7 +228,7 @@ fn run_pruning(
     .map_err(&one)?;
     warnings.extend(absent_skip_warnings(&model, &program, live));
 
-    let mut answers = Vec::with_capacity(program.queries.len());
+    let mut queries = Vec::with_capacity(program.queries.len());
     for (position, query) in program.queries.iter().enumerate() {
         // (body index) → (op, total skipped, groups that skipped), for the
         // aggregates written in *this* query. A query's premises are built and
@@ -207,7 +237,7 @@ fn run_pruning(
         let mut sites: BTreeMap<usize, (&'static str, usize, usize)> = BTreeMap::new();
         let mut lost_sites: BTreeMap<usize, (&'static str, usize)> = BTreeMap::new();
         let rows = model
-            .answer_reporting(query, &mut |premises| {
+            .answer_set_reporting(query, &mut |premises| {
                 for (idx, premise) in premises.iter().enumerate() {
                     match premise {
                         Some(crate::provenance::Premise::Aggregate { op, skipped, .. })
@@ -244,7 +274,10 @@ fn run_pruning(
                 failed,
             }
         }));
-        answers.push(answer_lines(query, &rows, &program));
+        queries.push(Answer::Rows {
+            shape: Shape::of(query, &program),
+            rows,
+        });
     }
     // The cross case, decided before the loop so at most one extra fixpoint is
     // ever run: `?whynot` over a fact that turns out to hold wants a proof, and
@@ -295,7 +328,7 @@ fn run_pruning(
 
     Ok(RunResult {
         model,
-        answers,
+        queries,
         explanations,
         warnings,
     })
@@ -611,97 +644,215 @@ fn assignment_is_guarded(body: &[ir::BodyLiteral], idx: usize) -> bool {
     })
 }
 
-/// Renders one query's answer rows to canonical fact lines per the §14 output
-/// shape. `rows` are the projected answer-variable bindings (in
-/// [`ir::Query::projection`] order), as returned by [`Model::answer`]. An empty
-/// projection makes `rows` the body's **truth value**: one empty row when it
-/// holds, none when it does not.
-fn answer_lines(query: &ir::Query, rows: &[Vec<ir::Value>], program: &ir::Program) -> Vec<String> {
-    // Row position of each projected slot — this is the order `Model::answer`
-    // lays out each row.
-    let position_of: HashMap<u32, usize> = query
-        .projection
-        .iter()
-        .enumerate()
-        .map(|(position, &slot)| (slot, position))
-        .collect();
+/// One query's answer as a run holds it: every error the query can raise has
+/// been raised, and no line is rendered until [`RunResult::write_output`] asks
+/// for it (§17, 2026-09-13). So stdout is still all of the answer or none of
+/// it, and a large answer is not held a second time as text.
+#[derive(Debug, Clone)]
+enum Answer {
+    /// [`Model::answer`]'s rows — projected bindings in
+    /// [`ir::Query::projection`] order, sorted and deduplicated — printed in
+    /// `shape`.
+    Rows {
+        rows: BTreeSet<Vec<ir::Value>>,
+        shape: Shape,
+    },
+}
 
-    let atoms: Vec<&ir::Atom> = query
-        .body
-        .iter()
-        .filter_map(|literal| match &literal.kind {
-            ir::BodyLiteralKind::Atom(atom) => Some(atom),
-            _ => None,
-        })
-        .collect();
-    let atom_vars: BTreeSet<u32> = atoms
-        .iter()
-        .flat_map(|atom| atom.args.iter())
-        .filter_map(|term| match term {
-            ir::Term::Var(var) => Some(var.0),
-            ir::Term::Const(_) => None,
-        })
-        .collect();
-    let projected: BTreeSet<u32> = query.projection.iter().copied().collect();
+/// Which §14 form a query's rows print in, decided from the query alone.
+#[derive(Debug, Clone)]
+enum Shape {
+    /// The body's atoms, each row substituted in.
+    ///
+    /// `in_row_order` when there is one atom and its variables first occur in
+    /// ascending slot order: rows sorted by projection are then sorted as facts,
+    /// and distinct rows are distinct facts, so they print as they are. Slots
+    /// number by first appearance in the *body*, so `?- X > 1, p(Y, X).` is not
+    /// in row order, and neither is a ground conjunction, whose facts sort by
+    /// name.
+    Atoms {
+        atoms: Vec<(String, Vec<Cell>)>,
+        in_row_order: bool,
+    },
+    /// `holds(true).` when the body holds.
+    Holds,
+    /// `answer(…)` over the projection.
+    Synthesized,
+}
 
-    // Substituted-atom form. Printing a real predicate's name is only honest
-    // when the atoms account for **every** answer variable, so this is set
-    // equality rather than the one-directional "every argument is projected":
-    // a body can bind a variable no atom mentions (an aggregate result, an
-    // `=`-assignment), and emitting the atoms would silently drop that column.
-    //
-    // One atom may carry a whole projection; several may carry only a ground
-    // yes, which `atom_vars` being empty is exactly the test for. The
-    // combination that matched a *multi-row* answer is not recoverable from
-    // several atoms' tuples alone — a filter that pruned rows leaves no trace
-    // in them — so those bodies fall through to `answer/N` (§17, 2026-08-17).
-    if !atoms.is_empty() && atom_vars == projected && (atoms.len() == 1 || atom_vars.is_empty()) {
-        let position_of = &position_of;
-        // Cells borrowed from `rows` and the query, not cloned: this list sorts
-        // the whole answer, and printing a large one held it a second time
-        // (`notes/pointsto-profile-2026-09-12.md`).
-        let mut facts: Vec<(&str, Vec<&ir::Value>)> = rows
+/// One argument of a substituted atom: a constant, or a column of the row.
+#[derive(Debug, Clone)]
+enum Cell {
+    Const(ir::Value),
+    Column(usize),
+}
+
+impl Shape {
+    /// The §14 output shape for `query`. An empty projection makes the rows the
+    /// body's **truth value**: one empty row when it holds, none when it does
+    /// not.
+    fn of(query: &ir::Query, program: &ir::Program) -> Shape {
+        // Row position of each projected slot — this is the order `Model::answer`
+        // lays out each row.
+        let position_of: HashMap<u32, usize> = query
+            .projection
             .iter()
-            .flat_map(|row| {
-                atoms.iter().map(move |&atom| {
-                    let tuple = atom
+            .enumerate()
+            .map(|(position, &slot)| (slot, position))
+            .collect();
+
+        let atoms: Vec<&ir::Atom> = query
+            .body
+            .iter()
+            .filter_map(|literal| match &literal.kind {
+                ir::BodyLiteralKind::Atom(atom) => Some(atom),
+                _ => None,
+            })
+            .collect();
+        let atom_vars: BTreeSet<u32> = atoms
+            .iter()
+            .flat_map(|atom| atom.args.iter())
+            .filter_map(|term| match term {
+                ir::Term::Var(var) => Some(var.0),
+                ir::Term::Const(_) => None,
+            })
+            .collect();
+        let projected: BTreeSet<u32> = query.projection.iter().copied().collect();
+
+        // Substituted-atom form. Printing a real predicate's name is only honest
+        // when the atoms account for **every** answer variable, so this is set
+        // equality rather than the one-directional "every argument is projected":
+        // a body can bind a variable no atom mentions (an aggregate result, an
+        // `=`-assignment), and emitting the atoms would silently drop that column.
+        //
+        // One atom may carry a whole projection; several may carry only a ground
+        // yes, which `atom_vars` being empty is exactly the test for. The
+        // combination that matched a *multi-row* answer is not recoverable from
+        // several atoms' tuples alone — a filter that pruned rows leaves no trace
+        // in them — so those bodies fall through to `answer/N` (§17, 2026-08-17).
+        if !atoms.is_empty() && atom_vars == projected && (atoms.len() == 1 || atom_vars.is_empty())
+        {
+            let atoms: Vec<(String, Vec<Cell>)> = atoms
+                .iter()
+                .map(|atom| {
+                    let cells = atom
                         .args
                         .iter()
                         .map(|term| match term {
-                            ir::Term::Const(value) => value,
-                            ir::Term::Var(var) => &row[position_of[&var.0]],
+                            ir::Term::Const(value) => Cell::Const(value.clone()),
+                            ir::Term::Var(var) => Cell::Column(position_of[&var.0]),
                         })
                         .collect();
-                    (program.pred_info(atom.pred).name.as_str(), tuple)
+                    (program.pred_info(atom.pred).name.clone(), cells)
                 })
-            })
-            .collect();
-        // By name then value, so a ground conjunction prints the same bytes
-        // however its atoms were ordered.
-        facts.sort();
-        facts.dedup();
-        return facts
-            .iter()
-            .map(|(name, values)| print_ground_fact(name, values))
-            .collect();
-    }
+                .collect();
+            let in_row_order = atoms.len() == 1 && columns_first_occur_in_order(&atoms[0].1);
+            return Shape::Atoms {
+                atoms,
+                in_row_order,
+            };
+        }
 
-    // No answer variables, and nothing substitutable to show: the body's whole
-    // content is a yes. Withholding it is what made an existence check
-    // indistinguishable from a failing one — `?- p("a"), q("b").` printed
-    // nothing either way, and so did `?- not banned("bob").` and `?- p(_).`.
-    if projected.is_empty() {
-        return if rows.is_empty() {
-            Vec::new()
-        } else {
-            vec![print_ground_fact("holds", &[ir::Value::Bool(true)])]
-        };
-    }
+        // No answer variables, and nothing substitutable to show: the body's whole
+        // content is a yes. Withholding it is what made an existence check
+        // indistinguishable from a failing one — `?- p("a"), q("b").` printed
+        // nothing either way, and so did `?- not banned("bob").` and `?- p(_).`.
+        if projected.is_empty() {
+            return Shape::Holds;
+        }
 
-    // Otherwise: synthesized `answer/N` facts over the answer variables.
-    rows.iter()
-        .map(|row| print_ground_fact("answer", row))
+        // Otherwise: synthesized `answer/N` facts over the answer variables.
+        Shape::Synthesized
+    }
+}
+
+/// Whether each column of `cells` first occurs after every smaller one — the
+/// condition under which a row's order is its fact's.
+fn columns_first_occur_in_order(cells: &[Cell]) -> bool {
+    let mut next = 0;
+    for cell in cells {
+        if let Cell::Column(column) = *cell {
+            if column == next {
+                next += 1;
+            } else if column > next {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+/// The values of one atom's substituted arguments, borrowed from the row and
+/// the atom.
+fn substitute<'a>(cells: &'a [Cell], row: &'a [ir::Value]) -> Vec<&'a ir::Value> {
+    cells
+        .iter()
+        .map(|cell| match cell {
+            Cell::Const(value) => value,
+            Cell::Column(column) => &row[*column],
+        })
         .collect()
+}
+
+impl Answer {
+    /// Whether the query answered at least one row.
+    fn answered(&self) -> bool {
+        match self {
+            Answer::Rows { rows, .. } => !rows.is_empty(),
+        }
+    }
+
+    /// Renders the answer's canonical fact lines in order, handing each to
+    /// `line` as it is made.
+    fn for_each_line(
+        &self,
+        line: &mut dyn FnMut(String) -> std::io::Result<()>,
+    ) -> std::io::Result<()> {
+        let Answer::Rows { rows, shape } = self;
+        match shape {
+            Shape::Atoms {
+                atoms,
+                in_row_order: true,
+            } => {
+                let (name, cells) = &atoms[0];
+                for row in rows {
+                    line(print_ground_fact(name, &substitute(cells, row)))?;
+                }
+            }
+            Shape::Atoms {
+                atoms,
+                in_row_order: false,
+            } => {
+                // By name then value, so a ground conjunction prints the same
+                // bytes however its atoms were ordered. Cells are borrowed, not
+                // cloned (`notes/pointsto-profile-2026-09-12.md`).
+                let mut facts: Vec<(&str, Vec<&ir::Value>)> = rows
+                    .iter()
+                    .flat_map(|row| {
+                        atoms
+                            .iter()
+                            .map(move |(name, cells)| (name.as_str(), substitute(cells, row)))
+                    })
+                    .collect();
+                facts.sort();
+                facts.dedup();
+                for (name, values) in facts {
+                    line(print_ground_fact(name, &values))?;
+                }
+            }
+            Shape::Holds => {
+                if !rows.is_empty() {
+                    line(print_ground_fact("holds", &[ir::Value::Bool(true)]))?;
+                }
+            }
+            Shape::Synthesized => {
+                for row in rows {
+                    line(print_ground_fact("answer", row))?;
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -743,7 +894,7 @@ e(\"b\", \"b\").
 ";
         let result = run(src).expect("runs");
         assert_eq!(
-            result.answers,
+            result.answer_lines(),
             vec![vec![
                 "e(\"a\", \"a\").".to_string(),
                 "e(\"b\", \"b\").".to_string(),
@@ -762,7 +913,7 @@ ancestor(X, Y) :- parent(X, Z), ancestor(Z, Y).
 ";
         let result = run(src).expect("runs");
         assert_eq!(
-            result.answers,
+            result.answer_lines(),
             vec![vec![
                 "ancestor(\"alice\", \"bob\").".to_string(),
                 "ancestor(\"alice\", \"carol\").".to_string(),
@@ -782,7 +933,7 @@ age(\"bob\", 15).
 ";
         let result = run(src).expect("runs");
         assert_eq!(
-            result.answers,
+            result.answer_lines(),
             vec![vec!["age(\"alice\", 30).".to_string()]]
         );
     }
@@ -799,7 +950,7 @@ banned(\"carol\").
 ";
         let result = run(src).expect("runs");
         assert_eq!(
-            result.answers,
+            result.answer_lines(),
             vec![vec!["answer(\"alice\", 30, 1).".to_string()]]
         );
     }
@@ -807,9 +958,9 @@ banned(\"carol\").
     #[test]
     fn ground_single_atom_query_prints_when_it_holds() {
         let holds = run("p(\"a\").\n?- p(\"a\").").expect("runs");
-        assert_eq!(holds.answers, vec![vec!["p(\"a\").".to_string()]]);
+        assert_eq!(holds.answer_lines(), vec![vec!["p(\"a\").".to_string()]]);
         let absent = run("p(\"a\").\n?- p(\"b\").").expect("runs");
-        assert_eq!(absent.answers, vec![Vec::<String>::new()]);
+        assert_eq!(absent.answer_lines(), vec![Vec::<String>::new()]);
     }
 
     #[test]
@@ -821,9 +972,9 @@ banned(\"carol\").
         let hoisted =
             run("number(1).\nnumber(2).\nsucc(N, M) :- number(N), M = N + 1.\n?- succ(X, Y).")
                 .expect("runs");
-        assert_eq!(inline.answers, hoisted.answers);
+        assert_eq!(inline.answer_lines(), hoisted.answer_lines());
         assert_eq!(
-            inline.answers,
+            inline.answer_lines(),
             vec![vec!["succ(1, 2).".to_string(), "succ(2, 3).".to_string(),]]
         );
     }
@@ -839,7 +990,7 @@ banned(\"carol\").
         let facts = "p(1).\np(2).\np(3).\nq(3).\n";
         let expected = vec![vec!["r(1).".to_string(), "r(3).".to_string()]];
         let inline = run(&format!("{facts}r(X) :- p(X), not q(X + 1).\n?- r(X).")).expect("runs");
-        assert_eq!(inline.answers, expected);
+        assert_eq!(inline.answer_lines(), expected);
     }
 
     /// The §5 claim that inline arithmetic and a hand-written assignment lower
@@ -859,8 +1010,8 @@ banned(\"carol\").
             "{facts}r(X) :- p(X), not q(Y), Y = X + 1.\n?- r(X)."
         ))
         .expect("binder-last runs");
-        assert_eq!(inline.answers, binder_first.answers);
-        assert_eq!(inline.answers, binder_last.answers);
+        assert_eq!(inline.answer_lines(), binder_first.answer_lines());
+        assert_eq!(inline.answer_lines(), binder_last.answer_lines());
     }
 
     /// The same defect reached through an aggregate result rather than
@@ -871,7 +1022,7 @@ banned(\"carol\").
         let program = "p(1).\np(2).\nq(3).\nr(X) :- p(X), not q(count { Y | p(Y) }).\n?- r(X).";
         let result = run(program).expect("runs");
         assert_eq!(
-            result.answers,
+            result.answer_lines(),
             vec![vec!["r(1).".to_string(), "r(2).".to_string()]]
         );
     }
@@ -882,7 +1033,7 @@ banned(\"carol\").
     fn a_wildcard_under_negation_stays_existential() {
         let result =
             run("p(1).\np(2).\nq(2, 9).\nr(X) :- p(X), not q(X, _).\n?- r(X).").expect("runs");
-        assert_eq!(result.answers, vec![vec!["r(1).".to_string()]]);
+        assert_eq!(result.answer_lines(), vec![vec!["r(1).".to_string()]]);
     }
 
     /// A *named* variable no literal binds is still unsafe — the one thing the
@@ -1017,13 +1168,19 @@ parsed(K, V) :- raw(K, S), V = S as int.
             "{SPARSE}has(F) :- m(F, A), A is not absent.\n?- has(F)."
         ))
         .expect("runs");
-        assert_eq!(present.answers, vec![vec!["has(\"a\").".to_string()]]);
+        assert_eq!(
+            present.answer_lines(),
+            vec![vec!["has(\"a\").".to_string()]]
+        );
 
         let missing = run(&format!(
             "{SPARSE}mis(F) :- m(F, A), A is absent.\n?- mis(F)."
         ))
         .expect("runs");
-        assert_eq!(missing.answers, vec![vec!["mis(\"b\").".to_string()]]);
+        assert_eq!(
+            missing.answer_lines(),
+            vec![vec!["mis(\"b\").".to_string()]]
+        );
     }
 
     #[test]
@@ -1032,7 +1189,10 @@ parsed(K, V) :- raw(K, S), V = S as int.
         // out — no type error despite the column being int.
         let result =
             run(&format!("{SPARSE}high(F) :- m(F, A), A >= 5.\n?- high(F).")).expect("runs");
-        assert_eq!(result.answers, vec![vec!["high(\"a\").".to_string()]]);
+        assert_eq!(
+            result.answer_lines(),
+            vec![vec!["high(\"a\").".to_string()]]
+        );
     }
 
     #[test]
@@ -1045,7 +1205,7 @@ parsed(K, V) :- raw(K, S), V = S as int.
             let result = run(&format!("{SPARSE}q(F) :- m(F, A), A {op} 9.\n?- q(F)."))
                 .unwrap_or_else(|e| panic!("runs: {e:?}"));
             assert_eq!(
-                result.answers,
+                result.answer_lines(),
                 vec![expected],
                 "`A {op} 9` never selects the absent row"
             );
@@ -1074,7 +1234,7 @@ parsed(K, V) :- raw(K, S), V = S as int.
         ))
         .expect("the producer form still lowers");
         assert_eq!(
-            produced.answers,
+            produced.answer_lines(),
             vec![vec![
                 "z(\"a\", absent).".to_string(),
                 "z(\"b\", absent).".to_string(),
@@ -1088,7 +1248,7 @@ parsed(K, V) :- raw(K, S), V = S as int.
         // reserved literal `absent` (Datalog-out is Datalog-in).
         let result = run(&format!("{SPARSE}rec(F, A) :- m(F, A).\n?- rec(F, A).")).expect("runs");
         assert_eq!(
-            result.answers,
+            result.answer_lines(),
             vec![vec![
                 "rec(\"a\", 5).".to_string(),
                 "rec(\"b\", absent).".to_string(),
@@ -1103,7 +1263,7 @@ parsed(K, V) :- raw(K, S), V = S as int.
         ))
         .expect("runs");
         assert_eq!(
-            result.answers,
+            result.answer_lines(),
             vec![vec![
                 "plus(\"a\", 15).".to_string(),
                 "plus(\"b\", absent).".to_string(),
@@ -1117,7 +1277,7 @@ parsed(K, V) :- raw(K, S), V = S as int.
         // nothing, including another absent.
         let src = "a(\"x\", absent).\nb(\"y\", absent).\nj(P, Q) :- a(P, K), b(Q, K).\n?- j(P, Q).";
         let result = run(src).expect("runs");
-        assert_eq!(result.answers, vec![Vec::<String>::new()]);
+        assert_eq!(result.answer_lines(), vec![Vec::<String>::new()]);
     }
 
     /// The third row of §4's four-site table: an aggregate **group key** stays
@@ -1134,7 +1294,7 @@ parsed(K, V) :- raw(K, S), V = S as int.
                    g(K, N) :- k(K), N = count { C | v(K, C) }.\n?- g(K, N).";
         let result = run(src).expect("runs");
         assert_eq!(
-            result.answers,
+            result.answer_lines(),
             vec![vec![
                 "g(absent, 0).".to_string(),
                 "g(\"a\", 1).".to_string()
@@ -1163,7 +1323,7 @@ parsed(K, V) :- raw(K, S), V = S as int.
         ))
         .expect("runs");
         assert_eq!(
-            result.answers,
+            result.answer_lines(),
             vec![vec![
                 "tag(\"a\", absent).".to_string(),
                 "tag(\"b\", absent).".to_string(),
@@ -1175,9 +1335,9 @@ parsed(K, V) :- raw(K, S), V = S as int.
     fn disjunction_is_equivalent_to_separate_rules() {
         let disjunctive = run("a(1).\nb(2).\np(X) :- a(X) ; b(X).\n?- p(X).").expect("runs");
         let separate = run("a(1).\nb(2).\np(X) :- a(X).\np(X) :- b(X).\n?- p(X).").expect("runs");
-        assert_eq!(disjunctive.answers, separate.answers);
+        assert_eq!(disjunctive.answer_lines(), separate.answer_lines());
         assert_eq!(
-            disjunctive.answers,
+            disjunctive.answer_lines(),
             vec![vec!["p(1).".to_string(), "p(2).".to_string(),]]
         );
     }
@@ -1198,8 +1358,8 @@ parsed(K, V) :- raw(K, S), V = S as int.
         fn disjunction_equals_separate_rules(
             (disjunctive, separate) in crate::testgen::arb_disjunction_spellings()
         ) {
-            let a = run(&disjunctive).map(|r| r.answers);
-            let b = run(&separate).map(|r| r.answers);
+            let a = run(&disjunctive).map(|r| r.answer_lines());
+            let b = run(&separate).map(|r| r.answer_lines());
             match (a, b) {
                 (Ok(a), Ok(b)) => prop_assert_eq!(a, b),
                 (Err(_), Err(_)) => {}
@@ -1239,7 +1399,8 @@ parsed(K, V) :- raw(K, S), V = S as int.
                 .expect("strategy produces a value")
                 .current();
             let Ok(result) = run(&program) else { continue };
-            let lines: Vec<&String> = result.answers.iter().flatten().collect();
+            let answer_lines = result.answer_lines();
+            let lines: Vec<&String> = answer_lines.iter().flatten().collect();
             if lines.is_empty() {
                 continue;
             }
@@ -1345,7 +1506,7 @@ parsed(K, V) :- raw(K, S), V = S as int.
                 reference_answer_lines(query, &rows, &program)
             })
             .collect();
-        prop_assert_eq!(&result.answers, &expected, "{}", src);
+        prop_assert_eq!(&result.answer_lines(), &expected, "{}", src);
         let mut bytes = String::new();
         for line in expected.iter().chain(&result.explanations).flatten() {
             bytes.push_str(line);
@@ -1415,7 +1576,7 @@ parsed(K, V) :- raw(K, S), V = S as int.
             ] {
                 let result = run(&src).expect("generated programs run");
                 let program = lower(&parse(&src).expect("parses")).expect("lowers");
-                for (query, lines) in program.queries.iter().zip(&result.answers) {
+                for (query, lines) in program.queries.iter().zip(&result.answer_lines()) {
                     if lines.is_empty() {
                         continue;
                     }
@@ -1525,7 +1686,7 @@ ok(X) :- p(X), not banned(X).
 ?- ok(X).
 ";
         let result = run(src).expect("runs");
-        assert_eq!(result.answers, vec![vec!["ok(1).", "ok(3)."]]);
+        assert_eq!(result.answer_lines(), vec![vec!["ok(1).", "ok(3)."]]);
     }
 
     /// A relation read **only inside an aggregate goal** is still evaluated.
@@ -1539,7 +1700,7 @@ n(N) :- N = count { X | big(X) }.
 ?- n(N).
 ";
         let result = run(src).expect("runs");
-        assert_eq!(result.answers, vec![vec!["n(2)."]]);
+        assert_eq!(result.answer_lines(), vec![vec!["n(2)."]]);
     }
 
     /// The permissive half of the ruling: a rule no goal depends on is not run,
@@ -1554,7 +1715,7 @@ boom(X, Y) :- p(X), Y = 100 / X.
 fine(X) :- p(X).
 ";
         let result = run(&format!("{rules}?- fine(X).\n")).expect("boom is never evaluated");
-        assert_eq!(result.answers, vec![vec!["fine(0).", "fine(1)."]]);
+        assert_eq!(result.answer_lines(), vec![vec!["fine(0).", "fine(1)."]]);
 
         for program in [format!("{rules}?- boom(X, Y).\n"), rules.to_string()] {
             let errors = run(&program).expect_err("boom is evaluated and divides by zero");
@@ -1618,7 +1779,7 @@ fine(X) :- p(X).
             let src = std::fs::read_to_string(path).expect("corpus file");
             match pruned_and_full(&src, Some(path)) {
                 (Ok(a), Ok(b)) => {
-                    assert_eq!(a.answers, b.answers, "{}", path.display());
+                    assert_eq!(a.answer_lines(), b.answer_lines(), "{}", path.display());
                     assert_eq!(a.explanations, b.explanations, "{}", path.display());
                     assert_eq!(a.warnings, b.warnings, "{}", path.display());
                 }
@@ -1628,8 +1789,8 @@ fine(X) :- p(X).
                 (a, b) => panic!(
                     "{}: pruning changed acceptance: {:?} vs {:?}",
                     path.display(),
-                    a.map(|r| r.answers),
-                    b.map(|r| r.answers)
+                    a.map(|r| r.answer_lines()),
+                    b.map(|r| r.answer_lines())
                 ),
             }
             compared += 1;
@@ -1666,7 +1827,7 @@ fine(X) :- p(X).
             let full = |src: &str| {
                 run_pruning(src, None, &mut |_| {}, false)
                     .expect("generated programs run")
-                    .answers
+                    .answer_lines()
             };
             let answers = full(&program);
             let without = |rule: &str| full(&program.replace(rule, ""));
@@ -1697,7 +1858,7 @@ fine(X) :- p(X).
         fn b13_pruning_changes_no_answer(program in crate::testgen::arb_pruning_program()) {
             let (pruned, full) = pruned_and_full(&program, None);
             let (pruned, full) = (pruned.expect("pruned run"), full.expect("full run"));
-            prop_assert_eq!(pruned.answers, full.answers, "{}", &program);
+            prop_assert_eq!(pruned.answer_lines(), full.answer_lines(), "{}", &program);
             prop_assert_eq!(pruned.explanations, full.explanations, "{}", &program);
             prop_assert_eq!(pruned.warnings, full.warnings, "{}", &program);
         }
@@ -1770,7 +1931,7 @@ fine(X) :- p(X).
             }
             let full = run_pruning(&src, None, &mut |_| {}, false).expect("full run");
             if full
-                .answers
+                .answer_lines()
                 .iter()
                 .flatten()
                 .any(|line| line == "pos(\"a\").")
@@ -1801,7 +1962,7 @@ fine(X) :- p(X).
             let src = with_import(&program, reach);
             let (pruned, full) = pruned_and_full(&src, None);
             let (pruned, full) = (pruned.expect("pruned run"), full.expect("full run"));
-            prop_assert_eq!(pruned.answers, full.answers, "{}", &src);
+            prop_assert_eq!(pruned.answer_lines(), full.answer_lines(), "{}", &src);
             prop_assert_eq!(pruned.explanations, full.explanations, "{}", &src);
             prop_assert_eq!(pruned.warnings, full.warnings, "{}", &src);
         }
@@ -1854,7 +2015,7 @@ fine(X) :- p(X).
         ) {
             let Ok(first) = run(&program) else { return Ok(()) };
             let appended: String = first
-                .answers
+                .answer_lines()
                 .iter()
                 .flat_map(|lines| lines.iter())
                 .map(|line| format!("{line}\n"))
@@ -1865,7 +2026,7 @@ fine(X) :- p(X).
                      --- program ---\n{program}--- appended ---\n{appended}--- {e:?}"
                 )))?;
             prop_assert_eq!(
-                &second.answers, &first.answers,
+                &second.answer_lines(), &first.answer_lines(),
                 "re-running with its own output changed the answers\n\
                  --- program ---\n{}--- appended ---\n{}",
                 &program, &appended
@@ -1893,7 +2054,7 @@ fine(X) :- p(X).
             program in crate::testgen::arb_closure_program()
         ) {
             let Ok(plain) = run(&program) else { return Ok(()) };
-            let Some(fact) = plain.answers.iter().flatten().next() else {
+            let Some(fact) = plain.answer_lines().into_iter().flatten().next() else {
                 return Ok(());
             };
             // Both sigils over a fact that holds, and one over a fact that does
@@ -1963,8 +2124,8 @@ fine(X) :- p(X).
         fn the_structural_laws_hold(
             (law, base, variant) in crate::testgen::arb_structural_law_spellings()
         ) {
-            let a = run(&base).map(|r| r.answers);
-            let b = run(&variant).map(|r| r.answers);
+            let a = run(&base).map(|r| r.answer_lines());
+            let b = run(&variant).map(|r| r.answer_lines());
             match (a, b) {
                 (Ok(a), Ok(b)) => prop_assert_eq!(
                     a, b,
@@ -1994,8 +2155,8 @@ fine(X) :- p(X).
         fn dash_q_rule_equals_the_same_rule_in_a_file(
             (base, rule, head) in crate::testgen::arb_dash_q_rule()
         ) {
-            let from_file = run(&format!("{base}{rule}.\n?- {head}.\n")).map(|r| r.answers);
-            let from_q = run_with_queries(&base, std::slice::from_ref(&rule)).map(|r| r.answers);
+            let from_file = run(&format!("{base}{rule}.\n?- {head}.\n")).map(|r| r.answer_lines());
+            let from_q = run_with_queries(&base, std::slice::from_ref(&rule)).map(|r| r.answer_lines());
             match (from_file, from_q) {
                 (Ok(a), Ok(b)) => prop_assert_eq!(a, b),
                 (Err(_), Err(_)) => {}
@@ -2025,8 +2186,8 @@ fine(X) :- p(X).
         fn ordered_comparison_and_minmax_agree_on_every_type(
             (compared, folded) in crate::testgen::arb_order_agreement_spellings()
         ) {
-            let a = run(&compared).map(|r| r.answers);
-            let b = run(&folded).map(|r| r.answers);
+            let a = run(&compared).map(|r| r.answer_lines());
+            let b = run(&folded).map(|r| r.answer_lines());
             match (a, b) {
                 (Ok(a), Ok(b)) => prop_assert_eq!(
                     a, b,
@@ -2063,8 +2224,8 @@ fine(X) :- p(X).
         fn a_computed_query_argument_answers_like_its_value(
             (computed, folded) in crate::testgen::arb_ground_query_spellings()
         ) {
-            let a = run(&computed).map(|r| r.answers);
-            let b = run(&folded).map(|r| r.answers);
+            let a = run(&computed).map(|r| r.answer_lines());
+            let b = run(&folded).map(|r| r.answer_lines());
             match (a, b) {
                 (Ok(a), Ok(b)) => prop_assert_eq!(a, b),
                 (Err(_), Err(_)) => {}
@@ -2096,8 +2257,8 @@ fine(X) :- p(X).
             let folded = crate::print::print_program(
                 &crate::testgen::fold_ground_atom_args(&program)
             );
-            let a = run(&inline).map(|r| r.answers);
-            let b = run(&folded).map(|r| r.answers);
+            let a = run(&inline).map(|r| r.answer_lines());
+            let b = run(&folded).map(|r| r.answer_lines());
             match (a, b) {
                 (Ok(a), Ok(b)) => prop_assert_eq!(a, b),
                 (Err(_), Err(_)) => {}
@@ -2208,7 +2369,7 @@ fine(X) :- p(X).
         ) {
             let result = run(&case.program).expect("generated programs run");
             prop_assert_eq!(
-                &result.answers,
+                &result.answer_lines(),
                 &vec![case.expected.clone()],
                 "shape {} disagreed\n--- program ---\n{}",
                 case.shape, &case.program
@@ -2242,10 +2403,10 @@ fine(X) :- p(X).
                 format!("{}{head} :- {}.\n?- {head}.\n", case.edb, case.body)
             };
             let named_answers = run(&named)
-                .map(|r| r.answers)
+                .map(|r| r.answer_lines())
                 .unwrap_or_else(|e| panic!("the named form runs: {e:?}"));
             let desugared_answers = run(&desugared)
-                .map(|r| r.answers)
+                .map(|r| r.answer_lines())
                 .unwrap_or_else(|e| panic!("the desugared form runs: {e:?}"));
             prop_assert_eq!(
                 &named_answers,
@@ -2294,7 +2455,7 @@ fine(X) :- p(X).
     #[test]
     fn constant_folding_in_a_fact() {
         let result = run("p(1 + 1).\n?- p(X).").expect("runs");
-        assert_eq!(result.answers, vec![vec!["p(2).".to_string()]]);
+        assert_eq!(result.answer_lines(), vec![vec!["p(2).".to_string()]]);
     }
 
     /// `bugs/005`: `?- p("a", 1 + 1).` printed nothing while `?- p("a", 2).`
@@ -2307,8 +2468,11 @@ fine(X) :- p(X).
         let facts = "p(\"a\", 2).\n";
         let folded = run(&format!("{facts}?- p(\"a\", 2).")).expect("folded runs");
         let computed = run(&format!("{facts}?- p(\"a\", 1 + 1).")).expect("computed runs");
-        assert_eq!(folded.answers, computed.answers);
-        assert_eq!(computed.answers, vec![vec!["p(\"a\", 2).".to_string()]]);
+        assert_eq!(folded.answer_lines(), computed.answer_lines());
+        assert_eq!(
+            computed.answer_lines(),
+            vec![vec!["p(\"a\", 2).".to_string()]]
+        );
     }
 
     /// The same defect one variable short of ground: the computed argument is
@@ -2318,7 +2482,10 @@ fine(X) :- p(X).
     #[test]
     fn a_ground_computed_argument_folds_in_a_non_ground_query() {
         let result = run("p(\"a\", 2).\np(\"b\", 3).\n?- p(X, 1 + 1).").expect("runs");
-        assert_eq!(result.answers, vec![vec!["p(\"a\", 2).".to_string()]]);
+        assert_eq!(
+            result.answer_lines(),
+            vec![vec!["p(\"a\", 2).".to_string()]]
+        );
     }
 
     /// The difference that must *survive* the fix (`bugs/005`, acceptance 3):
@@ -2332,7 +2499,10 @@ fine(X) :- p(X).
     #[test]
     fn a_hand_written_assignment_still_shows_its_value() {
         let result = run("p(\"a\", 2).\n?- V = 1 + 1, p(\"a\", V).").expect("runs");
-        assert_eq!(result.answers, vec![vec!["p(\"a\", 2).".to_string()]]);
+        assert_eq!(
+            result.answer_lines(),
+            vec![vec!["p(\"a\", 2).".to_string()]]
+        );
     }
 
     /// An assignment-bound variable no atom mentions: the atom cannot carry it,
@@ -2341,7 +2511,7 @@ fine(X) :- p(X).
     #[test]
     fn an_assignment_outside_every_atom_keeps_the_synthesized_form() {
         let result = run("p(\"a\").\n?- V = 1 + 1, p(\"a\").").expect("runs");
-        assert_eq!(result.answers, vec![vec!["answer(2).".to_string()]]);
+        assert_eq!(result.answer_lines(), vec![vec!["answer(2).".to_string()]]);
     }
 
     /// A *non-ground* computed argument still hoists, so the answer stays the
@@ -2350,7 +2520,7 @@ fine(X) :- p(X).
     #[test]
     fn a_non_ground_computed_argument_still_hoists() {
         let result = run("n(1).\nn(2).\np(2).\n?- n(X), p(X + 1).").expect("runs");
-        assert_eq!(result.answers, vec![vec!["answer(1).".to_string()]]);
+        assert_eq!(result.answer_lines(), vec![vec!["answer(1).".to_string()]]);
     }
 
     #[test]
@@ -2414,7 +2584,7 @@ fine(X) :- p(X).
         )
         .expect("runs");
         assert_eq!(
-            result.answers,
+            result.answer_lines(),
             vec![vec!["r(1).".to_string(), "r(9).".to_string()]]
         );
     }
@@ -2475,7 +2645,7 @@ anc(X, Y) :- parent(X, Z), anc(Z, Y).
 ";
         let result = run_with_queries(base, &["anc(\"alice\", Who)".to_string()]).expect("runs");
         assert_eq!(
-            result.answers,
+            result.answer_lines(),
             vec![vec![
                 "anc(\"alice\", \"bob\").".to_string(),
                 "anc(\"alice\", \"carol\").".to_string(),
@@ -2488,7 +2658,10 @@ anc(X, Y) :- parent(X, Z), anc(Z, Y).
         let base = "parent(\"a\", \"b\").\nparent(\"b\", \"c\").\n";
         let result = run_with_queries(base, &["gp(X,Z) :- parent(X,Y), parent(Y,Z)".to_string()])
             .expect("runs");
-        assert_eq!(result.answers, vec![vec!["gp(\"a\", \"c\").".to_string()]]);
+        assert_eq!(
+            result.answer_lines(),
+            vec![vec!["gp(\"a\", \"c\").".to_string()]]
+        );
     }
 
     #[test]
@@ -2500,7 +2673,7 @@ anc(X, Y) :- parent(X, Z), anc(Z, Y).
         // The printed `anc(...)` facts parse and load again.
         let second = run(&format!("{piped}?- anc(\"a\", Who).")).expect("re-runs");
         assert_eq!(
-            second.answers,
+            second.answer_lines(),
             vec![vec![
                 "anc(\"a\", \"b\").".to_string(),
                 "anc(\"a\", \"c\").".to_string()

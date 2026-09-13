@@ -3408,7 +3408,7 @@ mod tests {
                 .current();
             total += 1;
             if let Ok(result) = crate::api::run(&folded)
-                && result.answers.iter().any(|lines| !lines.is_empty())
+                && result.answer_lines().iter().any(|lines| !lines.is_empty())
             {
                 held += 1;
             }
@@ -3456,7 +3456,7 @@ mod tests {
             // trivially, which is the vacuity `bugs/005` was caught by.
             let answers = crate::api::run(&folded).expect("well-typed by construction");
             assert!(
-                answers.answers.iter().any(|lines| !lines.is_empty()),
+                answers.answer_lines().iter().any(|lines| !lines.is_empty()),
                 "generated a pair whose aggregate answered nothing: {folded}"
             );
         }

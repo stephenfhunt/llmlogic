@@ -13,7 +13,7 @@ fn corpus(name: &str) -> String {
 fn answers(src: &str) -> Vec<String> {
     datalog::run(src)
         .unwrap_or_else(|e| panic!("run failed: {e:?}"))
-        .answers
+        .answer_lines()
         .into_iter()
         .flatten()
         .collect()
@@ -202,7 +202,7 @@ fn module_import_splices_a_library() {
     let path = std::path::Path::new("tests/programs/modules_import.dl");
     let source = fs::read_to_string(path).expect("corpus file exists");
     let result = datalog::run_at(&source, Some(path)).unwrap_or_else(|e| panic!("run: {e:?}"));
-    let answers: Vec<String> = result.answers.into_iter().flatten().collect();
+    let answers: Vec<String> = result.answer_lines().into_iter().flatten().collect();
     assert_eq!(
         answers,
         vec![
@@ -218,7 +218,7 @@ fn module_import_splices_a_library() {
 fn pathless_module_import_resolves_against_the_working_directory() {
     let src = "import \"tests/programs/modules/family.dl\".\n?- parent(X, Y).\n";
     let result = datalog::run(src).unwrap_or_else(|e| panic!("run: {e:?}"));
-    let answers: Vec<String> = result.answers.into_iter().flatten().collect();
+    let answers: Vec<String> = result.answer_lines().into_iter().flatten().collect();
     assert_eq!(answers.len(), 2);
 }
 
@@ -231,7 +231,7 @@ fn csv_import_evaluates_16_5() {
     let path = std::path::Path::new("tests/programs/16_5_import.dl");
     let source = fs::read_to_string(path).expect("corpus file exists");
     let result = datalog::run_at(&source, Some(path)).unwrap_or_else(|e| panic!("run: {e:?}"));
-    let answers: Vec<String> = result.answers.into_iter().flatten().collect();
+    let answers: Vec<String> = result.answer_lines().into_iter().flatten().collect();
     assert_eq!(
         answers,
         vec![
@@ -269,7 +269,7 @@ fn features_program_output_shapes() {
     // query, and two queries in one program.
     let result = datalog::run(&corpus("features.dl")).expect("runs");
     assert_eq!(
-        result.answers,
+        result.answer_lines(),
         vec![
             // Query 1 (single atom): substituted, floats keep their decimal
             // point, symbols print bare.
@@ -516,7 +516,11 @@ fn output_is_valid_input_end_to_end() {
     let second = datalog::run(&composed).expect("re-runs over its own output");
     // Only alice's ancestors were materialized, so alice is the only match.
     assert_eq!(
-        second.answers.into_iter().flatten().collect::<Vec<_>>(),
+        second
+            .answer_lines()
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>(),
         vec!["ancestor(\"alice\", \"dave\")."]
     );
 }

@@ -1146,6 +1146,10 @@ that list that cannot drift.
   constant, a repeated variable, a wildcard after every variable and one before,
   and the out-of-order slots.
 
+  *Mutations* (the full suite): **printing every single-atom query in row order**
+  — skipping `columns_first_occur_in_order` — reddens D6 at `Medium` and at
+  `Large`, and nothing else in the lib suite.
+
 - [x] **D2** `parse(print(ast)) == ast` modulo spans, over generated
   parse-reachable ASTs incl. named-argument and arithmetic forms
   (`d2_ast_round_trip` over `arb_ast_program`; expressions are **arbitrarily
