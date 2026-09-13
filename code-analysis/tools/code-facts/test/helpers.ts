@@ -21,12 +21,13 @@ export function tempDir(label: string): string {
 }
 
 /** Extract a project directory (its tsconfig.json) with the root pinned to it. */
-export function extract(dir: string, opts: { out?: string; layers?: Layer[]; tsconfigs?: string[] } = {}): Result {
+export function extract(dir: string, opts: { out?: string; layers?: Layer[]; tsconfigs?: string[]; shareSourceFiles?: boolean } = {}): Result {
   return run({
     tsconfigs: opts.tsconfigs ?? [path.join(dir, "tsconfig.json")],
     root: dir,
     out: opts.out,
     layers: opts.layers !== undefined ? new Set<Layer>(["meta", "structure", ...opts.layers]) : undefined,
+    shareSourceFiles: opts.shareSourceFiles,
     time: FIXED_TIME,
   });
 }

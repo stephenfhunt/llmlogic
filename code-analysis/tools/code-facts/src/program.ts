@@ -72,7 +72,40 @@ function resolveConfigPath(p: string): string {
   return abs;
 }
 
-function loadOne(configPath: string, root: string): { project: LoadedProject; references: string[] } {
+const registry = ts.createDocumentRegistry();
+
+/**
+ * Makes `host` hand out one `SourceFile` per file across every program `load`
+ * creates, where parsing and binding would come out the same. Grafana's frontend
+ * is 16 tsconfigs whose programs held 44,954 parsed files for 13,768 paths — 7 GB
+ * of the load phase was the same files parsed again.
+ *
+ * Sound because (checked against TypeScript 6.0.3): the binder skips a file that
+ * is already bound (`if (!file.locals)`); module resolutions live on the program,
+ * not the file; the program writes only path fields onto a file, equal for one
+ * file name; and the key is TypeScript's own for sharing files between programs
+ * (the `DocumentRegistry` bucket key) plus the parse options of the call. That key
+ * also folds in `pathsBasePath`, which only module resolution and module-specifier
+ * generation read — and which alone kept Grafana's root config apart from its
+ * packages — so it is dropped.
+ */
+function shareParsedFiles(host: ts.CompilerHost, options: ts.CompilerOptions, parsed: Map<string, ts.SourceFile>): void {
+  const settings = registry.getKeyForCompilationSettings({ ...options, pathsBasePath: undefined });
+  const read = host.getSourceFile.bind(host);
+  host.getSourceFile = (fileName, languageVersionOrOptions, onError, shouldCreateNewSourceFile) => {
+    if (shouldCreateNewSourceFile === true) return read(fileName, languageVersionOrOptions, onError, true);
+    const o = typeof languageVersionOrOptions === "object" ? languageVersionOrOptions : { languageVersion: languageVersionOrOptions };
+    const key = `${settings}|${o.languageVersion}|${o.impliedNodeFormat}|${o.jsDocParsingMode}|${path.resolve(fileName)}`;
+    let sf = parsed.get(key);
+    if (sf === undefined) {
+      sf = read(fileName, languageVersionOrOptions, onError);
+      if (sf !== undefined) parsed.set(key, sf);
+    }
+    return sf;
+  };
+}
+
+function loadOne(configPath: string, root: string, shared: Map<string, ts.SourceFile> | undefined): { project: LoadedProject; references: string[] } {
   const read = ts.readConfigFile(configPath, (f) => ts.sys.readFile(f));
   const diagnostics: ts.Diagnostic[] = [];
   if (read.error !== undefined) {
@@ -94,9 +127,12 @@ function loadOne(configPath: string, root: string): { project: LoadedProject; re
     noEmitOnError: false,
     rewriteRelativeImportExtensions: false,
   };
+  const host = ts.createCompilerHost(options);
+  if (shared !== undefined) shareParsedFiles(host, options, shared);
   const program = ts.createProgram({
     rootNames: parsed.fileNames,
     options,
+    host,
     ...(parsed.projectReferences !== undefined ? { projectReferences: parsed.projectReferences } : {}),
   });
   const files = program
@@ -118,7 +154,7 @@ export function isProjectFile(program: ts.Program, sf: ts.SourceFile, root: stri
   return !toPosix(abs).includes("/node_modules/");
 }
 
-export function load(configArgs: readonly string[], rootArg: string | undefined, exclude: readonly RegExp[]): Loaded {
+export function load(configArgs: readonly string[], rootArg: string | undefined, exclude: readonly RegExp[], shareSourceFiles = true): Loaded {
   const configs = configArgs.map(resolveConfigPath);
   for (const c of configs) {
     if (!fs.existsSync(c)) throw new Error(`code-facts: no such tsconfig: ${c}`);
@@ -126,13 +162,14 @@ export function load(configArgs: readonly string[], rootArg: string | undefined,
   const root = rootArg !== undefined ? path.resolve(rootArg) : findRoot(configs);
   const projects: LoadedProject[] = [];
   const seen = new Set<string>();
+  const shared = shareSourceFiles ? new Map<string, ts.SourceFile>() : undefined;
   const queue = [...configs];
   while (queue.length > 0) {
     const next = queue.shift();
     if (next === undefined || seen.has(next)) continue;
     seen.add(next);
     if (!fs.existsSync(next)) continue;
-    const { project, references } = loadOne(next, root);
+    const { project, references } = loadOne(next, root, shared);
     projects.push(project);
     queue.push(...references);
   }

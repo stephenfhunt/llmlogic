@@ -60,6 +60,18 @@ run: size its default run count from the measured per-run rate, not by eye.
   binding is used as a value), keeps the statement; guard: a plain import elided,
   one kept, one kept by `verbatimModuleSyntax`, and an `import type`.
   *Mutation:* `runtime` from syntax (`kind != type_only`) → red.
+- [x] **P9** Shared parsing: extraction with one parsed copy of a file handed to
+  every tsconfig whose settings parse and bind it the same (`program.ts`,
+  `shareParsedFiles`) equals extraction with each program parsing its own, byte
+  for byte, over P2's projects under 2–3 overlapping tsconfigs that differ in
+  `paths` (shares), `target` and `moduleDetection` (must not). Guards: a file
+  listed in two sharing configs (218/500), and the script witness — a global
+  declared by a script, called from a module whose program took the script from a
+  config with the other detection (246/500). *Mutation:* key on file name alone →
+  red, 3 of 3 suites, shrinking to that witness. **Green at first**, and its
+  witness at 20/500: under `nodenext` the default `moduleDetection` binds every
+  `.ts` file as a module, so only `legacy` makes the two detections differ, and a
+  randomly placed witness was a coin that rarely landed.
 - [x] **P2-py** Module-graph fidelity for Python, over P2's model rendered as
   packages: `imports`, `import_name` and `call_site` equal the graph, with
   imports spelled absolute or relative, a namespace import as `import a.b as ns`,

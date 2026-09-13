@@ -47,6 +47,8 @@ export interface Options {
   exclude?: string[] | undefined;
   gitSince?: string | undefined;
   gitMaxCommits?: number | undefined;
+  /** Parse each file once across tsconfigs (default true). Off only as a test oracle. */
+  shareSourceFiles?: boolean | undefined;
   /** Fixed extraction time, for byte-identical output in tests. */
   time?: Date | undefined;
   log?: ((line: string) => void) | undefined;
@@ -82,7 +84,7 @@ export function run(opts: Options): Result {
   let flowNodes = 1;
 
   if (opts.tsconfigs.length > 0) {
-    const loaded = timed("load", () => load(opts.tsconfigs, root, exclude));
+    const loaded = timed("load", () => load(opts.tsconfigs, root, exclude, opts.shareSourceFiles ?? true));
     // Say how big the job is *before* spending minutes on it. Extraction peaks
     // at roughly 1 GB per 100k lines, and the phase that blows a small heap is
     // `ids`, which comes next — so a user who is about to wait, or about to run
