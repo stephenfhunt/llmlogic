@@ -24,6 +24,50 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-13 (later) — the TypeScript extractor profiled: 19.35 → 16.37 GB on Grafana, facts identical
+
+Asked to profile the TypeScript extractor for memory, giving up no fact data,
+and take any low-hanging fruit. Planned from a by-phase profile (forced GC per
+phase), then shipped in three commits, each checked against a frozen trunk
+extraction by `sha256sum facts/*.jsonl`.
+
+**Done** — code-facts `npm test`, typecheck; each intermediate tree tested on its own
+- **`8adb540`** — programs share each parsed file where their settings would parse
+  and bind it the same. On Grafana's 16 tsconfigs, 44,954 `SourceFile`s had held
+  13,768 paths: load **7,043 → 2,710 MB** retained, 36.5 → 15 s. **P9**: output
+  identical with sharing on and off.
+- **`2c76fe6`** — declaration keys name a file by an integer: `ids` +742 → +529 MB.
+- **`444c97b`** — numstat as parallel `git log --no-walk` jobs via a child
+  process: git layer 43 → 11 s. A test compares rows across job counts.
+- **End to end** (single runs): frontend `refs,quality,git` **382 s / 19.35 GB →
+  361 s / 16.37 GB**; `@grafana/ui` **67.3 s / 2.26 GB → 37.0 s / 2.05 GB**. Both
+  digests identical. Measurements: `code-analysis/notes/code-facts.md` § The
+  extractor's own cost.
+- **Mutations**: keying the share on file name alone was **green at first**. Under
+  `nodenext` the default `moduleDetection` binds every `.ts` file as a module, so
+  only `legacy` differs, and a randomly placed witness hit 4% of runs. Pinned, it
+  is 49%, and the mutant is red 3 of 3. Dropping a chunk's last commit → red.
+  Ignoring the pathspec in numstat stayed green; it is output-invisible.
+
+**Decided** (`code-analysis/decisions.md` 2026-09-13; the first the user's)
+- **The extractor represents the project as its tsconfigs configure it** — no
+  setting of its own; an optimisation must equal per-tsconfig output.
+- The share key is TypeScript's `DocumentRegistry` key without `pathsBasePath`.
+- Numstat uses a child process, not a worker thread, because a synchronous
+  caller blocked on a worker that fails to load hangs.
+- Compact keys only if they measured ≥100 MB — they did.
+
+**Removed**
+- The single-pass `git log --numstat`; a worker-thread draft of it, replaced
+  before commit; the oldest worklog entry.
+
+**Next up**
+- **The extractor's peak is its checkers**: the emit's forced type check (+3.7 GB),
+  one checker per tsconfig, and V8's slack over live heap (ROADMAP). VS Code
+  `src/` is not re-measured (no checkout).
+- **`datalog/bugs/015`** — still the user's call; the § Performance gate waits on it.
+- **Open**: `datalog/bugs/009`, `013`, `014`, `015`; `code-analysis/bugs/001`–`005`.
+
 ## 2026-09-13 — a query's answer printed from the model: 1,978 → 978 MB, and a deep run that does not finish
 
 Asked to work on streaming output, from the Grafana/`vs/base` performance work.
@@ -117,51 +161,4 @@ approved; Step 1 and the first tiered properties shipped.
   oracle, an Andersen points-to solver — and imports, seek and parser at size.
 - The plan: `~/.claude/plans/let-s-plan-and-start-quirky-pancake.md` (local);
   its substance is in `datalog/notes/growing-inputs.md` § Sequence.
-- **Open**: `datalog/bugs/009`, `013`, `014`; `code-analysis/bugs/001`–`005`.
-
-## 2026-09-12 (night) — `pointsto.dl` as an engine vehicle: a new fact was pending once per path
-
-Asked to keep grinding engine performance with `pointsto.dl`. The full `vs/base`
-does not finish, so a series cut from it by file (10–100%), a per-round counter in
-an uncommitted worktree (`~/.cache/pointsto-wt`), heaptrack, perf.
-
-**Done** — datalog 615 tests, clippy both feature sets, fmt; code-facts `npm test`
-- **Found**: a round held a *new* fact once per path that reached it — 12.16M
-  pending entries for 471k distinct `pts`; the 70% cut aborted on that `Vec`
-  doubling to 4 GB. The earlier fix only skipped facts already held.
-- **`563831b`** — an unkept match's fact goes into a per-round set that is the
-  delta. 35% cut, evaluating: **35.5 s / 2.67 GB → 32.3 s / 0.97 GB**; 50%
-  3.98 → 1.55 GB; 70% now finishes (6.8 GB). The full base still aborts at 15 GB.
-- **`aefb6dc`** — `answer_lines` sorts borrowed cells: printing 3.40M rows
-  2,287 → 1,974 MB. **`69aac3f`** — the binary writes line by line
-  (`RunResult::write_output`): no measured change; a closed pipe exits 2, not a panic.
-- **Grafana bench, trunk vs now, 23 digests identical**: frontend `coupling`
-  290 → 171 s, `coupling_kinds` 148 → 120 s, `orient` 78 → 62 s, `modgraph`
-  75 → 61 s; peaks 2–10% lower. `@grafana/ui` `pointsto` 8.9 s / 373 MB.
-- `datalog/notes/pointsto-profile-2026-09-12.md`; `code-analysis/notes/code-facts.md`
-  § Re-measured after a round held each fact once; E9's two mutations in `testing.md`.
-- **`8d8df27`** — two defects passed all 615 tests, each shown by mutation: a 3+-atom
-  semi-naive view, a dropped reporting derivation. `arb_shaped_program` (analysis
-  shapes, sized) kills both through B1/E9; B1/E9 run under a round cap, so a hang
-  fails. **`a5236f6`** — output tests. 623 tests; lib suite 5.5 → 14.2 s.
-
-**Decided** (`datalog/spec.md` §17 2026-09-12, first two entries; the last three the user's)
-- **A round holds each unkept fact once**; recorded runs are untouched.
-- **Keep `write_output`** though it measured nothing: it is the copy that becomes
-  the peak once answers stream.
-- **Property tests grow their inputs before more refactoring or performance work**
-  — `datalog/notes/growing-inputs.md`. Streaming answers waits on it.
-
-**Removed**
-- `pending`'s one entry per unkept match; `answer_lines`' cloned rows; the joined
-  output `String`; E9's inline body (now `e9_holds`); the oldest worklog entry.
-  The round counter never entered the repo.
-
-**Next up**
-- **Grow the property tests' inputs** — design first (datalog ROADMAP § Testing):
-  tiers or drawn size, scaling oracles, budgets, a generator audit; then B5/B13.
-- **Then stream a query's answer**, and **drive a delta round from its delta atom**
-  (14 s of `pointsto.dl`'s 28 s on the 35% cut; a §17 design session).
-- Re-learned: heaptrack names the site that *allocated* a tuple, not what holds
-  it — the first reading here blamed `pending` for what was the answer.
 - **Open**: `datalog/bugs/009`, `013`, `014`; `code-analysis/bugs/001`–`005`.
