@@ -14,6 +14,44 @@ with the long form in [`notes/code-facts.md`](notes/code-facts.md).
 
 ## Decisions
 
+- **2026-09-13 (night ii)** — **The skill's texts are written for a stranger's
+  project, and the skill owns every one of them** (the user's ruling).
+  - **What ships is published, not project documentation.** That covers
+    `SKILL.md`, `reference/`, the library headers and the text the extractor
+    writes or prints. Its reader is an agent in a novel project with its own
+    setup, conventions and tooling. None of it carries provenance: no defect ids,
+    dates, subject codebases, session narrative or repo paths.
+  - **`reference/datalog.md` and `bring-your-own.md` are this skill's own
+    files**, not symlinks. The two skills serve different purposes, and dual
+    maintenance is accepted.
+  - Swept: "the project above" (nine times), sqlparse and the experiments'
+    answer key, bug ids and "found dogfooding" in seven library headers,
+    `keys.dl`'s engine-workaround lesson, the extractor's call-site size note
+    (against 2026-09-12 evening), and links to files the bundle lacks.
+  - Guarded by `test/published-text.test.ts`, which cannot see context-dependent
+    prose; that stays a reading discipline (`AGENTS.md`).
+
+- **2026-09-13 (night)** — **The playbook teaches investigation, not only
+  measurement.** It read as a menu of libraries. Yet the best Grafana result came
+  from the maintainers' own question, and the one false result was a negative
+  reported unprobed (`notes/code-facts.md` § Dogfooding — Grafana).
+  - `SKILL.md` gains five things:
+    - a first step that finds the question: the project's own lint rules and
+      owners, or the user;
+    - going down rather than across, and asking the query that refutes a claim;
+    - probing every negative with `?whynot` and the blind spots, and sampling
+      for precision;
+    - a synthesis step;
+    - impact and two-commit-diff recipes, and a hazards row naming quality facts
+      no library reads.
+  - **Every recipe was run before it was written**: on `@grafana/ui` impact takes
+    0.1–1.6 s and the drill 11 s; the diff was run on code-facts itself.
+  - ***Rejected:*** an impact library, since a seeded closure is four rules over
+    the caller's own change set. Also rejected: a diff tool, since sorted
+    canonical answers make `diff` enough.
+  - Open: whether it changes what an agent does. H-CA1 grades questions we
+    specify and cannot see it; a Grafana re-run with only the bundle can.
+
 - **2026-09-13 (later)** — **An import the compiler could not resolve claims no
   package; a declaration can confirm the guess** (`bugs/002`, the user's choice).
   - `imports.target_package` is set only for a resolved target. An unresolved bare
@@ -70,6 +108,10 @@ with the long form in [`notes/code-facts.md`](notes/code-facts.md).
   an unresolved import, `lib/exports.dl`, and `uncounted_dependent` beside a
   doc line. Only `hidden_coupling` stayed a doc fix, because deriving it needs a
   history of the graph that nothing else wants (`bugs/resolved/001`–`005`).
+  ***Consequences 2026-09-13 (night ii)*** — the ruling reaches everything an agent
+  reads, not only `SKILL.md`. `code-facts` still printed "will be slow; anchor on
+  edges or narrow first", and `keys.dl`'s header still taught re-keying; both
+  went in the leak sweep.
 
 - **2026-09-12 (later still)** — **The import-graph closure is back in
   `modgraph.dl`, because the engine now pays for a rule only when a goal reaches
@@ -221,6 +263,8 @@ with the long form in [`notes/code-facts.md`](notes/code-facts.md).
   - *Shape:* the extractor is renamed `ts-facts` → `code-facts` (it gains Python);
     the Datalog guide and the bring-your-own recipe stay single-homed in the
     datalog skill, reached by symlink, resolved at package time.
+    ***Superseded by 2026-09-13 (night ii)*** — each skill owns its texts; one
+    reader's guide written into the other skill leaked its history.
   - *Rejected:* a second skill inside `datalog/` (a domain application owned by
     the engine's project), and one widened skill (above).
   - *Open:* whether a domain skill beats the general one plus the same tools is

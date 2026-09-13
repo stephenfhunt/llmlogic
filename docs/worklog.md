@@ -24,6 +24,56 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-13 (night) — code-analysis from the user's chair: the playbook investigates, and its texts stop leaking
+
+Asked what the skill tells a user, what it won't, and whether agents dig or only
+run the table. Assessed in plan mode; the user chose the playbook follow-up, then
+asked for an audit of what in the skill's texts leaks this project's background.
+
+**Done** — code-facts `npm test`, typecheck; bundle rebuilt (`dist/` untracked)
+- **Assessment**: the facts and libraries outrun the playbook, which taught
+  measuring, not investigating or synthesising; no library reads the quality
+  layer, and nothing diffs commits, recovers structure or measures digging.
+- **`SKILL.md`**:
+  - find the question first; *How to investigate* (go down, refute, `?whynot`
+    on negatives, sample precision);
+  - impact and two-commit `diff` recipes, and a hazards row; *Synthesise, then
+    report*.
+  - Each recipe ran on `~/.cache/code-facts/grafana-ui` first (impact 1.6 s,
+    drill 11 s); the diff ran on code-facts itself.
+- **The leak sweep.** The bundle read like this repo's notebook:
+  - "the project above" nine times, and sqlparse with the experiments' answer
+    key;
+  - bug ids and "found dogfooding" in seven library headers;
+  - the extractor's size note and dated schema comment;
+  - `datalog.md`'s links out of the bundle, and `bring-your-own.md`'s dated
+    crate narrative.
+  - All rewritten as cases. `SKILL.md` now reads for a novel project: its own
+    scratch directory, a user it may not reach, worktree cleanup, its report
+    conventions.
+- `reference/datalog.md` and `bring-your-own.md` are this skill's own files, not
+  symlinks. `test/published-text.test.ts` fails on provenance in what ships.
+
+**Decided** (code-analysis `decisions.md`)
+- 2026-09-13 (night): no impact library, no diff tool.
+- 2026-09-13 (night ii), the user's: **skill texts are published for a stranger's
+  project**; each skill owns its texts. This supersedes 2026-09-11's
+  single-homing.
+
+**Removed** — the two reference symlinks and `package.sh`'s frontmatter
+stripping; every provenance line above; the extractor's size note; the probe
+files and scratch worktree; the oldest worklog entry.
+
+**Next up**
+- **Measure the playbook**: re-run the `@grafana/ui` dogfood with a fresh agent
+  and only the bundle.
+- **The datalog skill has the same leaks** (`More` links, dated recipe
+  narrative) — its own session, since the experiments measure it.
+- The bundle still ships `tools/code-facts/src`, whose comments name subjects and
+  bugs.
+- Queued on code-analysis ROADMAP: quality-layer libraries, structure recovery,
+  an eval of open-ended analysis. **Open**: `datalog/bugs/015`.
+
 ## 2026-09-13 (evening) — the dogfood bugs: eight closed with their properties; the ninth found the recorder
 
 Asked to work the bugs Grafana and VS Code filed and to build quality into the
@@ -116,49 +166,4 @@ extraction by `sha256sum facts/*.jsonl`.
   user's ruling: no working around TypeScript's cost, since users compile the
   project anyway (`code-analysis/decisions.md` 2026-09-13, amended).
 - **`datalog/bugs/015`** — still the user's call; the § Performance gate waits on it.
-- **Open**: `datalog/bugs/009`, `013`, `014`, `015`; `code-analysis/bugs/001`–`005`.
-
-## 2026-09-13 — a query's answer printed from the model: 1,978 → 978 MB, and a deep run that does not finish
-
-Asked to work on streaming output, from the Grafana/`vs/base` performance work.
-Planned; the user asked why printing copies at all — it need not, and the plan
-widened. Shipped in three commits, each verified.
-
-**Done** — datalog 502 lib tests, integration and system, clippy both feature sets, fmt; code-facts `npm test` on the new binary
-- **`699d195`** — **D6**: a run prints the eager renderer's bytes over its own
-  model, at `Medium`/`Large` and over shaped programs, each also with query
-  bodies reversed and with leading wildcards; a guard classifies lowered queries.
-- **`affb601`** — `RunResult` holds each answer (row set + §14 shape) and renders
-  in `write_output`; `answers` became `answer_lines()` / `answered()`.
-- **`7c91da4`** — a bare atom walks its relation while printing: constants and
-  repeated variables filter through `Value::unifies_with`, trailing wildcards
-  dedup adjacent rows. Anything else keeps its row set.
-- **`pointsto.dl`, 0.35 cut, 3.40M rows printed: 36.5 s / 1,978 MB → 33.3 s /
-  978 MB**, sha256 identical — the run now peaks where evaluation alone did.
-  `grafana-ui` bench, trunk against the change: all 13 digests identical, times
-  unchanged, peaks within ±30 MB (`callgraph` 244 → 217, `pointsto` 391 → 365).
-- **Five mutations, all killed** — but walking past a leading wildcard survived
-  D6 until `with_leading_wildcards` and its guard case: the guard counted the
-  atom answering, never a relation out of the answer's order.
-- **`144bb9e`** — `bugs/015`: the deep run does not finish here. B13 at `Deep`
-  passed 14.9 GB; skipped, the run was still killed with B5 at `Deep` running.
-
-**Decided** (`datalog/spec.md` §17 2026-09-13; the first two the user's)
-- **Print from the model, lazily; every error before the first byte.** Rejected:
-  a per-query sink, which leaves partial stdout when a later query fails.
-- **Ahead of the rest of § Testing**, guarded by its own tiered property.
-- Parked: a row set of `&Value` — the join clones its bindings.
-
-**Removed**
-- `RunResult.answers` and the eager line list (its renderer survives only as
-  D6's test oracle); "streaming" from the ROADMAP's round-bound risk and §14's
-  *Not covered*; the scratch trunk worktree; the oldest worklog entry.
-
-**Next up**
-- **`bugs/015`** — the user's call: B13's proofs only to `Large`, a sampled
-  proof clause, or a smaller `Deep`. Until then the § Performance gate cannot run.
-- **Tier the rest** (B2–B4, B6, B8, C11, C13, C14, E1–E10) and the generator audit.
-- **Drive a delta round from its delta atom** (a §17 design session).
-- Re-learned: a "baseline" that recompiles picks up uncommitted tests — the
-  second trunk deep run was not trunk. Freeze binaries before measuring.
 - **Open**: `datalog/bugs/009`, `013`, `014`, `015`; `code-analysis/bugs/001`–`005`.

@@ -8,6 +8,19 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
   out of the datalog skill. _shipped_ — `decisions.md` 2026-09-11.
 - **The playbook** (`skill/SKILL.md`) and `skill/reference/`, TypeScript and
   Python. _shipped._
+- **The playbook investigates**: find the question, go down, probe negatives,
+  synthesise; impact and two-commit diff recipes. _shipped_ — `decisions.md`
+  2026-09-13 (night). Unmeasured until a Grafana re-run with only the bundle.
+- **The skill's texts read in a stranger's project** — no provenance in
+  anything shipped or emitted; its own reference copies; guarded by a test.
+  _shipped_ — `decisions.md` 2026-09-13 (night ii).
+- **Libraries over the quality layer** — `floating_promise`, throws escaping
+  past callers, suppressions × churn; no library reads these facts. _queued._
+- **Structure recovery** — which edges fuse a large import SCC, levels of the
+  condensed graph, candidate modules. _queued_ — a design session first.
+- **An evaluation of open-ended analysis** — does an agent find what matters
+  unprompted (seeded defects, or Grafana's verified findings as gold)? H-CA1
+  grades specified questions only. _queued_ — `../experiments/`.
 - **`package.sh`** — the standalone bundle. _shipped._
 - **Python frontend** — all layers but dataflow. _shipped_ — P1-py–P4-py,
   `notes/code-facts.md` § The Python frontend.
