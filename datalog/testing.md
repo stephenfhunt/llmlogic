@@ -209,7 +209,8 @@ it. A future audit starts here.
 | Closure at the program level (§14) | `arb_closure_program` | **D5**; D1 is the fact-set half |
 | The rendered proof's structure (§11) | `arb_program_with_edb`, every derived fact explained and printed | **E7** (every line is a comment — E5's lexical precondition) and **E8** (the declared depth is the node's); a guard pins the generator reaches a proof deeper than one node |
 | Explanations against the fact stream (§11/§14) | `arb_closure_program` plus both sigils over a fact the run answered and one it did not | **E5** — stripping the comments leaves the run without its goals, byte for byte; also the printed half of E9 |
-| Demand-provisioned provenance (§11/§15) | `arb_program_with_edb`, evaluated all three ways | **E9** — identical model, answers and §9/§12 warnings, and a model that did not record says `Unrecorded` rather than `DoesNotHold` |
+| Analysis-shaped recursion (§6/§15) | `arb_shaped_program` (`ShapeSize`): chain data for depth, fan-in and cycles, multi-atom recursive rule templates, stratified negation and an aggregate on top, a fact derived with and without a report | **B1** `b1_shaped_programs_agree` and **E9** `e9_shaped_programs_provision_alike`, both under `ROUND_CAP`; guards read off the recorded run; `shaped_generator_is_well_typed` |
+| Demand-provisioned provenance (§11/§15) | `arb_program_with_edb` and `arb_shaped_program`, evaluated all three ways | **E9** — identical model, answers and §9/§12 warnings, and a model that did not record says `Unrecorded` rather than `DoesNotHold` |
 | The failure trace (§11) | `arb_program_with_edb`, goals built from the model's own value pool that do **not** hold | **E10** — five claims about a near-miss, including *a repair must repair*, which found `Repair::AbsentKey` |
 | §10's std-builtin exemption | `ArithShape::StdBuiltin` | **C10**'s guard — the mutation lands on the classification, not the fixpoint |
 | Diagnostics as a branchable surface (§12) | `arb_corrupted_program_text` — the first generator that makes programs **fail** | **C16**, with `c16_generator_rejects_and_reaches_several_families`; the pinned set itself is `every_code_is_pinned_and_belongs_to_its_category` |
@@ -346,7 +347,9 @@ compared keyed by predicate *name*, not `PredId`.
   `b1_comparison_programs_agree`): both evaluators agree as fact sets and agree
   on the error path (a generated `/ 0` makes both reject). Extended again over
   the **absent value** (`absent_ir`, `b1_absent_programs_agree`, 2026-07-25) —
-  see the note below; and over aggregation (`aggregate_ir`).
+  see the note below; and over aggregation (`aggregate_ir`). Extended over
+  **analysis-shaped programs** (`arb_shaped_program`, `b1_shaped_programs_agree`,
+  2026-09-12) — see the note after the absent one.
 
   **The absent gap, and why a shape-targeted generator was needed.** Until
   2026-07-25 `naive.rs` had *no* absent semantics — plain `==` in `match_atom` /
@@ -375,6 +378,26 @@ compared keyed by predicate *name*, not `PredId`.
   is a *join* property and restoring it means giving up `NULL ≠ NULL`. The pair
   is the reason C9 below is asserted against the model rather than across the
   two evaluators.
+
+  **The shape gap, the same lesson a second time.** `arb_program_with_edb` draws
+  1–2-atom bodies over at most six facts, so it cannot build a recursive body of
+  three atoms or a fixpoint many rounds deep. Reading the first atom of a 3+-atom
+  body as `Old` when the delta sits later — which loses every instance whose first
+  and later premise are both new with an older one between — **passed the whole
+  suite**, and allowing 3-atom bodies in `eval_bounds` still did not catch it: the
+  instance needs data deep enough for two premises to be new in one round.
+  `arb_shaped_program` builds that deliberately, as text: chain-shaped data whose
+  length sets the round count, extra edges for fan-in and cycles, and rules from a
+  menu of the shapes `code-analysis`'s libraries write (closures, a recursive atom
+  mid-body, two around a plain one, points-to's store and load, a four-atom chain),
+  with stratified negation and an aggregate on top. Its size is a knob
+  (`ShapeSize`). Guards read the recorded run, not the text:
+  `shaped_generator_reaches_deep_rounds_and_a_split_instance` (15 of 48 programs
+  match that instance, 15 run 8+ rounds; asserted ≥ 10) and
+  `shaped_generator_is_well_typed` (rule 4). *Mutation (killed, 3 of 3 runs):* the
+  `Old` read above reddens `b1_shaped_programs_agree`, and nothing else. B1 and E9
+  now evaluate under a round cap (`ROUND_CAP`), so a fixpoint that stops
+  converging fails a case instead of hanging the suite.
 - [x] **B2** Fixpoint idempotence: re-running with `facts ∪ output` derives
   nothing new.
 - [x] **B3** Set semantics: duplicating any subset of input facts leaves
@@ -1225,8 +1248,14 @@ and the asking form, which is also what unblocked E5.
     skipping *every* match nothing keeps reddens E9. A round's unkept facts are
     held as a set that becomes the delta (2026-09-12,
     `notes/pointsto-profile-2026-09-12.md`): building the delta without them
-    reddens E9; not adding them to the model makes E9 **hang** — every round
-    re-derives them — a kill by timeout, not by assertion. Non-vacuity: a guard pins
+    reddens E9; not adding them to the model made E9 **hang** — every round
+    re-derives them — and since the round cap (2026-09-12, B1's shape note) it fails
+    at `ROUND_CAP` instead. Dropping a *kept* derivation whose fact the same round
+    also supplied unkept silently shrinks a warning count, and passed everything
+    until `e9_shaped_programs_provision_alike`: `arb_shaped_program` pairs a cast
+    that loses its value with a plain row holding `absent` for one `parsed` fact
+    (`shaped_generator_reaches_a_fact_derived_with_and_without_a_report`: 41 of 48;
+    asserted ≥ 30). That mutation reddens the shaped property only. Non-vacuity: a guard pins
     that the generator reaches a program with a derived fact *and* a query, both
     halves holding trivially over an EDB.
 - [x] **E10** **A near-miss holds against the model.** `?whynot`'s guard: for a

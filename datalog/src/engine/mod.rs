@@ -4222,6 +4222,86 @@ mod tests {
             model.facts().collect()
         }
 
+        /// Round ceiling for the properties over generated programs. None of them
+        /// creates values in a recursion, so every round but the last adds a fact,
+        /// and their models converge in far fewer rounds than this. Reaching it
+        /// means a fixpoint stopped converging — which uncapped was a hung suite,
+        /// not a failed case (`testing.md` **E9**'s mutations, 2026-09-12).
+        const ROUND_CAP: u32 = 10_000;
+
+        /// [`eval_capped`] under [`ROUND_CAP`], failing the case instead of hanging.
+        fn capped(
+            program: &Program,
+            provenance: Provenance,
+        ) -> std::result::Result<Model, TestCaseError> {
+            eval_capped(program, ROUND_CAP, provenance, None).map_err(|capped| match capped {
+                Capped::Diverged => {
+                    TestCaseError::fail(format!("no fixpoint within {ROUND_CAP} rounds"))
+                }
+                Capped::Failed(error) => {
+                    TestCaseError::fail(format!("evaluation failed: {error:?}"))
+                }
+            })
+        }
+
+        /// **E9**'s claims about one program, shared by the property over
+        /// [`arb_program_with_edb`] and the one over shaped programs.
+        fn e9_holds(program: &Program) -> std::result::Result<(), TestCaseError> {
+            let recorded = capped(program, Provenance::Recorded)?;
+            let unrecorded = capped(program, Provenance::Unrecorded)?;
+            let reports = capped(program, Provenance::Reports)?;
+
+            let want: Vec<Fact> = recorded.facts().collect();
+            for (mode, model) in [("unrecorded", &unrecorded), ("reports", &reports)] {
+                let got: Vec<Fact> = model.facts().collect();
+                prop_assert_eq!(&got, &want, "{} provisioning changed the model", mode);
+
+                for query in &program.queries {
+                    prop_assert_eq!(
+                        model.answer(query).unwrap(),
+                        recorded.answer(query).unwrap(),
+                        "{} provisioning changed a query's answer",
+                        mode
+                    );
+                }
+
+                for fact in model.facts() {
+                    prop_assert!(!model.is_base(&fact));
+                    prop_assert_eq!(model.first_round(&fact), None);
+                    prop_assert_eq!(
+                        ProofTree::explain(model, &fact),
+                        crate::provenance::Explained::Unrecorded,
+                        "{} model reported a held fact as underivable",
+                        mode
+                    );
+                }
+            }
+
+            for fact in unrecorded.facts() {
+                prop_assert!(unrecorded.derivations_of(&fact).next().is_none());
+            }
+
+            prop_assert_eq!(
+                crate::api::absent_skip_warnings(&reports, program, None),
+                crate::api::absent_skip_warnings(&recorded, program, None),
+                "the reporting store changed a §9/§12 warning"
+            );
+
+            // And it kept nothing the full store did not: a subset claim,
+            // which needs no predicate of its own to state.
+            for fact in reports.facts() {
+                let full: Vec<&Derivation> = recorded.derivations_of(&fact).collect();
+                for derivation in reports.derivations_of(&fact) {
+                    prop_assert!(
+                        full.contains(&derivation),
+                        "the reporting store invented a derivation of {:?}",
+                        fact
+                    );
+                }
+            }
+            Ok(())
+        }
+
         /// Facts keyed by predicate *name*, for comparing programs whose
         /// `PredId` interning order may differ (testing.md B4).
         fn named_facts(model: &Model, program: &Program) -> BTreeSet<(String, Tuple)> {
@@ -4601,7 +4681,7 @@ mod tests {
             /// B1 — the anchor: naive and semi-naive agree as fact sets.
             #[test]
             fn b1_naive_matches_seminaive(program in arb_program_with_edb()) {
-                let model = eval(&program).unwrap();
+                let model = capped(&program, Provenance::Recorded)?;
                 prop_assert_eq!(model_facts(&model), naive_eval(&program).unwrap());
             }
 
@@ -5603,58 +5683,7 @@ mod tests {
             fn e9_provisioning_does_not_change_the_answers(
                 program in arb_program_with_edb(),
             ) {
-                let recorded = eval_with(&program, Provenance::Recorded).unwrap();
-                let unrecorded = eval_with(&program, Provenance::Unrecorded).unwrap();
-                let reports = eval_with(&program, Provenance::Reports).unwrap();
-
-                let want: Vec<Fact> = recorded.facts().collect();
-                for (mode, model) in [("unrecorded", &unrecorded), ("reports", &reports)] {
-                    let got: Vec<Fact> = model.facts().collect();
-                    prop_assert_eq!(&got, &want, "{} provisioning changed the model", mode);
-
-                    for query in &program.queries {
-                        prop_assert_eq!(
-                            model.answer(query).unwrap(),
-                            recorded.answer(query).unwrap(),
-                            "{} provisioning changed a query's answer",
-                            mode
-                        );
-                    }
-
-                    for fact in model.facts() {
-                        prop_assert!(!model.is_base(&fact));
-                        prop_assert_eq!(model.first_round(&fact), None);
-                        prop_assert_eq!(
-                            ProofTree::explain(model, &fact),
-                            crate::provenance::Explained::Unrecorded,
-                            "{} model reported a held fact as underivable",
-                            mode
-                        );
-                    }
-                }
-
-                for fact in unrecorded.facts() {
-                    prop_assert!(unrecorded.derivations_of(&fact).next().is_none());
-                }
-
-                prop_assert_eq!(
-                    crate::api::absent_skip_warnings(&reports, &program, None),
-                    crate::api::absent_skip_warnings(&recorded, &program, None),
-                    "the reporting store changed a §9/§12 warning"
-                );
-
-                // And it kept nothing the full store did not: a subset claim,
-                // which needs no predicate of its own to state.
-                for fact in reports.facts() {
-                    let full: Vec<&Derivation> = recorded.derivations_of(&fact).collect();
-                    for derivation in reports.derivations_of(&fact) {
-                        prop_assert!(
-                            full.contains(&derivation),
-                            "the reporting store invented a derivation of {:?}",
-                            fact
-                        );
-                    }
-                }
+                e9_holds(&program)?;
             }
 
             /// E10 — a near-miss's claims hold against the model.
@@ -5907,6 +5936,139 @@ mod tests {
             assert!(
                 reached,
                 "arb_program_with_edb never produced a derived fact under a query"
+            );
+        }
+
+        proptest! {
+            // Larger programs than the evaluation generator's, so fewer cases.
+            #![proptest_config(ProptestConfig::with_cases(48))]
+
+            /// **B1 over analysis-shaped programs** (`testgen::arb_shaped_program`).
+            /// The evaluation generator's 1–2-atom bodies over six facts cannot
+            /// build a recursive body of three atoms or a fixpoint many rounds
+            /// deep, and a semi-naive defect in exactly that shape passed every
+            /// test (2026-09-12). The naive evaluator is the oracle.
+            #[test]
+            fn b1_shaped_programs_agree(
+                generated in crate::testgen::arb_shaped_program(crate::testgen::SHAPED_LARGE),
+            ) {
+                let (src, program) = generated;
+                let model = capped(&program, Provenance::Recorded)?;
+                prop_assert_eq!(model_facts(&model), naive_eval(&program).unwrap(), "{}", src);
+            }
+
+            /// **E9 over analysis-shaped programs.** Generated programs elsewhere
+            /// carry no cast or aggregate, so the reporting store never keeps a
+            /// derivation there; these pair one that reports with one that does
+            /// not, for the same fact in the same round.
+            #[test]
+            fn e9_shaped_programs_provision_alike(
+                generated in crate::testgen::arb_shaped_program(crate::testgen::SHAPED_LARGE),
+            ) {
+                e9_holds(&generated.1)?;
+            }
+
+            /// The shaped generator's programs are accepted by the type checker
+            /// (testing.md rule 4): a generator the checker rejected would make
+            /// both properties above claims about programs no run can see.
+            #[test]
+            fn shaped_generator_is_well_typed(
+                generated in crate::testgen::arb_shaped_program(crate::testgen::SHAPED_LARGE),
+            ) {
+                prop_assert!(
+                    typecheck(&generated.1).is_ok(),
+                    "{:?}\n{}",
+                    typecheck(&generated.1).err(),
+                    generated.0
+                );
+            }
+        }
+
+        /// **The shaped generator's guards** (testing.md rule 2), read off what a
+        /// recorded run carried rather than off the program text. B1's claim over
+        /// these programs is only worth something if a run *matched* a body of
+        /// three or more atoms whose first premise and a later one were derived in
+        /// the same round with an older premise between them — the instance a
+        /// semi-naive round has to find from its later delta position — and if
+        /// fixpoints run deep.
+        #[test]
+        fn shaped_generator_reaches_deep_rounds_and_a_split_instance() {
+            use proptest::strategy::{Strategy, ValueTree};
+            use proptest::test_runner::TestRunner;
+
+            let mut runner = TestRunner::deterministic();
+            let (mut split, mut deep) = (0, 0);
+            for _ in 0..48 {
+                let (_, program) = crate::testgen::arb_shaped_program(crate::testgen::SHAPED_LARGE)
+                    .new_tree(&mut runner)
+                    .expect("strategy produces a value")
+                    .current();
+                let model = eval(&program).unwrap();
+                let rounds = model
+                    .facts()
+                    .filter_map(|fact| model.first_round(&fact))
+                    .max()
+                    .unwrap_or(0);
+                if rounds >= 8 {
+                    deep += 1;
+                }
+                let derived_round = |premise: &Premise| match premise {
+                    Premise::Fact(fact) if !model.is_base(fact) => model.first_round(fact),
+                    _ => None,
+                };
+                let reached = model.facts().any(|fact| {
+                    model.derivations_of(&fact).any(|derivation| {
+                        let rounds: Vec<Option<u32>> =
+                            derivation.premises.iter().map(derived_round).collect();
+                        rounds.len() >= 3
+                            && (2..rounds.len()).any(|k| match (rounds[0], rounds[k]) {
+                                (Some(first), Some(later)) if first == later => {
+                                    rounds[1..k].iter().all(|r| r.is_none_or(|r| r < first))
+                                }
+                                _ => false,
+                            })
+                    })
+                });
+                if reached {
+                    split += 1;
+                }
+            }
+            assert!(
+                split >= 10 && deep >= 10,
+                "of 48 shaped programs, {split} matched a split instance and {deep} ran 8+ rounds"
+            );
+        }
+
+        /// And the pairing E9's reporting claim rests on: a fact the full store
+        /// holds a reporting *and* a non-reporting derivation of, in a program
+        /// whose reporting run warns.
+        #[test]
+        fn shaped_generator_reaches_a_fact_derived_with_and_without_a_report() {
+            use proptest::strategy::{Strategy, ValueTree};
+            use proptest::test_runner::TestRunner;
+
+            let mut runner = TestRunner::deterministic();
+            let mut reached = 0;
+            for _ in 0..48 {
+                let (_, program) = crate::testgen::arb_shaped_program(crate::testgen::SHAPED_LARGE)
+                    .new_tree(&mut runner)
+                    .expect("strategy produces a value")
+                    .current();
+                let recorded = eval(&program).unwrap();
+                let paired = recorded.facts().any(|fact| {
+                    let (reporting, plain): (Vec<&Derivation>, Vec<&Derivation>) =
+                        recorded.derivations_of(&fact).partition(|d| d.reports());
+                    !reporting.is_empty() && !plain.is_empty()
+                });
+                let reports = eval_with(&program, Provenance::Reports).unwrap();
+                if paired && !crate::api::absent_skip_warnings(&reports, &program, None).is_empty()
+                {
+                    reached += 1;
+                }
+            }
+            assert!(
+                reached >= 30,
+                "of 48 shaped programs, {reached} derived a fact with and without a report"
             );
         }
 

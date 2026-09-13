@@ -404,6 +404,143 @@ pub(crate) fn arb_program_with_edb() -> impl Strategy<Value = ir::Program> {
         .prop_map(|ast| crate::lower::lower(&ast).expect("safe-by-construction programs lower"))
 }
 
+/// Size knobs for [`arb_shaped_program`].
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ShapeSize {
+    /// Nodes the data ranges over. The chain runs through up to all of them, and
+    /// a fixpoint's round count follows the chain.
+    pub(crate) nodes: usize,
+    /// Extra plain edges, and extra labelled edges, beyond the chain.
+    pub(crate) extra_edges: usize,
+    /// Rules drawn from [`SHAPE_RULES`], beside the three fixed base rules.
+    pub(crate) rules: usize,
+}
+
+/// Fixpoints a dozen rounds deep, with fan-in and cycles in the data.
+pub(crate) const SHAPED_LARGE: ShapeSize = ShapeSize {
+    nodes: 14,
+    extra_edges: 16,
+    rules: 8,
+};
+
+/// The rule menu for [`arb_shaped_program`]: the shapes a real analysis writes
+/// (`code-analysis`'s `lib/pointsto.dl`, `lib/modgraph.dl`), not a uniform draw.
+/// `P`, `Q` and `R` each become `p` or `q`, so any template can be self-,
+/// mutually or not recursive.
+const SHAPE_RULES: &[&str] = &[
+    // Closures: the recursive atom last, and first.
+    "P(X, Z) :- e(X, Y), Q(Y, Z).",
+    "P(X, Z) :- Q(X, Y), e(Y, Z).",
+    // A recursive atom between two plain ones.
+    "P(X, W) :- e(X, Y), Q(Y, Z), e(Z, W).",
+    // Two recursive atoms around a plain one: the instance a semi-naive round
+    // must still find when both are new and the middle is not.
+    "P(X, W) :- Q(X, Y), e(Y, Z), R(Z, W).",
+    // Points-to's store and load: one relation twice in a body, and a
+    // three-column relation in the same recursion.
+    "h(O, F, O2) :- l(B, F, V), P(B, O), Q(V, O2).",
+    "P(T, O2) :- l(T, F, B), Q(B, O), h(O, F, O2).",
+    "h(X, F, Z) :- h(X, F, Y), P(Y, Z).",
+    "P(X, Y) :- h(X, _, Y).",
+    // A four-atom chain through both kinds of edge.
+    "P(X, V) :- e(X, Y), Q(Y, Z), l(Z, _, W), R(W, V).",
+    // An inversion, a diagonal, and a symmetric self-join.
+    "P(Y, X) :- Q(X, Y).",
+    "P(X, X) :- s(X).",
+    "P(X, Y) :- Q(X, Y), R(Y, X).",
+];
+
+/// A program **shaped like an analysis**, as text and lowered: the evaluation
+/// generator [`arb_program_with_edb`] draws 1–2-atom bodies over at most six
+/// facts, and cannot build a fixpoint many rounds deep or a recursive body of
+/// three atoms — a semi-naive defect in exactly that shape passed the whole
+/// suite (`testing.md` **B1**, 2026-09-12).
+///
+/// - **Data** over string nodes `n0…`: a chain `e`/`l` through the first `chain`
+///   nodes (depth, and so rounds), extra plain and labelled edges (fan-in and
+///   cycles), and seeds `s`.
+/// - **Rules**: `p`, `q`, `h` from three base rules, then [`SHAPE_RULES`].
+/// - **Stratified on top**, half the time: a negation and an aggregate over the
+///   recursion.
+/// - **A fact derived two ways in one round**, when any of three keys fails its
+///   cast: `parsed` from a cast that loses the value (a derivation that reports,
+///   §12) and from a plain row holding `absent` (one that does not). The
+///   reporting store has to keep the first although the second supplied the fact.
+pub(crate) fn arb_shaped_program(size: ShapeSize) -> impl Strategy<Value = (String, ir::Program)> {
+    let node = 0..size.nodes;
+    (
+        1..size.nodes,
+        proptest::collection::vec((node.clone(), node.clone()), 0..=size.extra_edges),
+        proptest::collection::vec((node.clone(), 0u8..3, node.clone()), 0..=size.extra_edges),
+        proptest::collection::vec(node, 1..=3),
+        proptest::collection::vec((0..SHAPE_RULES.len(), any::<u8>()), 1..=size.rules),
+        proptest::bool::weighted(0.5),
+        proptest::collection::vec(proptest::bool::ANY, 3),
+    )
+        .prop_map(
+            |(chain, edges, labelled, seeds, rules, stratified, fails)| {
+                let mut src = String::new();
+                for i in 0..chain {
+                    src.push_str(&format!("e(\"n{i}\", \"n{}\").\n", i + 1));
+                    src.push_str(&format!("l(\"n{i}\", \"f{}\", \"n{}\").\n", i % 3, i + 1));
+                }
+                for (from, to) in edges {
+                    src.push_str(&format!("e(\"n{from}\", \"n{to}\").\n"));
+                }
+                for (from, label, to) in labelled {
+                    src.push_str(&format!("l(\"n{from}\", \"f{label}\", \"n{to}\").\n"));
+                }
+                for seed in seeds {
+                    src.push_str(&format!("s(\"n{seed}\").\n"));
+                }
+                src.push_str("p(X, Y) :- e(X, Y).\n");
+                src.push_str("q(X, Y) :- l(X, _, Y).\n");
+                src.push_str("h(X, F, Y) :- l(X, F, Y).\n");
+                for (template, roles) in rules {
+                    let role = |bit: u8| if roles >> bit & 1 == 0 { "p(" } else { "q(" };
+                    let rule = SHAPE_RULES[template]
+                        .replace("P(", role(0))
+                        .replace("Q(", role(1))
+                        .replace("R(", role(2));
+                    src.push_str(&rule);
+                    src.push('\n');
+                }
+                src.push_str("?- p(X, Y).\n?- h(A, F, B).\n");
+                if stratified {
+                    src.push_str("u(X) :- s(X), not p(X, X).\n");
+                    src.push_str("c(X, N) :- s(X), N = count { Y | q(X, Y) }.\n");
+                    src.push_str("?- u(X).\n?- c(X, N).\n");
+                }
+                if fails.iter().any(|&fail| fail) {
+                    for (k, fail) in fails.iter().enumerate() {
+                        if *fail {
+                            src.push_str(&format!(
+                                "raw(\"n{k}\", \"oops\").\ngiven(\"n{k}\", absent).\n"
+                            ));
+                        } else {
+                            src.push_str(&format!("raw(\"n{k}\", \"{}\").\n", k * 4));
+                        }
+                    }
+                    src.push_str("given(\"n9\", 1).\n");
+                    src.push_str("parsed(K, V) :- raw(K, S), V = S as int.\n");
+                    src.push_str("parsed(K, V) :- given(K, V).\n");
+                    src.push_str("?- parsed(K, V).\n");
+                }
+                let program = lower_text(&src);
+                (src, program)
+            },
+        )
+}
+
+/// Parses and lowers a generated program's text; a failure is a generator bug,
+/// so it panics with the text.
+fn lower_text(src: &str) -> ir::Program {
+    let ast = crate::parser::parse(src)
+        .unwrap_or_else(|errors| panic!("generated program parses: {errors:?}\n{src}"));
+    crate::lower::lower(&ast)
+        .unwrap_or_else(|errors| panic!("generated program lowers: {errors:?}\n{src}"))
+}
+
 /// A pair `(base, extended)` of safe programs where `extended` is `base` plus
 /// one extra fact and one extra rule (testing.md B4 monotonicity). The
 /// extension lives on fresh `ext_*` predicates — nothing in the base depends
