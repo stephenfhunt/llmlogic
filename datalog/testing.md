@@ -261,7 +261,7 @@ it. A future audit starts here.
 | Confluence (inference, interning, strata) | `arb_statement_permutation` | **C13** — the type half has nothing else; C4/C5 both fix statement order |
 | Order-invariance of *explanations* | B5/B6's mutators, compared at the derivation level | **C14**; E1–E4 check one evaluation each and are blind to it |
 | Closure at the program level (§14) | `arb_closure_program` | **D5**; D1 is the fact-set half |
-| Printing an answer from the model (§14) | `arb_program_text_at` at `Medium`/`Large`, each also with query bodies reversed; `arb_shaped_program` | **D6** — the eager renderer's bytes; `d6_generators_reach_every_printing_case` |
+| Printing an answer from the model (§14) | `arb_program_text_at` at `Medium`/`Large` and `arb_shaped_program`, each also with query bodies reversed and with leading wildcards | **D6** — the eager renderer's bytes; `d6_generators_reach_every_printing_case` |
 | The rendered proof's structure (§11) | `arb_program_with_edb`, every derived fact explained and printed | **E7** (every line is a comment — E5's lexical precondition) and **E8** (the declared depth is the node's); a guard pins the generator reaches a proof deeper than one node |
 | Explanations against the fact stream (§11/§14) | `arb_closure_program` plus both sigils over a fact the run answered and one it did not | **E5** — stripping the comments leaves the run without its goals, byte for byte; also the printed half of E9 |
 | Analysis-shaped recursion (§6/§15) | `arb_shaped_program` (`ShapeSize`): chain data for depth, fan-in and cycles, multi-atom recursive rule templates, stratified negation and an aggregate on top, a fact derived with and without a report | **B1** `b1_shaped_programs_agree` and **E9** `e9_shaped_programs_provision_alike`, both under `ROUND_CAP`; guards read off the recorded run; `shaped_generator_is_well_typed` |
@@ -1127,28 +1127,41 @@ that list that cannot drift.
   suite**, not a filtered one.
   Non-vacuity is `closure_generator_produces_runs_that_answer`, asserting both
   that runs answer at all and that some answer under a real relation's name.
-- [ ] **D6** **A run prints what the eager renderer would** (§14, §17
+- [x] **D6** **A run prints what the eager renderer would** (§14, §17
   2026-09-13): each query's lines, then the whole of stdout byte for byte, equal
   a reference that answers every row into owned values and sorts the rendered
   facts (`reference_answer_lines`, kept in `api.rs`'s tests), over the run's own
   model. `d6_holds`, at `Tier::Medium` and `Tier::Large` through
-  `arb_program_text_at`, each program also with every query body reversed
-  (`testgen::with_reversed_query_bodies`), and over `arb_shaped_program`.
+  `arb_program_text_at` and over `arb_shaped_program`, each program also with
+  every query body reversed (`testgen::with_reversed_query_bodies`, not for the
+  shaped queries) and with leading wildcards (`testgen::with_leading_wildcards`).
   Printing borrows from the model where a relation's order already is the
   answer's and sorts only where it is not, so the property is what fails if a
   borrowed order is not the canonical one.
 
   Reversal is the move that reaches **a single-atom query whose slots are out
   of argument order**: the generator writes negations last, so reversed, a
-  negation names a variable first. Non-vacuity is
+  negation names a variable first. **Leading wildcards** reach **an atom whose
+  relation is not in its answer's order** — `h(_, F, B)` over a relation sorted
+  by its first column — which a wildcard merely *before* a column, as the
+  generators drew it, did not (below). Non-vacuity is
   `d6_generators_reach_every_printing_case`, which classifies the lowered query
   and counts only queries that answered a row: every shape, an atom alone with a
   constant, a repeated variable, a wildcard after every variable and one before,
-  and the out-of-order slots.
+  and the out-of-order slots, and an atom alone whose relation, walked, is out of
+  the answer's order (`walk_order_is_not_the_answers`).
 
   *Mutations* (the full suite): **printing every single-atom query in row order**
   — skipping `columns_first_occur_in_order` — reddens D6 at `Medium` and at
-  `Large`, and nothing else in the lib suite.
+  `Large`, and nothing else in the lib suite. **Walking an atom whose wildcard
+  precedes a column** survived every test at first — the guard counted such
+  atoms answering a row, never a relation out of the answer's order, and none
+  the generators drew was; with leading wildcards and that guard case it reddens
+  D6 at `Medium`, at `Large` and over shaped programs.
+  **Dropping the repeated-variable filter** reddens D6 at both tiers and two
+  unit tests; **dropping the constant filter**, D6 and seventeen tests from unit
+  to system; **a scan that always answered**, the empty-relation unit test and
+  the system exit-code tests.
 
 - [x] **D2** `parse(print(ast)) == ast` modulo spans, over generated
   parse-reachable ASTs incl. named-argument and arithmetic forms

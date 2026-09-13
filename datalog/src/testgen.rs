@@ -2186,6 +2186,83 @@ pub(crate) fn with_reversed_query_bodies(src: &str) -> String {
     crate::print::print_program(&program)
 }
 
+/// D6 at size: the program text with, in each positive query atom, the first
+/// variable the query uses only once turned into `_` — when a variable follows
+/// it in that atom. The evaluation generator rarely leaves a wildcard ahead of
+/// an answer column and the analysis-shaped queries never do, yet that is the
+/// atom whose relation is not in its answer's order: `h(_, F, B)` over a
+/// relation sorted by its first column. Only a body of plain-term atoms is
+/// touched, so no rewrite can change which variables are bound.
+pub(crate) fn with_leading_wildcards(src: &str) -> String {
+    use crate::ast::{Args, Expr, ExprKind, LiteralKind, StatementKind, TermKind};
+    let variable = |expr: &Expr| match &expr.kind {
+        ExprKind::Term(term) => match &term.kind {
+            TermKind::Variable(name) => Some(name.clone()),
+            _ => None,
+        },
+        _ => None,
+    };
+    let mut program = crate::parser::parse(src).expect("generated text parses");
+    for statement in &mut program.statements {
+        let StatementKind::Query(query) = &mut statement.kind else {
+            continue;
+        };
+        let mut uses: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let mut plain = true;
+        for literal in &query.body {
+            let LiteralKind::Atom { atom, .. } = &literal.kind else {
+                plain = false;
+                break;
+            };
+            let exprs: Vec<&Expr> = match &atom.args {
+                Args::Positional(exprs) => exprs.iter().collect(),
+                Args::Named(named) => named.iter().map(|arg| &arg.value).collect(),
+            };
+            for expr in exprs {
+                match &expr.kind {
+                    ExprKind::Term(term) => {
+                        if let TermKind::Variable(name) = &term.kind {
+                            *uses.entry(name.clone()).or_default() += 1;
+                        }
+                    }
+                    _ => plain = false,
+                }
+            }
+        }
+        if !plain {
+            continue;
+        }
+        for literal in &mut query.body {
+            let LiteralKind::Atom {
+                negated: false,
+                atom,
+            } = &mut literal.kind
+            else {
+                continue;
+            };
+            let Args::Positional(exprs) = &mut atom.args else {
+                continue;
+            };
+            let Some(first) = exprs
+                .iter()
+                .position(|expr| variable(expr).is_some_and(|name| uses[&name] == 1))
+            else {
+                continue;
+            };
+            if !exprs[first + 1..]
+                .iter()
+                .any(|expr| variable(expr).is_some())
+            {
+                continue;
+            }
+            if let ExprKind::Term(term) = &mut exprs[first].kind {
+                term.kind = TermKind::Wildcard;
+            }
+        }
+    }
+    crate::print::print_program(&program)
+}
+
 /// B6: swaps two rule ids within one stratum, changing rule application order
 /// but not membership.
 pub(crate) fn with_swapped_stratum_rules(

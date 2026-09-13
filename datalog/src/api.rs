@@ -87,7 +87,7 @@ impl RunResult {
             .map(|answer| {
                 let mut lines = Vec::new();
                 answer
-                    .for_each_line(&mut |line| {
+                    .for_each_line(&self.model, &mut |line| {
                         lines.push(line);
                         Ok(())
                     })
@@ -100,7 +100,9 @@ impl RunResult {
     /// Whether each query, in program order, answered at least one row — what
     /// the exit code reads (§14), known without rendering a line.
     pub fn answered(&self) -> impl Iterator<Item = bool> + '_ {
-        self.queries.iter().map(Answer::answered)
+        self.queries
+            .iter()
+            .map(|answer| answer.answered(&self.model))
     }
 
     /// All answer lines across every query, then every explanation block,
@@ -122,7 +124,7 @@ impl RunResult {
     /// (`notes/pointsto-profile-2026-09-12.md`, §17 2026-09-13).
     pub fn write_output(&self, out: &mut impl std::io::Write) -> std::io::Result<()> {
         for answer in &self.queries {
-            answer.for_each_line(&mut |line| {
+            answer.for_each_line(&self.model, &mut |line| {
                 out.write_all(line.as_bytes())?;
                 out.write_all(b"\n")
             })?;
@@ -230,6 +232,13 @@ fn run_pruning(
 
     let mut queries = Vec::with_capacity(program.queries.len());
     for (position, query) in program.queries.iter().enumerate() {
+        // A bare atom is answered by its relation, which the model already
+        // holds in answer order: nothing is collected, and nothing it could
+        // report — a bare atom holds no aggregate and no conversion.
+        if let Some(scan) = Scan::of(query, &program) {
+            queries.push(Answer::Scan(scan));
+            continue;
+        }
         // (body index) → (op, total skipped, groups that skipped), for the
         // aggregates written in *this* query. A query's premises are built and
         // then dropped on the floor by `answer`; this is the only place they
@@ -657,6 +666,105 @@ enum Answer {
         rows: BTreeSet<Vec<ir::Value>>,
         shape: Shape,
     },
+    /// A body that is one atom and nothing else, walked out of the model's
+    /// relation while printing — the answer is not copied at all.
+    Scan(Scan),
+}
+
+/// A query answered by walking one relation ([`Answer::Scan`]).
+///
+/// A relation is sorted and distinct, and a walk keeps both when constants and
+/// repeated variables only filter it and every wildcard comes after every answer
+/// column: the columns are then a prefix of what the tuples sort by, so rows
+/// that differ only in a wildcard are adjacent, and comparing with the previous
+/// row deduplicates. Nothing in the walk can fail, so an answer held this way
+/// cannot break stdout's all-or-nothing contract. Any other atom — a wildcard
+/// before a column, slots out of argument order — is a [`Answer::Rows`].
+#[derive(Debug, Clone)]
+struct Scan {
+    pred: ir::PredId,
+    /// The relation's name, which the substituted form prints under.
+    name: String,
+    /// A position and the constant its value must match.
+    constants: Vec<(usize, ir::Value)>,
+    /// A position and the earlier position its value must match.
+    repeats: Vec<(usize, usize)>,
+    /// The answer columns' positions, in projection order.
+    columns: Vec<usize>,
+    /// Whether the atom has a wildcard: the answer is then `answer(…)` over the
+    /// columns, and otherwise the matched tuple itself.
+    projects_out: bool,
+}
+
+impl Scan {
+    /// A scan for `query`, when its body is one positive atom whose answer
+    /// columns are the projection in argument order, before every wildcard.
+    /// An empty projection is left to [`Answer::Rows`]: at most one row.
+    fn of(query: &ir::Query, program: &ir::Program) -> Option<Scan> {
+        let [
+            ir::BodyLiteral {
+                kind: ir::BodyLiteralKind::Atom(atom),
+                ..
+            },
+        ] = query.body.as_slice()
+        else {
+            return None;
+        };
+        let (mut constants, mut repeats, mut columns, mut wildcards) =
+            (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        let mut first_at: HashMap<u32, usize> = HashMap::new();
+        for (position, term) in atom.args.iter().enumerate() {
+            match term {
+                ir::Term::Const(value) => constants.push((position, value.clone())),
+                ir::Term::Var(var) => match first_at.get(&var.0) {
+                    Some(&earlier) => repeats.push((position, earlier)),
+                    None => {
+                        first_at.insert(var.0, position);
+                        if query.var_names[var.0 as usize].is_some() {
+                            columns.push((var.0, position));
+                        } else {
+                            wildcards.push(position);
+                        }
+                    }
+                },
+            }
+        }
+        let in_projection_order = columns
+            .iter()
+            .map(|&(slot, _)| slot)
+            .eq(query.projection.iter().copied());
+        let last_column = columns.last().map(|&(_, position)| position)?;
+        if !in_projection_order || wildcards.iter().any(|&position| position < last_column) {
+            return None;
+        }
+        Some(Scan {
+            pred: atom.pred,
+            name: program.pred_info(atom.pred).name.clone(),
+            constants,
+            repeats,
+            columns: columns.into_iter().map(|(_, position)| position).collect(),
+            projects_out: !wildcards.is_empty(),
+        })
+    }
+
+    /// The relation's tuples the atom matches, in canonical order. Matching is
+    /// the join's (`Value::unifies_with`), so a stored `absent` matches no
+    /// constant and no repeated variable.
+    fn matches<'m>(&'m self, model: &'m Model) -> impl Iterator<Item = &'m [ir::Value]> + 'm {
+        model
+            .relation(self.pred)
+            .iter()
+            .map(|tuple| tuple.0.as_slice())
+            .filter(move |tuple| {
+                self.constants
+                    .iter()
+                    .all(|(position, value)| tuple[*position].unifies_with(value))
+                    && self
+                        .repeats
+                        .iter()
+                        .all(|&(position, earlier)| tuple[position].unifies_with(&tuple[earlier]))
+            })
+    }
 }
 
 /// Which §14 form a query's rows print in, decided from the query alone.
@@ -796,9 +904,10 @@ fn substitute<'a>(cells: &'a [Cell], row: &'a [ir::Value]) -> Vec<&'a ir::Value>
 
 impl Answer {
     /// Whether the query answered at least one row.
-    fn answered(&self) -> bool {
+    fn answered(&self, model: &Model) -> bool {
         match self {
             Answer::Rows { rows, .. } => !rows.is_empty(),
+            Answer::Scan(scan) => scan.matches(model).next().is_some(),
         }
     }
 
@@ -806,9 +915,31 @@ impl Answer {
     /// `line` as it is made.
     fn for_each_line(
         &self,
+        model: &Model,
         line: &mut dyn FnMut(String) -> std::io::Result<()>,
     ) -> std::io::Result<()> {
-        let Answer::Rows { rows, shape } = self;
+        let (rows, shape) = match self {
+            Answer::Rows { rows, shape } => (rows, shape),
+            Answer::Scan(scan) => {
+                let mut previous: Option<Vec<&ir::Value>> = None;
+                for tuple in scan.matches(model) {
+                    if !scan.projects_out {
+                        line(print_ground_fact(&scan.name, tuple))?;
+                        continue;
+                    }
+                    let row: Vec<&ir::Value> = scan
+                        .columns
+                        .iter()
+                        .map(|&position| &tuple[position])
+                        .collect();
+                    if previous.as_ref() != Some(&row) {
+                        line(print_ground_fact("answer", &row))?;
+                        previous = Some(row);
+                    }
+                }
+                return Ok(());
+            }
+        };
         match shape {
             Shape::Atoms {
                 atoms,
@@ -900,6 +1031,53 @@ e(\"b\", \"b\").
                 "e(\"b\", \"b\").".to_string(),
             ]]
         );
+    }
+
+    /// A query atom printed straight from its relation still matches the way a
+    /// join does: a repeated variable never matches a stored `absent` twice
+    /// (§6), though `absent` sorts first and the walk meets it first.
+    #[test]
+    fn a_repeated_query_variable_does_not_match_absent_against_itself() {
+        let src = "\
+e(absent, absent).
+e(\"a\", \"a\").
+?- e(X, X).
+?- e(X, _).
+";
+        let result = run(src).expect("runs");
+        assert_eq!(
+            result.answer_lines(),
+            vec![
+                vec!["e(\"a\", \"a\").".to_string()],
+                vec!["answer(absent).".to_string(), "answer(\"a\").".to_string()],
+            ]
+        );
+    }
+
+    /// Slots number by first appearance in the body, so a filter that names a
+    /// variable first puts the rows out of the atom's argument order — and the
+    /// facts must still print sorted.
+    #[test]
+    fn a_filter_naming_a_variable_first_still_prints_facts_in_order() {
+        let src = "\
+p(\"b\", 1).
+p(\"a\", 2).
+?- X > 0, p(Y, X).
+";
+        let result = run(src).expect("runs");
+        assert_eq!(
+            result.answer_lines(),
+            vec![vec!["p(\"a\", 2).".to_string(), "p(\"b\", 1).".to_string()]]
+        );
+    }
+
+    /// A bare atom over a relation nothing defines prints nothing and answers
+    /// no row — what the exit code reads as 1.
+    #[test]
+    fn a_bare_atom_over_an_empty_relation_answers_nothing() {
+        let result = run("p(1).\n?- q(X).\n").expect("runs");
+        assert_eq!(result.answer_lines(), vec![Vec::<String>::new()]);
+        assert_eq!(result.answered().collect::<Vec<_>>(), vec![false]);
     }
 
     #[test]
@@ -1519,8 +1697,8 @@ parsed(K, V) :- raw(K, S), V = S as int.
     proptest! {
         #![proptest_config(ProptestConfig::with_cases(crate::testgen::cases(32)))]
 
-        /// **D6 at `Tier::Medium`** — `Large` in the deep run — as generated and
-        /// with every query body reversed.
+        /// **D6 at `Tier::Medium`** — `Large` in the deep run — as generated,
+        /// with every query body reversed, and with leading wildcards.
         #[test]
         fn d6_printing_is_the_eager_rendering_at_medium(
             generated in crate::testgen::arb_program_text_at(
@@ -1529,6 +1707,7 @@ parsed(K, V) :- raw(K, S), V = S as int.
         ) {
             d6_holds(&generated.0)?;
             d6_holds(&crate::testgen::with_reversed_query_bodies(&generated.0))?;
+            d6_holds(&crate::testgen::with_leading_wildcards(&generated.0))?;
         }
 
         /// **D6 at `Tier::Large`** — `Deep` in the deep run.
@@ -1540,15 +1719,18 @@ parsed(K, V) :- raw(K, S), V = S as int.
         ) {
             d6_holds(&generated.0)?;
             d6_holds(&crate::testgen::with_reversed_query_bodies(&generated.0))?;
+            d6_holds(&crate::testgen::with_leading_wildcards(&generated.0))?;
         }
 
         /// **D6 over analysis-shaped programs**: whole closures printed as
-        /// bare atoms, the case printing a large answer is.
+        /// bare atoms, the case printing a large answer is — and with a leading
+        /// wildcard, over relations far out of the answer's order.
         #[test]
         fn d6_printing_is_the_eager_rendering_over_shaped_programs(
             generated in crate::testgen::arb_shaped_program(crate::testgen::SHAPED_LARGE),
         ) {
             d6_holds(&generated.0)?;
+            d6_holds(&crate::testgen::with_leading_wildcards(&generated.0))?;
         }
     }
 
@@ -1556,23 +1738,37 @@ parsed(K, V) :- raw(K, S), V = S as int.
     /// the text (`testing.md` rule 2): each answer shape; a body that is one
     /// atom alone, with a constant, a repeated variable, a wildcard after every
     /// variable and one before; and a single-atom query whose slots are not in
-    /// argument order. Each counts only when the query answered a row.
+    /// argument order; and an atom alone whose relation, walked in its own
+    /// order, is out of the answer's — the one a walk must not print, which a
+    /// wildcard merely *before* a column does not reach (mutation, 2026-09-13).
+    /// Each counts only when the query answered a row.
     #[test]
     fn d6_generators_reach_every_printing_case() {
         use proptest::strategy::{Strategy, ValueTree};
         use proptest::test_runner::TestRunner;
 
         let mut runner = TestRunner::deterministic();
-        let strategy = crate::testgen::arb_program_text_at(crate::testgen::Tier::Medium);
-        let mut reached: BTreeMap<&str, usize> = BTreeMap::new();
+        let mut texts: Vec<String> = Vec::new();
+        let medium = crate::testgen::arb_program_text_at(crate::testgen::Tier::Medium);
         for _ in 0..200 {
-            let (text, _) = strategy
+            let tree = medium
                 .new_tree(&mut runner)
-                .expect("strategy produces a value")
-                .current();
+                .expect("strategy produces a value");
+            texts.push(tree.current().0);
+        }
+        let shaped = crate::testgen::arb_shaped_program(crate::testgen::SHAPED_LARGE);
+        for _ in 0..24 {
+            let tree = shaped
+                .new_tree(&mut runner)
+                .expect("strategy produces a value");
+            texts.push(tree.current().0);
+        }
+        let mut reached: BTreeMap<&str, usize> = BTreeMap::new();
+        for text in &texts {
             for src in [
                 text.clone(),
-                crate::testgen::with_reversed_query_bodies(&text),
+                crate::testgen::with_reversed_query_bodies(text),
+                crate::testgen::with_leading_wildcards(text),
             ] {
                 let result = run(&src).expect("generated programs run");
                 let program = lower(&parse(&src).expect("parses")).expect("lowers");
@@ -1582,6 +1778,11 @@ parsed(K, V) :- raw(K, S), V = S as int.
                     }
                     for case in printing_cases(query) {
                         *reached.entry(case).or_default() += 1;
+                    }
+                    if walk_order_is_not_the_answers(query, &result.model) {
+                        *reached
+                            .entry("atom alone, walked out of order")
+                            .or_default() += 1;
                     }
                 }
             }
@@ -1595,12 +1796,48 @@ parsed(K, V) :- raw(K, S), V = S as int.
             "atom alone, wildcard after",
             "atom alone, wildcard before",
             "slots out of argument order",
+            "atom alone, walked out of order",
         ] {
             assert!(
                 reached.get(case).is_some_and(|&n| n > 0),
                 "D6's generator never reached `{case}` with an answer: {reached:?}"
             );
         }
+    }
+
+    /// Whether `query` is one atom alone, with no constant and no repeated
+    /// variable, whose relation — walked in its own order and cut down to the
+    /// answer columns — is not in the answer's order.
+    fn walk_order_is_not_the_answers(query: &ir::Query, model: &Model) -> bool {
+        let [
+            ir::BodyLiteral {
+                kind: ir::BodyLiteralKind::Atom(atom),
+                ..
+            },
+        ] = query.body.as_slice()
+        else {
+            return false;
+        };
+        let mut seen: Vec<u32> = Vec::new();
+        let mut columns = Vec::new();
+        for (position, term) in atom.args.iter().enumerate() {
+            let ir::Term::Var(var) = term else {
+                return false;
+            };
+            if seen.contains(&var.0) {
+                return false;
+            }
+            seen.push(var.0);
+            if query.var_names[var.0 as usize].is_some() {
+                columns.push(position);
+            }
+        }
+        let walked: Vec<Vec<&ir::Value>> = model
+            .relation(atom.pred)
+            .iter()
+            .map(|tuple| columns.iter().map(|&position| &tuple.0[position]).collect())
+            .collect();
+        walked.windows(2).any(|pair| pair[0] > pair[1])
     }
 
     /// The cases [`d6_generators_reach_every_printing_case`] counts.
