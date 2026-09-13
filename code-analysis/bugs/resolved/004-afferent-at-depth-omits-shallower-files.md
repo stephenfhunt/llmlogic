@@ -45,3 +45,21 @@ just to avoid documenting a rule that is otherwise right.
 Bounds every coupling reading at a directory granularity. File-level
 (`G = -1`) and package-level (`G = -2`) components are unaffected: every file has
 one of each.
+
+## Resolution
+
+**Fixed 2026-09-13.** The documentation this file asked for landed: a sentence in
+`units.dl`'s header and trap 11 in `reference/typescript.md` §5. The consequence
+is also **queryable** now, rather than only written down. `coupling.dl` gains
+`unplaced(G, F)` (files with no component at directory depth G) and
+`unplaced_dependent(G, C, F)` (an unplaced file referencing component C), which is
+exactly the edge `afferent(G, C, _)` does not count. SKILL.md's coupling row names
+it. The diagnosis held.
+
+**Not taken**, as the file advised: a pseudo-component for shallower files. It
+changes every coupling number to avoid a rule that is right. `unplaced_dependent`
+gives the reader the omitted edges without moving any metric.
+
+*Test*: on the `basic` fixture at depth 2, `afferent(2, "src/util", 0)` stands
+beside `unplaced_dependent(2, "src/util", "src/main.ts")`. Nothing is unplaced at
+depth 1 or at `G = -1`. *Mutation*: `placed` ignores the depth → red.

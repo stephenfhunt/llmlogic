@@ -198,7 +198,14 @@ untested(S) :- exports(symbol: S, kind: local), fn(id: S), not covered(S).
     it" query calls it dead. `exports.dl` follows both; a query of your own over
     `ref` should too (`exports(kind: reexport)` onto a `symbol(kind: module)`,
     and `imports(kind: dynamic)`).
-11. **Bulk commits are in `commit` and out of `cochange.dl`** (over
+11. **A directory depth leaves out the files above it.** At `G = N`, a file
+    directly in a shallower directory is in no component, so its references
+    cross no boundary — and entry points and barrels sit shallow.
+    `afferent(4, "…/src/graveyard", 0)` on `@grafana/ui` read as "nothing uses
+    it" while `src/index.ts` re-exported it eight times. Before believing a
+    count at a depth, ask `unplaced_dependent(G, C, F)`; files (`G = -1`) and
+    packages (`G = -2`) have no such gap.
+12. **Bulk commits are in `commit` and out of `cochange.dl`** (over
     `bulk_limit(50)` files). A rename-everything commit would otherwise couple
     every file to every other.
 

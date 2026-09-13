@@ -17,6 +17,13 @@
 %                                   (the Stable Dependencies Principle, broken)
 %   cbo(T, N)                       coupling between objects: how many other
 %                                   types T references or is referenced by
+%   unplaced(G, F)                  file F belongs to no component at directory
+%                                   depth G: it sits directly in a shallower
+%                                   directory, so no metric at G counts it
+%   unplaced_dependent(G, C, F)     unplaced F references component C — an
+%                                   edge `afferent(G, C, _)` does not count.
+%                                   Ask it before reading a 0 as "unused": an
+%                                   entry point or barrel is usually here
 %
 % Every `ref` kind counts. To measure only runtime coupling, or only type
 % coupling, restrict `file_ref` by Kind in a rule of your own.
@@ -33,6 +40,11 @@ crossing(G, A, B, S, T, K, L) :-
   ref(from: S, to: T, kind: K, line: L), symbol(id: S, file: FA), symbol(id: T, file: FB),
   file_member(FA, G, A), file_member(FB, G, B), A != B.
 comp_edge_weight(G, A, B, N) :- comp_edge(G, A, B), N = count { S | crossing(G, A, B, S, T, K, L) }.
+
+dir_depth(G) :- comp(G, _), G >= 0.
+placed(F, G) :- file_member(F, G, _).
+unplaced(G, F) :- dir_depth(G), file(path: F), not placed(F, G).
+unplaced_dependent(G, C, F) :- unplaced(G, F), file_ref(F, FB, _), file_member(FB, G, C).
 
 efferent(G, C, N) :- comp(G, C), N = count { B | comp_edge(G, C, B) }.
 afferent(G, C, N) :- comp(G, C), N = count { A | comp_edge(G, A, C) }.

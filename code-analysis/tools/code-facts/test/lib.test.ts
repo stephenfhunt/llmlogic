@@ -85,6 +85,19 @@ test("coupling: Martin's metrics per file, CBO per type", { skip }, () => {
   assert.ok(cbo.includes('cbo("src/use.ts#Registry", 1).'));
 });
 
+// bugs/004: a directory depth silently omits the files above it — here the
+// entry point, whose references into src/util are all the afferent coupling
+// src/util has.
+test("coupling: a depth names the files it leaves out, and what they depend on", { skip }, () => {
+  const out = outOf("basic");
+  assert.deepEqual(ask(out, "coupling.dl", "unplaced(2, F)"), ['unplaced(2, "src/main.ts").']);
+  assert.deepEqual(ask(out, "coupling.dl", "unplaced(1, F)"), []);
+  assert.deepEqual(ask(out, "coupling.dl", "afferent(2, C, N)"), ['afferent(2, "src/util", 0).']);
+  assert.deepEqual(ask(out, "coupling.dl", "unplaced_dependent(2, C, F)"), ['unplaced_dependent(2, "src/util", "src/main.ts").']);
+  // Files and packages have no gap.
+  assert.deepEqual(ask(out, "coupling.dl", "u(F) :- unplaced(-1, F)"), []);
+});
+
 test("cohesion: LCOM4, TCC, LCOM-HS and relational cohesion", { skip }, () => {
   const out = outOf("refs");
   // Base: describe calls this.area and reads the getter this.name — one component.

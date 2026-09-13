@@ -6,7 +6,12 @@
 %    N   a directory at depth N      (C: the directory; 0 is the root)
 % So `instability(1, C, I)` is instability between top-level directories, and
 % `instability(-1, C, I)` between files. A file sitting directly in a shallower
-% directory belongs to no component at a deeper N.
+% directory belongs to no component at a deeper N — and **entry points and
+% barrels are exactly the files that sit shallow**: `src/index.ts` has no
+% component at depth 3, so its imports cross no boundary there, and a
+% component only it depends on reads `afferent(3, C, 0)`. `coupling.dl`'s
+% `unplaced` and `unplaced_dependent` name what a depth leaves out (bugs/003
+% sibling, bugs/004).
 %
 %   member(G, C, File)   File belongs to component C
 %   file_member(File, G, C)  the same, keyed by the file
