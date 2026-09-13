@@ -287,10 +287,13 @@ fn print_constant(constant: &Constant) -> String {
 // --- Ground-fact (§14 output) printing ---
 
 /// Prints one ground fact as canonical Datalog: `pred(v1, v2, …).`.
-pub fn print_ground_fact(predicate: &str, values: &[Value]) -> String {
+///
+/// Takes owned or borrowed values alike, so a caller printing cells it holds
+/// elsewhere need not clone them first.
+pub fn print_ground_fact<V: std::borrow::Borrow<Value>>(predicate: &str, values: &[V]) -> String {
     let args = values
         .iter()
-        .map(print_value)
+        .map(|value| print_value(value.borrow()))
         .collect::<Vec<_>>()
         .join(", ");
     format!("{predicate}({args}).")

@@ -647,16 +647,19 @@ fn answer_lines(query: &ir::Query, rows: &[Vec<ir::Value>], program: &ir::Progra
     // in them — so those bodies fall through to `answer/N` (§17, 2026-08-17).
     if !atoms.is_empty() && atom_vars == projected && (atoms.len() == 1 || atom_vars.is_empty()) {
         let position_of = &position_of;
-        let mut facts: Vec<(&str, Vec<ir::Value>)> = rows
+        // Cells borrowed from `rows` and the query, not cloned: this list sorts
+        // the whole answer, and printing a large one held it a second time
+        // (`notes/pointsto-profile-2026-09-12.md`).
+        let mut facts: Vec<(&str, Vec<&ir::Value>)> = rows
             .iter()
             .flat_map(|row| {
-                atoms.iter().map(move |atom| {
+                atoms.iter().map(move |&atom| {
                     let tuple = atom
                         .args
                         .iter()
                         .map(|term| match term {
-                            ir::Term::Const(value) => value.clone(),
-                            ir::Term::Var(var) => row[position_of[&var.0]].clone(),
+                            ir::Term::Const(value) => value,
+                            ir::Term::Var(var) => &row[position_of[&var.0]],
                         })
                         .collect();
                     (program.pred_info(atom.pred).name.as_str(), tuple)
