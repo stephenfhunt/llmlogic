@@ -330,6 +330,16 @@ Value layer (`src/ir.rs`):
   (126 / 74 of 200), and a rejection that only a declaration can reach without
   facts (74). *Mutation (killed)*: skip `seed_declared` — C17 red, and
   `a_declared_temporal_column_types_arithmetic_without_facts`.
+- [x] **C18** A column-form type clash locates both sides (`bugs/009`,
+  2026-09-13): over 2–7 one-column facts of mixed types on two predicates, one
+  per line, every clash is at the incoming term's first line and carries exactly
+  one related place — the term that fixed the column, labelled as written, at its
+  line (`tests/pipeline.rs`, `c18_a_column_clash_locates_both_sides`). The
+  oracle is read off the generated text, not the typechecker. Guard: by
+  construction — the first two facts share a predicate and differ in type.
+  *Mutations (both killed)*: drop the related place (also reddens
+  `a_column_type_clash_names_both_occurrences` and
+  `every_type_clash_locates_both_sides`); locate it at the incoming side.
 - [x] **A1** F64 order is total; `Ord` agrees with `PartialOrd`; sorting is
   deterministic.
 - [x] **A2** `a == b ⇒ hash(a) == hash(b)` (bit-hash + `-0.0` normalization).

@@ -52,7 +52,7 @@ each; detail in §17 and `docs/worklog.md`.
 > gated by a deep run (`DATALOG_PBT=deep cargo test --lib`) before and after it
 > (the user's) — which does not currently finish on a 30 GB machine (`bugs/015`).
 >
-> **Open defects live in [`bugs/`](bugs/)** — `013` opened 2026-09-12, `014` the same day, `015` 2026-09-13.
+> **Open defects live in [`bugs/`](bugs/)** — `015` opened 2026-09-13; `009`, `013` and `014` were resolved the same day.
 > **No design session blocks anything** either: §6's extension, the last one,
 > shipped 2026-08-18.
 >

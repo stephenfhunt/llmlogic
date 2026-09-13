@@ -381,6 +381,30 @@ impl fmt::Display for Position {
     }
 }
 
+/// Another place a diagnostic is about (§12): the other side of a conflict,
+/// named as a reader would recognise it and located the way the error is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Related {
+    /// What sits there — `symbol `alice``, `` `p.x` ``.
+    pub label: String,
+    /// The byte range, if the stage knew one.
+    pub span: Option<Span>,
+    /// `span.start` resolved against the source text, once it was in hand.
+    pub position: Option<Position>,
+}
+
+impl Related {
+    /// A related place at `span`, unresolved until [`Error::locate`].
+    pub fn new(label: impl Into<String>, span: Span) -> Related {
+        Related {
+            label: label.into(),
+            span: Some(span),
+            position: None,
+        }
+    }
+}
+
 /// A structured error produced by the engine.
 ///
 /// Build with [`Error::lex`] / [`Error::parse`] / [`Error::semantic`] /
@@ -401,6 +425,9 @@ pub struct Error {
     pub position: Option<Position>,
     /// A concrete fix to offer, rendered as "(did you mean …?)"-style trailer.
     pub suggestion: Option<String>,
+    /// Other places the diagnostic is about, each rendered `; {label} (at …)`
+    /// after the position — the earlier side of a clash (`bugs/009`).
+    pub related: Vec<Related>,
 }
 
 impl Error {
@@ -418,6 +445,7 @@ impl Error {
             span: None,
             position: None,
             suggestion: None,
+            related: Vec::new(),
         }
     }
 
@@ -457,6 +485,13 @@ impl Error {
         self
     }
 
+    /// Attaches another place the diagnostic is about ([`Related`]).
+    #[must_use]
+    pub fn related_at(mut self, label: impl Into<String>, span: Span) -> Error {
+        self.related.push(Related::new(label, span));
+        self
+    }
+
     /// Attaches a suggested fix.
     #[must_use]
     pub fn suggest(mut self, suggestion: impl Into<String>) -> Error {
@@ -471,6 +506,11 @@ impl Error {
         if let (Some(span), None) = (self.span, self.position) {
             self.position = Some(Position::locate(source, span.start));
         }
+        for related in &mut self.related {
+            if let (Some(span), None) = (related.span, related.position) {
+                related.position = Some(Position::locate(source, span.start));
+            }
+        }
     }
 
     /// Drops the span, and with it any claim to a location.
@@ -483,6 +523,8 @@ impl Error {
     pub fn forget_span(&mut self) {
         self.span = None;
         self.position = None;
+        // A related place is a span too, and as unresolvable.
+        self.related.clear();
     }
 }
 
@@ -509,6 +551,13 @@ impl fmt::Display for Error {
             (Some(position), _) => write!(f, " (at {position})")?,
             (None, Some(span)) => write!(f, " (at byte {})", span.start)?,
             (None, None) => {}
+        }
+        for related in &self.related {
+            match (related.position, related.span) {
+                (Some(position), _) => write!(f, "; {} (at {position})", related.label)?,
+                (None, Some(span)) => write!(f, "; {} (at byte {})", related.label, span.start)?,
+                (None, None) => {}
+            }
         }
         if let Some(suggestion) = &self.suggestion {
             write!(f, " ({suggestion})")?;
@@ -850,6 +899,38 @@ mod tests {
             "lexical error [unsupported-token]: `=<` is not an operator (at 2:1) \
              (did you mean `<=`?)"
         );
+    }
+
+    /// A related place renders after the position and before the suggestion,
+    /// resolves with the error, and goes when the span does (`bugs/009`).
+    #[test]
+    fn a_related_place_renders_resolves_and_is_forgotten() {
+        let src = "p(1).\np(\"x\").";
+        let mut error = Error::new(
+            ErrorCode::TypeClash,
+            "`p` column 0 is used as both int `1` and string `\"x\"`",
+        )
+        .at_span(Span { start: 6, end: 13 })
+        .related_at("int `1`", Span { start: 0, end: 5 })
+        .suggest("a fix");
+        assert_eq!(
+            error.to_string(),
+            "semantic error [type-clash]: `p` column 0 is used as both int `1` and string `\"x\"` \
+             (at byte 6); int `1` (at byte 0) (a fix)"
+        );
+        error.locate(src);
+        assert_eq!(
+            error.related[0].position,
+            Some(Position { line: 1, column: 1 })
+        );
+        assert_eq!(
+            error.to_string(),
+            "semantic error [type-clash]: `p` column 0 is used as both int `1` and string `\"x\"` \
+             (at 2:1); int `1` (at 1:1) (a fix)"
+        );
+        error.forget_span();
+        assert!(error.related.is_empty());
+        assert!(!error.to_string().contains("(at"), "{error}");
     }
 
     /// A stage that has a span but never saw the source still reports something

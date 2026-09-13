@@ -23,7 +23,7 @@
 //! once imports and IR-level declared types exist.
 
 use crate::ast::{AggOp, ArithOp, Span, TypeName};
-use crate::error::{Error, ErrorCode};
+use crate::error::{Error, ErrorCode, Related};
 use crate::ir;
 use crate::print::print_value;
 
@@ -241,6 +241,9 @@ struct Fixed {
     /// `None` where the type came from inference or a declaration rather than a
     /// literal — a `count` result is an int with no term to point at.
     witness: Option<String>,
+    /// Where the type was fixed — the fact, the clause holding the literal, or
+    /// the declaration — so a clash can locate its earlier side (`bugs/009`).
+    at: Option<Span>,
 }
 
 struct TypeChecker<'a> {
@@ -346,16 +349,30 @@ impl<'a> TypeChecker<'a> {
     fn set_type_from(&mut self, node: usize, t: TypeName, witness: Option<String>) {
         let root = self.find(node);
         match &self.ty[root] {
-            None => self.ty[root] = Some(Fixed { ty: t, witness }),
+            None => {
+                self.ty[root] = Some(Fixed {
+                    ty: t,
+                    witness,
+                    at: self.at,
+                })
+            }
             Some(fixed) if fixed.ty == t => {}
             Some(fixed) => {
+                let earlier = describe(fixed.ty, fixed.witness.as_deref());
+                let earlier_at = fixed.at;
                 let message = format!(
                     "{} is used as both {} and {}",
                     self.label[root],
-                    describe(fixed.ty, fixed.witness.as_deref()),
+                    earlier,
                     describe(t, witness.as_deref()),
                 );
-                self.raise(ErrorCode::TypeClash, message);
+                let error = self.raise(ErrorCode::TypeClash, message);
+                // The incoming side is where the error is; the earlier side is
+                // wherever it was fixed — often another fact, which is why the
+                // position alone could not locate it (`bugs/009`).
+                if let Some(span) = earlier_at {
+                    error.related.push(Related::new(earlier, span));
+                }
             }
         }
     }
@@ -413,6 +430,8 @@ impl<'a> TypeChecker<'a> {
     fn gather(&mut self) {
         // Facts pin their columns to concrete types.
         for fact in &self.program.facts {
+            // An imported row has no span: its clash is located at one side.
+            self.at = self.program.fact_spans.get(fact).copied();
             let base = self.col_base[fact.pred.0 as usize];
             for (col, value) in fact.tuple.0.iter().enumerate() {
                 // `absent` is type-neutral: it pins no column type (§4).
@@ -848,6 +867,7 @@ impl<'a> TypeChecker<'a> {
                         self.ty[root] = Some(Fixed {
                             ty: declared_ty,
                             witness: None,
+                            at: info.decl_span,
                         });
                         seeded.insert(root, (p, col));
                     }
@@ -861,7 +881,13 @@ impl<'a> TypeChecker<'a> {
                             type_label(declared_ty),
                         );
                         self.at = info.decl_span;
-                        self.raise(ErrorCode::TypeClash, message);
+                        let first = &program.predicates[q];
+                        let error = self.raise(ErrorCode::TypeClash, message);
+                        if let Some(span) = first.decl_span {
+                            error
+                                .related
+                                .push(Related::new(column_label(first, q_col), span));
+                        }
                     }
                     // Typed by inference — the sweep's to judge — or seeded
                     // the same way already.

@@ -180,3 +180,39 @@ So what remains is one design pass over the diagnostic model, not a fix: related
 spans on `Error`, how `locate_all` resolves them, how they render (and serialize
 for a future `--format json`), and what locates an imported row. Both criteria
 above become green from that work.
+
+## Resolution — 2026-09-13
+
+**Fixed**, through the design pass the 2026-08-27 note called for (§12 and §17
+2026-09-13 (later ii)).
+
+**What changed:**
+- `Error` carries `related: Vec<Related>`, each a label and a span. `locate`
+  resolves them, `forget_span` drops them, and `Display` renders
+  `; {label} (at l:c)` after the position and before the suggestion. That is
+  additive: no existing rendering moved, and all five pinned `.err` files are
+  byte-identical.
+- Facts get places in `ir::Program::fact_spans`, a table keyed **by the fact**.
+  That keeps `Fact`'s value identity and needs no alignment with the fact
+  vector's writers. Imported rows have no entry.
+- `typecheck`'s `Fixed` records where its type was fixed, and a column clash
+  attaches the earlier side. The repro now renders
+  `… used as both symbol `alice` and string `"alice"` (at 2:1); symbol `alice` (at 1:1)`,
+  and the two-fact case, which had no position at all, carries both. A clash
+  between two declarations (`bugs/014`'s seeding) points at the first.
+
+**Where the diagnosis did not hold:**
+- **The variable form never satisfied the general criterion as written.** The
+  ignored test required two rendered positions and said that form already had
+  them. It renders one, and nothing ran the test. Its two slots are named with
+  their rule, which the position locates, so that is what the test now asserts
+  of it.
+- **Not done:** attaching where each slot's class got its type. That changes
+  the byte-pinned `type-clash.err` for provenance nobody has asked for, and it
+  is the same union comment's question, still open.
+- **Not done:** an imported row's place (source + row).
+
+**Property:** **C18**, which reads its oracle off the generated text.
+*Mutations*: drop the related place → C18 and both formerly ignored tests red;
+locate it at the incoming side → C18 red. The three IR fixture tests now expect
+each written fact's place.

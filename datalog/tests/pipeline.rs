@@ -389,10 +389,9 @@ fn a_variable_type_clash_names_the_slots_that_clash() {
 /// position says where to look for it, which is what stops the message
 /// degrading with program length."
 ///
-/// `#[ignore]`d and failing until `set_type` carries the site that fixed a
-/// class's type, in the style of `bugs/002`'s criterion (`src/api.rs:1182`).
+/// Red and `#[ignore]`d from 2026-08-26 until a type recorded the place that
+/// fixed it and an error could carry a related location (§12, §17 2026-09-13).
 #[test]
-#[ignore = "bugs/009: set_type records the type without the site that fixed it"]
 fn a_column_type_clash_names_both_occurrences() {
     let errors = datalog::run("p(alice).\n?- p(\"alice\").\n").expect_err("symbol vs string");
     let clash = errors
@@ -418,23 +417,36 @@ fn a_column_type_clash_names_both_occurrences() {
 ///
 /// Filed with the bug rather than after it, per `bugs/README.md` — `001` was
 /// still reachable by a second spelling because its property was named and never
-/// written. The variable form satisfies this today because `union` holds two
-/// labelled slots, and `a_variable_type_clash_names_the_slots_that_clash` pins
-/// that it names those two; the column form fails, and the two-fact case below
-/// carries no span at all.
+/// written. The generated form of this property is C18 (`testing.md`).
+///
+/// *Corrected when the fix landed:* this test first required two positions of
+/// every form, and said the variable form met that already. It never did — that
+/// form renders one position, and the test was ignored, so nothing ran it. Its
+/// two slots are named with the rule they sit in (`variable `Q` in rule 0`), and
+/// the one position locates that rule; that is what is asserted of it now
+/// (`bugs/resolved/009`, §17 2026-09-13 (later ii)).
 #[test]
-#[ignore = "bugs/009: the column form locates at most one side"]
 fn every_type_clash_locates_both_sides() {
+    let variable_form = "declare item(name: string, qty: int, weight: float).\n\
+         item(\"bolt\", 4, 1.5).\n\
+         total(N) :- item(qty: Q, weight: W), N = Q + W.\n\
+         ?- total(N).\n";
+    let errors = datalog::run(variable_form).expect_err("a type clash");
+    let rendered = errors
+        .iter()
+        .find(|e| e.code == ErrorCode::TypeClash)
+        .expect("a variable-form clash")
+        .to_string();
+    assert_eq!(rendered.matches(" in rule 0").count(), 2, "{rendered}");
+    assert!(rendered.contains("(at 3:"), "{rendered}");
+
     let programs = [
         // column form: symbol against string
         "p(alice).\n?- p(\"alice\").\n",
-        // column form, two facts: today this renders with no position whatsoever
+        // column form, two facts: rendered with no position whatsoever until 009
         "p(1).\np(\"x\").\n?- p(X).\n",
-        // variable form: passes today, and is here so it stays passing
-        "declare item(name: string, qty: int, weight: float).\n\
-         item(\"bolt\", 4, 1.5).\n\
-         total(N) :- item(qty: Q, weight: W), N = Q + W.\n\
-         ?- total(N).\n",
+        // column form, two declarations joined by a rule (`bugs/014`)
+        "declare p(x: int).\ndeclare q(y: string).\nr(X) :- p(x: X), q(y: X).\n?- r(X).\n",
     ];
     for program in programs {
         let errors = datalog::run(program).expect_err("a type clash");
@@ -1142,7 +1154,99 @@ fn two_declarations_joined_as_one_column_clash_without_facts() {
     assert!(rendered.contains("`p.x` is declared as int"), "{rendered}");
     assert!(rendered.contains("`q.y`"), "{rendered}");
     assert!(rendered.contains("(at 2:1)"), "{rendered}");
+    // …and the first declaration is the related place (`bugs/009`).
+    assert!(rendered.contains("; `p.x` (at 1:1)"), "{rendered}");
     // With a row in each, the verdict is the same.
     let with_rows = format!("{src}p(1).\nq(\"a\").\n");
     assert!(datalog::run(&with_rows).is_err());
+}
+
+/// **C18** — a column-form type clash locates both of its sides: the incoming
+/// term at the error's position and the term that fixed the column first as
+/// its related place (`bugs/009`). The oracle reads the generated source text,
+/// not the typechecker: for each predicate, its first value's term and line, and
+/// every differently typed term's first line.
+mod c18_a_column_clash_locates_both_sides {
+    use datalog::ErrorCode;
+    use proptest::prelude::*;
+
+    /// A value as written, and its type as §4 names it.
+    fn arb_term() -> impl Strategy<Value = (String, &'static str)> {
+        prop_oneof![
+            (0i64..3).prop_map(|n| (n.to_string(), "int")),
+            prop_oneof![Just("a"), Just("b")].prop_map(|s| (format!("\"{s}\""), "string")),
+            prop_oneof![Just("a"), Just("b")].prop_map(|s| (s.to_string(), "symbol")),
+            any::<bool>().prop_map(|b| (b.to_string(), "bool")),
+        ]
+    }
+
+    /// 2–7 one-column facts over `p0`/`p1`, one per line. The first two are
+    /// `p0` facts of different types, so every program clashes at least once —
+    /// the property's sentence is about a clash, and cannot hold vacuously.
+    fn arb_facts() -> impl Strategy<Value = Vec<(usize, String, &'static str)>> {
+        (
+            arb_term(),
+            arb_term(),
+            prop::collection::vec((0usize..2, arb_term()), 0..=5),
+        )
+            .prop_filter("the first two p0 facts differ in type", |(a, b, _)| {
+                a.1 != b.1
+            })
+            .prop_map(|(a, b, rest)| {
+                let mut facts = vec![(0, a.0, a.1), (0, b.0, b.1)];
+                facts.extend(rest.into_iter().map(|(p, (t, ty))| (p, t, ty)));
+                facts
+            })
+    }
+
+    proptest! {
+        #[test]
+        fn c18_a_column_clash_locates_both_sides(facts in arb_facts()) {
+            let mut src = String::new();
+            for (p, term, _) in &facts {
+                src.push_str(&format!("p{p}({term}).\n"));
+            }
+            src.push_str("?- p0(X).\n");
+
+            // The oracle: per predicate, the first term fixes the column; each
+            // distinct term of another type clashes once, at its first line.
+            let mut expected = Vec::new();
+            for p in 0..2 {
+                let lines: Vec<(u32, &String, &str)> = facts
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, (q, _, _))| *q == p)
+                    .map(|(i, (_, term, ty))| (i as u32 + 1, term, *ty))
+                    .collect();
+                let Some(&(first_line, first_term, first_ty)) = lines.first() else {
+                    continue;
+                };
+                let mut seen = Vec::new();
+                for &(line, term, ty) in &lines {
+                    if ty != first_ty && !seen.contains(&term) {
+                        seen.push(term);
+                        expected.push((
+                            format!("`p{p}` column 0 is used as both {first_ty} `{first_term}` and {ty} `{term}`"),
+                            line,
+                            format!("{first_ty} `{first_term}`"),
+                            first_line,
+                        ));
+                    }
+                }
+            }
+
+            let errors = datalog::run(&src).expect_err("the first two facts clash");
+            let clashes: Vec<_> = errors.iter().filter(|e| e.code == ErrorCode::TypeClash).collect();
+            prop_assert_eq!(clashes.len(), expected.len(), "{}\n{:#?}", src, errors);
+            for (message, line, label, first_line) in expected {
+                let error = clashes.iter().find(|e| e.message == message);
+                prop_assert!(error.is_some(), "no `{}` in\n{}\n{:#?}", message, src, clashes);
+                let error = error.unwrap();
+                prop_assert_eq!(error.position.map(|p| p.line), Some(line), "{}\n{}", src, error);
+                prop_assert_eq!(error.related.len(), 1, "{}\n{}", src, error);
+                prop_assert_eq!(&error.related[0].label, &label, "{}\n{}", src, error);
+                prop_assert_eq!(error.related[0].position.map(|p| p.line), Some(first_line), "{}\n{}", src, error);
+            }
+        }
+    }
 }

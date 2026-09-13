@@ -1505,9 +1505,20 @@ is deliberate design cost, not an accident: gating is what lets those relations
 take short names that would otherwise be unusable as reserved words, and the
 suggestion is what keeps the gate from costing a round of guessing.
 
+**Related locations.** A diagnostic about a conflict has two sides, and the
+position locates one. So an error may also carry **related locations** — each a
+label naming what sits there and a span resolved the same way. A type clash
+between two terms of one column points at the earlier term, which is often
+another fact, as related; a clash between two declarations points at the first.
+The field is additive: an error with none renders exactly as before, and a
+related span is dropped with the error's own when a module is spliced (below).
+Not given one: the *variable* form of `type-clash`, whose two slots are named
+with the rule they sit in, which the position already locates; and an imported
+row, whose honest place is a source row, not a span of the program.
+
 **Rendering** is
-`"{category} error [{code}]: {message} (at {line}:{column}) ({suggestion})"`,
-composed from the fields — so a future `--format json` edge (§14) serializes the
+`"{category} error [{code}]: {message} (at {line}:{column}); {label} (at {line}:{column}) ({suggestion})"`,
+with one `; {label} (at …)` per related location, composed from the fields — so a future `--format json` edge (§14) serializes the
 same data with no message re-parsing. The code is rendered ahead of the sentence
 rather than after the position, so the machine-readable part of the line never
 sits behind the prose a machine is trying not to read.
@@ -2574,6 +2585,26 @@ marker that records a decision working out *well*, which the log would otherwise
 never say.
 
 ### Decisions
+
+- **2026-09-13 (later ii)** — **A diagnostic carries related locations: the other
+  side of a conflict, labelled and located** (§12; `error::Related`,
+  `ir::Program::fact_spans`; `testing.md` **C18**; closes `bugs/009`, with the
+  user's go-ahead this session).
+  - **`Error.related`**: label + span, resolved by `locate` and cleared by
+    `forget_span`; rendered `; {label} (at l:c)` after the position. Additive
+    under §12's contract — no existing rendering moves.
+  - **Facts get places in a side table keyed by the fact**, not a field of
+    `Fact`: a fact's identity is its value (§17, derived facts dedupe), and a
+    table keyed by value needs no alignment with the fact vector's every
+    writer. Imported rows have no entry.
+  - **Only the column form gets one.** The variable form's two slots are
+    named with their rule, which the position locates; attaching where each
+    class got its type would change the byte-pinned
+    `experiments/reference/malformed/type-clash.err` for provenance nobody has
+    asked for. The ignored general test assumed that form already rendered two
+    positions; it never did, and was corrected (`bugs/resolved/009`).
+  - *Not done:* a related place for an imported row (source + row), and a
+    `--format json` edge to serialize the field.
 
 - **2026-09-13 (later)** — **A declared column type constrains inference where
   inference left the column untyped** (§4; `typecheck::seed_declared`;

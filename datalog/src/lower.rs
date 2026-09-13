@@ -670,10 +670,12 @@ impl Lowerer {
             }
         }
         if ground {
-            out.facts.push(ir::Fact {
+            let fact = ir::Fact {
                 pred: head.pred,
                 tuple: ir::Tuple(values),
-            });
+            };
+            out.fact_spans.entry(fact.clone()).or_insert(clause.span);
+            out.facts.push(fact);
         }
     }
 
@@ -2237,13 +2239,25 @@ mod tests {
     use crate::ast::fixtures as ast_fix;
     use crate::ir::fixtures as ir_fix;
 
+    /// A hand-built IR fixture as lowering produces it from its hand-built AST
+    /// fixture: every fact the AST writes has a place (`ir::Program::fact_spans`,
+    /// `bugs/009`), and an AST fixture's places are all `Span::DUMMY`.
+    fn written_at_dummy_spans(mut program: ir::Program) -> ir::Program {
+        program.fact_spans = program
+            .facts
+            .iter()
+            .map(|fact| (fact.clone(), Span::DUMMY))
+            .collect();
+        program
+    }
+
     /// The contract test: lowering the hand-built §16.1 surface program
     /// produces exactly the hand-built §16.1 IR — interning order, variable
     /// numbering, fact/rule split, and the single stratum.
     #[test]
     fn lowering_16_1_matches_ir_fixture() {
         let lowered = lower(&ast_fix::example_16_1()).expect("16.1 lowers cleanly");
-        assert_eq!(lowered, ir_fix::example_16_1());
+        assert_eq!(lowered, written_at_dummy_spans(ir_fix::example_16_1()));
     }
 
     #[test]
@@ -2307,7 +2321,7 @@ mod tests {
     #[test]
     fn lowering_16_2_matches_ir_fixture() {
         let lowered = lower(&ast_fix::example_16_2()).expect("16.2 lowers cleanly");
-        assert_eq!(lowered, ir_fix::example_16_2());
+        assert_eq!(lowered, written_at_dummy_spans(ir_fix::example_16_2()));
     }
 
     /// A *named* variable under negation still needs a positive binder; only
@@ -2597,7 +2611,7 @@ mod tests {
     #[test]
     fn lowering_16_7_matches_ir_fixture() {
         let lowered = lower(&ast_fix::example_16_7()).expect("16.7 lowers cleanly");
-        assert_eq!(lowered, ir_fix::example_16_7());
+        assert_eq!(lowered, written_at_dummy_spans(ir_fix::example_16_7()));
     }
 
     /// The invariant behind the whole feature: a named literal and the

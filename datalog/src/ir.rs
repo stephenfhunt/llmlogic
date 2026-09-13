@@ -505,6 +505,12 @@ pub struct Program {
     pub predicates: Vec<PredicateInfo>,
     /// Ground facts from empty-body clauses (and later, imports).
     pub facts: Vec<Fact>,
+    /// Where a fact written in the program text was written, for a diagnostic
+    /// that has to point at it (`bugs/009`). A side table and not a field of
+    /// [`Fact`], whose identity is its value — a fact derived two ways is one
+    /// fact (§17). Imported rows have no entry: their place is a source row,
+    /// not a span of the program. A repeated fact keeps its first place.
+    pub fact_spans: std::collections::HashMap<Fact, Span>,
     /// Rules in source order: `RuleId(i)` → `rules[i]`.
     pub rules: Vec<Rule>,
     pub queries: Vec<Query>,
@@ -580,6 +586,7 @@ pub(crate) mod fixtures {
         let parent = PredId(0);
         let ancestor = PredId(1);
         Program {
+            fact_spans: Default::default(),
             predicates: vec![
                 PredicateInfo {
                     name: "parent".to_string(),
@@ -680,6 +687,7 @@ pub(crate) mod fixtures {
         let parent = PredId(1);
         let root = PredId(2);
         Program {
+            fact_spans: Default::default(),
             predicates: vec![
                 PredicateInfo {
                     name: "person".to_string(),
@@ -759,6 +767,7 @@ pub(crate) mod fixtures {
         let person = PredId(2);
         let adult = PredId(3);
         Program {
+            fact_spans: Default::default(),
             predicates: vec![
                 // Field names survive lowering: `employee` from the explicit
                 // import schema, `person` from its `declare`. The two rule

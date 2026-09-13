@@ -2541,6 +2541,7 @@ mod tests {
         let edge = PredId(0);
         let path = PredId(1);
         let program = Program {
+            fact_spans: Default::default(),
             predicates: vec![
                 PredicateInfo {
                     name: "edge".to_string(),
