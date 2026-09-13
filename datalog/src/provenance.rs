@@ -267,6 +267,16 @@ pub enum ProofTree {
     },
 }
 
+/// One step of a proof: how [`ProofTree::explain`] justifies a fact before it
+/// recurses into the step's premises.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum ProofStep<'a> {
+    /// A base fact: the proof is a leaf.
+    Leaf,
+    /// A derived fact: the proof is built on this derivation.
+    Derived(&'a Derivation),
+}
+
 /// What an evaluated model can say about one fact — §11's union, minus the
 /// near-miss half that `?whynot` adds.
 ///
@@ -331,26 +341,43 @@ impl ProofTree {
         }
     }
 
-    /// The recursive half of [`explain`](Self::explain), on a model already
-    /// known to be [`Provenance::Recorded`]. `None` only where a fact does not
-    /// hold.
-    fn extract(model: &Model, fact: &Fact) -> Option<ProofTree> {
+    /// The step [`extract`](Self::extract) takes for `fact` on a
+    /// [`Provenance::Recorded`] model; `None` where the fact does not hold.
+    ///
+    /// A proof is this step applied recursively, and a derived step's fact
+    /// premises first appeared in strictly earlier rounds. So two models whose
+    /// steps agree on a fact and on every fact below it prove it the same way —
+    /// which is how `testing.md` **B13** compares proofs without building them.
+    pub(crate) fn step<'a>(model: &'a Model, fact: &Fact) -> Option<ProofStep<'a>> {
         if !model.contains(fact) {
             return None;
         }
         if model.is_base(fact) {
-            return Some(ProofTree::Leaf(fact.clone()));
+            return Some(ProofStep::Leaf);
         }
         let round = model.first_round(fact)?;
-        let derivation = model.derivations_of(fact).find(|d| {
-            d.premises.iter().all(|premise| match premise {
-                Premise::Fact(f) => model.first_round(f).is_some_and(|r| r < round),
-                Premise::NoMatch(_)
-                | Premise::Builtin { .. }
-                | Premise::Presence { .. }
-                | Premise::Aggregate { .. } => true,
+        model
+            .derivations_of(fact)
+            .find(|d| {
+                d.premises.iter().all(|premise| match premise {
+                    Premise::Fact(f) => model.first_round(f).is_some_and(|r| r < round),
+                    Premise::NoMatch(_)
+                    | Premise::Builtin { .. }
+                    | Premise::Presence { .. }
+                    | Premise::Aggregate { .. } => true,
+                })
             })
-        })?;
+            .map(ProofStep::Derived)
+    }
+
+    /// The recursive half of [`explain`](Self::explain), on a model already
+    /// known to be [`Provenance::Recorded`]. `None` only where a fact does not
+    /// hold.
+    fn extract(model: &Model, fact: &Fact) -> Option<ProofTree> {
+        let derivation = match ProofTree::step(model, fact)? {
+            ProofStep::Leaf => return Some(ProofTree::Leaf(fact.clone())),
+            ProofStep::Derived(derivation) => derivation,
+        };
         let children = derivation
             .premises
             .iter()

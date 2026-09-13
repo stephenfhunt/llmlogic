@@ -4516,33 +4516,65 @@ mod tests {
         /// **B13** for one program: evaluating only the live rules changes no
         /// answer, no live relation and no proof of a live fact (the property's
         /// sentence is on `b13_pruning_changes_no_live_relation`).
+        ///
+        /// **Proofs are compared one step per live fact, not as trees.** A proof
+        /// is `ProofTree::step` applied recursively; a derived step's fact
+        /// premises first appeared in strictly earlier rounds, and they are live,
+        /// because `live_predicates` follows every body edge of a live rule. So,
+        /// by induction on that round, the two runs choose the same step for
+        /// every live fact exactly when every live fact has the same proof — and
+        /// a shifted round stamp that changed a proof changed some step. What
+        /// the induction saves is building the trees, which copy every shared
+        /// subproof, and holding two recorded stores: the full run is reduced to
+        /// its answers, live facts and steps before the pruned run exists
+        /// (`bugs/015`).
         fn b13_holds(src: &str, program: &Program) -> std::result::Result<(), TestCaseError> {
+            use crate::provenance::{Derivation, ProofStep};
             let Some(live) = crate::lower::live_predicates(program) else {
                 return Ok(());
             };
-            let full = capped(program, Provenance::Recorded)?;
-            let pruned = eval_capped(program, ROUND_CAP, Provenance::Recorded, Some(&live))
-                .map_err(|capped| TestCaseError::fail(format!("pruned run: {capped:?}")))?;
-            for query in &program.queries {
-                prop_assert_eq!(
-                    pruned.answer(query).unwrap(),
-                    full.answer(query).unwrap(),
-                    "{}",
-                    src
-                );
-            }
             let restrict = |model: &Model| -> Vec<Fact> {
                 model
                     .facts()
                     .filter(|fact| live[fact.pred.0 as usize])
                     .collect()
             };
-            prop_assert_eq!(restrict(&pruned), restrict(&full), "{}", src);
-            for fact in restrict(&full) {
+            // `None`: the fact does not hold; `Some(None)`: a leaf.
+            let steps = |model: &Model, facts: &[Fact]| -> Vec<Option<Option<Derivation>>> {
+                facts
+                    .iter()
+                    .map(|fact| {
+                        ProofTree::step(model, fact).map(|step| match step {
+                            ProofStep::Leaf => None,
+                            ProofStep::Derived(derivation) => Some(derivation.clone()),
+                        })
+                    })
+                    .collect()
+            };
+            let (answers, facts, full_steps) = {
+                let full = capped(program, Provenance::Recorded)?;
+                let answers: Vec<_> = program
+                    .queries
+                    .iter()
+                    .map(|query| full.answer(query).unwrap())
+                    .collect();
+                let facts = restrict(&full);
+                let full_steps = steps(&full, &facts);
+                (answers, facts, full_steps)
+            };
+            let pruned = eval_capped(program, ROUND_CAP, Provenance::Recorded, Some(&live))
+                .map_err(|capped| TestCaseError::fail(format!("pruned run: {capped:?}")))?;
+            for (query, expected) in program.queries.iter().zip(&answers) {
+                prop_assert_eq!(&pruned.answer(query).unwrap(), expected, "{}", src);
+            }
+            prop_assert_eq!(&restrict(&pruned), &facts, "{}", src);
+            let pruned_steps = steps(&pruned, &facts);
+            for ((fact, expected), got) in facts.iter().zip(&full_steps).zip(&pruned_steps) {
                 prop_assert_eq!(
-                    ProofTree::explain(&pruned, &fact),
-                    ProofTree::explain(&full, &fact),
-                    "pruning changed the proof of a live fact\n{}",
+                    got,
+                    expected,
+                    "pruning changed the proof step of live fact {:?}\n{}",
+                    fact,
                     src
                 );
             }

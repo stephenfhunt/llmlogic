@@ -218,7 +218,12 @@ dense pool bounds the *model* (about 27k facts at `Deep`), not the *instances*: 
 recorded run keeps every instance of a five-atom self-join. The first deep run
 was killed for system memory inside `b5_holds`, which recorded twice for a claim
 about facts; unrecorded, B5 at `Deep` peaks at 55 MB and takes 188 s for 192
-cases. E9 is what licenses the swap. **The deep run: 495 tests in 134 s wall, 1.5 GB peak** (2026-09-13).
+cases. *Corrected 2026-09-13*: E9 is not tiered, so it does not license the swap
+at `Deep` — B5's unrecorded claim there is unguarded by it. B13 records at every
+tier because its claim reads proofs, and a few `Deep` draws in a few hundred store
+1–8 M derivations, so **the deep run does not finish** until the recorder is
+redesigned (`bugs/015`, `notes/recorder-at-scale.md`). It last finished at 495
+tests, 134 s, 1.5 GB — a draw, not a bound.
 
 **Policy — generators vs. the no-DSL rule.** The no-macro-DSL/no-builder rule
 (the pyramid, item 1) is about ergonomic sugar for hand-written tests;
@@ -664,7 +669,12 @@ compared keyed by predicate *name*, not `PredId`.
     under `?- total(S).`). Both redden it.
   - `engine::…::b13_pruning_changes_no_live_relation` — same query answers,
     live relations and proofs of live facts over `arb_program_with_edb`. The
-    proof half is the check that shifted round stamps change no proof. **Neither
+    proof half is the check that shifted round stamps change no proof. **Proofs are compared one step per
+    live fact** (`ProofTree::step`), not as trees: by induction on first round the
+    steps agree exactly when the proofs do, and the full run is dropped before the
+    pruned one is evaluated (2026-09-13, `bugs/015`). *Mutation (killed at every
+    tier)*: the pruned run restarts round stamps each stratum — proofs change,
+    facts do not. **Neither
     mutation reddens it** in 256 cases: that generator's negated relations are
     rarely derived and it draws no aggregates, which is why the text level
     exists. Its tiers, `…_at_medium` and `…_at_large`,

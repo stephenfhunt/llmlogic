@@ -45,3 +45,27 @@ chosen: the proof clause of B13 only up to `Large` (the fact and answer clauses
 unrecorded at `Deep`); or proofs compared for a bounded sample of live facts;
 or `Deep` drawn with a smaller self-join ceiling. It is the user's
 testing-first ruling this gates, so the choice is theirs.
+
+## 2026-09-13 — progress; still open, and why
+
+- **The first choice was built and withdrawn the same session.** Proofs only up
+  to `Large`, with B13 unrecorded at `Deep`: this dropped proof coverage at
+  `Deep`, and its justification, E9, never runs at `Deep`.
+- **B13 now compares proofs one step per live fact** (`ProofTree::step`). By
+  induction on first round this is exactly as strong as comparing trees, it is
+  cheaper, and only one recorded store is alive at a time. *Mutation*: the pruned
+  run restarts round stamps each stratum → red at every tier.
+- **It is not enough, and the root cause above is confirmed and sharpened.**
+  Recorded at `Deep` alone, three runs gave 34 s / 664 MB, then 245 s / 8.2 GB,
+  then a kill at 19.5 GB. The store keeps every rule instance. On one fixed
+  sample, idx 129 stores 8.2 M derivations for 2,257 derived facts: 93–99% are
+  later-round rediscoveries no proof reads, at ~800 bytes each
+  (`notes/recorder-at-scale.md`).
+- **"Which test held the memory" is answered.** Unrecorded at `Deep`, B5 alone is
+  26 s / 22 MB and B13 alone 39 s / 26 MB; recorded, B13 is the one.
+- **Not taken, by the user's ruling:** a derivation budget or any size cap on the
+  test. The recorder is the defect. This file closes with the recorder design
+  session (ROADMAP § Provenance surface).
+- **Correction to this session's measurements:** `systemd-run --user -p
+  MemoryMax` is not enforced on this machine, whose user cgroups delegate only
+  `pids`. `prlimit --as` is.
