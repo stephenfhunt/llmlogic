@@ -84,14 +84,24 @@ impl RunResult {
     /// Answers first, explanations after, both in program order: an explanation
     /// is commentary on a run and reads after the rows it is about.
     pub fn output(&self) -> String {
-        let mut out = String::new();
+        let mut out = Vec::new();
+        self.write_output(&mut out)
+            .expect("writing to a Vec cannot fail");
+        String::from_utf8(out).expect("answer and explanation lines are UTF-8")
+    }
+
+    /// [`output`](Self::output), written to `out` line by line instead of
+    /// joined into one string first. This is what the binary prints through: a
+    /// large answer is already held once in [`answers`](Self::answers), and
+    /// joining it held it twice (`notes/pointsto-profile-2026-09-12.md`).
+    pub fn write_output(&self, out: &mut impl std::io::Write) -> std::io::Result<()> {
         for lines in self.answers.iter().chain(&self.explanations) {
             for line in lines {
-                out.push_str(line);
-                out.push('\n');
+                out.write_all(line.as_bytes())?;
+                out.write_all(b"\n")?;
             }
         }
-        out
+        Ok(())
     }
 }
 

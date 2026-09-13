@@ -88,7 +88,17 @@ fn main() -> ExitCode {
 
     match result {
         Ok(result) => {
-            print!("{}", result.output());
+            // Line by line into a buffer, not joined into one string first: the
+            // answer is already held once, in `result`.
+            let mut out = std::io::BufWriter::new(std::io::stdout().lock());
+            if let Err(error) = result
+                .write_output(&mut out)
+                .and_then(|()| std::io::Write::flush(&mut out))
+            {
+                eprintln!("error: could not write the answers: {error}");
+                return ExitCode::from(DID_NOT_ANSWER);
+            }
+            drop(out);
             // Warnings go to stderr so the stdout fact stream stays valid Datalog
             // input; they never change the exit code, which answers whether the
             // run produced rows and not whether it was happy about them (§14).
