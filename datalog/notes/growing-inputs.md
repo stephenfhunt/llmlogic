@@ -30,9 +30,8 @@ at any size; that remains the bench's job (`code-analysis`), not this plan's.
 
 ## What "grow" has to mean here
 
-Proptest, unlike QuickCheck and Hypothesis, has **no size parameter that rises
-across a run** — a strategy's ranges are fixed, and shrinking moves toward the
-small end. So growth has to be designed in, on three axes:
+Proptest, unlike Haskell's QuickCheck, has **no size parameter that rises across
+a run** — a strategy's ranges are fixed, and shrinking moves toward the small end. So growth has to be designed in, on three axes:
 
 - **size** — facts, distinct values, relation cardinality;
 - **depth** — fixpoint rounds, recursion chain length, strata;
