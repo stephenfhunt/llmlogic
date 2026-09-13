@@ -538,6 +538,50 @@ among the tsconfigs given. The query could not have found it either way: a
 negative over a blind spot* is the failure mode the playbook names, and step 5 —
 open the source — is what caught it.
 
+## The extractor's own cost — Grafana
+
+2026-09-13. Profiled by phase before changing anything: a forced GC after each
+phase, then `process.memoryUsage().heapUsed`. Each fix is checked by
+`sha256sum facts/*.jsonl` against an extraction by a frozen trunk copy;
+`extraction.jsonl` differs only in `time`. Why each fix took the shape it did:
+`../decisions.md` 2026-09-13.
+
+Grafana's frontend, 16 tsconfigs, on trunk:
+
+| phase | time | retained heap after |
+|---|---:|---:|
+| load | 36.5 s | 7.0 GB |
+| ids | 15.4 s | 7.8 GB |
+| structure | 134 s | 11.5 GB |
+| refs | 167 s | 12.1 GB |
+| quality, flush | 27 s | 12.3 GB |
+
+- **Load parsed the same files again for every tsconfig.** There were 44,954
+  `SourceFile`s for 13,768 paths; the root program alone held 12,789. Now a file
+  is parsed once for every tsconfig that would parse and bind it the same
+  (`program.ts`, P9): **7,043 → 2,710 MB** retained, 36.5 → 15.2 s. This does
+  nothing for a single tsconfig.
+- **`ids` spelled the absolute path into every key.** Now it uses an integer per
+  file: the phase's growth went from 742 → 529 MB.
+- **`structure` is mostly the emit.** `program.emit` asks for the emit resolver,
+  which type-checks the whole file first: +3.7 GB, 134 s. Import elision needs the
+  alias marks that check sets, and `refs` needs the checker anyway, so it stays.
+- **`git` on `@grafana/ui` was 43 of 70 s**, 38 of them in one single-threaded
+  `git log --numstat`. Split into parallel `--no-walk` jobs it takes 7.5 s.
+  Output is sha256-identical at the top level and under a pathspec.
+
+End to end, `/usr/bin/time`, single runs (the times are indicative; the peaks
+and digests are not):
+
+| subject | trunk | now |
+|---|---:|---:|
+| frontend, `refs,quality,git` | 382 s / 19.35 GB | **361 s / 16.37 GB** |
+| `@grafana/ui`, every layer | 67.3 s / 2.26 GB | **37.0 s / 2.05 GB** |
+
+The peak now sits in `structure` and `refs`, with one checker per tsconfig. On
+trunk RSS peaked 6 GB above the live heap. VS Code's `src/` is one tsconfig and
+was not re-measured: there is no checkout on disk.
+
 ## Subjects — what each one exercises, and what is still unexercised
 
 Kept because choosing the next dogfood subject by *size* is what hid the closure

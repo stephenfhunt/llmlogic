@@ -14,6 +14,23 @@ with the long form in [`notes/code-facts.md`](notes/code-facts.md).
 
 ## Decisions
 
+- **2026-09-13** — **Several tsconfigs parse each file once; the extractor's
+  output does not move.** Profiled by phase on Grafana (`notes/code-facts.md`
+  § The extractor's own cost): 7.0 GB of the 16-tsconfig load was 44,954 parsed
+  files for 13,768 paths.
+  - **The share key is TypeScript's own `DocumentRegistry` bucket key without
+    `pathsBasePath`**, plus the call's parse options. `pathsBasePath` is read only
+    by module resolution and specifier generation (TS 6.0.3), and it alone kept the
+    root config apart from its packages. Settings stay each tsconfig's — a file
+    is shared only where they would parse and bind it identically (P9).
+  - **Declaration keys name a file by integer** — kept because it measured
+    (−213 MB after `ids`), the bar set before building it.
+  - **Numstat runs in parallel through a child process**, not a worker thread:
+    a synchronous caller blocked on a worker that fails to load hangs forever,
+    while a failed child is an exit code. 38 → 7.5 s on Grafana, output identical.
+  - Not taken: the emit's full type check and the per-program checkers — the
+    peak now — need more than a cache (ROADMAP).
+
 - **2026-09-12 (evening)** — **The tool is made usable at size, not documented
   around it.** The user's rulings, on the engine's memory work
   (`../datalog/notes/memory-profile-2026-09-12.md`):
