@@ -211,7 +211,7 @@ export const RELATIONS: readonly Relation[] = [
       col("sloc", "int", "lines carrying at least one token (not blank, not only comments)"),
       col("is_test", "bool", "a test file (`*.test.*`, `*.spec.*`, `__tests__/`, `test(s)/`, or only in a test tsconfig)"),
       col("is_decl", "bool", "a `.d.ts` file"),
-      col("is_generated", "bool", "header says `@generated`, `auto-generated` or `DO NOT EDIT`"),
+      col("is_generated", "bool", "a heuristic: the header says `@generated`, `auto-generated` or `DO NOT EDIT`, or the name is `*.gen.*`, `*.generated.*`, `*_pb.*`/`*_pb2.py`/`*.pb.*`, or under `__generated__/`"),
     ],
   },
   {

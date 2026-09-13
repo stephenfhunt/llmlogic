@@ -110,9 +110,13 @@ what differs over Python facts.
    (two `scripts/main.py`-like files in sibling directories): an import of that
    name resolves to the first. A directory without `__init__.py` is a namespace
    package with no file of its own, so an import of it targets nothing.
-6. **Tests are in the facts** — `tests/`, `test_*.py`, `*_test.py` and
-   `conftest.py` are `is_test`. Test modules are many independent functions, so
-   `module_lcom4` ranks them highest: filter them out of cohesion questions.
+6. **Tests and generated code are in the facts, and the `file` flags that mark
+   them are heuristics** — `tests/`, `testing/`, `test_*.py`, `*_test.py` and
+   `conftest.py` are `is_test`; a header (`@generated`, `auto-generated`,
+   `DO NOT EDIT`) or a name (`*_pb2.py`, `*_pb2_grpc.py`, `*.generated.*`,
+   `__generated__/`) is `is_generated`; a `.pyi` stub is `is_decl`. Test modules
+   are many independent functions and generated ones are machine-shaped, so
+   `module_lcom4` ranks both highest: filter them out of cohesion questions.
 7. **Columns are UTF-8 byte offsets** on lines with non-ASCII text (Python's
    own), not characters.
 

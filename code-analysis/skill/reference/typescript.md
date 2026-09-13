@@ -172,9 +172,16 @@ untested(S) :- exports(symbol: S, kind: local), fn(id: S), not covered(S).
    the flow layer. `ref.from` is the innermost *named* declaration: a
    module-level variable's initializer is that variable's, a callback's body is
    the callback's.
-6. **Tests are in the facts.** Filter on `file(is_test: false)` for "production
-   code" questions — and check `is_test` is right for your layout (it reads
-   `*.test.*`, `*.spec.*`, `__tests__/`, `test(s)/`, and test-only tsconfigs).
+6. **Tests and generated code are in the facts, and the `file` flags that mark
+   them are heuristics.** Filter on `file(is_test: false)` for "production code"
+   questions and on `file(is_generated: false)` before ranking anything by size,
+   complexity or cohesion — generated files top every such list. Check each flag
+   against your layout: `is_test` reads `*.test.*`, `*.spec.*`, `*.e2e.*`,
+   `__tests__/`, `__mocks__/`, `test(s)/`, `spec/`, `e2e/` and test-only
+   tsconfigs; `is_generated` reads a header (`@generated`, `auto-generated`,
+   `DO NOT EDIT`) or a name (`*.gen.*`, `*.generated.*`, `*_pb.*`, `*.pb.*`,
+   `__generated__/`); `is_decl` is a `.d.ts`. A project with its own convention
+   still misses — a generator that writes neither is not flagged.
 7. **The count trap is wider here.** `call_site` has 13 columns and `symbol` 18;
    a named-argument atom inside an aggregate carries every unmentioned one as a
    witness. Project into a two-column rule first (`bring-your-own.md` §5).

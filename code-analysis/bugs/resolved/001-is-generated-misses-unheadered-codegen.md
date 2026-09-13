@@ -58,3 +58,18 @@ documents none of them as such. `is_test`'s heuristic is at least named in trap
 
 Nothing recorded rests on it. `notes/code-facts.md` § Dogfooding — Grafana cites
 the measurement.
+
+## Resolution
+
+**Fixed 2026-09-13.** `is_generated` is now the header test *or* a file-name test
+(`GENERATED_PATH`: `*.gen.*`, `*.generated.*` / `*_generated.*`, `*_pb.*`,
+`*_pb2(_grpc).py`, `*.pb.*`, `__generated__/`), in both frontends. The diagnosis
+held. `gen` is matched only dot-prefixed, so `code_gen.ts` and `codegen.ts` stay
+unflagged; the test pins both near-misses.
+
+The general property was taken as documentation, not code: both references' trap 6
+now names all three `file` flags as heuristics and spells out each rule, and
+SKILL.md's "rank, then read" says to filter `is_generated: false` first. No library
+filters on the flag itself, since a ranking over generated code is still a
+legitimate question. *Mutation*: drop the path test in both frontends → both new
+tests red. A convention neither test covers still misses, which the traps now say.

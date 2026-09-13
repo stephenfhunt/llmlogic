@@ -81,6 +81,8 @@ cannot show — dead exports (name your entry points) and untested exports (over
 - **Rank, then read the top few.** The engine has no `ORDER BY` or `LIMIT`:
   compute the maximum (`M = max { C | fn(cyclomatic: C) }`), filter on a
   threshold, or count per bucket, then open the files that come out on top.
+  Filter `file(is_generated: false)` first: generated code tops every size,
+  complexity and cohesion ranking.
 - **Cross two signals.** One metric is a hint; two agreeing is a finding. High
   efferent coupling with a high `module_lcom4`; high cyclomatic with many
   `revisions`; `hidden_coupling` with different `main_author`s.
