@@ -2566,6 +2566,19 @@ never say.
 
 ### Decisions
 
+- **2026-09-12** — **Property tests grow their inputs before more refactoring or
+  performance work** (the user's: "it's paramount that we have proper and complete
+  testing"; `testing.md`; plan in `notes/growing-inputs.md`).
+  - **What forced it:** a semi-naive view defect in 3+-atom recursive bodies and a
+    dropped reporting derivation passed all 615 tests. Every evaluation generator
+    has fixed small ranges. `arb_shaped_program` caught both, one generator at
+    one size.
+  - **Growth is proven on the recorded run** (rounds, derived facts, premises
+    spanning rounds), not on program text, per rule 2.
+  - **Order:** § Testing in the ROADMAP before answer streaming and every
+    § Performance item. Tiers or a drawn size, oracles that scale, and budgets
+    are open (the note).
+
 - **2026-09-12** — **A round holds each unkept fact once, and an answer is not
   copied to be sorted or printed** (§14/§15; `engine::Pending`,
   `Model::insert_unkept`, `api::answer_lines`, `RunResult::write_output`). Long form

@@ -45,6 +45,10 @@ each; detail in §17 and `docs/worklog.md`.
 
 ## Open backlog
 
+> **Testing comes first** (the user's, §17 2026-09-12): property tests grow their
+> inputs before more refactoring or performance work — § Testing. Answer
+> streaming and every § Performance item wait on it.
+>
 > **Open defects live in [`bugs/`](bugs/)** — `013` opened 2026-09-12, `014` the same day.
 > **No design session blocks anything** either: §6's extension, the last one,
 > shipped 2026-08-18.
@@ -455,6 +459,18 @@ deferred until a consumer needs them (§8's *Not covered*). — §13,
 - **Module namespacing** — v1 module imports share one global namespace;
   qualified names / visibility deferred until needed. _queued — **post-v1**._ — §13.
 
+### Testing
+
+- **Property tests grow their inputs** — _designing, ruled next_ (the user's, §17
+  2026-09-12; **post-v1**). Every evaluation generator has fixed small ranges, and
+  two engine defects passed the whole suite until `arb_shaped_program`, one
+  generator at one size. Tiers or a drawn size, oracles that scale past the naive
+  evaluator, per-tier growth guards, a deep run, an audit of every generator:
+  [`notes/growing-inputs.md`](notes/growing-inputs.md). — testing.md.
+- **Metamorphic properties on sized, shaped generators** — _queued_, the item
+  above's step 3: B5 (body order, where semi-naive broke) and B13 first, then
+  B2–B4, B6, C11, C13, E1–E8, each re-verified by mutation. **post-v1**. — testing.md.
+
 ### Performance
 
 **Profiled ✅ 2026-08-20**, in [`notes/profile-2026-08-20.md`](notes/profile-2026-08-20.md).
@@ -500,7 +516,7 @@ join is executed changes.
   which ranks what is left). A round's unkept facts are a set (E9): on a 35% cut
   of `vs/base` evaluation takes 2.67 → 0.97 GB, and the 70% cut now finishes. The full base still does not fit. — §15/engine.
 - **Stream a query's answer rather than copying it out of the model** — _queued,
-  next session_ (the user's). Printing 3.40M rows holds them twice more:
+  after § Testing_ (the user's). Printing 3.40M rows holds them twice more:
   `Model::answer`'s owned rows and `RunResult.answers`' lines, ~820 MB of a 1.69 GB
   peak. Both are API shapes, so a short design pass first. — §14/api.
 

@@ -45,23 +45,28 @@ an uncommitted worktree (`~/.cache/pointsto-wt`), heaptrack, perf.
   75 → 61 s; peaks 2–10% lower. `@grafana/ui` `pointsto` 8.9 s / 373 MB.
 - `datalog/notes/pointsto-profile-2026-09-12.md`; `code-analysis/notes/code-facts.md`
   § Re-measured after a round held each fact once; E9's two mutations in `testing.md`.
+- **`8d8df27`** — two defects passed all 615 tests, each shown by mutation: a 3+-atom
+  semi-naive view, a dropped reporting derivation. `arb_shaped_program` (analysis
+  shapes, sized) kills both through B1/E9; B1/E9 run under a round cap, so a hang
+  fails. **`a5236f6`** — output tests. 623 tests; lib suite 5.5 → 14.2 s.
 
-**Decided** (`datalog/spec.md` §17 2026-09-12, first entry; the last two the user's)
+**Decided** (`datalog/spec.md` §17 2026-09-12, first two entries; the last three the user's)
 - **A round holds each unkept fact once**; recorded runs are untouched.
 - **Keep `write_output`** though it measured nothing: it is the copy that becomes
   the peak once answers stream.
-- **Streaming answers is next session.** The two copies left — `Model::answer`'s
-  rows, `RunResult.answers`' lines — are API shapes: ~820 MB of a 1.69 GB peak.
+- **Property tests grow their inputs before more refactoring or performance work**
+  — `datalog/notes/growing-inputs.md`. Streaming answers waits on it.
 
 **Removed**
 - `pending`'s one entry per unkept match; `answer_lines`' cloned rows; the joined
-  output `String`; the oldest worklog entry, to the archive. The round counter
-  never entered the repo.
+  output `String`; E9's inline body (now `e9_holds`); the oldest worklog entry.
+  The round counter never entered the repo.
 
 **Next up**
-- **Stream a query's answer** — a design pass, then build (datalog ROADMAP § Performance).
-- **Drive a delta round from its delta atom** — 14 s of `pointsto.dl`'s 28 s on the
-  35% cut; reordering is observable on the error path, so a §17 design session.
+- **Grow the property tests' inputs** — design first (datalog ROADMAP § Testing):
+  tiers or drawn size, scaling oracles, budgets, a generator audit; then B5/B13.
+- **Then stream a query's answer**, and **drive a delta round from its delta atom**
+  (14 s of `pointsto.dl`'s 28 s on the 35% cut; a §17 design session).
 - Re-learned: heaptrack names the site that *allocated* a tuple, not what holds
   it — the first reading here blamed `pending` for what was the answer.
 - **Open**: `datalog/bugs/009`, `013`, `014`; `code-analysis/bugs/001`–`005`.
