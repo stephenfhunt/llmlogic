@@ -1,7 +1,7 @@
 % Points-to analysis over the dataflow layer: Andersen-style (inclusion-based),
 % context-insensitive, field-based by name, with the call graph built on the
 % fly — an indirect call's targets are whatever functions its callee value can
-% point to. Sound for the modelled subset (see the dataflow layer's notes);
+% point to. Sound for the modelled subset (`reference/typescript.md` §5, trap 9);
 % imprecise by design, so read `pts` as "may point to".
 %
 %   pts(V, Site)          variable V may hold the object allocated at Site

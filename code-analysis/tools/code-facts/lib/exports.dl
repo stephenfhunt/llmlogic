@@ -25,7 +25,7 @@
 % exported base — is here, and wants `export` removed rather than the
 % declaration. Still over-reports what the facts cannot see: a framework that
 % loads a file by convention, a string-keyed lookup, a callback handed to a
-% library (the reference's traps 2–4).
+% library (`reference/typescript.md` §5, traps 2–4).
 
 import "../schema/structure.dl".
 import "../schema/refs.dl".

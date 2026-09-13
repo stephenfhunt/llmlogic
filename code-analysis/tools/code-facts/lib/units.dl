@@ -10,7 +10,7 @@
 % barrels are exactly the files that sit shallow**: `src/index.ts` has no
 % component at depth 3, so its imports cross no boundary there, and a
 % component only it depends on reads `afferent(3, C, 0)`. `coupling.dl`'s
-% `unplaced` and `uncounted_dependent` name what a depth leaves out (bugs/004).
+% `unplaced` and `uncounted_dependent` name what a depth leaves out.
 %
 %   member(G, C, File)   File belongs to component C
 %   file_member(File, G, C)  the same, keyed by the file

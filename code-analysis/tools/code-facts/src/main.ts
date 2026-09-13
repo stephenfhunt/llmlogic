@@ -271,11 +271,7 @@ function main(): void {
     byLayer.set(r.layer as string, l);
   }
   for (const [layer, list] of byLayer) console.log(`  ${layer}: ${list.join(", ")}`);
-  const edges = result.tables.count("call_site");
-  if (edges > 20000) {
-    console.log(`  note: ${edges} call sites — a full call-graph closure (lib/callreach.dl) will be slow; anchor on edges or narrow first`);
-  }
-  console.log(`  in ${((performance.now() - started) / 1000).toFixed(1)}s. Start with: import "${relTo(process.cwd(), out)}/schema/all.dl".`);
+  console.log(`  in ${((performance.now() - started) / 1000).toFixed(1)}s. Next: check the facts with lib/checks.dl, then lib/orient.dl; schema/all.dl imports every relation.`);
 }
 
 if (process.argv[1] !== undefined && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

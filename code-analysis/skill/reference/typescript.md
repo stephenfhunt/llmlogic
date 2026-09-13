@@ -3,7 +3,7 @@
 For TypeScript you do not write the extractor. `./code-facts` (next to
 `./datalog`) reads a project with the TypeScript compiler — the type checker
 resolves every name, so the call graph is resolved rather than guessed — and
-writes 61 relations across seven layers, from packages and import graphs down to
+writes relations in seven layers, from packages and import graphs down to
 control flow, def/use, points-to inputs, and git history. A rule library
 computes coupling, cohesion, reachability and the rest; you write the questions.
 
@@ -81,9 +81,9 @@ Each library imports what it needs; import the one that answers the question.
 | `taint.dl` | `tainted`, `tainted_sink` — you supply `source/1` and `sink/1` |
 | `cochange.dl` | `revisions`, `cochange`, `confidence`, `hidden_coupling`, `churn`, `author_commits`, `main_author`, `first_change`, `last_change` |
 
-**No classes? Use the module versions.** Much TypeScript has none — the project
-above has 0 classes and 94 exported functions — so `lcom4`, `wmc`, `dit` and
-`cbo` come back empty there. The module is the unit of design instead:
+**No classes? Use the module versions.** Much TypeScript has none — exported
+functions all the way down — so `lcom4`, `wmc`, `dit` and `cbo` come back empty
+there. The module is the unit of design instead:
 `module_lcom4` groups a file's exports by what they share (N > 1 is N modules in
 one file), `coupling_kinds.dl` classifies how two files are coupled, and
 `coupling.dl`'s component rules already work per file.
@@ -95,7 +95,7 @@ between top-level directories; `lib/units.dl` has the membership rule.
 ## 4. Questions worth asking
 
 The library answers the textbook measures; these are the questions it makes
-cheap to ask, each a few rules. All ran on the project above.
+cheap to ask, each a few rules.
 
 | question | shape |
 |---|---|
@@ -146,9 +146,9 @@ untested(S) :- exports(symbol: S, kind: local), fn(id: S), not covered(S).
    it is written as (and under `verbatimModuleSyntax` keeps every import not
    marked `type`). `imports.kind` is only what was *written*; `imports.runtime`
    is what the emitted JavaScript keeps, read from the compiler's own emit, and
-   `runtime_dep` follows it. `modgraph.dl`'s `in_cycle` follows every import: the project above
-   has an `answer.ts ↔ eval.ts` cycle that is type-only on both sides, so check
-   `runtime_dep` before calling a cycle real. For single names, ask `ref`: a
+   `runtime_dep` follows it. `modgraph.dl`'s `in_cycle` follows every import, so
+   a cycle that is type-only on both sides is in it: check `runtime_dep` before
+   calling a cycle real. For single names, ask `ref`: a
    name is a runtime dependency where some reference to it has a kind other
    than `type`, `typeof` or `implements`.
 2. **A callback handed to a library is called by the library**, so no
@@ -159,8 +159,8 @@ untested(S) :- exports(symbol: S, kind: local), fn(id: S), not covered(S).
    which comes from `implements` and `extends`. A function returning an object
    literal that satisfies an interface structurally — a factory of closures — is
    invisible to it; `call_edge_pt` follows the returned object's fields and finds
-   it. On the project above, "untested exports" went 5 → 0 across traps 2 and 3,
-   and each of the three checked in the source was a false positive.
+   it. Between them, traps 2 and 3 can make every row of an "untested exports"
+   list over plain `call_edge` a false positive.
 4. **`indirect` and `unresolved` calls are holes in `call_edge`.** Count them
    before believing "nothing calls X": `call_site(dispatch: indirect)` for values
    (resolved by `pointsto.dl`), `unresolved` for what the checker could not
@@ -202,8 +202,8 @@ untested(S) :- exports(symbol: S, kind: local), fn(id: S), not covered(S).
     re-export (`export { X } from './x'`) is an import edge with no `ref`, so it
     adds to no component's `afferent` at any granularity; and at a directory
     depth, a file directly in a shallower directory is in no component at all.
-    Entry points and barrels are both. `afferent(4, "…/src/graveyard", 0)` on
-    `@grafana/ui` read as "nothing uses it" while `src/index.ts` re-exported it
+    Entry points and barrels are both, so `afferent(4, "…/src/legacy", 0)` —
+    "nothing uses it" — can stand beside an `src/index.ts` that re-exports it
     eight times. Before believing a low count, ask
     `uncounted_dependent(G, C, F)`: every importer of C that `afferent` left out,
     and why is one query away (`unplaced(G, F)`).
@@ -214,8 +214,7 @@ untested(S) :- exports(symbol: S, kind: local), fn(id: S), not covered(S).
 ## 6. Verify before you believe
 
 `bring-your-own.md` §6 applies unchanged: **Datalog proposes, source
-verifies.** Every trap in §5 was found that way — an answer, a file opened, the
-answer wrong for a reason the facts could have said. On the project above the
-check also went the other way: its strongest hidden coupling (`answer.ts` and
-`test/examples.test.ts`, 9 co-changes, no static link) turned out real — the
-test pins golden output that `answer.ts` renders, reached only through `run()`.
+verifies.** Every trap in §5 is an answer the facts gave and the source
+contradicted. The check runs the other way too: a strong hidden coupling between
+a module and a test with no static link to it is often real — a golden-output
+test that reaches the module only through the entry point it calls.

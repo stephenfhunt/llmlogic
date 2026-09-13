@@ -18,14 +18,25 @@ the experiments measuring it measure one thing. Why the split:
 | path | what |
 |---|---|
 | `skill/` | the skill: `SKILL.md` (the playbook), `./datalog` and `./code-facts` wrappers, `reference/` |
-| `skill/reference/datalog.md` | **symlink** to `../datalog/skill/SKILL.md` — the language guide has one home |
-| `skill/reference/bring-your-own.md` | **symlink** to `../datalog/skill/recipes/source-analysis.md` — the experiments' `static_analysis` pack ships that file, so it stays in the datalog skill |
+| `skill/reference/` | the skill's own references: TypeScript, Python, the Datalog language, extracting another language. `datalog.md` and `bring-your-own.md` began as the datalog skill's guide and recipe and are maintained separately for this skill's reader |
 | `tools/code-facts/` | the extractor: TypeScript source run by Node, a Python frontend, the rule library (`lib/`), tests, `bench/` |
 | `package.sh` | builds the standalone bundle into `dist/` |
 | `decisions.md` | append-only decisions log (the amendment vocabulary is `../datalog/spec.md` §17's) |
 | `ROADMAP.md` | the item index |
 | `testing.md` | the property catalog |
 | `notes/` | overflow: `notes/code-facts.md` is the extractor's design |
+
+## The skill's texts are published
+
+Everything the skill ships — `SKILL.md`, `reference/`, the headers of `lib/*.dl`,
+and what `code-facts` writes into an output directory or prints — is read by an
+agent in someone else's project, with its own setup and conventions and none of
+this repository's history. Write it for that reader: state a case, never its
+provenance (no defect ids, dates, subject codebases, session narrative or paths
+into this repo — those live in `decisions.md`, `bugs/` and `notes/`).
+`test/published-text.test.ts` catches the common leaks; it cannot catch prose
+that only makes sense with the background, so read a change as a stranger would.
+Why: [`decisions.md`](decisions.md) 2026-09-13 (night ii).
 
 ## Build / test / run
 

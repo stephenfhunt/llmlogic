@@ -29,8 +29,8 @@
 % **Coupling counts references, not imports.** A re-export
 % (`export { X } from './x'`) is an import edge with no `ref`, so a barrel adds
 % to nobody's afferent coupling at any granularity — files and packages included.
-% On `@grafana/ui`, `afferent(4, "…/src/graveyard", 0)` stood beside eight
-% re-exports of it from `src/index.ts` (bugs/004).
+% `afferent(4, "…/src/legacy", 0)` can stand beside eight re-exports of that
+% directory from `src/index.ts`.
 %
 % Every `ref` kind counts. To measure only runtime coupling, or only type
 % coupling, restrict `file_ref` by Kind in a rule of your own.

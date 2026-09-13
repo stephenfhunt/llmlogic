@@ -40,11 +40,11 @@ violation("symbol.id is not a key", I) :- symbol(id: I, kind: K1), symbol(id: I,
 violation("symbol.id is not a key", I) :- symbol(id: I, line: L1), symbol(id: I, line: L2), L1 != L2.
 violation("project symbol without a file", I) :- symbol(id: I, origin: project, file: F), F is absent.
 % An ambient `declare module "*.css"` resolves a specifier that names no file
-% and no package, so `target_ambient` is a target too — see schema.ts.
+% and no package, so `target_ambient` is a target too — see `imports` in SCHEMA.md.
 violation("resolved import without a target", F) :-
   imports(file: F, resolved: true, target_file: T, target_package: P, target_ambient: A),
   T is absent, P is absent, A is absent.
-% A guess at a package is only for what did not resolve (bugs/002).
+% A guess at a package is only for what did not resolve.
 violation("imports.unresolved_package on a resolved import", F) :-
   imports(file: F, resolved: true, unresolved_package: U), U is not absent.
 violation("imports.unresolved_package beside a target_package", F) :-

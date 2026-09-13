@@ -17,8 +17,8 @@
 %                             today's graph with the whole history window**, so
 %                             a link that existed and was removed — a
 %                             decoupling refactor that worked — scores exactly
-%                             like one that never existed, and scores highest
-%                             (bugs/005). A pair whose `first_change` postdates
+%                             like one that never existed, and scores highest.
+%                             A pair whose `first_change` postdates
 %                             the window's start cannot be that artifact; for
 %                             the rest, narrow the window (`--git-since`) or
 %                             check `git log -S` for a removed import

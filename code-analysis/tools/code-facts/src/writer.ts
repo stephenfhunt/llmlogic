@@ -171,10 +171,8 @@ function layerSchema(layer: Layer, extracted: boolean, tables: Tables): string {
   if (!extracted) {
     lines.push("% NOT EXTRACTED in this run (switched off with --layers / --no-git).");
     lines.push("% Declared but empty, so a rule over these relations is well-formed and");
-    lines.push("% derives nothing. Without the declarations it is a *semantic error*: a");
-    lines.push("% named argument needs a known field name, so `lib/checks.dl` — which");
-    lines.push("% covers every layer — would not run at all on a partial extraction, which");
-    lines.push("% is exactly what a large repository needs (found dogfooding, 2026-09-12).");
+    lines.push("% derives nothing — a 0 over them means the layer was not extracted, not");
+    lines.push("% that the code has none.");
     for (const r of RELATIONS.filter((x) => x.layer === layer)) {
       const cols = r.columns.map((c) => `${c.name}: ${c.type}`).join(", ");
       lines.push(`declare ${r.name}(${cols}).`);

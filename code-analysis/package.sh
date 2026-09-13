@@ -2,10 +2,9 @@
 # Build the standalone code-analysis skill bundle: dist/code-analysis-skill/
 # (and a .tar.gz), dropped into a `.claude/skills/code-analysis` to install.
 #
-# The engine and the two docs single-homed in the datalog skill (its SKILL.md,
-# the language guide; its source-analysis recipe, the bring-your-own method)
-# come from `cargo package-skill`'s bundle, which has already stripped their
-# `<!-- block: … -->` markers — so this script never reimplements that rule.
+# The engine binary comes from `cargo package-skill`'s bundle. Every document is
+# this skill's own (skill/SKILL.md, skill/reference/): the datalog skill's guide
+# and recipe are written for a different reader, so they are not reused.
 # The extractor ships without its tests, fixtures or dev packages, with its
 # TypeScript vendored by `npm ci --omit=dev`.
 set -euo pipefail
@@ -30,16 +29,8 @@ cp "$ENGINE/datalog" "$BUNDLE/datalog"
 cp "$HERE/skill/code-facts" "$BUNDLE/code-facts"
 chmod +x "$BUNDLE/datalog" "$BUNDLE/code-facts"
 
-# 3. Reference docs. The two from the datalog skill lose their frontmatter: a
-#    skill reads only its own SKILL.md's, and a second `name: datalog` block in a
-#    reference file would read as a second skill's header.
-strip_frontmatter() { awk 'NR == 1 && $0 == "---" { skip = 1; next } skip && $0 == "---" { skip = 0; next } !skip' "$1"; }
-strip_frontmatter "$ENGINE/SKILL.md" > "$BUNDLE/reference/datalog.md"
-cp "$ENGINE/recipes/source-analysis.md" "$BUNDLE/reference/bring-your-own.md"
-for doc in "$HERE"/skill/reference/*.md; do
-  [[ -L "$doc" ]] && continue # the symlinked two are handled above
-  cp "$doc" "$BUNDLE/reference/"
-done
+# 3. Reference docs.
+cp "$HERE"/skill/reference/*.md "$BUNDLE/reference/"
 
 # 4. The extractor, without what exists only to develop it.
 TOOL="$HERE/tools/code-facts"
@@ -54,7 +45,7 @@ fi
 cat > "$BUNDLE/INSTALL.md" <<'MD'
 # Installing the code-analysis skill
 
-A self-contained Claude Code skill: `SKILL.md` (the playbook), the compiled
+A self-contained Claude Code skill: `SKILL.md` (the instructions), the compiled
 `datalog` engine, the `code-facts` extractor, and `reference/`.
 
 ```sh

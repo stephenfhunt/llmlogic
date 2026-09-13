@@ -18,9 +18,7 @@ import "modgraph.dl".
 % Which layers this extraction actually has. **Read this line first.** A layer
 % switched off (`--layers`, `--no-git`) leaves its relations declared and empty,
 % so every count over it is 0 — and a 0 that means "not extracted" looks exactly
-% like a 0 that means "none". `functions(0)` on a 2.9M-line codebase was this,
-% and the engine's `undefined-predicate` warning names a relation rather than
-% the number it made wrong (found dogfooding, 2026-09-12).
+% like a 0 that means "none".
 layer_extracted(L) :- relation_rows(layer: L, rows: R), R > 0.
 
 % Data, not source. A `.json` a module imports is one of the program's files and
@@ -31,11 +29,10 @@ production_files(N) :- N = count { P | file(path: P, is_test: false, is_decl: fa
 test_files(N) :- N = count { P | file(path: P, is_test: true), source_file(P) }.
 code_lines(N) :- N = sum { L | file(path: P, sloc: L, is_test: false, is_decl: false), source_file(P) }.
 
-% **Gated on their layer, so a 0 that means "not extracted" cannot print.** It
-% did: `functions(0)` on a 2.9M-line codebase, because `fn` is a flow-layer
-% relation and flow was not extracted. Reporting
-% nothing is the honest answer to a question these facts cannot answer, and
-% `layer_extracted` above says which those are (found dogfooding, 2026-09-12).
+% **Gated on their layer, so a 0 that means "not extracted" cannot print.** `fn`
+% is a flow-layer relation, so without flow there is no `functions` line at all.
+% Reporting nothing is the honest answer to a question these facts cannot
+% answer, and `layer_extracted` above says which those are.
 functions(N) :- layer_extracted(flow), N = count { F | fn(id: F, kind: K), K != module }.
 classes(N) :- N = count { C | symbol(id: C, kind: class, origin: project) }.
 exported_symbols(N) :- N = count { S | symbol(id: S, exported: true, origin: project) }.

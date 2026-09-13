@@ -19,8 +19,8 @@
 %
 % **The cycle relations follow `dep`, which is every import, type-only
 % included.** A cycle they report may not exist at run time; re-derive over
-% `runtime_dep` before calling one real (`../SCHEMA.md`, and the language
-% reference's first trap).
+% `runtime_dep` before calling one real (`reference/typescript.md`
+% §5, trap 1).
 
 import "../schema/structure.dl".
 

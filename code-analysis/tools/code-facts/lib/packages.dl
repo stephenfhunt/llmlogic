@@ -52,9 +52,7 @@ imported_at_runtime(Pkg, Dep, F) :-
 % mapping or a node_modules symlink back into the tree, and `target_package` is
 % set only for a target outside it. The dependency is real and it is the target
 % file's own package, so read it off `file.package` instead. Without this,
-% `unused` names every workspace sibling a package actually depends on: on
-% Grafana it named four that 540 statements import
-% (found dogfooding, 2026-09-12).
+% `unused` names every workspace sibling a package actually depends on.
 %
 % **This feeds `used` only, not `undeclared`.** `imports` does not record
 % whether a specifier was written bare (`@scope/lib` — a request for a package,
@@ -72,9 +70,9 @@ declared_as(Pkg, Dep, K) :- package_dep(package: Pkg, dep: Dep, kind: K).
 declared(Pkg, Dep) :- declared_as(Pkg, Dep, _).
 types_declared(Pkg, Dep) :- package_dep(package: Pkg, types_for: Dep).
 
-% A bare specifier the compiler could not resolve names no package for sure
-% (bugs/002): a webpack `resolve.alias` onto `public/vendor` made Grafana
-% "import" a package called `vendor`. A declaration (or an `@types/` one)
+% A bare specifier the compiler could not resolve names no package for sure:
+% a bundler alias `vendor/…` onto a local directory reads as an import of a
+% package called `vendor`. A declaration (or an `@types/` one)
 % confirms the guess, and a confirmed guess is `imported` like a resolved one —
 % so an extraction made without `node_modules`, where *every* package import is
 % a guess, still answers `unused`, `dev_in_production`, `only_in_tests` and

@@ -14,7 +14,7 @@
 %   dead_store(D, V, Line)  a local's definition that nothing ever reads
 %                           (captured variables excluded — a closure may read it)
 %
-% Exceptions are over-approximated (see the flow layer's notes), so a path
+% Exceptions are over-approximated (`reference/typescript.md` §5, trap 8), so a path
 % through a `throw` edge is a path; `reachable` is therefore sound for dead code
 % — a node it calls unreachable really is — and conservative for everything else.
 % Variables are symbol ids: a module-level variable written in one function and

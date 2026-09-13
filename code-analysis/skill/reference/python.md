@@ -58,8 +58,7 @@ they hold an `__init__.py`, so a `src/` layout needs nothing special.
   after the first, each conditional expression, and each comprehension `for` and
   `if`. mccabe (ruff `C901`, flake8) counts none of the last three and folds a
   nested function into its parent — so these numbers run higher than a flake8
-  threshold expects. Set those differences aside and they agree: on the project
-  above, 1116 of 1117 functions equal ruff's count. Compare within the codebase.
+  threshold expects. Compare within the codebase.
 - **Quality.** `lint_directive` reads `# noqa` (`# ruff: noqa` is directive
   `file`), `# pylint: disable=…`, `# type: ignore[…]` (tool `mypy`),
   `# pyright: ignore[…]` and `# pragma: no cover`. `any_site` is `Any` written in
@@ -94,10 +93,9 @@ what differs over Python facts.
    *and* `unused pyyaml`. Pair them up before reporting either.
 2. **A tool is declared and never imported.** `ruff`, `black`, `mypy` and pytest
    plugins come out `unused`; so does a dependency the code really stopped
-   using. Only the second is a finding — on the project above, `anthropic` was,
-   and `ruff` was not.
-3. **Unresolved calls are the common case in unannotated code** — 44% of
-   sqlparse's call sites, 24% of the annotated project above. Before saying
+   using. Only the second is a finding.
+3. **Unresolved calls are the common case in unannotated code** — close to
+   half of all call sites, and a quarter even where code is annotated. Before saying
    "nothing calls X", count `call_site(dispatch: unresolved, callee_name: N)`
    for X's name: the name tier over-approximates what the call graph misses.
 4. **What Python decides at run time is invisible:** `getattr` / `setattr` with
@@ -123,7 +121,6 @@ what differs over Python facts.
 ## 5. Verify before you believe
 
 As for TypeScript: the engine is exact about the facts, and whether the facts
-say what you think is checked in the source. On sqlparse the facts answer the
-experiments' four static-analysis questions exactly as an independent
-`ast`-based answer key does; on the project above, each finding quoted in this
-file was opened and confirmed.
+say what you think is checked in the source. Python leaves more to check:
+every negative over the call graph, and every coupling kind that needs an
+annotation.
