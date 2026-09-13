@@ -2586,6 +2586,21 @@ never say.
 
 ### Decisions
 
+- **2026-09-13 (later iv)** — **A fact store with one owner: the review's answers,
+  built on a branch** (engine; `notes/fact-store.md`; the user's calls).
+  - **Sorted runs, membership by binary search per run.** A B-tree over rows or a
+    content-to-row hash is built only if the gate shows seeks or head checks losing.
+  - **Storage before provenance, staged:** a `Relation` type with no behaviour
+    change; then the flat store, runs and watermark views, premises still copied;
+    then provenance by `FactRef`. Shared tuples changed both at once.
+  - **Imports stay in `Program.facts`**, sorted into the store at eval start;
+    loading straight into it waits on the gate. `?whynot`'s cross case copies the
+    base block.
+  - **On branch `fact-store`**, fast-forwarded to trunk when every step passes its
+    gate. A failed step is recorded on the branch, not reverted on trunk.
+  - **Guards:** output byte-identical to a frozen `efcda71` binary (the note's §
+    Gate); the capped deep run on pinned seeds; and the note's three new
+    properties, each mutation-verified.
 - **2026-09-13 (later iii)** — **A fact reference is a shared tuple, not an id**
   (engine, `ir::Tuple`; the user's call that references come next, and their
   question *why not a `&`?*). The design is in `notes/recorder-at-scale.md`

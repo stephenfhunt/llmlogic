@@ -435,8 +435,9 @@ them. Except where noted these are documented v1 limits rather than defects.
     cloned premise tuples.
   - **Fact references: shared tuples built and reverted 2026-09-13** — a `?why`
     43–50% smaller, runs up to 50% slower (§17 2026-09-13 (later iii),
-    ***Falsified***). **Next: a fact store with one owner** (the user's), designed
-    and prototyped before trunk (`notes/fact-store.md`).
+    ***Falsified***). **A fact store with one owner** (the user's): reviewed
+    2026-09-13 (§17 (later iv)). _building — on branch `fact-store`._ Detail in
+    `notes/fact-store.md`.
   - **Raised, not decided:** one derivation per fact, chosen when the fact is
     established (the code shows printed proofs unchanged); no fact copy for
     `?whynot`.

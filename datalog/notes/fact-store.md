@@ -1,9 +1,9 @@
 # A fact store with one owner — design
 
-*Drafted 2026-09-13 for review; not decided. Prompted by the reverted shared
-tuples (`recorder-at-scale.md` § Shared tuples, measured; §17 2026-09-13 (later
-iii), ***Falsified***). Nothing here is built. The questions at the end are the
-ones the review settles before a prototype.*
+*Designed 2026-09-13 and reviewed the same day (§17 2026-09-13 (later iv)); the
+answers are at the end. Building on branch `fact-store`. Prompted by the reverted
+shared tuples (`recorder-at-scale.md` § Shared tuples, measured; §17 2026-09-13
+(later iii), ***Falsified***).*
 
 ## The defect this answers
 
@@ -156,11 +156,45 @@ B5 and B13.
 - **Each ships with a mutation and a non-vacuity guard** (`testing.md`'s rules).
   The generator must reach a relation with several runs and a merge.
 
-## Measurement gate for the prototype
+## Gate
 
-In the scratch worktree, against a frozen `7e3f9ef` release binary:
+Every step passes all of this before the next one starts. The tooling lives
+outside the repo, in `~/.cache/fact-store/`. The baseline is a frozen `efcda71`
+release binary, which is code-identical to `7e3f9ef`; `~/.cache/recorder-wt` is
+its worktree.
 
-| program | today | must hold |
+- **Per commit:**
+  - `cargo test`;
+  - `cargo test --no-default-features`;
+  - `cargo clippy --all-targets`;
+  - `cargo fmt --check`.
+- **Output identical to the baseline.** `harness/diff.py run BIN OUT`, then
+  `diff -r` against the baseline's run. Each case records stdout, stderr and the
+  exit code, over:
+  - every `tests/programs` file;
+  - every `@grafana/ui` library and query file, asked for every relation it
+    defines by rule, plus both `?why` goals;
+  - the 26 cross-engine programs;
+  - a fixed sample of generated programs at `Medium`, `Large`, `Deep` and shaped
+    sizes.
+
+  The corpus and generated programs also get up to four `?why` goals each. They
+  also get two `?whynot` goals: a crossover of two answers that does not hold (the
+  failure trace) and one that does (the cross case). Every goal is fixed once, from
+  the baseline's answers. The baseline diffed against itself must also be empty, or
+  the oracle is flaky.
+- **The deep run,** `harness/deep.sh`: `DATALOG_PBT=deep cargo test --lib` under
+  `prlimit --as` (16 GB). It runs at `PROPTEST_RNG_SEED` 1, 2 and 3, which draw the
+  baseline's cases while the generators are unchanged, plus one random seed. It
+  skips only the tests `bugs/015` exhausts memory on, as recorded in
+  `runs/deep-summary.txt`.
+- **New properties** are mutation-verified, and each mutation is written on its
+  catalog line in `testing.md`.
+- **Performance,** `harness/measure.py BASELINE BRANCH`. The binaries are
+  interleaved run by run and the baseline is re-measured in the same sitting; this
+  table's figures are history, not the bar:
+
+| program | `7e3f9ef`, measured 2026-09-13 | must hold |
 |---|---|---|
 | `pointsto.dl`, no goals | 8.4 s / 361 MB | no slower |
 | `pointsto.dl` `?why` | 9.2 s / 836 MB | no slower; memory reported |
@@ -172,20 +206,41 @@ Also reported: rounds per stratum and runs per relation, which price the merge
 policy. `perf stat` goes beside every time (instructions, cycles, cache misses),
 since the shared-tuple failure hid behind equal instruction counts.
 
-## Questions for the review
+## Rules the build must keep
 
-1. **Runs, or a B-tree over row numbers?** The recommendation is runs first. They
-   fit batched rounds and give the views for free. The B-tree is the prototype's
-   fallback if seeks lose.
-2. **Membership:** binary search per run, or a hash from content to row beside the
-   runs? The hash buys O(1) head checks and costs memory per fact.
-3. **Imports:** should the loader write rows straight into a store that `eval`
-   adopts? That removes the per-row `Vec` entirely, but changes `LoadedTable` and
-   how `Program` carries base facts (lowering and typechecking read them).
-4. **Program facts in the IR:** keep `Program.facts: Vec<Fact>` for text facts and
-   route imports around it, or give the IR per-relation blocks too?
-5. **The `?whynot` cross case:** copy the base block (flat, cheap), or keep the
-   first model's store alive for the second evaluation?
-6. **Scope of the first prototype:** the store, the index and the views, with
-   premises still copying? That isolates the storage change before the provenance
-   change, and shared tuples conflated the two.
+- **Delta is the rows this stratum's previous apply wrote, not the newest run.** A
+  relation last written in an earlier round, or by a lower stratum, has an empty
+  delta. So each relation records which round wrote its newest block. Guard: the
+  views property, and B1 at `Medium`/`Large`.
+- **`Old` is `Full` below the delta's first row.** This holds only because nothing
+  is written while a round collects (E1).
+- **Content order everywhere a consumer can see it.** Seeks, `relation()`,
+  `facts()` and `repair_for` merge their runs in content order, as the `BTreeSet`
+  gave it. The consumers that can observe order include:
+  - which near-miss `trace_failure` reports;
+  - which error pruning reaches first;
+  - the scan printer, which drops a repeated row by comparing it with the row
+    before (`api.rs`, D6).
+
+  A seek for the join alone that skips the merge is a later optimisation, measured
+  separately, after an audit shows its consumer ignores order.
+- **No `unsafe`.**
+
+## Review answers (2026-09-13, the user's; §17 2026-09-13 (later iv))
+
+1. **Runs.** A B-tree over rows only if seeks lose at the gate.
+2. **Membership is a binary search on each run.** A hash from content to row only
+   if head checks lose at the gate.
+3. **Imports stay `LoadedTable` → `Program.facts`**, sorted into the store when
+   evaluation starts. Loading straight into the store waits until the gate shows
+   the per-row `Vec` still costs.
+4. **`Program.facts: Vec<Fact>` stays**, for text facts and imports alike.
+5. **`?whynot`'s cross case copies the base block.**
+6. **Staged, storage first, with `bugs/015`'s skips named in the gate:**
+   1. a `Relation` type with no behaviour change, and the properties stated
+      against it;
+   2. the flat store, runs and watermark views, with premises still copied;
+   3. provenance by `FactRef`;
+   4. then the cross case, and imports if the gate calls for them.
+
+   Each step is a series of green commits on branch `fact-store`.
