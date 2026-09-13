@@ -2566,6 +2566,23 @@ never say.
 
 ### Decisions
 
+- **2026-09-12** — **Sized generators: tiers with a drawn size, one checker per
+  claim, and a deep run** (`testing.md` § Generator sizes; answers
+  `notes/growing-inputs.md` questions 1, 3 and 4).
+  - **A `testgen::Tier` is upper bounds proptest draws within**, so a failing case
+    still shrinks (at `Large`, to 8 facts and 6 rules in 2.9 s). A property runs at
+    `tier.scaled()`, one `proptest!` entry per tier over a shared `*_holds` checker.
+  - **`DATALOG_PBT=deep`** moves every scaled tier up one and cases ×4; run on
+    demand and **before and after every § Performance item** (the user's). The
+    per-commit `cargo test --lib` stays **under 60 s** (the user's).
+  - **The naive oracle runs to `Large`** (measured ~20 ms a case), not `Deep`.
+  - **Above `Small`, bodies are connected and constants come from a dense pool** —
+    forced: a four-atom Cartesian product did not finish, and a recursive arity-3
+    relation over the typed pools was OOM-killed. `Small` keeps products.
+  - **Growth is guarded on the recorded run** (`RunStats`). *Evidence:* the `Old`
+    read no untiered property sees reddens B1 and B5 at `Medium` and `Large`.
+  - *Rejected:* `#[ignore]` twins for the deep tier — two copies of each property.
+
 - **2026-09-12** — **Property tests grow their inputs before more refactoring or
   performance work** (the user's: "it's paramount that we have proper and complete
   testing"; `testing.md`; plan in `notes/growing-inputs.md`).

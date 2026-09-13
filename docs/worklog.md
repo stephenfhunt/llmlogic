@@ -24,6 +24,56 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-12 (late night) — property tests that grow: tiers, a deep run, the `Old` read caught unprompted
+
+Asked to plan and start an ambitious expansion of the property tests, sized for
+program shape and scale, so they can carry the performance refactors. Plan
+approved; Step 1 and the first tiered properties shipped.
+
+**Done** — datalog 495 lib tests, full suite, clippy, fmt
+- **`c9422a7`** — `testgen::Tier` (`Small` = the old `eval_bounds`, unchanged),
+  `arb_program_with_edb_at` / `arb_program_text_at`, `DATALOG_PBT=deep`,
+  `testgen::cases`, `RunStats` read off the recorded run, a growth guard with
+  measured floors; **B1 at `Medium` and `Large`**.
+- **Calibration forced two shapes**: above `Small`, bodies are connected (a
+  four-atom product at `Large` did not finish) and constants come from a dense
+  pool (an arity-3 recursion over the typed pools was OOM-killed at `Deep`).
+- **The 2026-09-12 `Old` read now reddens B1 and B5 at `Medium` and `Large`**
+  (2 of 2 runs) with no shape built for it; every untiered property stays green.
+  At `Large` it shrank to 8 facts and 6 rules in 2.9 s.
+- **`a03a20c`** — B5 permuting every body (`with_permuted_bodies`) and B13 over
+  a query mask (`keep_queries`) at both tiers. Skipping `Dep::Negated` reddens
+  B13 at `Medium` in 2 of 3 runs, at `Large` in none.
+- **Lib suite 12.2 → 18.1 s**: the tiered tests ~4.7 s; `b1_shaped_programs_agree`
+  alone is 12.3 s. **Deep run: 134 s, 1.5 GB peak, green**; `Deep`'s floors set from it. The
+  first deep run was killed for memory in B5 at `Deep`, recording derivations a
+  fact claim never reads; `Unrecorded`, it peaks at 55 MB.
+- `Deep`'s slowest programs take 6–7 s (debug) for under 500 derived facts —
+  five-atom self-joins over arity-3 relations: performance vehicles too.
+
+**Decided** (`datalog/spec.md` §17 2026-09-12, *sized generators*; two the user's)
+- **Per-commit `cargo test --lib` under 60 s**; **a deep run before and after
+  every § Performance item**, and on demand.
+- Tiers are upper bounds; one shared `*_holds` checker per claim, one
+  `proptest!` entry per tier; the naive oracle runs to `Large`, not `Deep`; no
+  `#[ignore]` twins.
+
+**Removed**
+- The duplicated bodies of shaped B1 and engine B13 (now `b1_holds`,
+  `b13_holds`); the temporary calibration test; the oldest worklog entry.
+
+**Next up**
+- **The generator audit** (plan Step 0's table, into `testing.md` § Generator
+  sizes) — measured the baseline, did not write the table.
+- **Tier the rest** through `*_holds`: B2–B4, B6, B8, C11, C13, C14, E1–E10.
+- **A tiered shaped generator** (mutual recursion, strata layers, arithmetic,
+  named arguments, temporal), then **the scaling oracles** — all-paths
+  differential, staged evaluation, renaming / disjoint union, first-round
+  oracle, an Andersen points-to solver — and imports, seek and parser at size.
+- The plan: `~/.claude/plans/let-s-plan-and-start-quirky-pancake.md` (local);
+  its substance is in `datalog/notes/growing-inputs.md` § Sequence.
+- **Open**: `datalog/bugs/009`, `013`, `014`; `code-analysis/bugs/001`–`005`.
+
 ## 2026-09-12 (night) — `pointsto.dl` as an engine vehicle: a new fact was pending once per path
 
 Asked to keep grinding engine performance with `pointsto.dl`. The full `vs/base`
@@ -119,56 +169,4 @@ bench digests identical on every `vs/base` library
   skill, the engine item that retires `lib/keys.dl`. **Column projection**, then
   **interning**: design sessions, measured.
 - Re-learned: measure with the repository's `lib/`, never a fact directory's copy.
-- **Open**: `datalog/bugs/009`, `013`, `014`; `code-analysis/bugs/001`–`005`.
-
-## 2026-09-12 (later) — rule and relation pruning: a run pays for what its goals reach
-
-Picked up the two § Performance items the Grafana dogfood ruled next. Both
-shipped, and `bugs/012` closed with them — narrowed, because half its premise was
-false.
-
-**Done** — **datalog 615 tests**, clippy (both feature sets) and fmt clean
-- **Rule pruning** (`0841069`): only the rules a goal depends on run. The walk
-  reuses `collect_stratum_edges`, so a relation read only under `not` or inside an
-  aggregate stays live. `vs/base`, `callreach.dl` beside an unrelated question:
-  **37.4 s / 4.20 GB → 3.1 s / 0.70 GB**.
-- **Relation pruning**: with every schema explicit the program is lowered before
-  any import is read, and only reached imports are. The same question **0.01 s /
-  33 MB**; an unknown field **5.5 s / 1.10 GB → 0.00 s**; counting all 179,748
-  `var` rows **6.7 s / 1.64 GB → 0.71 s / 0.21 GB**.
-- **B13** at three levels plus an import half; four mutations recorded, each
-  reddening its test. The text guard's first draft ran *pruned* and went quiet
-  under the mutation it guards.
-- **`code-analysis` bench digests identical** on the 13 libraries that answer
-  (`pointsto` does not fit either way); `npm test` green on the new binary.
-- **`bugs/014`**: a declared temporal column fixes no type, so an empty relation
-  makes `A + @1d` a type error. `012`'s syntax-error half never reproduced.
-- **`reach.dl` unwound into `modgraph.dl`**: answers byte-identical; `dep` over a
-  synthetic 2,000-file cycle 32.7 s unpruned → 0.03 s.
-- **Grafana re-measured** (4.04M facts): nothing runs out of memory; worst peaks
-  `orient.dl` 9.5 GB (was 13.9) and `modgraph.dl` with cycles 9.3 GB.
-
-**Decided** (`datalog/spec.md` §17 2026-09-12, two entries; the user's calls)
-- **Permissive**: a pruned rule cannot fail or hang a run; static warnings stay
-  whole-program; a program with no goals prunes nothing.
-- **The early check is lowering, not typecheck.** The approved plan argued a
-  fact-free typecheck only under-rejects; the source said otherwise. The user
-  asked whether sources could supply types — they can (Parquet free, JSONL/CSV a
-  streaming pass), but typecheck ignores declared types for the same reason.
-  Split: lowering now, *a column's type is known before its rows* designed later.
-- **A type rejection over a partial load is re-checked over a full one**, so a
-  pruned run accepts and rejects exactly what a full load does.
-- **A skipped import is still checked short of reading** — a broken path fails.
-
-**Removed**
-- Load-then-lower for explicit-schema programs; ~90 lines of pre-build analysis
-  in the two ROADMAP items (now §17); the recipe's "import the closure, not the
-  library" advice and its 35× anecdote; `bugs/012` (to `resolved/`).
-
-**Next up**
-- **A column's type is known before its rows** (`bugs/014`) — a design session:
-  declarations as constraints first, a source's own types second.
-- **Nothing is ruled next in datalog § Performance.** On Grafana the largest cost
-  left is `orient.dl`'s own closure (9.5 GB) — its size gate is a user call — and
-  the coupling libraries at 5–8 min (`code-analysis/notes` § Re-measured).
 - **Open**: `datalog/bugs/009`, `013`, `014`; `code-analysis/bugs/001`–`005`.

@@ -54,7 +54,11 @@ does.
 - Oracle cost: the naive evaluator re-joins every relation each iteration. B1 over
   `SHAPED_LARGE` at 48 cases took the lib suite from 5.5 s to 14.2 s.
 
-## Design questions (not decided)
+## Design questions
+
+Questions 1, 3 and 4 were answered 2026-09-12 (§17, *sized generators*;
+`testing.md` § Generator sizes); 2 is half answered — the naive oracle measured
+affordable through `Large`, and the scaling oracles are still to build.
 
 1. **Tiers, or a drawn size?** A size drawn *inside* the strategy, skewed small
    with a long tail, shrinks toward small counterexamples for free. Fixed tiers
@@ -80,7 +84,13 @@ does.
 7. **`code-analysis`'s own properties** (fast-check) have the same question; a
    separate project, flagged here only.
 
-## Proposed sequence
+## Sequence
+
+The working plan widened step 3 into the scaling oracles — an all-paths
+differential over every way to evaluate, staged evaluation, renaming and
+disjoint union, a first-round oracle, and an independent Andersen points-to
+solver — and added the non-engine generators (imports, seek, parser). Done so
+far: step 2 for `arb_program_with_edb`, and step 3's B1, B5 and B13.
 
 1. **Audit** — a table of every generator: its ranges, the properties reading it,
    what growing it would take. Into `testing.md`'s coverage map.

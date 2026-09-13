@@ -47,7 +47,9 @@ each; detail in §17 and `docs/worklog.md`.
 
 > **Testing comes first** (the user's, §17 2026-09-12): property tests grow their
 > inputs before more refactoring or performance work — § Testing. Answer
-> streaming and every § Performance item wait on it.
+> streaming and every § Performance item wait on it. Every § Performance item is
+> gated by a deep run (`DATALOG_PBT=deep cargo test --lib`) before and after it
+> (the user's).
 >
 > **Open defects live in [`bugs/`](bugs/)** — `013` opened 2026-09-12, `014` the same day.
 > **No design session blocks anything** either: §6's extension, the last one,
@@ -461,15 +463,15 @@ deferred until a consumer needs them (§8's *Not covered*). — §13,
 
 ### Testing
 
-- **Property tests grow their inputs** — _designing, ruled next_ (the user's, §17
-  2026-09-12; **post-v1**). Every evaluation generator has fixed small ranges, and
-  two engine defects passed the whole suite until `arb_shaped_program`, one
-  generator at one size. Tiers or a drawn size, oracles that scale past the naive
-  evaluator, per-tier growth guards, a deep run, an audit of every generator:
-  [`notes/growing-inputs.md`](notes/growing-inputs.md). — testing.md.
-- **Metamorphic properties on sized, shaped generators** — _queued_, the item
-  above's step 3: B5 (body order, where semi-naive broke) and B13 first, then
-  B2–B4, B6, C11, C13, E1–E8, each re-verified by mutation. **post-v1**. — testing.md.
+- **Property tests grow their inputs** — _building_ (the user's, §17 2026-09-12;
+  **post-v1**). Tiers, the deep run and growth guards shipped for
+  `arb_program_with_edb` (§17 2026-09-12, sized generators); next the generator
+  audit, a tiered shaped generator, and the non-engine generators:
+  [`notes/growing-inputs.md`](notes/growing-inputs.md). — testing.md § Generator sizes.
+- **Metamorphic properties on sized, shaped generators** — _building_: B1, B5 and
+  B13 run at `Medium` and `Large`; B2–B4, B6, B8, C11, C13, C14, E1–E10 next, each
+  re-verified by mutation; then the scaling oracles (staged evaluation, renaming,
+  rounds, an all-paths differential). **post-v1**. — testing.md.
 
 ### Performance
 

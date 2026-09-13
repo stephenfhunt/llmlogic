@@ -213,6 +213,13 @@ facts 0/3 · 1/19 · 5/271 · 29/492, from `Small` to `Deep`; split instances
 500 derived facts — five-atom self-joins over arity-3 relations — which makes
 them performance vehicles as well as test cases.
 
+**At `Deep`, a checker records provenance only if its claim reads it.** The
+dense pool bounds the *model* (about 27k facts at `Deep`), not the *instances*: a
+recorded run keeps every instance of a five-atom self-join. The first deep run
+was killed for system memory inside `b5_holds`, which recorded twice for a claim
+about facts; unrecorded, B5 at `Deep` peaks at 55 MB and takes 188 s for 192
+cases. E9 is what licenses the swap. **The deep run: 495 tests in 134 s wall, 1.5 GB peak** (2026-09-13).
+
 **Policy — generators vs. the no-DSL rule.** The no-macro-DSL/no-builder rule
 (the pyramid, item 1) is about ergonomic sugar for hand-written tests;
 generators are *coverage machinery* that construct plain `ast::`/`ir::` values
