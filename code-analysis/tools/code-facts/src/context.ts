@@ -580,8 +580,26 @@ function resolvedName(sf: ts.SourceFile): string {
   return name;
 }
 
+// A file's key is a small integer per resolved name, not the name: every
+// declaration and call site holds a key, and a path in each was the bulk of them.
+const fileIds = new WeakMap<ts.SourceFile, number>();
+const fileIdByName = new Map<string, number>();
+function fileId(sf: ts.SourceFile): number {
+  let id = fileIds.get(sf);
+  if (id === undefined) {
+    const name = resolvedName(sf);
+    id = fileIdByName.get(name);
+    if (id === undefined) {
+      id = fileIdByName.size;
+      fileIdByName.set(name, id);
+    }
+    fileIds.set(sf, id);
+  }
+  return id;
+}
+
 export function declKey(node: ts.Node): string {
-  return `${resolvedName(node.getSourceFile())}:${node.pos}:${node.end}:${node.kind}`;
+  return `${fileId(node.getSourceFile())}:${node.pos}:${node.end}:${node.kind}`;
 }
 
 export function declSymbol(decl: ts.Node, checker: ts.TypeChecker): ts.Symbol | undefined {
