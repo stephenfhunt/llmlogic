@@ -195,3 +195,39 @@ test("packages: an unresolved bare specifier is guessed, not undeclared; a decla
   assert.deepEqual(ask(out, "packages.dl", "unused(P, D, K)"), []);
   assert.deepEqual(ask(out, "checks.dl", "violation(K, V)"), []);
 });
+
+// bugs/003: a namespace re-export and a lazily imported module each made the
+// hand-written dead-export recipe report live exports as dead.
+test("exports: reachable from an entry through namespace re-exports, and lazily imported modules, are not dead", { skip }, () => {
+  const dir = tempDir("lib-exports");
+  writeProject(dir, {
+    "src/index.ts": [
+      'import * as builder from "./builder.js";',
+      "export { builder };",
+      'export * as direct from "./direct.js";',
+      'export { live } from "./live.js";',
+      'export { load } from "./app.js";',
+      "",
+    ].join("\n"),
+    "src/builder.ts": "export function addAxis() { return 1; }\nexport const card = 2;\n",
+    "src/direct.ts": "export const d = 3;\n",
+    "src/live.ts": "export const live = 4;\nexport function dead() { return 5; }\n",
+    "src/lazy.ts": "export function Editor() { return 6; }\n",
+    "src/app.ts": 'export async function load() { const m = await import("./lazy.js"); return m.Editor; }\n',
+    "src/used.ts": "export const helper = 7;\n",
+    "src/user.ts": 'import { helper } from "./used.js";\nexport const internal = helper;\n',
+    "src/x.test.ts": "export const fixtureData = 8;\n",
+  });
+  const out = tempDir("lib-exports-out");
+  extract(dir, { out, layers: ["refs"] });
+  const q = (query: string) => {
+    fs.writeFileSync(path.join(out, "q.dl"), `import "lib/exports.dl".\nentry("src/index.ts").\n`);
+    const r = datalog(path.join(out, "q.dl"), [query]);
+    assert.ok(r.code === 0 || r.code === 1, `${query}: exit ${r.code}\n${r.stderr}`);
+    return r.stdout.split("\n").filter((l) => l !== "");
+  };
+  assert.deepEqual(q("api_file(F)"), ['api_file("src/builder.ts").', 'api_file("src/direct.ts").', 'api_file("src/index.ts").']);
+  assert.deepEqual(q("lazy_module(F)"), ['lazy_module("src/lazy.ts").']);
+  // user.ts#internal is exported and used by nothing: dead as an export too.
+  assert.deepEqual(q("dead_export(P, N)"), ['dead_export("src/live.ts", "dead").', 'dead_export("src/user.ts", "internal").']);
+});

@@ -67,13 +67,13 @@ derives.
 | **hidden coupling** | files that change together with no import or reference between them | `cochange.dl`: `hidden_coupling` |
 | **cohesion** | files that are several modules sharing a name; classes that want to split | `cohesion.dl`: `module_lcom4` first (much code has no classes), then `lcom4`, `tcc` |
 | **complexity and risk** | the most complex functions; hot spots where complexity meets churn | `fn` (`cyclomatic`, `cognitive`); `cochange.dl`: `revisions` |
-| **dead and unreached** | dead code, dead stores, exports nothing uses, exported functions no test reaches | `flow.dl`: `unreachable`, `dead_store`; `pointsto.dl`: `call_edge_pt_lexical` from test files |
+| **dead and unreached** | dead code, dead stores, exports nothing uses, exported functions no test reaches | `flow.dl`: `unreachable`, `dead_store`; `exports.dl`: `dead_export` (supply `entry/1`); `pointsto.dl`: `call_edge_pt_lexical` from test files |
 | **dependencies** | undeclared, unused, dev-only-in-production, types-only packages | `packages.dl` |
 | **change and people** | churn, ownership, files every change drags along, coupled code owned by different people | `cochange.dl`: `churn`, `main_author`, `cochange` |
 | **API and types** | internal types leaking into exported signatures; where `any` enters; functions taking a record and reading one field | `type_ref`, `any_site`, `coupling_kinds.dl`: `stamp_param` |
 
 `reference/typescript.md` §4 spells out the queries that need a choice the table
-cannot show — dead exports (name your entry points) and untested exports (over
+cannot show — dead exports (name your entry points to `exports.dl`) and untested exports (over
 `call_edge_pt_lexical`, or three kinds of false positive).
 
 ## How to explore well

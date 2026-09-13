@@ -72,7 +72,8 @@ Each library imports what it needs; import the one that answers the question.
 | `coupling.dl` | per component: `efferent`, `afferent`, `instability`, `abstractness`, `distance`, `sdp_violation`, `comp_edge_weight`; per type: `cbo` |
 | `cohesion.dl` | per class: `lcom4`, `tcc`, `lcom_hs`; per file: `module_lcom4`, `module_component`; per component: `relational_cohesion` |
 | `coupling_kinds.dl` | Myers' scale: `content_access`, `common_state`, `shared_literal`, `control_param`, `stamp_param`, `data_call`; per file pair `module_coupling`, `worst_coupling` |
-| `packages.dl` | against package.json: `undeclared`, `unused`, `dev_in_production`, `only_in_tests`, `types_only` |
+| `packages.dl` | against package.json: `undeclared`, `unused`, `dev_in_production`, `only_in_tests`, `types_only`, and `unresolved_bare` (a bare import that resolved to nothing — an alias or a missing package) |
+| `exports.dl` | `api_file`, `api_export` (what your entry points publish, through namespace re-exports), `lazy_module` (loaded by `import()`), `dead_export` — you supply `entry/1` |
 | `metrics.dl` | `dit`, `noc`, `wmc`, `rfc`, `fan_in`, `fan_out` |
 | `flow.dl` | `reachable`, `unreachable`, `reaches_def`, `def_use`, `undefined_use`, `live_out`, `dead_store` |
 | `dominators.dl` | `dominates`, `back_edge`, `loop_header` |
@@ -105,7 +106,7 @@ cheap to ask, each a few rules. All ran on the project above.
 | how are two modules coupled — not how much, but how? | `worst_coupling(FA, FB, K)`; `content` and `common` first |
 | which functions take a whole record and read one field? (stamp coupling, ISP) | `stamp_param(F, T, Used, Total)`, lowest `Used` against `Total` |
 | is package.json telling the truth? | `packages.dl`: `undeclared`, `unused`, `dev_in_production`, `types_only` |
-| which exports does nothing else use? | `dead_export` below — exclude your entry points |
+| which exports does nothing else use? | `exports.dl`: `dead_export`, with your entry points as `entry/1` |
 | what does no test reach? | `untested` below — over `call_edge_pt_lexical` |
 | where do internal types leak through the public API? | `type_ref(from: F, to: T), symbol(id: F, exported: true), symbol(id: T, origin: project, exported: false)` |
 | where does `any` enter, and how far does it spread? | `any_site` counted by file; to follow one, seed `taint.dl` with the `actual_ret` of the call on its line |
@@ -119,14 +120,12 @@ cheap to ask, each a few rules. All ran on the project above.
 Two spelled out, because each needs a choice the table cannot show:
 
 ```datalog
-% Exports nothing in another file refers to. A public API re-exported from an
-% entry point counts only as a re-export, so name your entry points.
-import "schema/structure.dl".
-import "schema/refs.dl".
-used_elsewhere(S) :- ref(from: F, to: S), symbol(id: F, file: A), symbol(id: S, file: B), A != B.
-entry_export(S) :- exports(file: "src/index.ts", symbol: S).
-dead_export(P, N) :- exports(file: P, name: N, symbol: S, kind: local), file(path: P, is_test: false),
-                     not used_elsewhere(S), not entry_export(S).
+% Exports nothing in another file refers to. Name every entry point a consumer
+% imports; what they publish — including a namespace re-export's members — is
+% not dead, and nor is a module some `import()` loads.
+import "lib/exports.dl".
+entry("src/index.ts").
+?- dead_export(P, N).
 ```
 
 ```datalog
@@ -193,7 +192,13 @@ untested(S) :- exports(symbol: S, kind: local), fn(id: S), not covered(S).
    hidden in property reads, object spread and method values read off class
    instances are not modelled, so `pts` can miss those; everywhere else it only
    over-approximates. `lib/pointsto.dl`'s header has the rest.
-10. **Bulk commits are in `commit` and out of `cochange.dl`** (over
+10. **A module read as an object has no `ref` to its members.** `import * as ns`
+    re-exported from a barrel, or `const m = await import('./x')` then `m.Editor`,
+    uses a member without a reference to it, so a hand-written "nothing refers to
+    it" query calls it dead. `exports.dl` follows both; a query of your own over
+    `ref` should too (`exports(kind: reexport)` onto a `symbol(kind: module)`,
+    and `imports(kind: dynamic)`).
+11. **Bulk commits are in `commit` and out of `cochange.dl`** (over
     `bulk_limit(50)` files). A rename-everything commit would otherwise couple
     every file to every other.
 

@@ -1,0 +1,43 @@
+% The exports a project publishes, and the ones nothing uses. Name your entry
+% points in your own program, then ask:
+%
+%     import "lib/exports.dl".
+%     entry("src/index.ts").
+%     ?- dead_export(P, N).
+%
+%   entry(F)            you supply this: the files a consumer imports. Without
+%                       it the engine warns `entry` is undefined, and every
+%                       export only a consumer outside the project reads is dead
+%   api_file(F)         an entry, or a file an api_file re-exports as a
+%                       namespace (`import * as ns …; export { ns }`,
+%                       `export * as ns from …`) — every member of it is public
+%   api_export(S)       a symbol an api_file exports (re-export chains are
+%                       resolved by the extractor, so `export *` is covered)
+%   lazy_module(F)      a file some `import()` loads. Its members are read off
+%                       the module object (`m.Editor`), which is no `ref`, so
+%                       every export of it counts as used
+%   used_elsewhere(S)   a symbol some other file refers to
+%   dead_export(P, N)   export N of non-test file P: not used from another
+%                       file, not public, not lazily loaded
+%
+% A dead *export* is not always dead *code*: a symbol used only in its own file
+% — a compound component (`Layout.Legend = LayoutLegend`), a subclass of an
+% exported base — is here, and wants `export` removed rather than the
+% declaration. Still over-reports what the facts cannot see: a framework that
+% loads a file by convention, a string-keyed lookup, a callback handed to a
+% library (the reference's traps 2–4).
+
+import "../schema/structure.dl".
+import "../schema/refs.dl".
+
+api_file(F) :- entry(F).
+api_file(F) :- api_file(E), exports(file: E, symbol: M), symbol(id: M, kind: module, file: F).
+api_export(S) :- api_file(F), exports(file: F, symbol: S).
+
+lazy_module(F) :- imports(kind: dynamic, target_file: F), F is not absent.
+
+used_elsewhere(S) :- ref(from: F, to: S), symbol(id: F, file: A), symbol(id: S, file: B), A != B.
+
+dead_export(P, N) :-
+  exports(file: P, name: N, symbol: S, kind: local), file(path: P, is_test: false),
+  not used_elsewhere(S), not api_export(S), not lazy_module(P).

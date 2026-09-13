@@ -56,12 +56,16 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
   decorator-saturated, nominally-typed codebase (NestJS, TypeORM, Angular) is the
   next dogfood subject on shape grounds, not size. _queued_ —
   `notes/code-facts.md` § Subjects, which also lists what each candidate adds.
+- **`lib/exports.dl`** — what named entry points publish, through namespace
+  re-exports; modules loaded by `import()`; `dead_export`. _shipped_ — `bugs/resolved/003`.
 - **A public-API-surface relation.** "Is this symbol reachable from a published
   entry point" was rebuilt by hand three times in one session and was still not
   certainly complete (`export * from` chains, `export { x as default }`,
   conditional `exports` maps). For a published library that is the primary object
   of study, and `packages.dl` already reads the `package.json` the `exports` map
-  lives in. _queued._
+  lives in. `exports.dl` takes its entry points from you as `entry/1`; reading
+  them from `package.json` (the `package` facts carry none yet) is what is left.
+  _queued._
 - **Python dataflow layer** (points-to and taint for Python). _parked_ until the
   first Python version has been used.
 - **A TypeScript 7 backend**, when its compiler API stabilizes. _parked._

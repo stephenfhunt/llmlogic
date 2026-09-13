@@ -60,3 +60,32 @@ Two smaller false-positive classes seen in the same run and worth a sentence,
 because they are *not* dead code and should not share the bucket: same-file
 compound-component assignment (`VizLayout.Legend = VizLayoutLegend`) and
 same-file subclassing of an exported abstract class.
+
+## Resolution
+
+**Fixed 2026-09-13**, as a library rather than a longer recipe (the user's choice).
+The new `lib/exports.dl` has you supply `entry/1` and derives four relations:
+- `api_file`: the entry points, plus every file one re-exports as a namespace.
+  The rule is recursive and follows `exports(kind: reexport)` onto a
+  `symbol(kind: module)`.
+- `api_export`: what the `api_file`s export.
+- `lazy_module`: any `import()` target, all of whose exports count as used.
+- `dead_export`: an export of a non-test file that is used from no other file,
+  is not an `api_export`, and is not in a `lazy_module`.
+
+§4's recipe is now three lines. §5 gains trap 10, a module read as an object. The
+two same-file classes get their sentence in the library's header.
+
+**The diagnosis held, with a simpler join than the one filed.** The facts already
+carry a namespace re-export on the barrel's `exports` row. So the `import_name`
+column this file says the reference never mentions is not needed, and neither is
+the `"*"` string.
+
+**Measured on `@grafana/ui`** (cached base, the dogfood's three entries): 127
+non-story dead exports, against 129 from the dogfood's hand-fixed recipe, which
+already had the namespace fix. The difference is modules `lazy_module` found (9 on
+the base). None of the file's named false positives remain. Cost matches the
+hand query: 1.9 s, 208 MB. What is left is mostly `Props` interfaces.
+
+Reading entry points from `package.json` stays the queued API-surface item.
+*Mutations*: drop the namespace rule → test red; drop `lazy_module` → test red.
