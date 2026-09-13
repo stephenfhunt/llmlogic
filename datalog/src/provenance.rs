@@ -60,47 +60,68 @@ impl NoMatchPattern {
 
 /// One premise of a derivation, aligned with its body literal
 /// ([`crate::ir::BodyIdx`]).
+///
+/// Every kind but [`Premise::Fact`] is boxed, so a premise is a [`Fact`] wide.
+/// A recorded run holds one premise per body literal of every derivation, and
+/// fact premises are nearly all of them; sized for the widest kind, every slot
+/// cost 80 bytes where a fact needs 32. A no-match pattern is no wider than a
+/// fact, but two inline variants of the same shape leave the enum no spare bits
+/// for its tag, which costs every slot another 8.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Premise {
     /// The fact that matched a positive literal.
     Fact(Fact),
     /// The pattern no fact matched, satisfying a negated literal.
-    NoMatch(NoMatchPattern),
-    /// A satisfied comparison/assignment builtin (§8), carrying the operator
-    /// and the evaluated operand values (for an assignment `N = expr`, both
-    /// values are the assigned value). Self-justifying — like [`Premise::NoMatch`]
-    /// it carries no fixpoint round and recurses into nothing.
-    Builtin {
-        op: CmpOp,
-        lhs: Value,
-        rhs: Value,
-        /// Conversions (§8's `as`) that **failed on data** while evaluating this
-        /// literal: a value existed, could not be represented, and became
-        /// `absent` (§17, 2026-08-16). `None` is the ordinary case.
-        ///
-        /// It rides here rather than in a counter beside the loop because a rule
-        /// instance may be rediscovered in a later round, and derivations
-        /// deduplicate by rule + premises — so the count is right by
-        /// construction, exactly as [`Premise::Aggregate`]'s `skipped` is.
-        lost: Option<LostConversion>,
-    },
-    /// A satisfied presence test `expr is [not] absent` (§4/§8), carrying the
-    /// evaluated operand and the operator's `negated` flag. Self-justifying like
-    /// [`Premise::Builtin`]: it holds on its evaluated operand and recurses into
+    NoMatch(Box<NoMatchPattern>),
+    /// A satisfied comparison/assignment builtin (§8). Self-justifying — like
+    /// [`Premise::NoMatch`] it carries no fixpoint round and recurses into
     /// nothing.
-    Presence { value: Value, negated: bool },
-    /// A satisfied aggregate (§9): the operator, the produced value, and the
-    /// counts that keep the absent-skip non-silent — `present` values folded and
-    /// `skipped` absent inputs (the §9 skip-count report surface). Self-justifying
-    /// like [`Premise::Builtin`]: it summarises the fold over the goal's witnesses
-    /// and recurses into nothing (the aggregated relation is lower-stratum and
-    /// complete when it runs).
-    Aggregate {
-        op: AggOp,
-        value: Value,
-        present: usize,
-        skipped: usize,
-    },
+    Builtin(Box<BuiltinPremise>),
+    /// A satisfied presence test `expr is [not] absent` (§4/§8). Self-justifying
+    /// like [`Premise::Builtin`]: it holds on its evaluated operand and recurses
+    /// into nothing.
+    Presence(Box<PresencePremise>),
+    /// A satisfied aggregate (§9). Self-justifying like [`Premise::Builtin`]: it
+    /// summarises the fold over the goal's witnesses and recurses into nothing
+    /// (the aggregated relation is lower-stratum and complete when it runs).
+    Aggregate(Box<AggregatePremise>),
+}
+
+/// What a [`Premise::Builtin`] records: the operator and the evaluated operand
+/// values (for an assignment `N = expr`, both values are the assigned value).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct BuiltinPremise {
+    pub op: CmpOp,
+    pub lhs: Value,
+    pub rhs: Value,
+    /// Conversions (§8's `as`) that **failed on data** while evaluating this
+    /// literal: a value existed, could not be represented, and became
+    /// `absent` (§17, 2026-08-16). `None` is the ordinary case.
+    ///
+    /// It rides here rather than in a counter beside the loop because a rule
+    /// instance may be rediscovered in a later round, and derivations
+    /// deduplicate by rule + premises — so the count is right by
+    /// construction, exactly as [`AggregatePremise::skipped`] is.
+    pub lost: Option<LostConversion>,
+}
+
+/// What a [`Premise::Presence`] records: the evaluated operand and the
+/// operator's `negated` flag.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct PresencePremise {
+    pub value: Value,
+    pub negated: bool,
+}
+
+/// What a [`Premise::Aggregate`] records: the operator, the produced value, and
+/// the counts that keep the absent-skip non-silent — `present` values folded
+/// and `skipped` absent inputs (the §9 skip-count report surface).
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct AggregatePremise {
+    pub op: AggOp,
+    pub value: Value,
+    pub present: usize,
+    pub skipped: usize,
 }
 
 /// A conversion that failed on data, summarised for one premise: the target
@@ -149,8 +170,8 @@ impl Derivation {
 /// which is what lets the fixpoint decide whether to build one at all.
 pub(crate) fn premises_report<'a>(premises: impl IntoIterator<Item = &'a Premise>) -> bool {
     premises.into_iter().any(|premise| match premise {
-        Premise::Aggregate { skipped, .. } => *skipped > 0,
-        Premise::Builtin { lost, .. } => lost.is_some(),
+        Premise::Aggregate(aggregate) => aggregate.skipped > 0,
+        Premise::Builtin(builtin) => builtin.lost.is_some(),
         Premise::Fact(_) | Premise::NoMatch(_) | Premise::Presence { .. } => false,
     })
 }
@@ -383,27 +404,22 @@ impl ProofTree {
             .iter()
             .map(|premise| match premise {
                 Premise::Fact(f) => ProofTree::extract(model, f),
-                Premise::NoMatch(pattern) => Some(ProofTree::NoMatch(pattern.clone())),
-                Premise::Builtin { op, lhs, rhs, lost } => Some(ProofTree::Builtin {
-                    op: *op,
-                    lhs: lhs.clone(),
-                    rhs: rhs.clone(),
-                    lost: *lost,
+                Premise::NoMatch(pattern) => Some(ProofTree::NoMatch((**pattern).clone())),
+                Premise::Builtin(builtin) => Some(ProofTree::Builtin {
+                    op: builtin.op,
+                    lhs: builtin.lhs.clone(),
+                    rhs: builtin.rhs.clone(),
+                    lost: builtin.lost,
                 }),
-                Premise::Presence { value, negated } => Some(ProofTree::Presence {
-                    value: value.clone(),
-                    negated: *negated,
+                Premise::Presence(presence) => Some(ProofTree::Presence {
+                    value: presence.value.clone(),
+                    negated: presence.negated,
                 }),
-                Premise::Aggregate {
-                    op,
-                    value,
-                    present,
-                    skipped,
-                } => Some(ProofTree::Aggregate {
-                    op: *op,
-                    value: value.clone(),
-                    present: *present,
-                    skipped: *skipped,
+                Premise::Aggregate(aggregate) => Some(ProofTree::Aggregate {
+                    op: aggregate.op,
+                    value: aggregate.value.clone(),
+                    present: aggregate.present,
+                    skipped: aggregate.skipped,
                 }),
             })
             .collect::<Option<Vec<ProofTree>>>()?;
@@ -436,6 +452,14 @@ mod tests {
     use crate::engine::eval;
     use crate::ir::PredId;
     use crate::ir::fixtures::{example_16_1, fact2};
+
+    /// A premise is a fact wide: a recorded run holds one per body literal of
+    /// every derivation, so a payload wider than a [`Fact`] belongs behind a box
+    /// like the three self-justifying kinds, not inline.
+    #[test]
+    fn a_premise_is_a_fact_wide() {
+        assert_eq!(std::mem::size_of::<Premise>(), std::mem::size_of::<Fact>());
+    }
 
     #[test]
     fn base_facts_explain_as_leaves() {

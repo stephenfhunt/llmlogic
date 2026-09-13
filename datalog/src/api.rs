@@ -249,18 +249,20 @@ fn run_pruning(
             .answer_set_reporting(query, &mut |premises| {
                 for (idx, premise) in premises.iter().enumerate() {
                     match premise {
-                        Some(crate::provenance::Premise::Aggregate { op, skipped, .. })
-                            if *skipped > 0 =>
+                        Some(crate::provenance::Premise::Aggregate(aggregate))
+                            if aggregate.skipped > 0 =>
                         {
-                            let entry = sites.entry(idx).or_insert((op.keyword(), 0, 0));
-                            entry.1 += skipped;
+                            let entry = sites.entry(idx).or_insert((aggregate.op.keyword(), 0, 0));
+                            entry.1 += aggregate.skipped;
                             entry.2 += 1;
                         }
-                        Some(crate::provenance::Premise::Builtin {
-                            lost: Some(lost), ..
-                        }) if !assignment_is_guarded(&query.body, idx) => {
-                            let entry = lost_sites.entry(idx).or_insert((lost.to.keyword(), 0));
-                            entry.1 += lost.count as usize;
+                        Some(crate::provenance::Premise::Builtin(builtin)) => {
+                            if let Some(lost) = builtin.lost
+                                && !assignment_is_guarded(&query.body, idx)
+                            {
+                                let entry = lost_sites.entry(idx).or_insert((lost.to.keyword(), 0));
+                                entry.1 += lost.count as usize;
+                            }
                         }
                         _ => {}
                     }
@@ -574,19 +576,19 @@ pub(crate) fn absent_skip_warnings(
     for fact in model.facts() {
         for derivation in model.derivations_of(&fact) {
             for (idx, premise) in derivation.premises.iter().enumerate() {
-                if let crate::provenance::Premise::Aggregate { op, skipped, .. } = premise
-                    && *skipped > 0
+                if let crate::provenance::Premise::Aggregate(aggregate) = premise
+                    && aggregate.skipped > 0
                 {
-                    let entry =
-                        sites
-                            .entry((derivation.rule.0, idx))
-                            .or_insert((op.keyword(), 0, 0));
-                    entry.1 += skipped;
+                    let entry = sites.entry((derivation.rule.0, idx)).or_insert((
+                        aggregate.op.keyword(),
+                        0,
+                        0,
+                    ));
+                    entry.1 += aggregate.skipped;
                     entry.2 += 1;
                 }
-                if let crate::provenance::Premise::Builtin {
-                    lost: Some(lost), ..
-                } = premise
+                if let crate::provenance::Premise::Builtin(builtin) = premise
+                    && let Some(lost) = builtin.lost
                     && !assignment_is_guarded(&program.rules[derivation.rule.0 as usize].body, idx)
                 {
                     let entry = lost_sites

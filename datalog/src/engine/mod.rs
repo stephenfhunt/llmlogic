@@ -54,7 +54,8 @@ use crate::ir::{
 };
 use crate::lexer::{CellClass, classify_cell, classify_symbol};
 use crate::provenance::{
-    Derivation, FailureTrace, LostConversion, NearMiss, NoMatchPattern, Premise, Repair,
+    AggregatePremise, BuiltinPremise, Derivation, FailureTrace, LostConversion, NearMiss,
+    NoMatchPattern, Premise, PresencePremise, Repair,
 };
 use crate::temporal;
 
@@ -1036,7 +1037,7 @@ fn enumerate_literal(
             {
                 return Ok(());
             }
-            premises[idx] = Some(Premise::NoMatch(pattern));
+            premises[idx] = Some(Premise::NoMatch(Box::new(pattern)));
             let result = enumerate_from(cx, order, depth + 1, bindings, premises, on_match);
             premises[idx] = None;
             result?;
@@ -1054,12 +1055,12 @@ fn enumerate_literal(
                     // (§8), so the row never reaches here. That site is named in
                     // §12's *Not covered* rather than reported from a premise
                     // that does not exist.
-                    premises[idx] = Some(Premise::Builtin {
+                    premises[idx] = Some(Premise::Builtin(Box::new(BuiltinPremise {
                         op: *op,
                         lhs,
                         rhs,
                         lost: None,
-                    });
+                    })));
                     let result = enumerate_from(cx, order, depth + 1, bindings, premises, on_match);
                     premises[idx] = None;
                     result?;
@@ -1073,12 +1074,12 @@ fn enumerate_literal(
                     } else {
                         None
                     };
-                    premises[idx] = Some(Premise::Builtin {
+                    premises[idx] = Some(Premise::Builtin(Box::new(BuiltinPremise {
                         op: *op,
                         lhs: value.clone(),
                         rhs: value.clone(),
                         lost,
-                    });
+                    })));
                     bindings[slot] = Some(value);
                     let result = enumerate_from(cx, order, depth + 1, bindings, premises, on_match);
                     premises[idx] = None;
@@ -1095,10 +1096,10 @@ fn enumerate_literal(
             let value = eval_expr(expr, bindings)?;
             let is_absent = value.is_absent();
             if is_absent != *negated {
-                premises[idx] = Some(Premise::Presence {
+                premises[idx] = Some(Premise::Presence(Box::new(PresencePremise {
                     value,
                     negated: *negated,
-                });
+                })));
                 let result = enumerate_from(cx, order, depth + 1, bindings, premises, on_match);
                 premises[idx] = None;
                 result?;
@@ -1156,12 +1157,12 @@ fn enumerate_literal(
                 return Err(error);
             }
             let outcome = fold_aggregate(*op, &values)?;
-            premises[idx] = Some(Premise::Aggregate {
+            premises[idx] = Some(Premise::Aggregate(Box::new(AggregatePremise {
                 op: *op,
                 value: outcome.value.clone(),
                 present: outcome.present,
                 skipped: outcome.skipped,
-            });
+            })));
             bindings[result.0 as usize] = Some(outcome.value);
             let cont = enumerate_from(cx, order, depth + 1, bindings, premises, on_match);
             premises[idx] = None;
@@ -3356,7 +3357,7 @@ mod tests {
                         pred: person,
                         tuple: Tuple(vec![string_value("alice")]),
                     }),
-                    Premise::NoMatch(absent.clone()),
+                    Premise::NoMatch(Box::new(absent.clone())),
                 ],
             }]
         );
@@ -4915,16 +4916,8 @@ mod tests {
                             return None;
                         }
                     }
-                    (
-                        BodyLiteralKind::Compare { op, lhs, rhs },
-                        Premise::Builtin {
-                            op: recorded_op,
-                            lhs: recorded_lhs,
-                            rhs: recorded_rhs,
-                            ..
-                        },
-                    ) => {
-                        if op != recorded_op {
+                    (BodyLiteralKind::Compare { op, lhs, rhs }, Premise::Builtin(recorded)) => {
+                        if *op != recorded.op {
                             return None;
                         }
                         let bindings = slots(rule, &env);
@@ -4932,7 +4925,7 @@ mod tests {
                             // A recorded premise says the literal *held*.
                             CompareOutcome::Fail => return None,
                             CompareOutcome::Pass { lhs, rhs } => {
-                                if &lhs != recorded_lhs || &rhs != recorded_rhs {
+                                if lhs != recorded.lhs || rhs != recorded.rhs {
                                     return None;
                                 }
                             }
@@ -4944,34 +4937,25 @@ mod tests {
                             // that disagrees has to reach the head and fail
                             // there, not be quietly overwritten.
                             CompareOutcome::Bind { slot, value } => {
-                                if &value != recorded_lhs || &value != recorded_rhs {
+                                if value != recorded.lhs || value != recorded.rhs {
                                     return None;
                                 }
-                                env.insert(crate::ir::Var(slot as u32), recorded_lhs.clone());
+                                env.insert(crate::ir::Var(slot as u32), recorded.lhs.clone());
                             }
                         }
                     }
-                    (
-                        BodyLiteralKind::Presence { expr, negated },
-                        Premise::Presence {
-                            value,
-                            negated: recorded_negated,
-                        },
-                    ) => {
-                        if negated != recorded_negated {
+                    (BodyLiteralKind::Presence { expr, negated }, Premise::Presence(recorded)) => {
+                        if *negated != recorded.negated {
                             return None;
                         }
                         let bindings = slots(rule, &env);
                         let evaluated = eval_expr(expr, &bindings).ok()?;
-                        if &evaluated != value || evaluated.is_absent() == *negated {
+                        if evaluated != recorded.value || evaluated.is_absent() == *negated {
                             return None;
                         }
                     }
-                    (
-                        BodyLiteralKind::Aggregate { result, .. },
-                        Premise::Aggregate { value, .. },
-                    ) => {
-                        env.insert(*result, value.clone());
+                    (BodyLiteralKind::Aggregate { result, .. }, Premise::Aggregate(recorded)) => {
+                        env.insert(*result, recorded.value.clone());
                     }
                     _ => return None, // premise kind does not match its literal
                 }

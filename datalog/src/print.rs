@@ -597,36 +597,33 @@ fn trace_lines(trace: &FailureTrace, program: &ir::Program, out: &mut Vec<String
 fn premise_text(premise: &Premise, program: &ir::Program, site: Site<'_>) -> String {
     match premise {
         Premise::Fact(fact) => print_ir_fact(fact, program),
-        Premise::NoMatch(pattern) => node_text(&ProofTree::NoMatch(pattern.clone()), program, site),
-        Premise::Builtin { op, lhs, rhs, lost } => node_text(
+        Premise::NoMatch(pattern) => {
+            node_text(&ProofTree::NoMatch((**pattern).clone()), program, site)
+        }
+        Premise::Builtin(builtin) => node_text(
             &ProofTree::Builtin {
-                op: *op,
-                lhs: lhs.clone(),
-                rhs: rhs.clone(),
-                lost: *lost,
+                op: builtin.op,
+                lhs: builtin.lhs.clone(),
+                rhs: builtin.rhs.clone(),
+                lost: builtin.lost,
             },
             program,
             site,
         ),
-        Premise::Presence { value, negated } => node_text(
+        Premise::Presence(presence) => node_text(
             &ProofTree::Presence {
-                value: value.clone(),
-                negated: *negated,
+                value: presence.value.clone(),
+                negated: presence.negated,
             },
             program,
             site,
         ),
-        Premise::Aggregate {
-            op,
-            value,
-            present,
-            skipped,
-        } => node_text(
+        Premise::Aggregate(aggregate) => node_text(
             &ProofTree::Aggregate {
-                op: *op,
-                value: value.clone(),
-                present: *present,
-                skipped: *skipped,
+                op: aggregate.op,
+                value: aggregate.value.clone(),
+                present: aggregate.present,
+                skipped: aggregate.skipped,
             },
             program,
             site,
