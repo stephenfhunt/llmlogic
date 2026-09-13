@@ -311,6 +311,16 @@ impl Model {
             Some(fact.tuple)
         }
     }
+
+    /// Adds a round's facts that nothing is kept of: no derivation to store
+    /// and, since only a run that records stamps a round, nothing else either.
+    /// The caller keeps `facts` as the round's delta.
+    fn insert_unkept(&mut self, facts: &HashMap<PredId, BTreeSet<Tuple>>) {
+        debug_assert!(facts.is_empty() || self.provenance != Provenance::Recorded);
+        for (pred, tuples) in facts {
+            self.relations[pred.0 as usize].extend(tuples.iter().cloned());
+        }
+    }
 }
 
 /// Evaluates a lowered program to its least model.
@@ -654,7 +664,7 @@ fn eval_stratum(
     // every instance derivable from base facts and earlier strata.
     round += 1;
     let no_delta: HashMap<PredId, BTreeSet<Tuple>> = HashMap::new();
-    let mut pending: Vec<(Fact, Derivation)> = Vec::new();
+    let mut pending = Pending::default();
     for &rule_id in stratum {
         let rule = &program.rules[rule_id.0 as usize];
         let views = vec![AtomView::Full; rule.body.len()];
@@ -664,6 +674,7 @@ fn eval_stratum(
     loop {
         // Apply the round's matches. Every derivation is recorded (the
         // all-derivations contract); only genuinely new facts enter the delta.
+        // The unkept facts are new by construction, so they *are* the delta.
         //
         // **Application is batched, and proof finiteness rests on it.** Nothing
         // inserted here is visible to the collection that produced `pending` —
@@ -675,8 +686,9 @@ fn eval_stratum(
         // Interleaving collection with insertion here would break that silently:
         // the test that fails is **E1** (`e1_derived_facts_have_derivations`),
         // and behind it E2.
-        let mut delta: HashMap<PredId, BTreeSet<Tuple>> = HashMap::new();
-        for (fact, derivation) in pending.drain(..) {
+        let mut delta = std::mem::take(&mut pending.unkept);
+        model.insert_unkept(&delta);
+        for (fact, derivation) in pending.kept.drain(..) {
             let pred = fact.pred;
             if let Some(tuple) = model.insert_derived(fact, derivation, round) {
                 delta.entry(pred).or_default().insert(tuple);
@@ -757,15 +769,27 @@ struct Probe {
     premises: Vec<Option<Premise>>,
 }
 
+/// One round's matches, held until the round is applied.
+#[derive(Default)]
+struct Pending {
+    /// Matches whose derivation the model keeps, one entry per match.
+    kept: Vec<(Fact, Derivation)>,
+    /// Facts the model does not yet hold, from matches nothing is kept of. A
+    /// set, so a fact reached along many paths in one round is held once — a
+    /// list held one entry per path, 26× the distinct facts on a points-to
+    /// closure (`notes/pointsto-profile-2026-09-12.md`).
+    unkept: HashMap<PredId, BTreeSet<Tuple>>,
+}
+
 /// Enumerates all matches of `rule`'s body under `views`, grounding the head
-/// into pending (fact, derivation) pairs.
+/// into `pending`.
 fn collect_rule_matches(
     model: &Model,
     delta: &HashMap<PredId, BTreeSet<Tuple>>,
     rule: &Rule,
     rule_id: RuleId,
     views: &[AtomView],
-    pending: &mut Vec<(Fact, Derivation)>,
+    pending: &mut Pending,
 ) -> Result<()> {
     let cx = JoinCx {
         model,
@@ -797,26 +821,30 @@ fn collect_rule_matches(
             Provenance::Reports => crate::provenance::premises_report(premises.iter().flatten()),
             Provenance::Unrecorded => false,
         };
-        // Nor is a match whose fact the model already holds pending at all, when
-        // nothing of it is kept: the model is frozen while a round collects, so
-        // `insert_derived` would find the fact present and store nothing. In a
-        // recursive rule most matches are these rediscoveries.
-        if !keep && model.relation(rule.head.pred).contains(&tuple) {
+        // When nothing of a match is kept, all that remains of it is its fact —
+        // and only if the model does not already hold it: the model is frozen
+        // while a round collects, so `insert_derived` would find the fact present
+        // and store nothing. In a recursive rule most matches are these
+        // rediscoveries, and most of the rest reach one new fact many times.
+        if !keep {
+            if !model.relation(rule.head.pred).contains(&tuple) {
+                pending
+                    .unkept
+                    .entry(rule.head.pred)
+                    .or_default()
+                    .insert(tuple);
+            }
             return;
         }
-        let premises = if keep {
-            premises
-                .iter()
-                .map(|premise| {
-                    premise
-                        .clone()
-                        .expect("complete match: every body literal contributed a premise")
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
-        pending.push((
+        let premises = premises
+            .iter()
+            .map(|premise| {
+                premise
+                    .clone()
+                    .expect("complete match: every body literal contributed a premise")
+            })
+            .collect();
+        pending.kept.push((
             Fact {
                 pred: rule.head.pred,
                 tuple,

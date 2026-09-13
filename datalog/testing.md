@@ -1222,7 +1222,11 @@ and the asking form, which is also what unblocked E5.
     it, and skips a match whose fact is already held when nothing of it is kept
     (2026-09-12, `notes/memory-profile-2026-09-12.md`): treating `Reports` as
     keeping no premises reddens the api-level warning test (E9 does not);
-    skipping *every* match nothing keeps reddens E9. Non-vacuity: a guard pins
+    skipping *every* match nothing keeps reddens E9. A round's unkept facts are
+    held as a set that becomes the delta (2026-09-12,
+    `notes/pointsto-profile-2026-09-12.md`): building the delta without them
+    reddens E9; not adding them to the model makes E9 **hang** — every round
+    re-derives them — a kill by timeout, not by assertion. Non-vacuity: a guard pins
     that the generator reaches a program with a derived fact *and* a query, both
     halves holding trivially over an EDB.
 - [x] **E10** **A near-miss holds against the model.** `?whynot`'s guard: for a
