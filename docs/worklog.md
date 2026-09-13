@@ -24,6 +24,51 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-13 — a query's answer printed from the model: 1,978 → 978 MB, and a deep run that does not finish
+
+Asked to work on streaming output, from the Grafana/`vs/base` performance work.
+Planned; the user asked why printing copies at all — it need not, and the plan
+widened. Shipped in three commits, each verified.
+
+**Done** — datalog 502 lib tests, integration and system, clippy both feature sets, fmt; code-facts `npm test` on the new binary
+- **`699d195`** — **D6**: a run prints the eager renderer's bytes over its own
+  model, at `Medium`/`Large` and over shaped programs, each also with query
+  bodies reversed and with leading wildcards; a guard classifies lowered queries.
+- **`affb601`** — `RunResult` holds each answer (row set + §14 shape) and renders
+  in `write_output`; `answers` became `answer_lines()` / `answered()`.
+- **`7c91da4`** — a bare atom walks its relation while printing: constants and
+  repeated variables filter through `Value::unifies_with`, trailing wildcards
+  dedup adjacent rows. Anything else keeps its row set.
+- **`pointsto.dl`, 0.35 cut, 3.40M rows printed: 36.5 s / 1,978 MB → 33.3 s /
+  978 MB**, sha256 identical — the run now peaks where evaluation alone did.
+  `grafana-ui` bench, trunk against the change: all 13 digests identical, times
+  unchanged, peaks within ±30 MB (`callgraph` 244 → 217, `pointsto` 391 → 365).
+- **Five mutations, all killed** — but walking past a leading wildcard survived
+  D6 until `with_leading_wildcards` and its guard case: the guard counted the
+  atom answering, never a relation out of the answer's order.
+- **`144bb9e`** — `bugs/015`: the deep run does not finish here. B13 at `Deep`
+  passed 14.9 GB; skipped, the run was still killed with B5 at `Deep` running.
+
+**Decided** (`datalog/spec.md` §17 2026-09-13; the first two the user's)
+- **Print from the model, lazily; every error before the first byte.** Rejected:
+  a per-query sink, which leaves partial stdout when a later query fails.
+- **Ahead of the rest of § Testing**, guarded by its own tiered property.
+- Parked: a row set of `&Value` — the join clones its bindings.
+
+**Removed**
+- `RunResult.answers` and the eager line list (its renderer survives only as
+  D6's test oracle); "streaming" from the ROADMAP's round-bound risk and §14's
+  *Not covered*; the scratch trunk worktree; the oldest worklog entry.
+
+**Next up**
+- **`bugs/015`** — the user's call: B13's proofs only to `Large`, a sampled
+  proof clause, or a smaller `Deep`. Until then the § Performance gate cannot run.
+- **Tier the rest** (B2–B4, B6, B8, C11, C13, C14, E1–E10) and the generator audit.
+- **Drive a delta round from its delta atom** (a §17 design session).
+- Re-learned: a "baseline" that recompiles picks up uncommitted tests — the
+  second trunk deep run was not trunk. Freeze binaries before measuring.
+- **Open**: `datalog/bugs/009`, `013`, `014`, `015`; `code-analysis/bugs/001`–`005`.
+
 ## 2026-09-12 (late night) — property tests that grow: tiers, a deep run, the `Old` read caught unprompted
 
 Asked to plan and start an ambitious expansion of the property tests, sized for
@@ -119,54 +164,4 @@ an uncommitted worktree (`~/.cache/pointsto-wt`), heaptrack, perf.
   (14 s of `pointsto.dl`'s 28 s on the 35% cut; a §17 design session).
 - Re-learned: heaptrack names the site that *allocated* a tuple, not what holds
   it — the first reading here blamed `pending` for what was the answer.
-- **Open**: `datalog/bugs/009`, `013`, `014`; `code-analysis/bugs/001`–`005`.
-
-## 2026-09-12 (evening) — memory at Grafana scale: an import held three times, a proof built for nothing
-
-Asked to profile `orient.dl` on a Grafana-sized base and find what else is
-memory-gated, without fitting Grafana. heaptrack (installed this session) over a
-new `profiling` cargo profile; a frozen binary per stage; two shapes of base —
-Grafana's frontend (4.04M facts) and `vs/base` (1.33M, zero import cycles).
-
-**Done** — datalog 615 tests, clippy both feature sets, fmt; code-facts `npm test`;
-bench digests identical on every `vs/base` library
-- **Found**: `finalize` held an import three times (`symbol`: 2.28 GB of heap for
-  489 MB of JSONL); lowering and evaluation each cloned the base facts; every match
-  built a `Derivation` that `Unrecorded` then dropped (~2.9 GB of the closure's 6.7).
-- **Four fixes**: typing consumes the raw rows; `lower_with_sources` consumes the
-  tables and `eval_pruned_moving_facts` the facts; a derivation is built only if
-  kept; a match whose fact is already held is not pending.
-- **Grafana `orient.dl` 224 s / 9.46 GB → 87 s / 4.94 GB**, answers byte-identical;
-  `modgraph` with cycles 9.3 → 5.1 GB; `coupling` 9.3 → 3.8, `coupling_kinds`
-  9.1 → 6.1, `checks` 6.2 → 3.2.
-  First runs there: `callreach` 18 s / 1.4 GB, `cochange` 337 s / 2.0 GB.
-  `vs/base`: `callreach` 3.5 → 0.7 GB, `cohesion` 1.9 → 0.4.
-- **Still memory-gated**: `pointsto.dl` (killed above 14 GB at 130 s on `vs/base`)
-  and the extractor (16.8 GB on Grafana).
-- **Measured for later**: column projection (`symbol`, 4 of 18 columns: 582 MB
-  against 1,374); interning (263 MB of its text, 96 MB distinct).
-- `datalog/notes/memory-profile-2026-09-12.md`; `code-analysis/notes/code-facts.md`
-  § Re-measured after the engine stopped copying.
-
-**Decided** (`datalog/spec.md` §17 2026-09-12, first entry; `code-analysis/decisions.md`
-2026-09-12 evening — the user's)
-- **Real profilers**, not an allocator counter in the engine.
-- **No size gate on `orient.dl` and no size or cost guidance in the skill**: the
-  tool is made usable instead. The engine stays generic — nothing special to one
-  library — and a library workaround is engine debt (`lib/keys.dl` reopened).
-- **A program with an explanation keeps its copy of the facts** (`?whynot`
-  evaluates twice).
-
-**Removed**
-- The three-copy load path and `type_column`; every size and cost note from
-  `SKILL.md`, both language references (timing columns, the join-key rule) and
-  seven library headers; the queued `orient.dl` gate; the oldest worklog entry.
-
-**Next up**
-- **Profile `pointsto.dl` as an engine vehicle** (datalog ROADMAP § Performance)
-  and **profile the TypeScript extractor** (16.8 GB on Grafana) — both queued.
-- **A non-leading bound column still scans** — with re-keying gone from the
-  skill, the engine item that retires `lib/keys.dl`. **Column projection**, then
-  **interning**: design sessions, measured.
-- Re-learned: measure with the repository's `lib/`, never a fact directory's copy.
 - **Open**: `datalog/bugs/009`, `013`, `014`; `code-analysis/bugs/001`–`005`.
