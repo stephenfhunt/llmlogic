@@ -495,13 +495,14 @@ join is executed changes.
   answers identical ([`notes/memory-profile-2026-09-12.md`](notes/memory-profile-2026-09-12.md)).
   — §13/§15/engine.
 
-- **Profile `pointsto.dl` as a vehicle for the engine** — _queued_. `code-analysis`'s
-  Andersen-style points-to analysis does not fit `vs/base` (1.33M facts): past
-  14 GB at 130 s after the 2026-09-12 memory work, 23.7 GB before. Nothing special
-  to it (`code-analysis/decisions.md` 2026-09-12 evening): what it teaches is
-  engine work. Leads already named: the delta copy, the per-candidate premise
-  clone, interning ([`notes/memory-profile-2026-09-12.md`](notes/memory-profile-2026-09-12.md)).
-  — §15/engine.
+- **Profile `pointsto.dl` as a vehicle for the engine** — **profiled ✅ 2026-09-12**
+  (§17 that date; [`notes/pointsto-profile-2026-09-12.md`](notes/pointsto-profile-2026-09-12.md),
+  which ranks what is left). A round's unkept facts are a set (E9): on a 35% cut
+  of `vs/base` evaluation takes 2.67 → 0.97 GB, and the 70% cut now finishes. The full base still does not fit. — §15/engine.
+- **Stream a query's answer rather than copying it out of the model** — _queued,
+  next session_ (the user's). Printing 3.40M rows holds them twice more:
+  `Model::answer`'s owned rows and `RunResult.answers`' lines, ~820 MB of a 1.69 GB
+  peak. Both are API shapes, so a short design pass first. — §14/api.
 
 - **Real pushdown: column projection, then demand transformation** — _designing,
   post-v1._ The two items above are pruning — they decide *whether* to read a
@@ -552,7 +553,11 @@ join is executed changes.
   The scheduler runs positive atoms in strict source order with no cost model
   (`schedule.rs`), and reordering them is observable on the error path — whether a
   runtime error fires at all — so this is its own design session, not a patch.
-  B5/C14 already assert the *answer* is order-invariant. _queued — **post-v1**._
+  B5/C14 already assert the *answer* is order-invariant. Semi-naive makes it
+  worse: a delta round walks the Full atoms before its delta position in full,
+  which is 14 s of `pointsto.dl`'s 28 s on a 35% `vs/base` cut
+  ([`notes/pointsto-profile-2026-09-12.md`](notes/pointsto-profile-2026-09-12.md)).
+  _queued — **post-v1**._
   — §15/engine.
 - **An aggregate runs once per binding of the atom beside it, not per distinct
   group key** — `calls(K, N) :- call_site(dispatch: K), N = count { … }` folds once

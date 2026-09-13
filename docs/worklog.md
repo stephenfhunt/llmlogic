@@ -24,6 +24,48 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-12 (night) — `pointsto.dl` as an engine vehicle: a new fact was pending once per path
+
+Asked to keep grinding engine performance with `pointsto.dl`. The full `vs/base`
+does not finish, so a series cut from it by file (10–100%), a per-round counter in
+an uncommitted worktree (`~/.cache/pointsto-wt`), heaptrack, perf.
+
+**Done** — datalog 615 tests, clippy both feature sets, fmt; code-facts `npm test`
+- **Found**: a round held a *new* fact once per path that reached it — 12.16M
+  pending entries for 471k distinct `pts`; the 70% cut aborted on that `Vec`
+  doubling to 4 GB. The earlier fix only skipped facts already held.
+- **`563831b`** — an unkept match's fact goes into a per-round set that is the
+  delta. 35% cut, evaluating: **35.5 s / 2.67 GB → 32.3 s / 0.97 GB**; 50%
+  3.98 → 1.55 GB; 70% now finishes (6.8 GB). The full base still aborts at 15 GB.
+- **`aefb6dc`** — `answer_lines` sorts borrowed cells: printing 3.40M rows
+  2,287 → 1,974 MB. **`69aac3f`** — the binary writes line by line
+  (`RunResult::write_output`): no measured change; a closed pipe exits 2, not a panic.
+- **Grafana bench, trunk vs now, 23 digests identical**: frontend `coupling`
+  290 → 171 s, `coupling_kinds` 148 → 120 s, `orient` 78 → 62 s, `modgraph`
+  75 → 61 s; peaks 2–10% lower. `@grafana/ui` `pointsto` 8.9 s / 373 MB.
+- `datalog/notes/pointsto-profile-2026-09-12.md`; `code-analysis/notes/code-facts.md`
+  § Re-measured after a round held each fact once; E9's two mutations in `testing.md`.
+
+**Decided** (`datalog/spec.md` §17 2026-09-12, first entry; the last two the user's)
+- **A round holds each unkept fact once**; recorded runs are untouched.
+- **Keep `write_output`** though it measured nothing: it is the copy that becomes
+  the peak once answers stream.
+- **Streaming answers is next session.** The two copies left — `Model::answer`'s
+  rows, `RunResult.answers`' lines — are API shapes: ~820 MB of a 1.69 GB peak.
+
+**Removed**
+- `pending`'s one entry per unkept match; `answer_lines`' cloned rows; the joined
+  output `String`; the oldest worklog entry, to the archive. The round counter
+  never entered the repo.
+
+**Next up**
+- **Stream a query's answer** — a design pass, then build (datalog ROADMAP § Performance).
+- **Drive a delta round from its delta atom** — 14 s of `pointsto.dl`'s 28 s on the
+  35% cut; reordering is observable on the error path, so a §17 design session.
+- Re-learned: heaptrack names the site that *allocated* a tuple, not what holds
+  it — the first reading here blamed `pending` for what was the answer.
+- **Open**: `datalog/bugs/009`, `013`, `014`; `code-analysis/bugs/001`–`005`.
+
 ## 2026-09-12 (evening) — memory at Grafana scale: an import held three times, a proof built for nothing
 
 Asked to profile `orient.dl` on a Grafana-sized base and find what else is
@@ -125,59 +167,3 @@ false.
   left is `orient.dl`'s own closure (9.5 GB) — its size gate is a user call — and
   the coupling libraries at 5–8 min (`code-analysis/notes` § Re-measured).
 - **Open**: `datalog/bugs/009`, `013`, `014`; `code-analysis/bugs/001`–`005`.
-
-## 2026-09-12 — the playbook on a codebase nobody here wrote: Grafana, end to end
-
-Asked for a real analysis of a real project, git facts included — the exploring
-half of the playbook and the git layer had never been used outside fixtures.
-Subject `grafana/grafana` @ `9d9d93ee41`: 9,426 TS files, 1.59M lines, 73,113
-commits, deps installed, the bundle in its `.claude/skills/`. Two scopes, each
-explored by a fresh agent holding only `SKILL.md` and `reference/`.
-
-**Done** — code-facts **118 tests**, typecheck and bench clean, digests unmoved
-- **Extraction and the gate held on a codebase it had never seen**: 1.17M facts
-  from `grafana-ui`, **4.04M** from the whole frontend, `checks.dl` **exit 1,
-  zero violations** on both, first try.
-- **`lib/reach.dl`** — the closure split out of `modgraph.dl`, which computed
-  17.45M pairs for every importer while both read only `dep`. Same answer:
-  **306 s / 12.6 GB → 70 s / 3.3 GB**, and `orient.dl` — *step 3 of the method* —
-  went from **OOM-killed at 21 GB** to 207 s.
-- **`packages.dl` works in a monorepo** — `imported_workspace` reads the
-  dependency off `file.package`, since a sibling resolves to a file (44,908 of
-  55,762 imports) and `unused` named four packages 540 statements import. An
-  unnamed `package.json` is no longer a package.
-- **New `monorepo` fixture**; `bugs/` opened for `code-analysis` (five), two more
-  against the engine (`012`, `013`).
-- **Findings, verified in the source**: a latent bug at `useDragAndDrop.tsx:109`;
-  three unused runtime deps in a published package; a plugin-decoupling plan.
-
-**Decided** (`code-analysis/decisions.md` 2026-09-12 later; long form
-`code-analysis/notes/code-facts.md` § Dogfooding — Grafana)
-- **A closure does not travel with the cheap rules** — a library costs what it
-  imports; `callreach.dl`'s precedent applied here and had not been taken.
-- **A corpus chosen for size does not exercise shape.** `vs/base` has *zero*
-  import cycles, so the one superlinear rule was never run; Grafana has 915 files
-  in 27, the largest a 796-file SCC.
-- **A relation that cannot tell two cases apart claims the weaker one** —
-  `imported_workspace` feeds `used`, not `undeclared`.
-- **Three oracles agreed** (`git log --follow`, a Tarjan SCC, a regex import
-  scanner); the one wrong answer was a *confident negative over a blind spot*,
-  caught by the verify step, not by the engine.
-
-**Removed**
-- `file_reaches`/`in_cycle`/`cycle_edge` from `modgraph.dl` (moved); the dir-name
-  fallback for an unnamed `package.json`; the bench's two closure queries from
-  its `modgraph` entry, now their own.
-
-**Next up**
-- **`orient.dl` is fixed but still 13.9 GB** — its own `runtime_reaches` is 11.8M
-  pairs; the gate that declines the cycle question runs in 13.6 s / 3.3 GB, but
-  its threshold is a guess from four points — a design call.
-- **The next two datalog items are ruled** (user, 2026-09-12; measurements and
-  sequencing in `datalog/ROADMAP.md` § Performance): *don't evaluate a rule no
-  goal depends on*, then *load only the relations the program names* — one
-  reachability analysis applied twice. They close `bugs/012` and make `reach.dl`
-  optional; `code-analysis/ROADMAP.md` carries the unwind item. Column projection
-  and magic sets are the bigger chunk behind them, deliberately not next.
-- **Open**: `code-analysis/bugs/001`–`005`, `datalog/bugs/012`–`013`. H-CA1 still
-  needs its reference program and the `code-analysis` arm.

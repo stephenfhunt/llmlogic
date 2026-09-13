@@ -2566,6 +2566,23 @@ never say.
 
 ### Decisions
 
+- **2026-09-12** — **A round holds each unkept fact once, and an answer is not
+  copied to be sorted or printed** (§14/§15; `engine::Pending`,
+  `Model::insert_unkept`, `api::answer_lines`, `RunResult::write_output`). Long form
+  `notes/pointsto-profile-2026-09-12.md`.
+  - **A match nothing is kept of goes into a per-round set, which is the delta.**
+    A list held one entry per path: 26× the distinct facts on `pointsto.dl`. Only
+    a fact the frozen model lacks enters, so the delta is what `insert_derived`
+    returned before. Recorded runs are untouched.
+  - **Printing borrows.** `answer_lines` sorts `&Value`s; the binary writes lines
+    to a buffered stdout, not one joined `String`. A write failure, such as a
+    closed pipe, exits 2 where `print!` panicked.
+  - **Streaming the answer out of the model is next** (the user's): the two copies
+    left are API shapes (ROADMAP § Performance).
+
+  Guarded by E9 (a delta without the set reddens it; a model without it hangs)
+  and stdout digests. A 35% `vs/base` cut, evaluating: 2.67 → **0.97 GB**.
+
 - **2026-09-12** — **A run holds its base facts once, and builds a derivation
   only if it will keep it** (§13/§15; `sources::table::finalize`,
   `lower::lower_with_sources`, `engine::eval_pruned_moving_facts`,
@@ -2585,6 +2602,12 @@ never say.
   Grafana's runtime closure 133 s / 6.73 GB → **44 s / 3.45 GB**; `vs/base`
   `checks.dl` 1,265 → **699 MB**. Interning and column projection stay design
   items, now measured (ROADMAP § Performance).
+  ***Consequences 2026-09-12 (later still):*** the pending test held but covered
+  the smaller half: a fact *new* this round, reached along many paths, was still
+  pending once per path — `pointsto.dl`'s growth, and a 4 GB `Vec` abort (entry
+  above). Reading heaptrack also needs care: a site that allocates a tuple is
+  not the structure holding it. The 70% cut's "1.86 GB under `on_match`" was mostly
+  the answer, not `pending`.
 
 - **2026-09-12** — **An import no goal reaches is not read, and the program is
   lowered before any import is** (§13; `api::lower_and_load`,

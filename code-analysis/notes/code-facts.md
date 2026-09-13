@@ -467,6 +467,33 @@ Grafana run "asked about cycles" in 1.2 s.
 `symbol` alone is 1.37 GB on Grafana, and a library reading 4 of its 18 columns
 could load it in 0.58 GB — column projection, a datalog design item.
 
+### Re-measured after a round held each fact once
+
+The engine's `pointsto.dl` profile (`../../datalog/notes/pointsto-profile-2026-09-12.md`):
+a round's unkept facts are a set, not one entry per path that reached them, and
+printing no longer copies the answer to sort it. `bench/` over the repository's
+`lib/`, trunk `279b64a` then `69aac3f` per library, back to back, single runs —
+so times are indicative; peaks and digests are not. **All 23 digests identical.**
+
+| Grafana frontend | trunk | now |
+|---|---:|---:|
+| `coupling.dl` | 290 s / 3,820 MB | **171 s** / 3,713 MB |
+| `cohesion.dl` | 208 s / 3,103 MB | **178 s** / 3,055 MB |
+| `coupling_kinds.dl` | 148 s / 6,190 MB | **120 s** / 5,928 MB |
+| `orient.dl` | 78 s / 4,940 MB | **62 s** / 4,793 MB |
+| `modgraph.dl`, cycle questions asked | 75 s / 5,140 MB | **61 s** / 4,906 MB |
+| `checks.dl` | 36 s / 3,254 MB | 34 s / 3,187 MB |
+| `callgraph.dl` | 19.5 s / 2,763 MB | 17.9 s / 2,482 MB |
+| `metrics.dl` | 17.1 s / 2,400 MB | 16.0 s / 2,344 MB |
+| `callreach.dl` | 17.4 s / 1,366 MB | 15.0 s / 1,341 MB |
+| `packages.dl` | 1.3 s / 91 MB | 1.3 s / 84 MB |
+
+On `@grafana/ui` nothing moved by more than a second or 10% except `flow.dl`
+(20.6 → 17.4 s) and `dominators.dl` (8.4 → 6.7 s). `pointsto.dl` there answers
+in 8.9 s / 373 MB (29,428 rows), against 9.0 s / 397 MB. The frontend's cache has
+no dataflow layer, so `pointsto.dl` has not run on it. What gained time was not
+attributed per rule here.
+
 ### What it found, verified in the source
 
 On `@grafana/ui`: five independent measures — complexity × churn, revisions,

@@ -48,9 +48,10 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
   with `refs,quality,git`; VS Code's `src/` exhausts a 12 GB heap in `dataflow`.
   Attribute by phase before changing anything, as the engine's profile did.
   _queued_ — `notes/code-facts.md` § Dogfooding.
-- **`pointsto.dl` does not fit `vs/base`** — past 14 GB at 130 s. Profiled as a
-  vehicle for the engine, with nothing special to it. _queued_ —
-  `../datalog/ROADMAP.md` § Performance.
+- **`pointsto.dl` does not fit `vs/base`** — profiled as an engine vehicle
+  2026-09-12. A 70% cut now finishes evaluating (6.8 GB); the full base does not,
+  and `@grafana/ui` runs in 9 s. _open_ — `../datalog/ROADMAP.md` § Performance,
+  whose profile note ranks what is left.
 - **The decorator layer has never met a real subject** — `decorator` is zero rows
   in every fact base on disk, and `implements` is 2 rows on `@grafana/ui`. A
   decorator-saturated, nominally-typed codebase (NestJS, TypeORM, Angular) is the

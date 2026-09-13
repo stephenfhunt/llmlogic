@@ -135,3 +135,19 @@ held before the first line is written.
 3. **A non-leading bound column** — already queued; 6.7 s of 28 here.
 4. **The per-candidate `Premise::Fact` clone** — `Vec` and `String` clones plus
    the allocator are ~10% of samples; temporary, so time, not peak.
+5. **Stream a query's answer** (queued, next session) — after stage 1 and the
+   two printing changes, 3.40M printed rows still hold `Model::answer`'s owned
+   rows (278 MB) and `RunResult.answers`' lines (289 MB) at once, plus ~250 MB of
+   their `Vec`s: ~820 MB of a 1.69 GB heap peak at 0.35.
+
+## On Grafana
+
+`code-analysis`'s bench, trunk `279b64a` against `69aac3f` per library, back to
+back, on the repository's `lib/`: **all 23 digests identical.** `@grafana/ui`'s
+`pointsto.dl` answers in 9.0 → 8.9 s / 397 → 373 MB — a closure that small is
+not where this bites. On the frontend (no dataflow layer, so no `pointsto`) the
+unkept set shows up in **time** on the join-heavy libraries, from single runs:
+`coupling.dl` 290 → 171 s, `orient.dl` 78 → 62 s, `modgraph.dl` 75 → 61 s,
+`coupling_kinds.dl` 148 → 120 s, `cohesion.dl` 208 → 178 s; peaks 2–10% lower.
+Table: `../../code-analysis/notes/code-facts.md` § Re-measured after a round held
+each fact once.
