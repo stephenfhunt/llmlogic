@@ -4,6 +4,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { test } from "node:test";
 import { datalog, engineAvailable, extract, tempDir, writeProject } from "./helpers.ts";
+import { extractGit } from "../src/layers/git.ts";
+import { Tables } from "../src/writer.ts";
 
 function sh(cwd: string, ...args: string[]): void {
   execFileSync("git", args, {
@@ -61,6 +63,51 @@ test("git: commits, touches, and renames followed to today's path", () => {
     ["first", "src/b.ts", "src/b.ts", null, "added", 1, 0],
     ["first", "tsconfig.json", "tsconfig.json", null, "added", 14, 0],
   ]);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+// Numstat runs as parallel `git log --no-walk` jobs over the commit list; how the
+// commits are split must not change a row. The history has what numstat treats
+// specially — a binary file, a merge, a rename — and more commits than jobs, and
+// is read from the top level and from a root below it.
+test("git: splitting numstat across jobs changes no commit or touch row", () => {
+  const dir = tempDir("gitjobs");
+  writeProject(dir, { "app/src/a.ts": "export const a = 1;\n", "app/src/b.ts": "export const b = 2;\n", "lib/c.ts": "export const c = 3;\n" });
+  sh(dir, "init", "-q", "-b", "main");
+  sh(dir, "add", ".");
+  sh(dir, "commit", "-q", "-m", "first");
+  fs.writeFileSync(path.join(dir, "app", "logo.bin"), Buffer.from([0, 1, 2, 255, 0, 7]));
+  sh(dir, "add", ".");
+  sh(dir, "commit", "-q", "-m", "binary");
+  sh(dir, "checkout", "-q", "-b", "side");
+  fs.appendFileSync(path.join(dir, "app", "src", "a.ts"), "export const a2 = 2;\n");
+  sh(dir, "commit", "-q", "-am", "side edit");
+  sh(dir, "checkout", "-q", "main");
+  // Both sides touch app/, so the merge survives history simplification under that root.
+  fs.appendFileSync(path.join(dir, "lib", "c.ts"), "export const c2 = 4;\n");
+  fs.appendFileSync(path.join(dir, "app", "src", "b.ts"), "export const b2 = 5;\n");
+  sh(dir, "commit", "-q", "-am", "main edit");
+  sh(dir, "merge", "-q", "--no-ff", "-m", "merge side", "side");
+  sh(dir, "mv", "app/src/b.ts", "app/src/bee.ts");
+  sh(dir, "commit", "-q", "-m", "rename b");
+  for (let i = 0; i < 6; i++) {
+    fs.appendFileSync(path.join(dir, i % 2 === 0 ? "app/src/a.ts" : "lib/c.ts"), `export const x${i} = ${i};\n`);
+    sh(dir, "commit", "-q", "-am", `edit ${i}`);
+  }
+
+  const history = (root: string, numstatJobs: number) => {
+    const tables = new Tables();
+    extractGit({ root, tables }, { maxCommits: 0, numstatJobs });
+    return { commits: tables.rows("commit"), touches: tables.rows("touch") };
+  };
+  for (const root of [dir, path.join(dir, "app")]) {
+    const one = history(root, 1);
+    assert.ok(one.commits.some((c) => c.parents === 2), `${root}: a merge`);
+    assert.ok(one.touches.some((t) => t.change === "renamed"), `${root}: a rename`);
+    assert.ok(one.touches.some((t) => t.change === "added" && t.added === null), `${root}: a binary file`);
+    assert.ok(one.touches.some((t) => typeof t.added === "number" && t.added > 0), `${root}: line counts`);
+    for (const jobs of [2, 3, 64]) assert.deepEqual(history(root, jobs), one, `${root}: ${jobs} jobs`);
+  }
   fs.rmSync(dir, { recursive: true, force: true });
 });
 

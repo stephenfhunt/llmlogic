@@ -3,13 +3,17 @@
 // history touches is emitted — not only TypeScript — since a config file or a doc
 // that always changes with a module is coupling too.
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
+import { availableParallelism } from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import { truncate } from "../context.ts";
 import { relTo } from "../program.ts";
 import type { Tables } from "../writer.ts";
+import type { NumstatJob } from "./git-numstat.ts";
 
 const MAX_BUFFER = 1 << 30;
+const NUMSTAT = fileURLToPath(new URL("./git-numstat.ts", import.meta.url));
 
 function git(cwd: string, args: string[]): string | undefined {
   try {
@@ -57,6 +61,27 @@ function splitRecords(out: string): { header: string[]; tokens: string[] }[] {
 export interface GitOptions {
   since?: string | undefined;
   maxCommits: number;
+  /** Concurrent `git log --numstat` processes (default: the machine's parallelism). */
+  numstatJobs?: number | undefined;
+}
+
+/** Each commit's numstat, from `git-numstat.ts` over `jobs` chunks of `shas`, or
+ * none if it failed — line counts go missing, as a failed `git log` always left
+ * them, rather than the history. */
+function numstat(top: string, shas: string[], pathspec: string | null, jobs: number): string[] {
+  if (shas.length === 0) return [];
+  const size = Math.ceil(shas.length / Math.max(1, Math.min(jobs, shas.length)));
+  const chunks: string[][] = [];
+  for (let i = 0; i < shas.length; i += size) chunks.push(shas.slice(i, i + size));
+  const job: NumstatJob = { top, chunks, pathspec };
+  const r = spawnSync(process.execPath, ["--disable-warning=ExperimentalWarning", NUMSTAT], {
+    input: JSON.stringify(job),
+    encoding: "utf8",
+    maxBuffer: MAX_BUFFER,
+    stdio: ["pipe", "pipe", "ignore"],
+  });
+  if (r.error !== undefined || r.status !== 0) return [];
+  return JSON.parse(r.stdout) as string[];
 }
 
 export function extractGit(ctx: { root: string; tables: Tables }, opts: GitOptions): void {
@@ -72,26 +97,6 @@ export function extractGit(ctx: { root: string; tables: Tables }, opts: GitOptio
 
   const statusOut = git(top, ["log", "-z", "-M", "--name-status", "--format=%x01%H%x02%an%x02%ae%x02%at%x02%P%x02%s", ...range]);
   if (statusOut === undefined) return;
-  const numstatOut = git(top, ["log", "-z", "-M", "--numstat", "--format=%x01%H", ...range]) ?? "";
-
-  // (sha, new path) → [added, deleted]; binary files report "-".
-  const lines = new Map<string, [number | null, number | null]>();
-  for (const { header, tokens } of splitRecords(numstatOut)) {
-    const sha = header[0] ?? "";
-    for (let i = 0; i < tokens.length; i++) {
-      const parts = (tokens[i] ?? "").split("\t");
-      const count = (s: string | undefined) => (s === undefined || s === "-" ? null : Number.parseInt(s, 10));
-      const added = count(parts[0]);
-      const deleted = count(parts[1]);
-      let p = parts[2] ?? "";
-      if (p === "") {
-        // A rename: "a\td\t" then old, new as their own tokens.
-        i += 2;
-        p = tokens[i] ?? "";
-      }
-      lines.set(`${sha}\0${p}`, [added, deleted]);
-    }
-  }
 
   const commits: Commit[] = [];
   for (const { header, tokens } of splitRecords(statusOut)) {
@@ -116,6 +121,28 @@ export function extractGit(ctx: { root: string; tables: Tables }, opts: GitOptio
       subject: truncate(subject, 200),
       entries,
     });
+  }
+
+  // (sha, new path) → [added, deleted]; binary files report "-".
+  const lines = new Map<string, [number | null, number | null]>();
+  const shas = commits.map((c) => c.sha);
+  for (const out of numstat(top, shas, sub !== "." ? sub : null, opts.numstatJobs ?? availableParallelism())) {
+    for (const { header, tokens } of splitRecords(out)) {
+      const sha = header[0] ?? "";
+      for (let i = 0; i < tokens.length; i++) {
+        const parts = (tokens[i] ?? "").split("\t");
+        const count = (s: string | undefined) => (s === undefined || s === "-" ? null : Number.parseInt(s, 10));
+        const added = count(parts[0]);
+        const deleted = count(parts[1]);
+        let p = parts[2] ?? "";
+        if (p === "") {
+          // A rename: "a\td\t" then old, new as their own tokens.
+          i += 2;
+          p = tokens[i] ?? "";
+        }
+        lines.set(`${sha}\0${p}`, [added, deleted]);
+      }
+    }
   }
 
   // Walk newest → oldest, carrying each historical path forward to today's.
