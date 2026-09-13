@@ -348,7 +348,7 @@ fn match_positives(
 fn refutes(atom: &Atom, tuple: &Tuple, env: &HashMap<Var, Value>) -> bool {
     atom.args
         .iter()
-        .zip(&tuple.0)
+        .zip(tuple.0.iter())
         .all(|(term, value)| match term {
             Term::Const(c) => c == value,
             Term::Var(v) => env.get(v).is_none_or(|bound| bound == value),
@@ -364,7 +364,7 @@ pub(crate) fn match_atom(
     env: &HashMap<Var, Value>,
 ) -> Option<HashMap<Var, Value>> {
     let mut env = env.clone();
-    for (term, value) in atom.args.iter().zip(&tuple.0) {
+    for (term, value) in atom.args.iter().zip(tuple.0.iter()) {
         match term {
             // Matching an *already-known* value uses the semantic rule (§4), so
             // a repeated variable or a constant never unifies with `absent`.

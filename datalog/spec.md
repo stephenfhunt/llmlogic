@@ -2604,6 +2604,10 @@ never say.
     B13, §16.6), and a copy everywhere a tuple is held that is not a premise.
   - **Costs:** 8 bytes per held fact, and `Model` is not `Send`. Nothing needs it;
     parallelism (post-v1) would take `Arc`.
+  ***Amended 2026-09-13 (later iii)*** — a premise stays 32 bytes, not the 24
+  designed: a shared tuple's pointer and length have no spare bits for the enum's
+  tag, where a `Vec`'s capacity had. Ids would save 16 bytes a premise, not 8.
+  `a_premise_is_a_fact_wide` now allows the tag.
 - **2026-09-13 (later ii)** — **A diagnostic carries related locations: the other
   side of a conflict, labelled and located** (§12; `error::Related`,
   `ir::Program::fact_spans`; `testing.md` **C18**; closes `bugs/009`, with the

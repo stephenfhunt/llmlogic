@@ -105,7 +105,7 @@ pub fn lower_with_sources(
                         let rows = std::mem::take(&mut table.rows);
                         out.facts.extend(rows.into_iter().map(|row| ir::Fact {
                             pred,
-                            tuple: ir::Tuple(row),
+                            tuple: ir::Tuple::from(row),
                         }));
                     }
                     data_import += 1;
@@ -672,7 +672,7 @@ impl Lowerer {
         if ground {
             let fact = ir::Fact {
                 pred: head.pred,
-                tuple: ir::Tuple(values),
+                tuple: ir::Tuple::from(values),
             };
             out.fact_spans.entry(fact.clone()).or_insert(clause.span);
             out.facts.push(fact);
@@ -742,7 +742,7 @@ impl Lowerer {
                 sigil: explain.sigil,
                 goal: ir::Fact {
                     pred: goal.pred,
-                    tuple: ir::Tuple(values),
+                    tuple: ir::Tuple::from(values),
                 },
                 span: explain.span,
             });
@@ -3767,11 +3767,12 @@ mod tests {
                 .position(|p| p.name == "next_year")
                 .expect("next_year predicate") as u32,
         );
-        let expected: std::collections::BTreeSet<ir::Tuple> = std::iter::once(ir::Tuple(vec![
-            ir::Value::String("alice".to_string()),
-            ir::Value::Int(31),
-        ]))
-        .collect();
+        let expected: std::collections::BTreeSet<ir::Tuple> =
+            std::iter::once(ir::Tuple::from(vec![
+                ir::Value::String("alice".to_string()),
+                ir::Value::Int(31),
+            ]))
+            .collect();
         assert_eq!(model.relation(next_year), &expected);
     }
 

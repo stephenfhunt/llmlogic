@@ -966,7 +966,7 @@ fn print_ir_fact(fact: &ir::Fact, program: &ir::Program) -> String {
     let args = match &info.fields {
         Some(fields) => fields
             .iter()
-            .zip(&fact.tuple.0)
+            .zip(fact.tuple.0.iter())
             .map(|(field, value)| format!("{field}: {}", print_value(value)))
             .collect::<Vec<_>>(),
         None => fact.tuple.0.iter().map(print_value).collect::<Vec<_>>(),
@@ -1117,7 +1117,7 @@ mod tests {
             .unwrap_or_else(|| panic!("no predicate `{predicate}`"));
         let fact = ir::Fact {
             pred: ir::PredId(pred as u32),
-            tuple: ir::Tuple(args.to_vec()),
+            tuple: ir::Tuple::from(args.to_vec()),
         };
         let tree = ProofTree::explain(&model, &fact)
             .proof()

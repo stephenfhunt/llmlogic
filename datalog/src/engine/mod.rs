@@ -1233,7 +1233,7 @@ pub fn trace_failure(program: &Program, model: &Model, goal: &Fact) -> Result<Fa
 /// not repeat (`p(X, X)` against `p(1, 2)`).
 fn unify_head(rule: &Rule, goal: &Fact) -> Option<Vec<Option<Value>>> {
     let mut bindings: Vec<Option<Value>> = vec![None; rule.var_names.len()];
-    for (arg, value) in rule.head.args.iter().zip(&goal.tuple.0) {
+    for (arg, value) in rule.head.args.iter().zip(goal.tuple.0.iter()) {
         match arg {
             Term::Const(constant) => {
                 if constant != value {
@@ -1308,7 +1308,7 @@ fn repair_for(
             };
             let fact = Fact {
                 pred: atom.pred,
-                tuple: Tuple(values),
+                tuple: Tuple::from(values),
             };
             // A derived predicate has no fact to add — asking about it is the
             // next question, and answering that is what a repair defers to.
@@ -1574,7 +1574,7 @@ fn extreme_value(present: &[&Value], want_max: bool) -> Result<Value> {
 /// mismatch (with any partial bindings already undone).
 fn try_match(atom: &Atom, tuple: &Tuple, bindings: &mut [Option<Value>]) -> Option<Vec<usize>> {
     let mut bound: Vec<usize> = Vec::new();
-    for (term, value) in atom.args.iter().zip(&tuple.0) {
+    for (term, value) in atom.args.iter().zip(tuple.0.iter()) {
         let matches = match term {
             Term::Const(constant) => constant.unifies_with(value),
             Term::Var(var) => {
@@ -2469,7 +2469,7 @@ mod tests {
             pred,
             args: vec![Term::Var(Var(0))],
         };
-        let tuple = Tuple(vec![Value::Absent]);
+        let tuple = Tuple::from(vec![Value::Absent]);
         let mut bindings = vec![None];
         let bound = try_match(&atom, &tuple, &mut bindings).expect("binds");
         assert_eq!(bindings[0], Some(Value::Absent));
@@ -2481,7 +2481,7 @@ mod tests {
             pred,
             args: vec![Term::Var(Var(0)), Term::Var(Var(0))],
         };
-        let tuple_xx = Tuple(vec![Value::Absent, Value::Absent]);
+        let tuple_xx = Tuple::from(vec![Value::Absent, Value::Absent]);
         let mut bindings = vec![None];
         assert!(try_match(&atom_xx, &tuple_xx, &mut bindings).is_none());
         assert_eq!(bindings[0], None, "partial binding is undone on mismatch");
@@ -2505,7 +2505,7 @@ mod tests {
             ("carol", "dave"),
         ]
         .into_iter()
-        .map(|(a, b)| Tuple(vec![string_value(a), string_value(b)]))
+        .map(|(a, b)| Tuple::from(vec![string_value(a), string_value(b)]))
         .collect();
         assert_eq!(model.relation(ancestor), &expected);
 
@@ -2687,7 +2687,7 @@ mod tests {
         for n in 0..=3 {
             program.facts.push(Fact {
                 pred: p,
-                tuple: Tuple(vec![Value::Int(n)]),
+                tuple: Tuple::from(vec![Value::Int(n)]),
             });
         }
         program.rules.push(Rule {
@@ -2717,7 +2717,7 @@ mod tests {
         });
         program.strata = vec![vec![RuleId(0)]];
         let model = eval(&program).unwrap();
-        let expected: BTreeSet<Tuple> = [0, 1].map(|n| Tuple(vec![Value::Int(n)])).into();
+        let expected: BTreeSet<Tuple> = [0, 1].map(|n| Tuple::from(vec![Value::Int(n)])).into();
         assert_eq!(model.relation(q), &expected);
     }
 
@@ -2734,7 +2734,7 @@ mod tests {
         for (name, years) in [("alice", 30), ("bob", 15), ("carol", 42)] {
             program.facts.push(Fact {
                 pred: age,
-                tuple: Tuple(vec![string_value(name), Value::Int(years)]),
+                tuple: Tuple::from(vec![string_value(name), Value::Int(years)]),
             });
         }
         // adult(X) :- age(X, A), A >= 18.
@@ -2840,18 +2840,18 @@ mod tests {
         let model = eval(&program).unwrap();
 
         let expected_adult: BTreeSet<Tuple> = ["alice", "carol"]
-            .map(|n| Tuple(vec![string_value(n)]))
+            .map(|n| Tuple::from(vec![string_value(n)]))
             .into();
         assert_eq!(model.relation(adult), &expected_adult);
 
         let expected_older: BTreeSet<Tuple> =
             [("alice", "bob"), ("carol", "alice"), ("carol", "bob")]
-                .map(|(x, y)| Tuple(vec![string_value(x), string_value(y)]))
+                .map(|(x, y)| Tuple::from(vec![string_value(x), string_value(y)]))
                 .into();
         assert_eq!(model.relation(older), &expected_older);
 
         let expected_next: BTreeSet<Tuple> = [("alice", 31), ("bob", 16), ("carol", 43)]
-            .map(|(n, y)| Tuple(vec![string_value(n), Value::Int(y)]))
+            .map(|(n, y)| Tuple::from(vec![string_value(n), Value::Int(y)]))
             .into();
         assert_eq!(model.relation(next_year), &expected_next);
     }
@@ -2865,7 +2865,7 @@ mod tests {
         let t = program.intern_pred("t", 1);
         program.facts.push(Fact {
             pred: seed,
-            tuple: Tuple(vec![Value::Int(0)]),
+            tuple: Tuple::from(vec![Value::Int(0)]),
         });
         program.rules.push(Rule {
             head: Atom {
@@ -3287,7 +3287,7 @@ mod tests {
         let t = program.intern_pred("t", 1);
         program.facts.push(Fact {
             pred: seed,
-            tuple: Tuple(vec![Value::Int(0)]),
+            tuple: Tuple::from(vec![Value::Int(0)]),
         });
         program.rules.push(Rule {
             head: Atom {
@@ -3335,9 +3335,9 @@ mod tests {
 
         let alice = Fact {
             pred: root,
-            tuple: Tuple(vec![string_value("alice")]),
+            tuple: Tuple::from(vec![string_value("alice")]),
         };
-        let expected: BTreeSet<Tuple> = [Tuple(vec![string_value("alice")])].into();
+        let expected: BTreeSet<Tuple> = [Tuple::from(vec![string_value("alice")])].into();
         assert_eq!(model.relation(root), &expected);
 
         // The derivation records the matched person fact and the pattern
@@ -3355,7 +3355,7 @@ mod tests {
                 premises: vec![
                     Premise::Fact(Fact {
                         pred: person,
-                        tuple: Tuple(vec![string_value("alice")]),
+                        tuple: Tuple::from(vec![string_value("alice")]),
                     }),
                     Premise::NoMatch(Box::new(absent.clone())),
                 ],
@@ -3371,7 +3371,7 @@ mod tests {
                 children: vec![
                     ProofTree::Leaf(Fact {
                         pred: person,
-                        tuple: Tuple(vec![string_value("alice")]),
+                        tuple: Tuple::from(vec![string_value("alice")]),
                     }),
                     ProofTree::NoMatch(absent),
                 ],
@@ -3404,7 +3404,7 @@ mod tests {
         for name in ["a", "b", "c"] {
             program.facts.push(Fact {
                 pred: node,
-                tuple: Tuple(vec![string_value(name)]),
+                tuple: Tuple::from(vec![string_value(name)]),
             });
         }
         program.facts.push(fact2(edge, "a", "b"));
@@ -3497,7 +3497,7 @@ mod tests {
             ("c", "c"),
         ]
         .into_iter()
-        .map(|(x, y)| Tuple(vec![string_value(x), string_value(y)]))
+        .map(|(x, y)| Tuple::from(vec![string_value(x), string_value(y)]))
         .collect();
         assert_eq!(model.relation(no_path), &expected);
 
@@ -3554,7 +3554,7 @@ mod tests {
         program.facts.retain(|fact| fact.pred != parent);
         let model = eval(&program).unwrap();
         let expected: BTreeSet<Tuple> = ["alice", "bob", "carol"]
-            .map(|name| Tuple(vec![string_value(name)]))
+            .map(|name| Tuple::from(vec![string_value(name)]))
             .into();
         assert_eq!(model.relation(root), &expected);
         assert_eq!(
@@ -3580,12 +3580,12 @@ mod tests {
         let c = program.intern_pred("c", 1);
         program.facts.push(Fact {
             pred: seed,
-            tuple: Tuple(vec![string_value("x")]),
+            tuple: Tuple::from(vec![string_value("x")]),
         });
         for name in ["x", "y", "z"] {
             program.facts.push(Fact {
                 pred: d,
-                tuple: Tuple(vec![string_value(name)]),
+                tuple: Tuple::from(vec![string_value(name)]),
             });
         }
         let unary_rule = |head: PredId, body: Vec<BodyLiteral>| Rule {
@@ -3621,7 +3621,9 @@ mod tests {
         program.strata = vec![vec![RuleId(0)], vec![RuleId(1)], vec![RuleId(2)]];
 
         let model = eval(&program).unwrap();
-        let expected_b: BTreeSet<Tuple> = ["y", "z"].map(|n| Tuple(vec![string_value(n)])).into();
+        let expected_b: BTreeSet<Tuple> = ["y", "z"]
+            .map(|n| Tuple::from(vec![string_value(n)]))
+            .into();
         assert_eq!(model.relation(b), &expected_b);
         assert_eq!(model.relation(c), model.relation(a));
         assert_eq!(
@@ -4376,6 +4378,33 @@ mod tests {
             Ok(())
         }
 
+        /// **E12** for one program: every recorded fact premise is its relation's
+        /// own tuple — the same allocation, not an equal copy (§17 2026-09-13
+        /// (later iii)).
+        ///
+        /// Every other property compares tuples by value, so a copy passes them
+        /// all, and only the pointer can tell.
+        fn e12_holds(program: &Program) -> std::result::Result<(), TestCaseError> {
+            let model = capped(program, Provenance::Recorded)?;
+            for fact in model.facts() {
+                for derivation in model.derivations_of(&fact) {
+                    for premise in &derivation.premises {
+                        let Premise::Fact(premise) = premise else {
+                            continue;
+                        };
+                        let held = model.relation(premise.pred).get(&premise.tuple);
+                        prop_assert!(
+                            held.is_some_and(|held| std::rc::Rc::ptr_eq(&held.0, &premise.tuple.0)),
+                            "premise {:?} of {:?} is a copy, not its relation's tuple",
+                            premise,
+                            fact
+                        );
+                    }
+                }
+            }
+            Ok(())
+        }
+
         /// **E9**'s claims about one program, shared by the property over
         /// [`arb_program_with_edb`] and the one over shaped programs.
         fn e9_holds(program: &Program) -> std::result::Result<(), TestCaseError> {
@@ -4688,6 +4717,29 @@ mod tests {
             assert!(reached >= 3, "{reached} of 48 (floor 3)");
         }
 
+        /// E12's non-vacuity guard (`testing.md` rule 2): the claim is about fact
+        /// premises, so the generator must record some.
+        #[test]
+        fn e12_generator_records_a_fact_premise() {
+            let cases = sample(arb_program_with_edb(), 48);
+            let reached = cases
+                .iter()
+                .filter(|program| {
+                    let model = eval(program).unwrap();
+                    model.facts().any(|fact| {
+                        model.derivations_of(&fact).any(|derivation| {
+                            derivation
+                                .premises
+                                .iter()
+                                .any(|premise| matches!(premise, Premise::Fact(_)))
+                        })
+                    })
+                })
+                .count();
+            eprintln!("{reached} of 48 record a fact premise");
+            assert!(reached >= 8, "{reached} of 48 (floor 8)");
+        }
+
         /// The growth guard for [`arb_program_with_edb_at`] (`testing.md` rule 2):
         /// each tier reaches, on the recorded run, what the tier below does not —
         /// deeper fixpoints (rounds, strata), larger models (derived facts, the
@@ -4798,6 +4850,14 @@ mod tests {
                 generated in crate::testgen::arb_program_text_at(Tier::Medium.scaled()),
             ) {
                 e11_holds(&generated.1)?;
+            }
+
+            /// **E12 at `Tier::Medium`** — and `Large` in the deep run.
+            #[test]
+            fn e12_a_premise_is_its_relations_tuple_at_medium(
+                generated in crate::testgen::arb_program_text_at(Tier::Medium.scaled()),
+            ) {
+                e12_holds(&generated.1)?;
             }
         }
 
@@ -5385,11 +5445,11 @@ mod tests {
                 let conflict = bad.intern_pred("conflict", 1);
                 bad.facts.push(Fact {
                     pred: conflict,
-                    tuple: Tuple(vec![Value::String("x".to_string())]),
+                    tuple: Tuple::from(vec![Value::String("x".to_string())]),
                 });
                 bad.facts.push(Fact {
                     pred: conflict,
-                    tuple: Tuple(vec![Value::Int(0)]),
+                    tuple: Tuple::from(vec![Value::Int(0)]),
                 });
                 prop_assert!(
                     typecheck(&bad).is_err(),
@@ -5431,7 +5491,7 @@ mod tests {
                 let probe = bad.intern_pred("c6probe", 1);
                 bad.facts.push(Fact {
                     pred: probe,
-                    tuple: Tuple(vec![Value::Int(0)]),
+                    tuple: Tuple::from(vec![Value::Int(0)]),
                 });
                 // Declare the (inferred int) column as string — a contradiction.
                 bad.predicates[probe.0 as usize].fields = Some(vec!["v".to_string()]);
@@ -5734,7 +5794,7 @@ mod tests {
                     .iter()
                     .map(|(a, b)| Fact {
                         pred: parent,
-                        tuple: Tuple(vec![
+                        tuple: Tuple::from(vec![
                             Value::String(a.clone()),
                             Value::String(b.clone()),
                         ]),
@@ -5756,7 +5816,7 @@ mod tests {
                         }
                     }
                     for target in reachable {
-                        expected.insert(Tuple(vec![
+                        expected.insert(Tuple::from(vec![
                             Value::String(start.to_string()),
                             Value::String(target.to_string()),
                         ]));
@@ -5810,7 +5870,7 @@ mod tests {
                     let derived: BTreeSet<Vec<Value>> = variant_model
                         .relation(q_ans)
                         .iter()
-                        .map(|tuple| tuple.0.clone())
+                        .map(|tuple| tuple.0.to_vec())
                         .collect();
                     prop_assert_eq!(answers, derived);
                 }
@@ -5833,11 +5893,11 @@ mod tests {
                     .iter()
                     .map(|p| Fact {
                         pred: person,
-                        tuple: Tuple(vec![Value::String(format!("n{p}"))]),
+                        tuple: Tuple::from(vec![Value::String(format!("n{p}"))]),
                     })
                     .chain(edges.iter().map(|(a, b)| Fact {
                         pred: parent,
-                        tuple: Tuple(vec![
+                        tuple: Tuple::from(vec![
                             Value::String(a.clone()),
                             Value::String(b.clone()),
                         ]),
@@ -5849,7 +5909,7 @@ mod tests {
                     .iter()
                     .map(|p| format!("n{p}"))
                     .filter(|p| edges.iter().all(|(_, child)| child != p))
-                    .map(|p| Tuple(vec![Value::String(p)]))
+                    .map(|p| Tuple::from(vec![Value::String(p)]))
                     .collect();
                 prop_assert_eq!(model.relation(root), &expected);
             }
@@ -6095,6 +6155,12 @@ mod tests {
                 e11_holds(&program)?;
             }
 
+            /// E12 — a recorded fact premise is its relation's tuple, not a copy.
+            #[test]
+            fn e12_a_premise_is_its_relations_tuple(program in arb_program_with_edb()) {
+                e12_holds(&program)?;
+            }
+
             /// E2 — every fact has a proof, and every leaf is a base fact.
             #[test]
             fn e2_proof_leaves_are_base_facts(program in arb_program_with_edb()) {
@@ -6270,7 +6336,7 @@ mod tests {
                         let mut seen: std::collections::BTreeMap<u32, &Value> =
                             std::collections::BTreeMap::new();
                         let mut unifies = rule.head.args.len() == goal.tuple.0.len();
-                        for (arg, value) in rule.head.args.iter().zip(&goal.tuple.0) {
+                        for (arg, value) in rule.head.args.iter().zip(goal.tuple.0.iter()) {
                             match arg {
                                 Term::Const(constant) => unifies &= constant == value,
                                 Term::Var(var) => {
@@ -6801,7 +6867,7 @@ mod tests {
             // no-match pattern closed to `absent` — the discriminating case.
             assert_eq!(
                 model.relation(pred("unmatched")),
-                &BTreeSet::from([Tuple(vec![Value::Absent])]),
+                &BTreeSet::from([Tuple::from(vec![Value::Absent])]),
                 "the positive prefix must bind an absent key"
             );
             assert!(model.relation(pred("contra")).is_empty());
@@ -7013,7 +7079,7 @@ mod tests {
                             .max()
                             .map_or(Value::Absent, |v| Value::Int(*v)),
                     };
-                    Tuple(vec![Value::Int(i64::from(*k)), value])
+                    Tuple::from(vec![Value::Int(i64::from(*k)), value])
                 })
                 .collect()
         }

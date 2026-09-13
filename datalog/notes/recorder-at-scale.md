@@ -206,7 +206,7 @@ fact keys and `api::run`'s copy of the program's facts all hold one allocation.
 
 | | shared tuples | stable ids |
 |---|---|---|
-| premise | 24 bytes | 16 bytes |
+| premise | 32 bytes: a 24-byte fact and a tag, which finds no spare bits | 16 bytes |
 | held fact | +8 bytes (fat pointer 16, count header 16, against a `Vec` header 24) | +4 bytes |
 | copies left | none | delta, pending heads, `facts()`, `api::run`'s fact copy |
 | proof order | contents, by construction | an id order that B5, B13 and §16.6 must keep out |
