@@ -245,6 +245,7 @@ interface Resolution {
   target_file: string | null;
   target_package: string | null;
   target_ambient: string | null;
+  unresolved_package: string | null;
   resolved: boolean;
 }
 
@@ -262,7 +263,7 @@ function resolveSpecifier(ctx: Context, info: SourceInfo, specNode: ts.StringLit
   const spec = specNode.text;
   const opts = info.project.options;
   const mode = ts.getModeForUsageLocation(info.sf, specNode, opts);
-  const none = { target_file: null, target_package: null, target_ambient: null };
+  const none = { target_file: null, target_package: null, target_ambient: null, unresolved_package: null };
   const res = ts.resolveModuleName(spec, info.sf.fileName, opts, ts.sys, undefined, undefined, mode).resolvedModule;
   if (res !== undefined) {
     const abs = path.resolve(res.resolvedFileName);
@@ -305,7 +306,9 @@ function resolveSpecifier(ctx: Context, info: SourceInfo, specNode: ts.StringLit
       resolved: true,
     };
   }
-  return { ...none, target_package: bare ? packageOfSpecifier(spec) : null, resolved: false };
+  // Unresolved, a bare specifier is only a guess at a package: a bundler alias
+  // (`vendor/css/x.css`) or an uninstalled package look the same (bugs/002).
+  return { ...none, unresolved_package: bare ? packageOfSpecifier(spec) : null, resolved: false };
 }
 
 /**

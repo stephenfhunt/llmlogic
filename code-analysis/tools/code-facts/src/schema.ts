@@ -295,6 +295,11 @@ export const RELATIONS: readonly Relation[] = [
       ),
       col("builtin", "bool", "the specifier names a Node.js builtin module (`fs`, `node:fs`)"),
       col("resolved", "bool", "the compiler resolved the specifier"),
+      opt(
+        "unresolved_package",
+        "string",
+        "TypeScript only: for a bare specifier the compiler could not resolve, its first segment (`@scope/pkg` for a scoped one) — a *guess* at a package, never a `target_package`, because a bundler alias (`vendor/x.css`) looks the same as a package that is not installed. Python fills `target_package` by name instead: it has no aliases",
+      ),
     ],
   },
   {

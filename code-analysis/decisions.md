@@ -14,6 +14,21 @@ with the long form in [`notes/code-facts.md`](notes/code-facts.md).
 
 ## Decisions
 
+- **2026-09-13 (later)** — **An import the compiler could not resolve claims no
+  package; a declaration can confirm the guess** (`bugs/002`, the user's choice).
+  - `imports.target_package` is set only for a resolved target. An unresolved bare
+    specifier's first segment goes in `unresolved_package` — the unresolved-case
+    counterpart of 2026-09-11 (later ii), which kept a wildcard ambient match
+    out of `target_package`.
+  - **A declaration confirms a guess**: `packages.dl` counts a confirmed guess as
+    `imported`. An unconfirmed one is `unresolved_bare`, never `undeclared`,
+    because a bundler alias and an uninstalled package look the same. Same
+    principle as 2026-09-12 (later): a relation that cannot tell two cases apart
+    claims the weaker thing.
+  - ***Rejected:*** reading bundler aliases, since the extractor mirrors tsconfig
+    and nothing else. Also rejected: feeding the guess to `used` alone, which
+    silenced three relations on an uninstalled extraction.
+
 - **2026-09-13** — **Several tsconfigs parse each file once; the extractor's
   output does not move.** Profiled by phase on Grafana (`notes/code-facts.md`
   § The extractor's own cost): 7.0 GB of the 16-tsconfig load was 44,954 parsed

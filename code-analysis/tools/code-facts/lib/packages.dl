@@ -15,6 +15,15 @@
 %   undeclared(Pkg, Dep, File)          imported, but in none of Pkg's
 %                                       dependency blocks (a type-only import
 %                                       is covered by `@types/Dep` too)
+%   guessed(Pkg, Dep, File)             a file of Pkg imports a bare specifier
+%                                       the compiler could not resolve, whose
+%                                       first segment is Dep — a package that
+%                                       is not installed, or a bundler alias
+%   unresolved_bare(Pkg, Dep, File)     guessed, and declared nowhere: an
+%                                       alias (`vendor/…`, `app/…`) or a
+%                                       genuinely missing package. Not claimed
+%                                       as `undeclared`, since the two look
+%                                       the same; open the bundler config
 %   unused(Pkg, Dep, Kind)              declared, imported by no file of Pkg. An
 %                                       `@types/` package counts as used when
 %                                       what it types is imported; a build tool
@@ -62,6 +71,24 @@ imported_workspace(Pkg, Dep, F) :-
 declared_as(Pkg, Dep, K) :- package_dep(package: Pkg, dep: Dep, kind: K).
 declared(Pkg, Dep) :- declared_as(Pkg, Dep, _).
 types_declared(Pkg, Dep) :- package_dep(package: Pkg, types_for: Dep).
+
+% A bare specifier the compiler could not resolve names no package for sure
+% (bugs/002): a webpack `resolve.alias` onto `public/vendor` made Grafana
+% "import" a package called `vendor`. A declaration (or an `@types/` one)
+% confirms the guess, and a confirmed guess is `imported` like a resolved one —
+% so an extraction made without `node_modules`, where *every* package import is
+% a guess, still answers `unused`, `dev_in_production`, `only_in_tests` and
+% `types_only`. An unconfirmed guess is `unresolved_bare`, never `undeclared`.
+guessed(Pkg, Dep, F) :-
+  imports(file: F, unresolved_package: Dep), Dep is not absent, file(path: F, package: Pkg), Dep != Pkg.
+confirmed(Pkg, Dep, F) :- guessed(Pkg, Dep, F), declared(Pkg, Dep).
+confirmed(Pkg, Dep, F) :- guessed(Pkg, Dep, F), types_declared(Pkg, Dep).
+imported(Pkg, Dep, F) :- confirmed(Pkg, Dep, F).
+imported_at_runtime(Pkg, Dep, F) :- confirmed(Pkg, Dep, F), imports(file: F, unresolved_package: Dep, runtime: true).
+imported_at_runtime(Pkg, Dep, F) :-
+  confirmed(Pkg, Dep, F), imports(file: F, unresolved_package: Dep, runtime: R, kind: K), R is absent,
+  K != type_only, K != type_query.
+unresolved_bare(Pkg, Dep, F) :- guessed(Pkg, Dep, F), not declared(Pkg, Dep), not types_declared(Pkg, Dep).
 
 undeclared(Pkg, Dep, F) :- imported_at_runtime(Pkg, Dep, F), not declared(Pkg, Dep).
 undeclared(Pkg, Dep, F) :- imported(Pkg, Dep, F), not declared(Pkg, Dep), not types_declared(Pkg, Dep).

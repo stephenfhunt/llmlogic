@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { test } from "node:test";
-import { datalog, engineAvailable, extract, fixture, tempDir } from "./helpers.ts";
+import { datalog, engineAvailable, extract, fixture, tempDir, writeProject } from "./helpers.ts";
 
 const skip = !engineAvailable();
 
@@ -179,4 +179,19 @@ test("taint: a value followed from a source through calls and fields to a sink",
   const r = datalog(q, ["tainted_sink(V)"]);
   assert.equal(r.code, 0, r.stderr);
   assert.equal(r.stdout.trim(), 'tainted_sink("src/use.ts#Registry.add.s").');
+});
+
+test("packages: an unresolved bare specifier is guessed, not undeclared; a declaration confirms it (bugs/002)", { skip }, () => {
+  const dir = tempDir("lib-unresolved");
+  writeProject(dir, {
+    "package.json": JSON.stringify({ name: "app", dependencies: { "left-pad": "^1.3.0" } }),
+    "src/index.ts": "import 'vendor/css/font_awesome.css';\nimport pad from 'left-pad';\nexport const y = pad;\n",
+  });
+  const out = tempDir("lib-unresolved-out");
+  extract(dir, { out, layers: [] });
+  assert.deepEqual(ask(out, "packages.dl", "undeclared(P, D, F)"), []);
+  assert.deepEqual(ask(out, "packages.dl", "unresolved_bare(P, D, F)"), ['unresolved_bare("app", "vendor", "src/index.ts").']);
+  // left-pad is not installed, so only its declaration says the guess is right.
+  assert.deepEqual(ask(out, "packages.dl", "unused(P, D, K)"), []);
+  assert.deepEqual(ask(out, "checks.dl", "violation(K, V)"), []);
 });

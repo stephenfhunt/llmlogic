@@ -209,3 +209,22 @@ test("is_generated reads a header or a generator's file name (bugs/001)", () => 
     ],
   );
 });
+
+test("an unresolved bare specifier is a guess, never a target_package (bugs/002)", () => {
+  const dir = tempDir("unresolved");
+  writeProject(dir, {
+    // A webpack alias, and a declared package that is not installed.
+    "src/index.ts": "import 'vendor/css/font_awesome.css';\nimport pad from 'left-pad';\nimport { x } from '@scope/lib/sub';\nexport const y = [pad, x];\n",
+  });
+  const r = extract(dir, { layers: [] });
+  assert.deepEqual(
+    r.tables.rows("imports").map((i) => [i.specifier, i.target_package, i.unresolved_package, i.resolved]),
+    [
+      ["vendor/css/font_awesome.css", null, "vendor", false],
+      ["left-pad", null, "left-pad", false],
+      ["@scope/lib/sub", null, "@scope/lib", false],
+    ],
+  );
+  // A resolved specifier carries no guess.
+  assert.ok(rows("imports").every((i) => i.unresolved_package === null));
+});

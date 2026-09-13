@@ -75,7 +75,11 @@ test("coupling kinds: each of Myers' six, found where the fixture put it", { ski
 
 test("package hygiene: package.json against what the files import", { skip }, () => {
   // node:fs is a builtin, left-pad is declared (with its @types), the rest are wrong one way each.
-  assert.deepEqual(ask("packages.dl", "undeclared(P, D, F)"), ['undeclared("design-fixture", "chalk", "src/format.ts").']);
+  // Nothing is installed, so every package import is a guess a declaration must
+  // confirm; chalk is declared nowhere, so it is a guess and not a claim — an
+  // alias would look the same (bugs/002).
+  assert.deepEqual(ask("packages.dl", "undeclared(P, D, F)"), []);
+  assert.deepEqual(ask("packages.dl", "unresolved_bare(P, D, F)"), ['unresolved_bare("design-fixture", "chalk", "src/format.ts").']);
   assert.deepEqual(ask("packages.dl", "unused(P, D, K)"), ['unused("design-fixture", "unused-lib", prod).']);
   assert.deepEqual(ask("packages.dl", "dev_in_production(P, D, F)"), ['dev_in_production("design-fixture", "dev-only", "src/format.ts").']);
   assert.deepEqual(ask("packages.dl", "only_in_tests(P, D)"), ['only_in_tests("design-fixture", "only-in-tests").']);

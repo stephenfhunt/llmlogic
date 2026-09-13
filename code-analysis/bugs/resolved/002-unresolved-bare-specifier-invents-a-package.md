@@ -53,3 +53,28 @@ config — is worth weighing rather than assuming.
 
 Bounds every `undeclared` reading on an application repository. Does not affect
 `unused`, `only_in_tests` or `types_only`, which key on declared names.
+
+## Resolution
+
+**Fixed 2026-09-13** (the user chose absent + a separate relation over reading
+bundler configs). An unresolved bare specifier now leaves `target_package` absent
+and puts its first segment in a new column, `imports.unresolved_package`, named as
+a guess. `packages.dl` gains `guessed` and `unresolved_bare`. A guess **confirmed by
+a declaration** (or an `@types/` one) counts as `imported`. `checks.dl` pins that a
+guess appears only on an unresolved row and never beside a `target_package`. The
+diagnosis held.
+
+**Not taken:** reading webpack/vite aliases. The extractor mirrors tsconfig, and
+parsing JavaScript configs is a different tool. **Absent only** was not taken
+either: on an extraction without `node_modules`, every package import is
+unresolved, and `unused` would have named every dependency.
+
+**What it cost:** the first version fed the guess to `used` alone. The `design`
+fixture, which has nothing installed, showed `dev_in_production`, `only_in_tests`
+and `types_only` all go silent. That was a wider loss than this file's Fallout
+allows, and the confirmed-guess rule is the fix. The one intended change is that
+an undeclared, uninstalled package (`chalk` there) is now `unresolved_bare`, not
+`undeclared`. The Python frontend is unchanged: it has no aliases, so a top-level
+name outside the project and the stdlib is a distribution by definition.
+*Mutations*: restore the old `target_package` fallback → two tests red; drop
+`imported :- confirmed` → the design and library tests red.

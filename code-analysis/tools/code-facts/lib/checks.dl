@@ -44,6 +44,11 @@ violation("project symbol without a file", I) :- symbol(id: I, origin: project, 
 violation("resolved import without a target", F) :-
   imports(file: F, resolved: true, target_file: T, target_package: P, target_ambient: A),
   T is absent, P is absent, A is absent.
+% A guess at a package is only for what did not resolve (bugs/002).
+violation("imports.unresolved_package on a resolved import", F) :-
+  imports(file: F, resolved: true, unresolved_package: U), U is not absent.
+violation("imports.unresolved_package beside a target_package", F) :-
+  imports(file: F, target_package: P, unresolved_package: U), P is not absent, U is not absent.
 
 % ── refs ─────────────────────────────────────────────────────────────────
 violation("ref.from", F) :- ref(from: F), not known(F).
