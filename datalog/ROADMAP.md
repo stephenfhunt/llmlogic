@@ -433,8 +433,8 @@ them. Except where noted these are documented v1 limits rather than defects.
   - **Dense generated programs** still store up to 5.4 GB for a model under 1 MB.
     93–99% of stored derivations are later-round rediscoveries, each mostly
     cloned premise tuples.
-  - **Next: premises as fact references** (the user's, 2026-09-13), designed
-    first, since stable ids reach into evaluator storage.
+  - **Fact references: designed 2026-09-13, building.** A tuple is shared,
+    not an id, and the join borrows its premises (§17 2026-09-13 (later iii)).
   - **Raised, not decided:** one derivation per fact, chosen when the fact is
     established (the code shows printed proofs unchanged); no fact copy for
     `?whynot`.

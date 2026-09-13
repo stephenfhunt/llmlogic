@@ -2586,6 +2586,24 @@ never say.
 
 ### Decisions
 
+- **2026-09-13 (later iii)** — **A fact reference is a shared tuple, not an id**
+  (engine, `ir::Tuple`; the user's call that references come next, and their
+  question *why not a `&`?*). The design is in `notes/recorder-at-scale.md`
+  § Fact references.
+  - **A stored `&` cannot exist.** The store and the relations share `Model`,
+    relations grow while premises are held, and a B-tree moves its keys on insert.
+  - **A `&` is right inside a round's join.** Batched application freezes the
+    model while a round collects (E1), so a match borrows its premises and only a
+    kept derivation owns them.
+  - **What outlives a round shares ownership.** `Tuple` wraps `Rc<[Value]>`, so a
+    relation, its delta, a pending head and a premise hold one allocation.
+    `Derivation`'s `Ord` still compares contents, so which proof prints cannot move.
+  - **Rejected: stable per-relation ids**, a premise as `(PredId, u32)`. They buy
+    an O(1) old view, dense stamps and 8 bytes a premise. They cost a resolver in
+    every proof reader, an id order that must never reach a printed proof (B5,
+    B13, §16.6), and a copy everywhere a tuple is held that is not a premise.
+  - **Costs:** 8 bytes per held fact, and `Model` is not `Send`. Nothing needs it;
+    parallelism (post-v1) would take `Arc`.
 - **2026-09-13 (later ii)** — **A diagnostic carries related locations: the other
   side of a conflict, labelled and located** (§12; `error::Related`,
   `ir::Program::fact_spans`; `testing.md` **C18**; closes `bugs/009`, with the

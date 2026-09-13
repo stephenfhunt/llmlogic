@@ -179,6 +179,44 @@ scratch worktree.
   RSS. A smaller constant moves the tail and does not bound it, so `bugs/015`
   still waits on question 1 below.
 
+## Fact references: shared tuples, not ids
+
+*Designed later on 2026-09-13* (§17 2026-09-13 (later iii)). The direction above
+said stable per-fact ids. Asked why a premise could not simply be a `&`, the
+answer splits in two.
+
+**Where a `&` cannot be.** A stored premise outlives the round that found it.
+- The store and the relations are fields of one `Model`, so a borrow from one
+  into the other is a self-referential struct.
+- Every later round inserts into the relations the premises point into.
+- A `BTreeSet` keeps keys inline in its nodes and moves them on a split, so even
+  a raw pointer to a `Tuple` dangles. Only a `Vec`'s heap buffer stays put, and
+  leaning on that takes `unsafe` that `Model: Clone` breaks.
+
+**Where a `&` is exactly right.** Application is batched: a round collects every
+match against the model as of the previous round, and only then applies them
+(`eval_stratum`, E1). So during collection a premise can borrow the relation's
+tuple. Before this, every matched literal cloned its tuple, in every run,
+unrecorded ones included.
+
+**What outlives a round shares ownership.** `Tuple` is `Rc<[Value]>`. A clone is
+a count, so the relation, the delta, a pending head, a kept premise, the store's
+fact keys and `api::run`'s copy of the program's facts all hold one allocation.
+`Derivation` compares contents as before, so the printed proof cannot change.
+
+| | shared tuples | stable ids |
+|---|---|---|
+| premise | 24 bytes | 16 bytes |
+| held fact | +8 bytes (fat pointer 16, count header 16, against a `Vec` header 24) | +4 bytes |
+| copies left | none | delta, pending heads, `facts()`, `api::run`'s fact copy |
+| proof order | contents, by construction | an id order that B5, B13 and §16.6 must keep out |
+| readers | unchanged | an id-to-tuple resolver in `explain`, printing, the trace, the tests |
+| old view | a set lookup | an id comparison |
+| `Send` | no (`Arc` if parallelism lands) | yes |
+
+The one-derivation-per-fact question is untouched: this removes the constant,
+not the count.
+
 ## Questions for the design session
 
 1. Is "all derivations" a capability to keep stored, or to recover on demand?
