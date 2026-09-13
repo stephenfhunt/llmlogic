@@ -99,7 +99,7 @@ cheap to ask, each a few rules. All ran on the project above.
 
 | question | shape |
 |---|---|
-| what changes together but shares no code? | `hidden_coupling(A, B, N), N >= 3` — co-change with no import or reference either way |
+| what changes together but shares no code? | `hidden_coupling(A, B, N), N >= 3` — co-change with no import or reference either way *today*; a pair whose `first_change(A, T)` and `first_change(B, T2)` are both after the window opened cannot be a link since removed |
 | which modules break the Stable Dependencies Principle? | `sdp_violation(G, A, B)` |
 | which classes want to be two? | `lcom4(C, N), N > 1` |
 | which files are several modules sharing a name? | `module_lcom4(F, N), N > 1`, then `module_component(F, R, E)` for the groups |

@@ -13,7 +13,15 @@
 %                             one referring to the other's (references resolve
 %                             through re-exports, so a barrel does not hide a
 %                             link). Coupling the code does not show. Filter on
-%                             N; 3 or more is a common start
+%                             N; 3 or more is a common start. **It compares
+%                             today's graph with the whole history window**, so
+%                             a link that existed and was removed — a
+%                             decoupling refactor that worked — scores exactly
+%                             like one that never existed, and scores highest
+%                             (bugs/005). A pair whose `first_change` postdates
+%                             the window's start cannot be that artifact; for
+%                             the rest, narrow the window (`--git-since`) or
+%                             check `git log -S` for a removed import
 %   churn(F, Added, Deleted)  lines added and deleted over F's history (binary
 %                             changes have no line counts and are not in it)
 %   author_commits(F, Email, N)  who changed F, how often

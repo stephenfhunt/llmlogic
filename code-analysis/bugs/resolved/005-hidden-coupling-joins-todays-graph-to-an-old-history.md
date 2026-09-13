@@ -55,3 +55,20 @@ history of the *graph*, not of the files, and nothing else needs it.
 Bounds every `hidden_coupling` reading over a long window — which is the default
 (`--git-max-commits 20000`). It does not affect `cochange`, `confidence`,
 `revisions` or `churn`, none of which join against the static graph.
+
+## Resolution
+
+**Fixed 2026-09-13, as documentation, the fix the file chose.** `cochange.dl`'s
+header, SKILL.md's hidden-coupling row and the reference's §4 row now say three
+things: the relation compares today's graph with the whole history window; a
+removed link scores like one that never existed; and `first_change`,
+`--git-since` or `git log -S` are the instruments.
+
+**Not derived in the library**, for the file's own reason: telling a removed
+dependency from an absent one needs a history of the *graph* — when each import
+edge disappeared — which no other relation needs and the extractor does not
+record. This is the one bug in the batch fixed only in the docs, and the ruling
+that the tool should be made usable rather than documented around was weighed
+against it. It would reopen if a second question needs graph history (for
+example "which dependencies did this refactor remove"), since the extractor cost
+would then be shared. The diagnosis held.

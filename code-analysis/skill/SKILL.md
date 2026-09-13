@@ -64,7 +64,7 @@ derives.
 | **architecture** | import cycles that exist at run time; dependencies pointing up a layer; which rules your architecture should obey (below) | `modgraph.dl`: `runtime_dep`, `unit_dep`, `cycle_edge`, `in_cycle`; `coupling.dl`: `sdp_violation` |
 | **how much coupling** | afferent / efferent / instability / distance per file (`G = -1`), directory depth (`G = N`), package (`G = -2`); at a depth, `unplaced_dependent` for the shallower files (entry points, barrels) it does not count | `coupling.dl` |
 | **how two modules are coupled** | the strongest kind per file pair — content, common, external, control, stamp, data — and the member, variable, literal or parameter that makes it so | `coupling_kinds.dl`: `worst_coupling`, then the per-kind relations |
-| **hidden coupling** | files that change together with no import or reference between them | `cochange.dl`: `hidden_coupling` |
+| **hidden coupling** | files that change together with no import or reference between them *today* — a link removed inside the history window looks the same, so check both files' `first_change` or narrow `--git-since` | `cochange.dl`: `hidden_coupling` |
 | **cohesion** | files that are several modules sharing a name; classes that want to split | `cohesion.dl`: `module_lcom4` first (much code has no classes), then `lcom4`, `tcc` |
 | **complexity and risk** | the most complex functions; hot spots where complexity meets churn | `fn` (`cyclomatic`, `cognitive`); `cochange.dl`: `revisions` |
 | **dead and unreached** | dead code, dead stores, exports nothing uses, exported functions no test reaches | `flow.dl`: `unreachable`, `dead_store`; `exports.dl`: `dead_export` (supply `entry/1`); `pointsto.dl`: `call_edge_pt_lexical` from test files |
