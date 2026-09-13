@@ -4399,14 +4399,19 @@ mod tests {
 
         /// **B5** for one program: permuting every rule's body changes no fact
         /// (`testgen::with_permuted_bodies`).
+        ///
+        /// Unrecorded: the claim is about facts, E9 pins that recording changes
+        /// none, and at `Tier::Deep` a recorded run keeps every instance of a
+        /// five-atom self-join — the deep run that recorded here was killed for
+        /// memory.
         fn b5_holds(
             src: &str,
             program: &Program,
             picks: &[u16],
         ) -> std::result::Result<(), TestCaseError> {
-            let expected = model_facts(&capped(program, Provenance::Recorded)?);
+            let expected = model_facts(&capped(program, Provenance::Unrecorded)?);
             let permuted = crate::testgen::with_permuted_bodies(program.clone(), picks);
-            let got = model_facts(&capped(&permuted, Provenance::Recorded)?);
+            let got = model_facts(&capped(&permuted, Provenance::Unrecorded)?);
             prop_assert_eq!(got, expected, "{}", src);
             Ok(())
         }
@@ -4537,12 +4542,12 @@ mod tests {
                 (
                     Tier::Deep,
                     &[
-                        ("rounds >= 7", |s| s.rounds as usize, 7, 1),
-                        ("derived >= 50", |s| s.derived, 50, 1),
-                        ("largest relation >= 50", |s| s.largest_relation, 50, 1),
-                        ("fired body >= 5", |s| s.longest_fired_body, 5, 1),
-                        ("strata deriving >= 3", |s| s.strata_deriving, 3, 1),
-                        ("split instance", |s| s.split_instance as usize, 1, 1),
+                        ("rounds >= 7", |s| s.rounds as usize, 7, 10),
+                        ("derived >= 50", |s| s.derived, 50, 8),
+                        ("largest relation >= 50", |s| s.largest_relation, 50, 8),
+                        ("fired body >= 5", |s| s.longest_fired_body, 5, 16),
+                        ("strata deriving >= 3", |s| s.strata_deriving, 3, 12),
+                        ("split instance", |s| s.split_instance as usize, 1, 10),
                     ],
                 ),
             ];
