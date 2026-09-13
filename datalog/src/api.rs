@@ -711,6 +711,46 @@ mod tests {
     use crate::error::ErrorCode;
     use proptest::prelude::*;
 
+    /// A writer's failure comes back from `write_output` rather than panicking;
+    /// the binary turns it into exit 2 (`tests/system.rs`).
+    #[test]
+    fn write_output_returns_the_writers_error() {
+        struct Refuses;
+        impl std::io::Write for Refuses {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe))
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let result = run("p(\"a\").\n?- p(X).\n").expect("runs");
+        let error = result
+            .write_output(&mut Refuses)
+            .expect_err("a refusing writer fails the write");
+        assert_eq!(error.kind(), std::io::ErrorKind::BrokenPipe);
+    }
+
+    /// A variable repeated in a query atom prints the atom with the value in both
+    /// places, and answers only the rows whose two columns agree.
+    #[test]
+    fn a_repeated_query_variable_substitutes_both_positions() {
+        let src = "\
+e(\"a\", \"a\").
+e(\"a\", \"b\").
+e(\"b\", \"b\").
+?- e(X, X).
+";
+        let result = run(src).expect("runs");
+        assert_eq!(
+            result.answers,
+            vec![vec![
+                "e(\"a\", \"a\").".to_string(),
+                "e(\"b\", \"b\").".to_string(),
+            ]]
+        );
+    }
+
     #[test]
     fn single_atom_query_substitutes_bindings() {
         let src = "\

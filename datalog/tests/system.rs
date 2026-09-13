@@ -1150,3 +1150,33 @@ fn a_repair_names_a_fact_only_when_there_is_one_to_name() {
         compared.stdout
     );
 }
+
+/// A reader that goes away is a write failure, not a panic: the run says so on
+/// stderr and exits 2, §14's "did not answer". The answer is larger than a pipe's
+/// buffer, so the write fails whenever the reader closes.
+#[test]
+fn a_closed_stdout_exits_2_with_a_message() {
+    let mut program: String = (0..20_000).map(|i| format!("n({i}).\n")).collect();
+    program.push_str("?- n(X).\n");
+    let mut child = Command::new(BIN)
+        .arg("-")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("binary spawns");
+    drop(child.stdout.take());
+    child
+        .stdin
+        .take()
+        .expect("stdin is piped")
+        .write_all(program.as_bytes())
+        .expect("program written");
+    let output = child.wait_with_output().expect("binary exits");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(2), "stderr: {stderr}");
+    assert!(
+        stderr.contains("could not write the answers"),
+        "stderr: {stderr}"
+    );
+}
