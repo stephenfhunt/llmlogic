@@ -168,7 +168,11 @@ interrogate one of the rows it returned.**
 ## Datalog in 30 seconds
 
 - **Facts**: `parent("alice", "bob").` — relations lowercase, string data quoted.
-- **Rules**: `head :- body1, body2, … .` — `,` is "and"; `;` in a body is "or".
+- **Rules**: `head :- body1, body2, … .` — `,` is "and"; `;` in a body is "or",
+  and it binds **looser** than `,`: `h(X) :- a(X), b(X) ; c(X).` is the two rules
+  `h(X) :- a(X), b(X).` and `h(X) :- c(X).` There are no parentheses, so to filter
+  on alternatives inside a longer body, give them a rule of their own:
+  `pick(B) :- B = "a" ; B = "b".` then `h(X) :- site(B, X), pick(B).`
 - **Variables** are Capitalized (`X`, `Who`); `_` is a wildcard.
 - **Recursion** is allowed and is the whole point:
   ```

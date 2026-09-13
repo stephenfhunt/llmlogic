@@ -28,9 +28,9 @@
 //!   lexer.
 
 use crate::ast::{
-    AggOp, Aggregate, Args, Atom, Clause, Comparison, Constant, Declaration, Explain, Expr,
-    ExprKind, FieldDecl, Ident, Import, ImportKind, Literal, LiteralKind, NamedArg, Program, Query,
-    Sigil, Span, Statement, StatementKind, Term, TermKind, TypeName,
+    AggOp, Aggregate, Args, Atom, Clause, Comparison, Constant, Declaration, Disjunct, Explain,
+    Expr, ExprKind, FieldDecl, Ident, Import, ImportKind, Literal, LiteralKind, NamedArg, Program,
+    Query, Sigil, Span, Statement, StatementKind, Term, TermKind, TypeName,
 };
 use crate::error::{Error, ErrorCode};
 use crate::lexer::{Token, TokenKind, lex};
@@ -442,6 +442,7 @@ impl Parser<'_> {
                         head,
                         body: Vec::new(),
                         span: join(start, end),
+                        disjunct: None,
                     }),
                     span: join(start, end),
                 }])
@@ -451,13 +452,20 @@ impl Parser<'_> {
                 let disjuncts = self.parse_body()?;
                 let end = self.expect(&TokenKind::Dot, "`.` to end the rule")?.span;
                 let span = join(start, end);
+                let of = disjuncts.len();
                 Ok(disjuncts
                     .into_iter()
-                    .map(|body| Statement {
+                    .enumerate()
+                    .map(|(i, (body, body_span))| Statement {
                         kind: StatementKind::Clause(Clause {
                             head: head.clone(),
                             body,
                             span,
+                            disjunct: (of > 1).then_some(Disjunct {
+                                index: i + 1,
+                                of,
+                                span: body_span,
+                            }),
                         }),
                         span,
                     })
@@ -469,10 +477,15 @@ impl Parser<'_> {
 
     /// Parses a rule body as a disjunction of conjunctions (top-level DNF, no
     /// parentheses in v1); `,` binds tighter than `;` (decision 7).
-    fn parse_body(&mut self) -> PResult<Vec<Vec<Literal>>> {
-        let mut disjuncts = vec![self.parse_conjunction()?];
+    /// Each disjunct comes with the span of its own literals.
+    fn parse_body(&mut self) -> PResult<Vec<(Vec<Literal>, Span)>> {
+        let spanned = |literals: Vec<Literal>| {
+            let span = join(literals[0].span, literals[literals.len() - 1].span);
+            (literals, span)
+        };
+        let mut disjuncts = vec![spanned(self.parse_conjunction()?)];
         while self.eat(&TokenKind::Semi) {
-            disjuncts.push(self.parse_conjunction()?);
+            disjuncts.push(spanned(self.parse_conjunction()?));
         }
         Ok(disjuncts)
     }

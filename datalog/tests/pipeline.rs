@@ -1086,3 +1086,30 @@ fn a_contradiction_inference_derived_from_a_rule_does_not_claim_values() {
         assert!(!message.contains("its values are"), "{message}");
     }
 }
+
+/// `bugs/013` — a rule `;` split reports its unsafe alternatives as a split:
+/// one error per alternative, at that alternative, naming every head variable
+/// it leaves unbound. Before, each of the rule's variables got its own error at
+/// the whole rule, and none said `;` had divided it.
+#[test]
+fn an_unsafe_alternative_of_a_split_rule_names_the_split() {
+    let src = "site(\"a\", \"f.ts\", 1).\n\
+               r(F, L) :- site(B, F, L), B = \"a\" ; B = \"b\" ; B = \"c\".\n\
+               ?- r(F, L).\n";
+    let errors = datalog::run(src).expect_err("two alternatives bind neither F nor L");
+    let unsafe_rules: Vec<String> = errors
+        .iter()
+        .filter(|e| e.code == ErrorCode::UnsafeRule)
+        .map(|e| e.to_string())
+        .collect();
+    assert_eq!(unsafe_rules.len(), 2, "{unsafe_rules:#?}");
+    for (rendered, (index, column)) in unsafe_rules.iter().zip([(2, 37), (3, 47)]) {
+        assert!(
+            rendered.contains(&format!("alternative {index} of 3")),
+            "{rendered}"
+        );
+        assert!(rendered.contains("`F`, `L`"), "{rendered}");
+        assert!(rendered.contains("`;` binds looser than `,`"), "{rendered}");
+        assert!(rendered.contains(&format!("(at 2:{column})")), "{rendered}");
+    }
+}

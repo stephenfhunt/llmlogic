@@ -2015,6 +2015,7 @@ fn arb_statement() -> impl Strategy<Value = Statement> {
             head,
             body: Vec::new(),
             span: Span::DUMMY,
+            disjunct: None,
         })
     });
     let rule = (
@@ -2026,6 +2027,7 @@ fn arb_statement() -> impl Strategy<Value = Statement> {
                 head,
                 body,
                 span: Span::DUMMY,
+                disjunct: None,
             })
         });
     // A query is named or not (§14). `count` is deliberately in the pool: it is a
@@ -2623,6 +2625,7 @@ pub(crate) fn positionalize(program: &Program) -> Program {
                     head: rewrite_atom(&clause.head),
                     body: rewrite_body(&clause.body),
                     span: clause.span,
+                    disjunct: clause.disjunct,
                 }),
                 span: statement.span,
             },
@@ -2738,6 +2741,7 @@ pub(crate) fn hoist_atom_args(program: &Program) -> Program {
                     head: clause.head.clone(),
                     body: rewrite_body(&clause.body),
                     span: clause.span,
+                    disjunct: clause.disjunct,
                 }),
                 span: statement.span,
             },
@@ -2900,6 +2904,7 @@ pub(crate) fn fold_ground_atom_args(program: &Program) -> Program {
                     head: fold_atom(&clause.head),
                     body: fold_body(&clause.body),
                     span: clause.span,
+                    disjunct: clause.disjunct,
                 }),
                 StatementKind::Query(query) => StatementKind::Query(Query {
                     name: query.name.clone(),

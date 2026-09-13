@@ -59,3 +59,37 @@ None recorded. Worth checking whether the same shape can produce a *silently
 wrong answer* rather than an error — a split clause all of whose fragments happen
 to be safe would derive extra rows with no diagnostic at all, which would make
 this `wrong-answer` rather than `usability`.
+
+## Resolution
+
+**Fixed 2026-09-13.** Both criteria landed.
+
+1. **The language guide** (`skill/SKILL.md`) now says `;` binds looser than `,`,
+   shows the expansion, and says there are no parentheses. It gives the idiom for
+   a filter on alternatives inside a longer body: a rule of their own
+   (`pick(B) :- B = "a" ; B = "b".`), joined. `spec.md` §5 already stated the
+   precedence, so the gap was the guide alone.
+2. **The diagnostic names the cause.** `ast::Clause` carries
+   `disjunct: Option<Disjunct { index, of, span }>`, set by the parser only for a
+   rule `;` split. `lower::check_rule_safety` gives an unsafe alternative **one**
+   error:
+   - it names every head variable that alternative leaves unbound;
+   - it says `alternative i of n` and that `;` split the whole body;
+   - it sits at the alternative's own span;
+   - it suggests the idiom above.
+
+   The repro's twelve errors are now three. A rule written without `;` renders
+   exactly as before: `experiments/reference/malformed/unbound-head.err` is
+   byte-identical.
+
+**The open question in Fallout is settled: no wrong answer.** A split whose
+alternatives are all safe is the stated semantics (§5 decision 7). It derives what
+the separate rules would, and the engine cannot tell an intended disjunction from a
+misread one. So no lint was added: it would fire on correct programs. The guide is
+the defence there.
+
+**Property**: testing.md **A16** runs over 2–4-alternative rules. Each rule has one
+alternative forced safe and one forced unsafe, so it cannot pass vacuously. It
+asserts one error per unsafe alternative, naming its position and the split, at its
+span. *Mutations (both killed, A16 and the pipeline test)*: drop the split note; use
+the rule's span.

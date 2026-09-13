@@ -381,6 +381,17 @@ variants:
   `Some(f)` implies `f.len() == arity` on every `ir::PredicateInfo` of every
   safe program.
 
+- [x] **A16** An unsafe alternative of a `;`-split rule is reported as one
+  (`bugs/013`, 2026-09-13): over 2–4-alternative rules mixing safe and unsafe
+  alternatives in three spellings each, exactly one `unsafe-rule` per unsafe
+  alternative and none for a safe one, each naming `alternative i of n` and the
+  split, at that alternative's own span
+  (`lower::…::a16_an_unsafe_alternative_names_the_split`). Guard: by
+  construction — every drawn rule forces one safe and one unsafe alternative, so
+  the sentence cannot hold vacuously. *Mutations (both killed)*: the split note
+  dropped from the message; the whole rule's span attached instead of the
+  alternative's.
+
 Named-argument defects injected by A11: unknown field, partial selection in a
 head, and named arguments on a predicate with no schema.
 

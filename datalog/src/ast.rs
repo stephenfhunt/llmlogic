@@ -219,6 +219,23 @@ pub struct Clause {
     pub head: Atom,
     pub body: Vec<Literal>,
     pub span: Span,
+    /// Which alternative of a `;`-split rule this clause is; `None` for a rule
+    /// written without `;`, and for a fact.
+    pub disjunct: Option<Disjunct>,
+}
+
+/// One alternative of a rule whose body `;` split (§5): `;` binds looser than
+/// `,`, so `h :- a, b ; c.` is the two clauses `h :- a, b.` and `h :- c.`. Kept
+/// so a diagnostic about one clause can say the split happened — the author
+/// may not know it did (`bugs/013`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Disjunct {
+    /// 1-based position among the rule's alternatives.
+    pub index: usize,
+    /// How many alternatives the rule has (at least 2).
+    pub of: usize,
+    /// This alternative's body alone, from its first literal to its last.
+    pub span: Span,
 }
 
 /// A query statement: `?- body.`, or `?- name: body.` when named (§14).
@@ -620,6 +637,7 @@ pub(crate) mod fixtures {
                 head: positional_atom(predicate, args),
                 body: Vec::new(),
                 span: Span::DUMMY,
+                disjunct: None,
             }),
             span: Span::DUMMY,
         }
@@ -631,6 +649,7 @@ pub(crate) mod fixtures {
                 head,
                 body,
                 span: Span::DUMMY,
+                disjunct: None,
             }),
             span: Span::DUMMY,
         }

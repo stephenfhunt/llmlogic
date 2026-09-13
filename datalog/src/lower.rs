@@ -615,7 +615,7 @@ impl Lowerer {
             var_names: scope.names,
             span: clause.span,
         };
-        self.check_rule_safety(&rule, &clause.head.predicate.name);
+        self.check_rule_safety(&rule, &clause.head.predicate.name, clause.disjunct);
         out.rules.push(rule);
     }
 
@@ -1365,7 +1365,17 @@ impl Lowerer {
     /// Pass 4 for rules: head variables must be bound by the body — a positive
     /// atom, an `=`-assignment, or an aggregate result (spec §17, 2026-07-21;
     /// scheduled rather than source-ordered since 2026-07-25).
-    fn check_rule_safety(&mut self, rule: &ir::Rule, head_name: &str) {
+    ///
+    /// An alternative of a `;`-split rule gets **one** error naming every head
+    /// variable it leaves unbound, at the alternative's own span, saying the
+    /// split happened (`bugs/013`): per-variable errors at the whole rule named
+    /// the symptom twelve times and never the cause.
+    fn check_rule_safety(
+        &mut self,
+        rule: &ir::Rule,
+        head_name: &str,
+        disjunct: Option<ast::Disjunct>,
+    ) {
         // A body that cannot be scheduled binds nothing reliably, so every head
         // variable would be reported unbound — cascading noise on top of the one
         // error that matters. `check_body_safety` reports that one.
@@ -1373,19 +1383,63 @@ impl Lowerer {
             schedule::schedule_body_with(&rule.body, &std::collections::HashSet::new()).is_ok();
         if schedulable {
             let bound = safe_bound_vars(&rule.body);
+            let mut unbound: Vec<&str> = Vec::new();
             for arg in &rule.head.args {
                 if let ir::Term::Var(var) = arg
                     && !bound.contains(&var.0)
                 {
-                    let name = rule.var_names[var.0 as usize].as_deref().unwrap_or("_");
-                    self.errors.push(self.semantic(
-                        ErrorCode::UnsafeRule,
-                        format!(
-                            "unsafe rule for `{head_name}`: head variable `{name}` is not bound \
-                         by the body — it must occur in a positive body atom, or be bound by \
-                         an `=`-assignment or an aggregate result"
+                    unbound.push(rule.var_names[var.0 as usize].as_deref().unwrap_or("_"));
+                }
+            }
+            match disjunct {
+                Some(split) if !unbound.is_empty() => {
+                    let mut names: Vec<&str> = Vec::new();
+                    for name in unbound {
+                        if !names.contains(&name) {
+                            names.push(name);
+                        }
+                    }
+                    let (noun, verb) = if names.len() == 1 {
+                        ("variable", "is")
+                    } else {
+                        ("variables", "are")
+                    };
+                    let listed = names
+                        .iter()
+                        .map(|name| format!("`{name}`"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let (index, of) = (split.index, split.of);
+                    self.errors.push(
+                        Error::new(
+                            ErrorCode::UnsafeRule,
+                            format!(
+                                "unsafe rule for `{head_name}`: head {noun} {listed} {verb} not \
+                             bound by alternative {index} of {of} — `;` binds looser than `,`, so \
+                             it split the whole body into {of} rules, and each must bind every \
+                             head variable itself (in a positive body atom, an `=`-assignment or \
+                             an aggregate result)"
+                            ),
+                        )
+                        .at_span(split.span)
+                        .suggest(
+                            "to filter on alternatives inside a longer body, give them a rule \
+                             of their own — `pick(B) :- B = \"a\" ; B = \"b\".` — and join \
+                             `pick(B)`",
                         ),
-                    ));
+                    );
+                }
+                _ => {
+                    for name in unbound {
+                        self.errors.push(self.semantic(
+                            ErrorCode::UnsafeRule,
+                            format!(
+                                "unsafe rule for `{head_name}`: head variable `{name}` is not \
+                             bound by the body — it must occur in a positive body atom, or be \
+                             bound by an `=`-assignment or an aggregate result"
+                            ),
+                        ));
+                    }
                 }
             }
         }
@@ -3028,6 +3082,7 @@ mod tests {
                         ),
                         body: Vec::new(),
                         span: Span::DUMMY,
+                        disjunct: None,
                     }),
                     span: Span::DUMMY,
                 },
@@ -3059,6 +3114,7 @@ mod tests {
                         ),
                         body: Vec::new(),
                         span: Span::DUMMY,
+                        disjunct: None,
                     }),
                     span: Span::DUMMY,
                 },
@@ -3205,7 +3261,76 @@ mod tests {
             slots
         }
 
+        /// A rule of 2–4 `;`-alternatives as text, with the byte offset each
+        /// alternative starts at and whether it binds both head variables.
+        /// `forced_safe` and `forced_unsafe` pick one alternative of each kind,
+        /// so every drawn rule mixes the two — the property's sentence is about
+        /// an unsafe alternative *beside* the others, and it cannot hold
+        /// vacuously.
+        fn arb_split_rule() -> impl Strategy<Value = (String, Vec<(usize, bool)>)> {
+            (2usize..=4)
+                .prop_flat_map(|of| {
+                    (
+                        Just(of),
+                        0..of,
+                        1..of,
+                        prop::collection::vec((any::<bool>(), 0usize..3), of),
+                    )
+                })
+                .prop_map(|(of, forced_safe, shift, draws)| {
+                    let forced_unsafe = (forced_safe + shift) % of;
+                    let mut src = String::from("a(1). b(1, 2).\nh(X, Y) :- ");
+                    let mut alternatives = Vec::new();
+                    for (i, (safe, form)) in draws.into_iter().enumerate() {
+                        let safe = (safe || i == forced_safe) && i != forced_unsafe;
+                        if i > 0 {
+                            src.push_str(" ; ");
+                        }
+                        alternatives.push((src.len(), safe));
+                        src.push_str(match (safe, form) {
+                            (true, 0) => "b(X, Y)",
+                            (true, 1) => "a(X), Y = X + 1",
+                            (true, _) => "b(Y, X), a(Y)",
+                            (false, 0) => "a(X)",
+                            (false, 1) => "X = 1",
+                            (false, _) => "a(Z), b(Z, W)",
+                        });
+                    }
+                    src.push_str(".\n");
+                    (src, alternatives)
+                })
+        }
+
         proptest! {
+            /// **A16** — an unsafe alternative of a `;`-split rule is reported
+            /// as one: exactly one `unsafe-rule` error per unsafe alternative
+            /// and none for a safe one, each naming its alternative's position
+            /// and the split, and each carrying that alternative's span
+            /// (`bugs/013`).
+            #[test]
+            fn a16_an_unsafe_alternative_names_the_split((src, alternatives) in arb_split_rule()) {
+                let program = crate::parser::parse(&src).expect("parses");
+                let errors = lower(&program).expect_err("one alternative is unsafe by construction");
+                let of = alternatives.len();
+                let unsafe_rules: Vec<_> = errors
+                    .iter()
+                    .filter(|e| e.code == crate::error::ErrorCode::UnsafeRule)
+                    .collect();
+                let expected: Vec<(usize, usize)> = alternatives
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, (_, safe))| !safe)
+                    .map(|(i, (start, _))| (i + 1, *start))
+                    .collect();
+                prop_assert_eq!(unsafe_rules.len(), expected.len(), "{}\n{:#?}", src, errors);
+                for (error, (index, start)) in unsafe_rules.iter().zip(expected) {
+                    let named = format!("alternative {index} of {of}");
+                    prop_assert!(error.message.contains(&named), "{}\n{}", src, error);
+                    prop_assert!(error.message.contains("`;` binds looser"), "{}\n{}", src, error);
+                    prop_assert_eq!(error.span.map(|s| s.start as usize), Some(start), "{}\n{}", src, error);
+                }
+            }
+
             /// A6 (no panic), A7 (determinism), A8 (dense numbering),
             /// A9 (body order preserved), A10 (interning closed),
             /// A12 (fact/rule split + single stratum) over safe-by-construction
