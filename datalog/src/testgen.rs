@@ -2171,6 +2171,21 @@ pub(crate) fn with_permuted_bodies(mut program: ir::Program, picks: &[u16]) -> i
     program
 }
 
+/// D6 at size: the program text with every query's body reversed. The
+/// evaluation generator writes a query's negations after its positive atoms,
+/// so reversed, a negation names a variable first — and slots number by first
+/// appearance, so a single-atom query's answer rows stop being in the atom's
+/// argument order. That is the case where printing must sort.
+pub(crate) fn with_reversed_query_bodies(src: &str) -> String {
+    let mut program = crate::parser::parse(src).expect("generated text parses");
+    for statement in &mut program.statements {
+        if let crate::ast::StatementKind::Query(query) = &mut statement.kind {
+            query.body.reverse();
+        }
+    }
+    crate::print::print_program(&program)
+}
+
 /// B6: swaps two rule ids within one stratum, changing rule application order
 /// but not membership.
 pub(crate) fn with_swapped_stratum_rules(

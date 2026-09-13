@@ -1260,6 +1260,256 @@ parsed(K, V) :- raw(K, S), V = S as int.
         );
     }
 
+    // ---- Printing from the model (§14; `testing.md` D6) ----------------------
+
+    /// The eager renderer, kept as D6's oracle: every row answered into owned
+    /// values, then every line rendered, sorted by name and value.
+    fn reference_answer_lines(
+        query: &ir::Query,
+        rows: &[Vec<ir::Value>],
+        program: &ir::Program,
+    ) -> Vec<String> {
+        let position_of: HashMap<u32, usize> = query
+            .projection
+            .iter()
+            .enumerate()
+            .map(|(position, &slot)| (slot, position))
+            .collect();
+        let atoms: Vec<&ir::Atom> = query
+            .body
+            .iter()
+            .filter_map(|literal| match &literal.kind {
+                ir::BodyLiteralKind::Atom(atom) => Some(atom),
+                _ => None,
+            })
+            .collect();
+        let atom_vars: BTreeSet<u32> = atoms
+            .iter()
+            .flat_map(|atom| atom.args.iter())
+            .filter_map(|term| match term {
+                ir::Term::Var(var) => Some(var.0),
+                ir::Term::Const(_) => None,
+            })
+            .collect();
+        let projected: BTreeSet<u32> = query.projection.iter().copied().collect();
+        if !atoms.is_empty() && atom_vars == projected && (atoms.len() == 1 || atom_vars.is_empty())
+        {
+            let mut facts: Vec<(String, Vec<ir::Value>)> = rows
+                .iter()
+                .flat_map(|row| {
+                    atoms.iter().map(|atom| {
+                        let tuple = atom
+                            .args
+                            .iter()
+                            .map(|term| match term {
+                                ir::Term::Const(value) => value.clone(),
+                                ir::Term::Var(var) => row[position_of[&var.0]].clone(),
+                            })
+                            .collect();
+                        (program.pred_info(atom.pred).name.clone(), tuple)
+                    })
+                })
+                .collect();
+            facts.sort();
+            facts.dedup();
+            return facts
+                .iter()
+                .map(|(name, values)| print_ground_fact(name, values))
+                .collect();
+        }
+        if projected.is_empty() {
+            return if rows.is_empty() {
+                Vec::new()
+            } else {
+                vec![print_ground_fact("holds", &[ir::Value::Bool(true)])]
+            };
+        }
+        rows.iter()
+            .map(|row| print_ground_fact("answer", row))
+            .collect()
+    }
+
+    /// **D6** for one program: what a run prints is the eager renderer's lines
+    /// over the run's own model, query by query and then byte for byte with the
+    /// explanations after. Lowered again here only to hand the oracle the
+    /// queries; the model is the run's, pruned as the run pruned it.
+    fn d6_holds(src: &str) -> std::result::Result<(), TestCaseError> {
+        let result =
+            run(src).map_err(|errors| TestCaseError::fail(format!("{errors:?}\n{src}")))?;
+        let program = lower(&parse(src).expect("parses")).expect("lowers");
+        let expected: Vec<Vec<String>> = program
+            .queries
+            .iter()
+            .map(|query| {
+                let rows = result.model.answer(query).expect("answers");
+                reference_answer_lines(query, &rows, &program)
+            })
+            .collect();
+        prop_assert_eq!(&result.answers, &expected, "{}", src);
+        let mut bytes = String::new();
+        for line in expected.iter().chain(&result.explanations).flatten() {
+            bytes.push_str(line);
+            bytes.push('\n');
+        }
+        prop_assert_eq!(result.output(), bytes, "{}", src);
+        Ok(())
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(crate::testgen::cases(32)))]
+
+        /// **D6 at `Tier::Medium`** — `Large` in the deep run — as generated and
+        /// with every query body reversed.
+        #[test]
+        fn d6_printing_is_the_eager_rendering_at_medium(
+            generated in crate::testgen::arb_program_text_at(
+                crate::testgen::Tier::Medium.scaled()
+            ),
+        ) {
+            d6_holds(&generated.0)?;
+            d6_holds(&crate::testgen::with_reversed_query_bodies(&generated.0))?;
+        }
+
+        /// **D6 at `Tier::Large`** — `Deep` in the deep run.
+        #[test]
+        fn d6_printing_is_the_eager_rendering_at_large(
+            generated in crate::testgen::arb_program_text_at(
+                crate::testgen::Tier::Large.scaled()
+            ),
+        ) {
+            d6_holds(&generated.0)?;
+            d6_holds(&crate::testgen::with_reversed_query_bodies(&generated.0))?;
+        }
+
+        /// **D6 over analysis-shaped programs**: whole closures printed as
+        /// bare atoms, the case printing a large answer is.
+        #[test]
+        fn d6_printing_is_the_eager_rendering_over_shaped_programs(
+            generated in crate::testgen::arb_shaped_program(crate::testgen::SHAPED_LARGE),
+        ) {
+            d6_holds(&generated.0)?;
+        }
+    }
+
+    /// What D6's generators reach, classified off the lowered query rather than
+    /// the text (`testing.md` rule 2): each answer shape; a body that is one
+    /// atom alone, with a constant, a repeated variable, a wildcard after every
+    /// variable and one before; and a single-atom query whose slots are not in
+    /// argument order. Each counts only when the query answered a row.
+    #[test]
+    fn d6_generators_reach_every_printing_case() {
+        use proptest::strategy::{Strategy, ValueTree};
+        use proptest::test_runner::TestRunner;
+
+        let mut runner = TestRunner::deterministic();
+        let strategy = crate::testgen::arb_program_text_at(crate::testgen::Tier::Medium);
+        let mut reached: BTreeMap<&str, usize> = BTreeMap::new();
+        for _ in 0..200 {
+            let (text, _) = strategy
+                .new_tree(&mut runner)
+                .expect("strategy produces a value")
+                .current();
+            for src in [
+                text.clone(),
+                crate::testgen::with_reversed_query_bodies(&text),
+            ] {
+                let result = run(&src).expect("generated programs run");
+                let program = lower(&parse(&src).expect("parses")).expect("lowers");
+                for (query, lines) in program.queries.iter().zip(&result.answers) {
+                    if lines.is_empty() {
+                        continue;
+                    }
+                    for case in printing_cases(query) {
+                        *reached.entry(case).or_default() += 1;
+                    }
+                }
+            }
+        }
+        for case in [
+            "substituted",
+            "answer/N",
+            "atom alone",
+            "atom alone, constant",
+            "atom alone, repeated variable",
+            "atom alone, wildcard after",
+            "atom alone, wildcard before",
+            "slots out of argument order",
+        ] {
+            assert!(
+                reached.get(case).is_some_and(|&n| n > 0),
+                "D6's generator never reached `{case}` with an answer: {reached:?}"
+            );
+        }
+    }
+
+    /// The cases [`d6_generators_reach_every_printing_case`] counts.
+    fn printing_cases(query: &ir::Query) -> Vec<&'static str> {
+        let mut cases = Vec::new();
+        let atoms: Vec<&ir::Atom> = query
+            .body
+            .iter()
+            .filter_map(|literal| match &literal.kind {
+                ir::BodyLiteralKind::Atom(atom) => Some(atom),
+                _ => None,
+            })
+            .collect();
+        let named = |var: &ir::Var| query.var_names[var.0 as usize].is_some();
+        if atoms.len() == 1 && query.body.len() == 1 {
+            let args = &atoms[0].args;
+            cases.push("atom alone");
+            if args.iter().any(|term| matches!(term, ir::Term::Const(_))) {
+                cases.push("atom alone, constant");
+            }
+            let vars: Vec<&ir::Var> = args
+                .iter()
+                .filter_map(|term| match term {
+                    ir::Term::Var(var) => Some(var),
+                    ir::Term::Const(_) => None,
+                })
+                .collect();
+            if vars
+                .iter()
+                .enumerate()
+                .any(|(i, var)| vars[..i].contains(var))
+            {
+                cases.push("atom alone, repeated variable");
+            }
+            let wildcard = vars.iter().position(|var| !named(var));
+            let last_named = vars.iter().rposition(|var| named(var));
+            match (wildcard, last_named) {
+                (Some(w), Some(n)) if w > n => cases.push("atom alone, wildcard after"),
+                (Some(_), Some(_)) => cases.push("atom alone, wildcard before"),
+                _ => {}
+            }
+        }
+        let projected: BTreeSet<u32> = query.projection.iter().copied().collect();
+        let atom_vars: BTreeSet<u32> = atoms
+            .iter()
+            .flat_map(|atom| atom.args.iter())
+            .filter_map(|term| match term {
+                ir::Term::Var(var) => Some(var.0),
+                ir::Term::Const(_) => None,
+            })
+            .collect();
+        if atoms.len() == 1 && atom_vars == projected && !projected.is_empty() {
+            cases.push("substituted");
+            let mut firsts: Vec<u32> = Vec::new();
+            for term in &atoms[0].args {
+                if let ir::Term::Var(var) = term
+                    && !firsts.contains(&var.0)
+                {
+                    firsts.push(var.0);
+                }
+            }
+            if firsts.windows(2).any(|pair| pair[0] > pair[1]) {
+                cases.push("slots out of argument order");
+            }
+        } else if !projected.is_empty() {
+            cases.push("answer/N");
+        }
+        cases
+    }
+
     // ---- Rule pruning (§15, §17 2026-09-12; `testing.md` B13) ---------------
 
     /// A relation read **only under `not`** is still evaluated. Pruning it would
