@@ -1367,8 +1367,8 @@ and the asking form, which is also what unblocked E5.
   recorder is provisioned by the run (§17, 2026-08-21), so the same program under
   `Provenance::Recorded`, `Provenance::Reports` and `Provenance::Unrecorded` must
   produce the identical model and the identical answer to every query — which is
-  the claim that the three provenance-only maps (`derivations`, `base`,
-  `first_round`) never feed the fixpoint. This is the profile's own answer guard
+  the claim that the provenance-only maps (`derivations`, `first_round`) never
+  feed the fixpoint. This is the profile's own answer guard
   promoted to a property: it was a stdout digest over 26 programs run from a
   scratch build (`notes/profile-2026-08-20.md`) that was then thrown away, and as
   a property it outlives the build and the corpus both.
@@ -1436,6 +1436,15 @@ and the asking form, which is also what unblocked E5.
     predicate near-misses; drop the absent-key guard. Non-vacuity: a guard pins
     that the generator reaches a near-miss carrying both a satisfied premise and
     a fact-naming repair.
+- [x] **E11** **Base facts are the program's, at round 0; every other held fact
+  is stamped from round 1.** The recorder keeps no base set. A held fact with no
+  round stamp is a base fact, because every base fact loads before the first
+  round and a round stamps only what it inserts. The claim is stated from
+  `program.facts`, not from the stamp, so it fails if either half breaks. Over
+  `arb_program_with_edb`, and at `Tier::Medium` (`Large` in the deep run).
+  - *Mutations (both killed, with E1 and E2):* `insert_base` stamps round 0;
+    a rediscovered fact is stamped. Non-vacuity: a guard pins that the generator
+    re-derives an asserted fact, the case the second mutation is about (4 of 48).
 
 ### Phase F — §13 imports (roadmap step 7) — generalizes §16.5, §16.7
 

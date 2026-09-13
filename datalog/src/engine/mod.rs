@@ -67,19 +67,19 @@ use crate::temporal;
 /// so — and `?whynot` needs the model and a re-solve, not a store, which is what
 /// makes the sigil worth having (`notes/provenance-asking-form.md`).
 ///
-/// The three maps it gates are **provenance-only**: nothing in evaluation reads
+/// The maps it gates are **provenance-only**: nothing in evaluation reads
 /// [`Model::is_base`], [`Model::first_round`] or [`Model::derivations_of`], so
 /// the answers are identical either way — which is `testing.md` **E9**, not an
 /// assumption.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Provenance {
-    /// Derivations, base membership and first-appearance rounds are stored;
+    /// Derivations and derived facts' first-appearance rounds are stored;
     /// [`crate::provenance::ProofTree::explain`] can answer.
     Recorded,
     /// Only the derivations §9's skip count and §12's malformed count are read
     /// out of — those whose premises actually skipped an `absent` input or lost
-    /// a conversion ([`Derivation::reports`]). Base membership and rounds are
-    /// not stored, and no proof can be extracted.
+    /// a conversion ([`Derivation::reports`]). Rounds are not stored, so base
+    /// membership cannot be read either, and no proof can be extracted.
     ///
     /// It exists because "skip but **report**" provisions the recorder for a
     /// program that asks nothing: an aggregate or a cast anywhere in a rule body
@@ -112,14 +112,17 @@ pub struct Model {
     relations: Vec<BTreeSet<Tuple>>,
     /// All derivations per derived fact, rule-instance-deduplicated.
     derivations: HashMap<Fact, BTreeSet<Derivation>>,
-    /// Facts asserted by the program (set-collapsed). A fact can be both base
-    /// and derived; base membership is what makes a proof-tree leaf.
-    base: BTreeSet<Fact>,
-    /// Fixpoint round each fact first appeared in (base facts: round 0).
-    /// Monotone across strata; guarantees a well-founded derivation choice
-    /// exists for every fact, so proof trees are finite.
+    /// Fixpoint round each *derived* fact first appeared in, from 1. Monotone
+    /// across strata; guarantees a well-founded derivation choice exists for
+    /// every fact, so proof trees are finite.
+    ///
+    /// Base facts carry no entry: every one is loaded before the first round,
+    /// and a fact is stamped only when a round inserts it, so a held fact with
+    /// no stamp is exactly a base fact, at round 0. A fact both asserted and
+    /// derived is base. Keeping the base set as its own map held every base
+    /// fact twice more (`testing.md` **E11**).
     first_round: HashMap<Fact, u32>,
-    /// Whether the three maps above were populated at all.
+    /// Whether the maps above were populated at all.
     provenance: Provenance,
 }
 
@@ -128,7 +131,6 @@ impl Model {
         Model {
             relations: vec![BTreeSet::new(); num_predicates],
             derivations: HashMap::new(),
-            base: BTreeSet::new(),
             first_round: HashMap::new(),
             provenance,
         }
@@ -173,7 +175,9 @@ impl Model {
 
     /// Was `fact` asserted by the program (as opposed to only derived)?
     pub fn is_base(&self, fact: &Fact) -> bool {
-        self.base.contains(fact)
+        self.provenance == Provenance::Recorded
+            && !self.first_round.contains_key(fact)
+            && self.contains(fact)
     }
 
     /// The fixpoint round `fact` first appeared in (0 for base facts), or
@@ -187,7 +191,10 @@ impl Model {
     /// Facts derived in the same round are therefore never ordered against each
     /// other, and never need to be.
     pub fn first_round(&self, fact: &Fact) -> Option<u32> {
-        self.first_round.get(fact).copied()
+        match self.first_round.get(fact) {
+            Some(&round) => Some(round),
+            None => self.is_base(fact).then_some(0),
+        }
     }
 
     /// Answers a query as a projection over the model (spec §17): one row per
@@ -272,18 +279,13 @@ impl Model {
 
     /// Loads a program-asserted fact (round 0; duplicates collapse).
     ///
-    /// Base membership and the round stamp are provenance, not evaluation, so
-    /// an [`Provenance::Unrecorded`] run stores neither — each is a second
-    /// fact-keyed copy of the whole EDB, which on an imported table is the
-    /// larger half of what is being saved.
+    /// Into its relation and nowhere else, whatever the provisioning: base
+    /// membership and round 0 are read off the absence of a stamp
+    /// ([`first_round`](Self::first_round)'s field), because each as a map of
+    /// its own was a fact-keyed copy of the whole EDB — on an imported table,
+    /// most of what a recorded run held.
     fn insert_base(&mut self, fact: Fact) {
-        if self.provenance == Provenance::Recorded {
-            self.relations[fact.pred.0 as usize].insert(fact.tuple.clone());
-            self.first_round.entry(fact.clone()).or_insert(0);
-            self.base.insert(fact);
-        } else {
-            self.relations[fact.pred.0 as usize].insert(fact.tuple);
-        }
+        self.relations[fact.pred.0 as usize].insert(fact.tuple);
     }
 
     /// Records one derivation, returning the fact's tuple if the fact itself is
@@ -349,7 +351,7 @@ pub fn eval(program: &Program) -> Result<Model> {
 
 /// [`eval`], provisioning the recorder explicitly (§17, 2026-08-21).
 ///
-/// [`Provenance::Unrecorded`] skips the three provenance-only maps; the model's
+/// [`Provenance::Unrecorded`] skips the provenance-only maps; the model's
 /// relations, and so every answer, are identical (`testing.md` **E9**). Use it
 /// for a run that will not be asked for a proof — which the surface decides from
 /// the program's own goals, and a library caller decides for itself.
@@ -4341,6 +4343,38 @@ mod tests {
             })
         }
 
+        /// **E11** — a recorded model's base facts are exactly the program's
+        /// asserted facts, at round 0, and every other held fact was stamped by a
+        /// round, from 1.
+        ///
+        /// `Model` keeps no base set: membership is read off a held fact having no
+        /// stamp, which rests on every base fact loading before the first round
+        /// and a round stamping only what it inserts. This states the claim from
+        /// the program's own facts instead, so it fails if either half breaks.
+        fn e11_holds(program: &Program) -> std::result::Result<(), TestCaseError> {
+            let model = capped(program, Provenance::Recorded)?;
+            let asserted: BTreeSet<&Fact> = program.facts.iter().collect();
+            for fact in &program.facts {
+                prop_assert!(model.contains(fact), "asserted {:?} does not hold", fact);
+            }
+            for fact in model.facts() {
+                let base = asserted.contains(&fact);
+                prop_assert_eq!(model.is_base(&fact), base, "base membership of {:?}", fact);
+                let round = model.first_round(&fact);
+                if base {
+                    prop_assert_eq!(round, Some(0), "base fact {:?} is not round 0", fact);
+                } else {
+                    prop_assert!(
+                        round.is_some_and(|r| r >= 1),
+                        "derived fact {:?} has round {:?}",
+                        fact,
+                        round
+                    );
+                }
+            }
+            Ok(())
+        }
+
         /// **E9**'s claims about one program, shared by the property over
         /// [`arb_program_with_edb`] and the one over shaped programs.
         fn e9_holds(program: &Program) -> std::result::Result<(), TestCaseError> {
@@ -4632,6 +4666,27 @@ mod tests {
             }
         }
 
+        /// E11's non-vacuity guard (`testing.md` rule 2): its hard case is a fact
+        /// the program asserts *and* a rule derives again, which must stay base
+        /// and unstamped. Counted over 48 samples of the generator E11 draws; the
+        /// floor is about two thirds of the 4 measured.
+        #[test]
+        fn e11_generator_rederives_an_asserted_fact() {
+            let cases = sample(arb_program_with_edb(), 48);
+            let reached = cases
+                .iter()
+                .filter(|program| {
+                    let model = eval(program).unwrap();
+                    program
+                        .facts
+                        .iter()
+                        .any(|fact| model.derivations_of(fact).next().is_some())
+                })
+                .count();
+            eprintln!("{reached} of 48 rederive an asserted fact");
+            assert!(reached >= 3, "{reached} of 48 (floor 3)");
+        }
+
         /// The growth guard for [`arb_program_with_edb_at`] (`testing.md` rule 2):
         /// each tier reaches, on the recorded run, what the tier below does not —
         /// deeper fixpoints (rounds, strata), larger models (derived facts, the
@@ -4734,6 +4789,14 @@ mod tests {
             ) {
                 let src = format!("{}\n(queries kept by mask {mask:#010b})", generated.0);
                 b13_holds(&src, &keep_queries(generated.1, mask))?;
+            }
+
+            /// **E11 at `Tier::Medium`** — and `Large` in the deep run.
+            #[test]
+            fn e11_base_facts_are_the_programs_at_medium(
+                generated in crate::testgen::arb_program_text_at(Tier::Medium.scaled()),
+            ) {
+                e11_holds(&generated.1)?;
             }
         }
 
@@ -6041,6 +6104,13 @@ mod tests {
                 }
             }
 
+            /// E11 — base facts are the program's, at round 0; the rest are
+            /// stamped from round 1.
+            #[test]
+            fn e11_base_facts_are_the_programs_at_round_zero(program in arb_program_with_edb()) {
+                e11_holds(&program)?;
+            }
+
             /// E2 — every fact has a proof, and every leaf is a base fact.
             #[test]
             fn e2_proof_leaves_are_base_facts(program in arb_program_with_edb()) {
@@ -6151,7 +6221,7 @@ mod tests {
             /// (`notes/profile-2026-08-20.md`), which established this by
             /// stdout digest over 26 programs from a scratch build that was
             /// then thrown away; as a property it outlives the build. What it
-            /// pins is that the three provenance-only maps never feed the
+            /// pins is that the provenance-only maps never feed the
             /// fixpoint — if any of them did, skipping them would move a row.
             ///
             /// The second half is what keeps a caller honest, and is the whole
