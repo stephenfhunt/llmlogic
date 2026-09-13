@@ -482,6 +482,11 @@ compared keyed by predicate *name*, not `PredId`.
   worked before could silently change pruning order (observable on the error
   path). Both were verified by mutation: reversing the tie-break, or making an
   aggregate ignore its group keys, fails the suite.
+  **At size.** `b5_body_order_is_irrelevant_at_medium` and `…_at_large` permute
+  every rule's body at once (`testgen::with_permuted_bodies`) over
+  `arb_program_with_edb_at` (§ Generator sizes). *Mutation (killed, 2 of 2
+  runs):* B1's `Old` read reddens both, and `b5_body_order_is_irrelevant` stays
+  green — the read loses instances only in bodies of three or more atoms.
 - [x] **B6** Rule-order invariance within a stratum.
 - [x] **B7** Independent oracle for a fixed shape: random `parent` edge sets
   into the §16.1 ancestor program vs. a hand-rolled DFS transitive closure
@@ -623,7 +628,12 @@ compared keyed by predicate *name*, not `PredId`.
     proof half is the check that shifted round stamps change no proof. **Neither
     mutation reddens it** in 256 cases: that generator's negated relations are
     rarely derived and it draws no aggregates, which is why the text level
-    exists.
+    exists. Its tiers, `…_at_medium` and `…_at_large`,
+    keep a drawn subset of the queries (`keep_queries`): a sized program's goals
+    read nearly every predicate and leave nothing to prune. *Mutation:* skipping
+    `Dep::Negated` reddens `_at_medium` in 2 of 3 runs and `_at_large` in none, so
+    the text level stays the negation walk's guard. Guard:
+    `tiered_b13_generator_prunes_a_rule_beside_a_derived_live_fact`.
   - `api::tests::b13_the_corpus_answers_the_same_pruned` — every
     `tests/programs/*.dl` but `nonterminating.dl`, errors included.
   - `api::tests::b13_pruned_loading_changes_no_answer` — the import half: the

@@ -2155,6 +2155,22 @@ pub(crate) fn with_swapped_body(
     program
 }
 
+/// B5 at size: permutes the body of **every** rule — one swap in one rule is a
+/// weak move once a program has a dozen rules of four atoms. Each body is
+/// shuffled by repeated removal, drawing picks from `picks` in turn (cycling),
+/// so all-zero picks are the identity and shrinking heads there.
+pub(crate) fn with_permuted_bodies(mut program: ir::Program, picks: &[u16]) -> ir::Program {
+    let mut picks = picks.iter().copied().cycle();
+    for rule in &mut program.rules {
+        let mut pool = std::mem::take(&mut rule.body);
+        while !pool.is_empty() {
+            let pick = picks.next().unwrap_or(0) as usize % pool.len();
+            rule.body.push(pool.remove(pick));
+        }
+    }
+    program
+}
+
 /// B6: swaps two rule ids within one stratum, changing rule application order
 /// but not membership.
 pub(crate) fn with_swapped_stratum_rules(

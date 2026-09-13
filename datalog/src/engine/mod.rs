@@ -4397,6 +4397,107 @@ mod tests {
             Ok(())
         }
 
+        /// **B5** for one program: permuting every rule's body changes no fact
+        /// (`testgen::with_permuted_bodies`).
+        fn b5_holds(
+            src: &str,
+            program: &Program,
+            picks: &[u16],
+        ) -> std::result::Result<(), TestCaseError> {
+            let expected = model_facts(&capped(program, Provenance::Recorded)?);
+            let permuted = crate::testgen::with_permuted_bodies(program.clone(), picks);
+            let got = model_facts(&capped(&permuted, Provenance::Recorded)?);
+            prop_assert_eq!(got, expected, "{}", src);
+            Ok(())
+        }
+
+        /// **B13** for one program: evaluating only the live rules changes no
+        /// answer, no live relation and no proof of a live fact (the property's
+        /// sentence is on `b13_pruning_changes_no_live_relation`).
+        fn b13_holds(src: &str, program: &Program) -> std::result::Result<(), TestCaseError> {
+            let Some(live) = crate::lower::live_predicates(program) else {
+                return Ok(());
+            };
+            let full = capped(program, Provenance::Recorded)?;
+            let pruned = eval_capped(program, ROUND_CAP, Provenance::Recorded, Some(&live))
+                .map_err(|capped| TestCaseError::fail(format!("pruned run: {capped:?}")))?;
+            for query in &program.queries {
+                prop_assert_eq!(
+                    pruned.answer(query).unwrap(),
+                    full.answer(query).unwrap(),
+                    "{}",
+                    src
+                );
+            }
+            let restrict = |model: &Model| -> Vec<Fact> {
+                model
+                    .facts()
+                    .filter(|fact| live[fact.pred.0 as usize])
+                    .collect()
+            };
+            prop_assert_eq!(restrict(&pruned), restrict(&full), "{}", src);
+            for fact in restrict(&full) {
+                prop_assert_eq!(
+                    ProofTree::explain(&pruned, &fact),
+                    ProofTree::explain(&full, &fact),
+                    "pruning changed the proof of a live fact\n{}",
+                    src
+                );
+            }
+            Ok(())
+        }
+
+        /// The program with only the queries `mask` selects (bit `i % 8` keeps
+        /// query `i`), and at least its first. A sized program's queries read
+        /// nearly every predicate, which leaves nothing for B13's walk to prune;
+        /// fewer goals leave more rules dead and more relations live only through
+        /// a negation or an aggregate.
+        fn keep_queries(mut program: Program, mask: u8) -> Program {
+            let mut index = 0;
+            let first = program.queries.first().cloned();
+            program.queries.retain(|_| {
+                index += 1;
+                mask >> ((index - 1) % 8) & 1 == 1
+            });
+            if program.queries.is_empty() {
+                program.queries.extend(first);
+            }
+            program
+        }
+
+        /// B13's sentence at a tier: some rule pruned beside a live relation that
+        /// holds a derived fact, counted over 48 samples with the query mask the
+        /// tiered properties draw.
+        /// Floors at about two thirds of the 6 and 11 measured.
+        #[test]
+        fn tiered_b13_generator_prunes_a_rule_beside_a_derived_live_fact() {
+            for (tier, floor) in [(Tier::Medium, 4), (Tier::Large, 7)] {
+                let cases = sample((arb_program_with_edb_at(tier), any::<u8>()), 48);
+                let reached = cases
+                    .into_iter()
+                    .filter(|(program, mask)| {
+                        let program = keep_queries(program.clone(), *mask);
+                        let Some(live) = crate::lower::live_predicates(&program) else {
+                            return false;
+                        };
+                        let model = eval(&program).unwrap();
+                        program
+                            .rules
+                            .iter()
+                            .any(|rule| !live[rule.head.pred.0 as usize])
+                            && model
+                                .facts()
+                                .any(|fact| live[fact.pred.0 as usize] && !model.is_base(&fact))
+                    })
+                    .count();
+                eprintln!("{tier:?}: {reached} of 48 prune a rule beside a derived live fact");
+                assert!(
+                    reached >= floor,
+                    "{tier:?}: {reached} of 48 (floor {floor})"
+                );
+            }
+        }
+
         /// The growth guard for [`arb_program_with_edb_at`] (`testing.md` rule 2):
         /// each tier reaches, on the recorded run, what the tier below does not —
         /// deeper fixpoints (rounds, strata), larger models (derived facts, the
@@ -4481,6 +4582,25 @@ mod tests {
             ) {
                 b1_holds(&generated.0, &generated.1)?;
             }
+
+            /// **B5 at `Tier::Medium`**, every body permuted at once.
+            #[test]
+            fn b5_body_order_is_irrelevant_at_medium(
+                generated in crate::testgen::arb_program_text_at(Tier::Medium.scaled()),
+                picks in proptest::collection::vec(any::<u16>(), 0..64),
+            ) {
+                b5_holds(&generated.0, &generated.1, &picks)?;
+            }
+
+            /// **B13 at `Tier::Medium`**.
+            #[test]
+            fn b13_pruning_changes_no_live_relation_at_medium(
+                generated in crate::testgen::arb_program_text_at(Tier::Medium.scaled()),
+                mask in any::<u8>(),
+            ) {
+                let src = format!("{}\n(queries kept by mask {mask:#010b})", generated.0);
+                b13_holds(&src, &keep_queries(generated.1, mask))?;
+            }
         }
 
         proptest! {
@@ -4499,6 +4619,25 @@ mod tests {
                 generated in crate::testgen::arb_program_text_at(Tier::Large),
             ) {
                 b1_holds(&generated.0, &generated.1)?;
+            }
+
+            /// **B5 at `Tier::Large`** — `Deep` in the deep run: no naive oracle.
+            #[test]
+            fn b5_body_order_is_irrelevant_at_large(
+                generated in crate::testgen::arb_program_text_at(Tier::Large.scaled()),
+                picks in proptest::collection::vec(any::<u16>(), 0..64),
+            ) {
+                b5_holds(&generated.0, &generated.1, &picks)?;
+            }
+
+            /// **B13 at `Tier::Large`** — `Deep` in the deep run.
+            #[test]
+            fn b13_pruning_changes_no_live_relation_at_large(
+                generated in crate::testgen::arb_program_text_at(Tier::Large.scaled()),
+                mask in any::<u8>(),
+            ) {
+                let src = format!("{}\n(queries kept by mask {mask:#010b})", generated.0);
+                b13_holds(&src, &keep_queries(generated.1, mask))?;
             }
         }
 
@@ -6286,25 +6425,7 @@ mod tests {
             /// `api::tests::b13_…`'s job; this generator draws no aggregates.
             #[test]
             fn b13_pruning_changes_no_live_relation(program in arb_program_with_edb()) {
-                let Some(live) = crate::lower::live_predicates(&program) else {
-                    return Ok(());
-                };
-                let full = eval_with(&program, Provenance::Recorded).unwrap();
-                let pruned = eval_pruned(&program, Provenance::Recorded, Some(&live)).unwrap();
-                for query in &program.queries {
-                    prop_assert_eq!(pruned.answer(query).unwrap(), full.answer(query).unwrap());
-                }
-                let restrict = |model: &Model| -> Vec<Fact> {
-                    model.facts().filter(|fact| live[fact.pred.0 as usize]).collect()
-                };
-                prop_assert_eq!(restrict(&pruned), restrict(&full));
-                for fact in restrict(&full) {
-                    prop_assert_eq!(
-                        ProofTree::explain(&pruned, &fact),
-                        ProofTree::explain(&full, &fact),
-                        "pruning changed the proof of a live fact"
-                    );
-                }
+                b13_holds("", &program)?;
             }
         }
 
