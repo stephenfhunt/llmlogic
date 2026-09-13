@@ -198,13 +198,15 @@ untested(S) :- exports(symbol: S, kind: local), fn(id: S), not covered(S).
     it" query calls it dead. `exports.dl` follows both; a query of your own over
     `ref` should too (`exports(kind: reexport)` onto a `symbol(kind: module)`,
     and `imports(kind: dynamic)`).
-11. **A directory depth leaves out the files above it.** At `G = N`, a file
-    directly in a shallower directory is in no component, so its references
-    cross no boundary — and entry points and barrels sit shallow.
-    `afferent(4, "…/src/graveyard", 0)` on `@grafana/ui` read as "nothing uses
-    it" while `src/index.ts` re-exported it eight times. Before believing a
-    count at a depth, ask `unplaced_dependent(G, C, F)`; files (`G = -1`) and
-    packages (`G = -2`) have no such gap.
+11. **Coupling counts references, not imports — and a barrel makes none.** A
+    re-export (`export { X } from './x'`) is an import edge with no `ref`, so it
+    adds to no component's `afferent` at any granularity; and at a directory
+    depth, a file directly in a shallower directory is in no component at all.
+    Entry points and barrels are both. `afferent(4, "…/src/graveyard", 0)` on
+    `@grafana/ui` read as "nothing uses it" while `src/index.ts` re-exported it
+    eight times. Before believing a low count, ask
+    `uncounted_dependent(G, C, F)`: every importer of C that `afferent` left out,
+    and why is one query away (`unplaced(G, F)`).
 12. **Bulk commits are in `commit` and out of `cochange.dl`** (over
     `bulk_limit(50)` files). A rename-everything commit would otherwise couple
     every file to every other.

@@ -64,6 +64,12 @@ with the long form in [`notes/code-facts.md`](notes/code-facts.md).
     profiling session.
   - **The library reads naturally**, so a workaround in it is engine debt:
     `lib/keys.dl` is the one left (2026-09-11 (later), reopened).
+  ***Consequences 2026-09-13*** — it held for correctness traps too, not only
+  size. Of five dogfood defects filed as "document the trap", four closed in
+  the tool instead: a file-name test for `is_generated`, a weaker relation for
+  an unresolved import, `lib/exports.dl`, and `uncounted_dependent` beside a
+  doc line. Only `hidden_coupling` stayed a doc fix, because deriving it needs a
+  history of the graph that nothing else wants (`bugs/resolved/001`–`005`).
 
 - **2026-09-12 (later still)** — **The import-graph closure is back in
   `modgraph.dl`, because the engine now pays for a rule only when a goal reaches

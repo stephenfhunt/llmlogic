@@ -20,15 +20,23 @@
 %   unplaced(G, F)                  file F belongs to no component at directory
 %                                   depth G: it sits directly in a shallower
 %                                   directory, so no metric at G counts it
-%   unplaced_dependent(G, C, F)     unplaced F references component C — an
-%                                   edge `afferent(G, C, _)` does not count.
-%                                   Ask it before reading a 0 as "unused": an
-%                                   entry point or barrel is usually here
+%   uncounted_dependent(G, C, F)    F imports component C, and afferent(G, C, _)
+%                                   does not count F — F is unplaced at G, or
+%                                   no symbol of F *references* C. Ask it before
+%                                   reading a 0 as "unused": a barrel is
+%                                   usually here on both counts
+%
+% **Coupling counts references, not imports.** A re-export
+% (`export { X } from './x'`) is an import edge with no `ref`, so a barrel adds
+% to nobody's afferent coupling at any granularity — files and packages included.
+% On `@grafana/ui`, `afferent(4, "…/src/graveyard", 0)` stood beside eight
+% re-exports of it from `src/index.ts` (bugs/004).
 %
 % Every `ref` kind counts. To measure only runtime coupling, or only type
 % coupling, restrict `file_ref` by Kind in a rule of your own.
 
 import "units.dl".
+import "modgraph.dl".
 import "keys.dl".
 import "types.dl".
 
@@ -44,7 +52,9 @@ comp_edge_weight(G, A, B, N) :- comp_edge(G, A, B), N = count { S | crossing(G, 
 dir_depth(G) :- comp(G, _), G >= 0.
 placed(F, G) :- file_member(F, G, _).
 unplaced(G, F) :- dir_depth(G), file(path: F), not placed(F, G).
-unplaced_dependent(G, C, F) :- unplaced(G, F), file_ref(F, FB, _), file_member(FB, G, C).
+imports_into(F, G, C) :- dep(F, FB), file_member(FB, G, C).
+counted_into(F, G, C) :- file_ref(F, FB, _), file_member(FB, G, C), file_member(F, G, A), A != C.
+uncounted_dependent(G, C, F) :- imports_into(F, G, C), not file_member(F, G, C), not counted_into(F, G, C).
 
 efferent(G, C, N) :- comp(G, C), N = count { B | comp_edge(G, C, B) }.
 afferent(G, C, N) :- comp(G, C), N = count { A | comp_edge(G, A, C) }.

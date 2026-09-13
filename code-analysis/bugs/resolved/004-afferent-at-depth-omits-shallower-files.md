@@ -63,3 +63,28 @@ gives the reader the omitted edges without moving any metric.
 *Test*: on the `basic` fixture at depth 2, `afferent(2, "src/util", 0)` stands
 beside `unplaced_dependent(2, "src/util", "src/main.ts")`. Nothing is unplaced at
 depth 1 or at `G = -1`. *Mutation*: `placed` ignores the depth → red.
+
+## Resolution, amended 2026-09-13 — the diagnosis did not hold
+
+The first fix was checked on the subject after it was committed, and it did not
+find the case it was for. `unplaced_dependent(4, "…/graveyard", F)` was empty,
+because **the graveyard's 0 was never about depth.** On the cached `@grafana/ui`
+base, `src/index.ts` has eight `reexport` import edges into the graveyard and
+**zero** `ref` edges. `coupling.dl` builds components from references. A re-export
+is an import with no reference, so `index.ts` counts toward no afferent coupling
+at any granularity: at `G = -1` too, where every file has a component. Two claims
+above are therefore wrong: the root cause ("belongs to no component at depth 4"),
+and "files and packages are unaffected".
+
+The depth gap is real, just not what hid this barrel, so both mechanisms are now
+one query. `unplaced_dependent` is replaced by `uncounted_dependent(G, C, F)`: F
+imports C (any `dep` edge), and `afferent(G, C, _)` does not count F, because F is
+unplaced at G or no symbol of F references C. On `@grafana/ui` it names `index.ts`
+for the graveyard (2.0 s, 208 MB). 1,300 files there have an importer `afferent`
+leaves out. No metric moved. Counting re-exports in `afferent` would change every
+coupling number and was not taken.
+
+*Test*: `basic` gives three rows, each explained in the test. *Mutations*: count
+importers that do reference C → red; follow references instead of imports → red.
+The lesson is the session's own: a fix shipped on a fixture before it was run on
+the subject that filed the bug.

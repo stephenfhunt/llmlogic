@@ -85,17 +85,21 @@ test("coupling: Martin's metrics per file, CBO per type", { skip }, () => {
   assert.ok(cbo.includes('cbo("src/use.ts#Registry", 1).'));
 });
 
-// bugs/004: a directory depth silently omits the files above it — here the
-// entry point, whose references into src/util are all the afferent coupling
-// src/util has.
-test("coupling: a depth names the files it leaves out, and what they depend on", { skip }, () => {
+// bugs/004: afferent coupling counts references, so it misses an importer that
+// sits above a directory depth *or* only re-exports — and a barrel is both.
+test("coupling: the importers afferent does not count, by depth and by re-export", { skip }, () => {
   const out = outOf("basic");
   assert.deepEqual(ask(out, "coupling.dl", "unplaced(2, F)"), ['unplaced(2, "src/main.ts").']);
   assert.deepEqual(ask(out, "coupling.dl", "unplaced(1, F)"), []);
   assert.deepEqual(ask(out, "coupling.dl", "afferent(2, C, N)"), ['afferent(2, "src/util", 0).']);
-  assert.deepEqual(ask(out, "coupling.dl", "unplaced_dependent(2, C, F)"), ['unplaced_dependent(2, "src/util", "src/main.ts").']);
-  // Files and packages have no gap.
-  assert.deepEqual(ask(out, "coupling.dl", "u(F) :- unplaced(-1, F)"), []);
+  assert.deepEqual(ask(out, "coupling.dl", "uncounted_dependent(G, C, F)"), [
+    // main.ts imports `plus` through the barrel; its references resolve past it.
+    'uncounted_dependent(-1, "src/util/index.ts", "src/main.ts").',
+    // the barrel re-exports math.ts and references nothing in it.
+    'uncounted_dependent(-1, "src/util/math.ts", "src/util/index.ts").',
+    // main.ts sits directly in src, so at depth 2 it is in no component.
+    'uncounted_dependent(2, "src/util", "src/main.ts").',
+  ]);
 });
 
 test("cohesion: LCOM4, TCC, LCOM-HS and relational cohesion", { skip }, () => {
