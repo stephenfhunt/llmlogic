@@ -50,7 +50,8 @@ each; detail in §17 and `docs/worklog.md`.
 > § Performance item waits on it; printing an answer from the model went ahead,
 > guarded by its own property (§17 2026-09-13). Every § Performance item is
 > gated by a deep run (`DATALOG_PBT=deep cargo test --lib`) before and after it
-> (the user's) — which does not currently finish on a 30 GB machine (`bugs/015`).
+> (the user's) — which does not currently finish on a 30 GB machine (`bugs/015`), and
+> waits on the recorder design session (§ Provenance surface).
 >
 > **Open defects live in [`bugs/`](bugs/)** — `015` opened 2026-09-13; `009`, `013` and `014` were resolved the same day.
 > **No design session blocks anything** either: §6's extension, the last one,
@@ -85,7 +86,8 @@ each; detail in §17 and `docs/worklog.md`.
 > **S1's harness (`EXPERIMENTS.md`) now sits alongside them** instead of near the
 > bottom, since §1 names it as the instrument v1 is defined against.
 >
-> Nine are resolved in `bugs/resolved/`: `012` (a program error paid for the whole
+> Resolved defects are `ls bugs/resolved/` — `009`, `013` and `014` on 2026-09-13, each with
+> its resolution note. Earlier ones, summarised: `012` (a program error paid for the whole
 > fact load), **fixed 2026-09-12** by relation pruning, which lowers before it
 > reads — its syntax-error half never reproduced, and the early check stops at
 > lowering because of `014`; `008` (a rule-level type clash
@@ -423,6 +425,19 @@ them. Except where noted these are documented v1 limits rather than defects.
   from the retained model (tsdl's answer). Optimises the *explaining* path only, and
   gives up all-derivations, the round-stamp cycle guard, and possibly which proof
   prints (§16.6 and E7/E8 pin it byte for byte). _parked — **post-v1**._ — §11/engine.
+- **The recorder holds what no proof reads** — measured 2026-09-13
+  ([`notes/recorder-at-scale.md`](notes/recorder-at-scale.md)).
+  - **Real library programs pay 4.5–5.5×**, mostly copies and base-fact
+    bookkeeping: `first_round`, `base`, and the program's own facts. A `?why`
+    holds every base fact four times.
+  - **Dense generated programs pay up to ~17,000×**, where 93–99% of stored
+    derivations are later-round rediscoveries.
+  - **Directions raised, not decided:** one derivation per fact, chosen when the
+    fact is established (the code shows printed proofs unchanged); premises as
+    references.
+  - Reopens §17 2026-07-19, and gates `bugs/015` and so the deep run.
+
+  _design session — its own_ (the user's). — §11/engine.
 
 ### `std` modules (§8/§12/§13) — shipped
 

@@ -2668,6 +2668,11 @@ never say.
   `Deep` records twice and one draw ran past 14.9 GB (`bugs/015`). The recorded
   1.5 GB was a seed, not a bound; *records only if its claim reads it* covers B5
   and not a claim that compares proofs.
+  ***Consequences 2026-09-13 (later)*** — B13 now compares proofs one step per
+  live fact and records at every tier. The deep run still does not finish,
+  because one recorded `Deep` draw can store 8 M derivations. The fix belongs to
+  the recorder, not the test (the user's ruling: no budget;
+  `notes/recorder-at-scale.md`).
 
 - **2026-09-12** — **Property tests grow their inputs before more refactoring or
   performance work** (the user's: "it's paramount that we have proper and complete
@@ -4642,6 +4647,16 @@ never say.
     only the explaining path, gives up all-derivations, needs its own cycle guard
     in place of the round stamp, and could change which proof prints — which §16.6
     and E7/E8 pin byte for byte. Decisions above, 2026-08-21.
+  ***Reopened 2026-09-13*** — by measurement (`notes/recorder-at-scale.md`).
+  Gating proportioned the store for runs that do not ask; the runs that do still
+  pay 4.5–5.5× on real library programs (`pointsto.dl` on `@grafana/ui`:
+  266 MB → 1,189 MB, 513 MB of it `first_round` and `base`, which only
+  book-keep base facts) and up to ~17,000× on dense generated programs, where
+  93–99% of stored derivations are later-round rediscoveries no proof reads.
+  From the code: the printed derivation is always one found in its fact's first
+  round, so it could be fixed when the fact is established. Not to be built on
+  until the recorder design session answers the note's questions; `bugs/015`
+  waits on it.
 - **2026-07-19** — **Step-2 comparison policy**: the core evaluator reports
   comparison literals as a structured "not yet supported" error (the same
   pattern lowering uses for negation and named arguments). §8 semantics —
