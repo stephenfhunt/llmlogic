@@ -673,7 +673,7 @@ compared keyed by predicate *name*, not `PredId`.
     steps agree exactly when the proofs do, and the full run is dropped before the
     pruned one is evaluated (2026-09-13, `bugs/015`). *Mutation (killed at every
     tier)*: the pruned run restarts round stamps each stratum — proofs change,
-    facts do not. **Neither
+    facts do not. Re-verified 2026-09-14, with premises as row references and steps compared resolved to content: B13 goes red at every tier. **Neither
     mutation reddens it** in 256 cases: that generator's negated relations are
     rarely derived and it draws no aggregates, which is why the text level
     exists. Its tiers, `…_at_medium` and `…_at_large`,
@@ -1378,7 +1378,10 @@ and the asking form, which is also what unblocked E5.
 - [x] **E2** Every fact has a proof tree, and every proof-tree leaf is a base
   (EDB/imported) fact.
 - [x] **E3** Replay: each derivation node's rule instance applied to its child
-  facts rederives exactly the fact (and every premise holds in the model).
+  facts rederives exactly the fact (and every premise holds in the model). A fact
+  premise has been a row reference since 2026-09-14, resolved when read. *Mutation
+  (killed):* the join recording the row before the one it matched, which turns E3
+  and E6 red.
 - [x] **E4** A base fact's provenance is a leaf.
 - [x] **E5** **Comment-stripping is the closure guard.** Proof trees are *not*
   facts (§17, 2026-08-16 — decided in the negative), so there is no fact-shaped
@@ -1509,6 +1512,14 @@ and the asking form, which is also what unblocked E5.
     predicate near-misses; drop the absent-key guard. Non-vacuity: a guard pins
     that the generator reaches a near-miss carrying both a satisfied premise and
     a fact-naming repair.
+  - **The satisfied facts are the rule's own match** (2026-09-14), not merely
+    facts that hold. Bind from the goal through the head, then match each
+    satisfied atom's fact against its literal, in schedule order, under what the
+    satisfied atoms before it bound. The matcher is the naive oracle's
+    `match_atom`, not the engine's. A trace naming a held fact from the wrong row
+    passed the holds-check. *Mutation (killed, E10 only with this clause):* a trace
+    resolving every fact premise to its relation's row 0. Guard:
+    `e10_generator_reaches_a_satisfied_fact_bound_by_the_goal`, 5 of 256.
 - [x] **E11** **Base facts are the program's, at round 0; every other held fact
   is from round 1.** The recorder keeps no base set and no per-fact round stamp.
   A relation knows how many of its rows its base load wrote, and the round that
@@ -1525,6 +1536,23 @@ and the asking form, which is also what unblocked E5.
     rediscovered fact being stamped were killed with E1 and E2.
   - Non-vacuity: a guard pins that the generator re-derives an asserted fact,
     the case where a base fact is also derived (4 of 48).
+
+- [x] **E12** **A fact's derivations come least first, by content** (§11/engine,
+  2026-09-14; `notes/fact-store.md` § Step 3 design). The recorder keeps each
+  fact's derivations by row reference, and a row's id is not its content's rank.
+  So `Model::derivations_of` resolves them and sorts by `Derivation<Fact>`'s
+  derived `Ord`, which is the order `ProofTree::step` chooses a proof in. Over
+  `arb_program_with_edb`, and at `Tier::Medium` (`Large` in the deep run), every
+  fact's derivations are strictly ascending.
+  - **The targeted case:**
+    `a_proof_takes_the_least_derivation_by_content_not_by_row`. A base `q("z")` is
+    stored before a derived `q("a")`, and both found `h("x")`. It asserts the
+    content order, the stored order that order corrects, and the proof.
+  - *Mutation (killed):* `derivations_of` not sorting. E12 at both tiers and the
+    targeted test go red. The diamond unit test, §16.6's golden, B5 and C14 all
+    stay green, because their facts' rows happen to be stored in content order.
+  - Guard: `e12_generator_reaches_derivations_stored_out_of_content_order`. Of 48
+    samples, 0 untiered and 17 at `Medium`, so only `Medium` has a floor.
 
 ### Phase F — §13 imports (roadmap step 7) — generalizes §16.5, §16.7
 

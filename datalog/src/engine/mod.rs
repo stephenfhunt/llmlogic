@@ -4547,6 +4547,25 @@ mod tests {
             }
         }
 
+        /// **E12** for one program: `derivations_of` yields each fact's derivations
+        /// strictly ascending by content (`Derivation<Fact>`'s derived `Ord`), which
+        /// is the order a proof is chosen in. The store keeps them by row, and a
+        /// row's id is not its content's rank, so this holds only because the
+        /// accessor sorts.
+        fn e12_holds(program: &Program) -> std::result::Result<(), TestCaseError> {
+            let model = capped(program, Provenance::Recorded)?;
+            for fact in model.facts() {
+                let derivations: Vec<Derivation<Fact>> = model.derivations_of(&fact).collect();
+                prop_assert!(
+                    derivations.windows(2).all(|pair| pair[0] < pair[1]),
+                    "derivations of {:?} are not strictly ascending: {:?}",
+                    fact,
+                    derivations
+                );
+            }
+            Ok(())
+        }
+
         /// **B14c** for one program: a row never moves. Every row id a relation
         /// has issued by the start of any delta pass names, in the finished model,
         /// the values it named then.
@@ -4874,6 +4893,100 @@ mod tests {
         /// the program asserts *and* a rule derives again, which must stay base
         /// and unstamped. Counted over 48 samples of the generator E11 draws; the
         /// floor is about two thirds of the 4 measured.
+        /// E12's non-vacuity guard, read against its sentence: the order only
+        /// needs the sort where a fact's stored derivations, by row, are *not*
+        /// already in content order. Counted over 48 samples at each generator E12
+        /// draws: untiered, 0 (its 256 cases still reach it, since the unsorted
+        /// mutation reddens that property); at `Medium`, 17. Only `Medium` has a
+        /// floor, at about two thirds.
+        #[test]
+        fn e12_generator_reaches_derivations_stored_out_of_content_order() {
+            let untiered = sample(arb_program_with_edb(), 48);
+            let medium: Vec<Program> =
+                sample(crate::testgen::arb_program_text_at(Tier::Medium), 48)
+                    .into_iter()
+                    .map(|(_, program)| program)
+                    .collect();
+            let mut counts = Vec::new();
+            for (name, programs) in [("untiered", &untiered), ("medium", &medium)] {
+                let reached = programs
+                    .iter()
+                    .filter(|program| {
+                        let model = eval(program).unwrap();
+                        model.facts().any(|fact| {
+                            let stored: Vec<Derivation<Fact>> = model
+                                .derivation_refs(&fact)
+                                .map(|derivation| model.resolve_derivation(derivation))
+                                .collect();
+                            stored.windows(2).any(|pair| pair[0] > pair[1])
+                        })
+                    })
+                    .count();
+                eprintln!(
+                    "{name}: {reached} of 48 store a fact's derivations out of content order"
+                );
+                counts.push((name, reached));
+            }
+            let medium = counts
+                .iter()
+                .find(|(name, _)| *name == "medium")
+                .map(|&(_, reached)| reached);
+            assert!(medium >= Some(11), "{counts:?} (medium floor 11)");
+        }
+
+        /// **E12's targeted case**: a fact whose two well-founded derivations were
+        /// stored with row order the reverse of content order. `q("z")` is a base
+        /// row, so it is written before `q("a")`, which a rule derives in round 1.
+        /// `gate("x")` arrives in round 2, so `h("x")` is derived in round 3 from both,
+        /// and both derivations are well-founded. Content puts `q("a")` first, and so
+        /// must `derivations_of` and the proof.
+        #[test]
+        fn a_proof_takes_the_least_derivation_by_content_not_by_row() {
+            let source = "q(\"z\").\nseed(\"a\").\ngate0(\"x\").\nq(X) :- seed(X).\ngate1(X) :- gate0(X).\ngate(X) :- gate1(X).\nh(X) :- q(Y), gate(X).\n";
+            let program = crate::lower::lower(&crate::parser::parse(source).expect("parses"))
+                .expect("lowers");
+            let pred = |name: &str| {
+                PredId(
+                    program
+                        .predicates
+                        .iter()
+                        .position(|p| p.name == name)
+                        .expect("predicate") as u32,
+                )
+            };
+            let fact = |name: &str, value: &str| Fact {
+                pred: pred(name),
+                tuple: Tuple(vec![Value::String(value.to_string())]),
+            };
+            let model = eval(&program).unwrap();
+            let h = fact("h", "x");
+            let derivations: Vec<Derivation<Fact>> = model.derivations_of(&h).collect();
+            assert_eq!(
+                derivations
+                    .iter()
+                    .map(|derivation| derivation.premises[0].clone())
+                    .collect::<Vec<_>>(),
+                vec![Premise::Fact(fact("q", "a")), Premise::Fact(fact("q", "z"))],
+                "derivations_of must come least first by content"
+            );
+            let stored_first = model
+                .derivation_refs(&h)
+                .map(|derivation| model.resolve_derivation(derivation))
+                .next()
+                .expect("h has derivations");
+            assert_eq!(
+                stored_first.premises[0],
+                Premise::Fact(fact("q", "z")),
+                "the case needs the store's row order to disagree with content"
+            );
+            match ProofTree::step(&model, &h) {
+                Some(crate::provenance::ProofStep::Derived(derivation)) => {
+                    assert_eq!(derivation.premises[0], Premise::Fact(fact("q", "a")));
+                }
+                other => panic!("h(\"x\") should prove by a derivation, got {other:?}"),
+            }
+        }
+
         #[test]
         fn e11_generator_rederives_an_asserted_fact() {
             let cases = sample(arb_program_with_edb(), 48);
@@ -5072,6 +5185,14 @@ mod tests {
                 generated in crate::testgen::arb_program_text_at(Tier::Medium.scaled()),
             ) {
                 b14c_holds(&generated.1)?;
+            }
+
+            /// **E12 at `Tier::Medium`** — and `Large` in the deep run.
+            #[test]
+            fn e12_derivations_come_least_first_at_medium(
+                generated in crate::testgen::arb_program_text_at(Tier::Medium.scaled()),
+            ) {
+                e12_holds(&generated.1)?;
             }
         }
 
@@ -6380,6 +6501,12 @@ mod tests {
                 b14c_holds(&program)?;
             }
 
+            /// E12 — a fact's derivations come least first, by content.
+            #[test]
+            fn e12_derivations_come_least_first(program in arb_program_with_edb()) {
+                e12_holds(&program)?;
+            }
+
             /// E2 — every fact has a proof, and every leaf is a base fact.
             #[test]
             fn e2_proof_leaves_are_base_facts(program in arb_program_with_edb()) {
@@ -6579,6 +6706,35 @@ mod tests {
                                 );
                             }
                         }
+                        // **The satisfied facts are the rule's own match**, not
+                        // merely facts that hold. Bound from the goal through the
+                        // head, each satisfied atom's fact matches its literal
+                        // under what the satisfied atoms before it bound, in
+                        // schedule order, by the naive oracle's matcher. A goal
+                        // value `absent` unifies with nothing (§4), so that head
+                        // binds nothing to check against. Builtins, negations and
+                        // aggregates bind nothing here, so a later atom over
+                        // their variables binds freely, and a sound trace cannot
+                        // fail this.
+                        if let Some(mut env) = match_atom(&rule.head, &goal.tuple, &HashMap::new()) {
+                            for &idx in &literal_order(&rule.body).expect("the rule schedules") {
+                                let (BodyLiteralKind::Atom(atom), Some(Premise::Fact(fact))) =
+                                    (&rule.body[idx].kind, &near_miss.satisfied[idx])
+                                else {
+                                    continue;
+                                };
+                                match match_atom(atom, &fact.tuple, &env) {
+                                    Some(bound) => env = bound,
+                                    None => prop_assert!(
+                                        false,
+                                        "satisfied premise {:?} does not match body literal {} \
+                                         under the goal and the premises before it",
+                                        fact,
+                                        idx
+                                    ),
+                                }
+                            }
+                        }
                         match &near_miss.repair {
                             Repair::Add(fact) | Repair::Ask(fact) => {
                                 prop_assert!(
@@ -6714,6 +6870,55 @@ mod tests {
         /// all, and every assertion above is then vacuous — so pin that the
         /// generator reaches a goal with a near-miss carrying both a satisfied
         /// premise and a fact-naming repair.
+        /// **The guard for E10's match clause.** It discriminates only where a
+        /// satisfied atom mentions a variable the head binds from the goal: there,
+        /// a fact from the wrong row fails to match. Counted over the 256
+        /// deterministic programs the guard above draws: 5 reach it. The floor is
+        /// about two thirds of that.
+        #[test]
+        fn e10_generator_reaches_a_satisfied_fact_bound_by_the_goal() {
+            use proptest::strategy::{Strategy, ValueTree};
+            use proptest::test_runner::TestRunner;
+
+            let mut runner = TestRunner::deterministic();
+            let mut reached = 0;
+            for _ in 0..256 {
+                let Ok(tree) = arb_program_with_edb().new_tree(&mut runner) else {
+                    continue;
+                };
+                let program = tree.current();
+                let model = eval(&program).unwrap();
+                let bound_by_goal = absent_goals(&program, &model).iter().any(|goal| {
+                    trace_failure(&program, &model, goal)
+                        .unwrap()
+                        .near_misses
+                        .iter()
+                        .any(|near_miss| {
+                            let rule = &program.rules[near_miss.rule.0 as usize];
+                            let head_vars: BTreeSet<u32> = rule
+                                .head
+                                .args
+                                .iter()
+                                .filter_map(|term| match term {
+                                    Term::Var(var) => Some(var.0),
+                                    Term::Const(_) => None,
+                                })
+                                .collect();
+                            near_miss.satisfied.iter().enumerate().any(|(idx, premise)| {
+                                matches!(premise, Some(Premise::Fact(_)))
+                                    && matches!(&rule.body[idx].kind, BodyLiteralKind::Atom(atom)
+                                        if atom.args.iter().any(|term| matches!(term, Term::Var(var) if head_vars.contains(&var.0))))
+                            })
+                        })
+                });
+                if bound_by_goal {
+                    reached += 1;
+                }
+            }
+            eprintln!("{reached} of 256 programs trace a satisfied fact bound by the goal");
+            assert!(reached >= 3, "{reached} of 256 (floor 3)");
+        }
+
         #[test]
         fn e10_generator_reaches_a_near_miss_that_names_a_fact() {
             use proptest::strategy::{Strategy, ValueTree};
