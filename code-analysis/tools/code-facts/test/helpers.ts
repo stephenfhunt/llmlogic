@@ -44,6 +44,23 @@ export function extractPython(dir: string, opts: { out?: string; layers?: Layer[
   });
 }
 
+/** Extract a Go module (its go.mod) with the root pinned to it. */
+export function extractGo(dir: string, opts: { out?: string; layers?: Layer[] } = {}): Result {
+  return run({
+    tsconfigs: [],
+    go: [dir],
+    root: dir,
+    out: opts.out,
+    layers: opts.layers !== undefined ? new Set<Layer>(["meta", "structure", ...opts.layers]) : undefined,
+    time: FIXED_TIME,
+  });
+}
+
+/** Whether a `go` command is on PATH — the Go frontend's tests need one. */
+export function goAvailable(): boolean {
+  return spawnSync("go", ["version"], { encoding: "utf8" }).status === 0;
+}
+
 /** Write files under `dir`: `files` maps relative paths to contents. */
 export function writeFiles(dir: string, files: Record<string, string>): void {
   for (const [rel, text] of Object.entries(files)) {

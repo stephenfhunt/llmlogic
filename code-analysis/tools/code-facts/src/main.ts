@@ -7,6 +7,7 @@
 // parses arguments and prints the summary.
 
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -36,12 +37,17 @@ const LARGE_PROJECT_LINES = 300_000;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const LIB_DIR = path.join(HERE, "..", "lib");
 const PY_FRONTEND = path.join(HERE, "frontends", "python", "py_facts.py");
+const GO_FRONTEND = path.join(HERE, "frontends", "go");
+/** Where the Go frontend is compiled to — outside `src/`, which is what ships. */
+const GO_BUILD = path.join(HERE, "..", "build", "go");
 
 export interface Options {
   /** TypeScript: tsconfig files (or directories holding one). */
   tsconfigs: string[];
   /** Python: source roots (directories, or a pyproject.toml). */
   python?: string[] | undefined;
+  /** Go: a go.mod or go.work, or a directory holding one. */
+  go?: string[] | undefined;
   out?: string | undefined;
   root?: string | undefined;
   layers?: ReadonlySet<Layer> | undefined;
@@ -76,9 +82,10 @@ export function run(opts: Options): Result {
   };
 
   const python = opts.python ?? [];
+  const go = opts.go ?? [];
   const exclude = (opts.exclude ?? []).map(globToRegExp);
-  // A Python root is a directory; findRoot reads each target's directory.
-  const anchors = [...opts.tsconfigs, ...python.map((p) => (fs.existsSync(p) && fs.statSync(p).isDirectory() ? path.join(p, "__target__") : p))];
+  // A Python or Go target may be a directory; findRoot reads each target's directory.
+  const anchors = [...opts.tsconfigs, ...[...python, ...go].map((p) => (fs.existsSync(p) && fs.statSync(p).isDirectory() ? path.join(p, "__target__") : p))];
   const root = opts.root !== undefined ? path.resolve(opts.root) : findRoot(anchors);
   const tables = new Tables();
   let ids: Counters = { callSite: 1, flowNode: 1 };
@@ -119,6 +126,14 @@ export function run(opts: Options): Result {
       return r.version;
     });
   }
+  let goVersion: string | null = null;
+  if (go.length > 0) {
+    goVersion = timed("go", () => {
+      const r = runGo(go, root, layers, exclude, ids, tables, log);
+      ids = r.ids;
+      return r.version;
+    });
+  }
   emitDirectories(tables);
   if (layers.has("git")) {
     timed("git", () => extractGit({ root, tables }, { since: opts.gitSince, maxCommits: opts.gitMaxCommits ?? 20000 }));
@@ -131,10 +146,11 @@ export function run(opts: Options): Result {
     python_version: pythonVersion,
     node_version: process.versions.node,
     root,
-    targets: [...opts.tsconfigs, ...python].map((c) => relTo(root, path.resolve(c))).join(","),
+    targets: [...opts.tsconfigs, ...python, ...go].map((c) => relTo(root, path.resolve(c))).join(","),
     layers: LAYERS.filter((l) => layers.has(l)).join(","),
     time,
     git_head: gitHead(root),
+    go_version: goVersion,
   });
   tables.dedupe();
   if (opts.out !== undefined) timed("write", () => tables.write(opts.out as string, layers, LIB_DIR));
@@ -234,21 +250,96 @@ function runPython(
   return { ids: next, version: v.stdout.trim() };
 }
 
-/** A pyproject.toml, or a directory with no tsconfig.json in it. */
-function isPythonTarget(a: string): boolean {
-  if (path.basename(a) === "pyproject.toml") return true;
-  return fs.existsSync(a) && fs.statSync(a).isDirectory() && !fs.existsSync(path.join(a, "tsconfig.json"));
+/**
+ * The Go frontend, `frontends/go/`. It is Go source, compiled on first use by
+ * the toolchain the project itself selects — so the type checker reads the
+ * project's language version — and cached by its source and that toolchain.
+ */
+function runGo(
+  targets: string[],
+  root: string,
+  layers: ReadonlySet<Layer>,
+  exclude: RegExp[],
+  ids: Counters,
+  tables: Tables,
+  log: (line: string) => void,
+): { ids: Counters; version: string } {
+  const first = path.resolve(targets[0] ?? ".");
+  const anchor = fs.existsSync(first) && fs.statSync(first).isDirectory() ? first : path.dirname(first);
+  const selected = spawnSync("go", ["env", "GOVERSION"], { cwd: anchor, encoding: "utf8" });
+  if (selected.error !== undefined) throw new Error(`code-facts: reading Go needs the \`go\` command on PATH (${selected.error.message})`);
+  if (selected.status !== 0) throw new Error(`code-facts: \`go env GOVERSION\` failed in ${anchor}:\n${selected.stderr}`);
+  const toolchain = selected.stdout.trim().split(/\s+/)[0] ?? "";
+  const binary = buildGoFrontend(toolchain, log);
+  const args = [
+    "--root",
+    root,
+    "--layers",
+    [...layers].join(","),
+    "--first-call-site",
+    String(ids.callSite),
+    "--first-flow-node",
+    String(ids.flowNode),
+    ...exclude.flatMap((re) => ["--exclude", re.source]),
+    ...targets.map((t) => path.resolve(t)),
+  ];
+  const next = runFrontend("Go", binary, args, process.env, ids, tables);
+  return { ids: next, version: toolchain.replace(/^go/, "") };
+}
+
+function buildGoFrontend(toolchain: string, log: (line: string) => void): string {
+  const hash = createHash("sha256");
+  for (const f of fs.readdirSync(GO_FRONTEND).filter((n) => n.endsWith(".go") || n === "go.mod" || n === "go.sum").sort()) {
+    hash.update(`${f}\0`);
+    hash.update(fs.readFileSync(path.join(GO_FRONTEND, f)));
+  }
+  hash.update(toolchain);
+  const binary = path.join(GO_BUILD, `go-facts-${hash.digest("hex").slice(0, 16)}`);
+  if (fs.existsSync(binary)) return binary;
+  log(`code-facts: building its Go frontend with ${toolchain} (first use)…`);
+  fs.mkdirSync(GO_BUILD, { recursive: true });
+  const vendored = fs.existsSync(path.join(GO_FRONTEND, "vendor"));
+  const partial = `${binary}.${process.pid}.partial`;
+  const r = spawnSync("go", ["build", ...(vendored ? ["-mod=vendor"] : []), "-o", partial, "."], {
+    cwd: GO_FRONTEND,
+    encoding: "utf8",
+    env: { ...process.env, GOTOOLCHAIN: toolchain, GOWORK: "off", GOFLAGS: "" },
+  });
+  if (r.error !== undefined) throw new Error(`code-facts: reading Go needs the \`go\` command on PATH (${r.error.message})`);
+  if (r.status !== 0) throw new Error(`code-facts: building the Go frontend with ${toolchain} failed; it needs Go 1.26 or later:\n${r.stderr}`);
+  fs.renameSync(partial, binary);
+  return binary;
+}
+
+type Lang = "ts" | "python" | "go";
+
+/**
+ * Which frontend reads a target: a tsconfig; a go.mod or go.work; a
+ * pyproject.toml; a directory by what it holds — a tsconfig.json, then a go.work
+ * or go.mod — and any other directory as Python.
+ */
+function detectLang(a: string): Lang {
+  const base = path.basename(a);
+  if (base === "go.mod" || base === "go.work") return "go";
+  if (base === "pyproject.toml") return "python";
+  if (!(fs.existsSync(a) && fs.statSync(a).isDirectory())) return "ts";
+  if (fs.existsSync(path.join(a, "tsconfig.json"))) return "ts";
+  if (fs.existsSync(path.join(a, "go.work")) || fs.existsSync(path.join(a, "go.mod"))) return "go";
+  return "python";
 }
 
 function usage(): string {
   return [
-    "usage: code-facts <tsconfig.json | python-root | pyproject.toml>... [options]",
+    "usage: code-facts <tsconfig.json | go.mod | go.work | pyproject.toml | directory>... [options]",
     "",
-    "  A tsconfig (or a directory holding one) is read as TypeScript; any other",
-    "  directory, or a pyproject.toml, as a Python source root. Both may be given.",
+    "  A tsconfig is read as TypeScript, a go.mod or go.work as Go, a pyproject.toml",
+    "  as Python. A directory is read by what it holds — a tsconfig.json, then a",
+    "  go.work or go.mod — and any other directory as a Python source root. Any",
+    "  mix may be given.",
     "",
     "  -o, --out DIR          output directory (default ./code-facts-out)",
     "  --root DIR             root every path is relative to (default: the git top-level)",
+    "  --lang ts|python|go    read the next target as this language, whatever it holds",
     `  --layers L,...         layers to extract (default all: ${OPTIONAL_LAYERS.join(",")}); structure always runs`,
     "  --no-git               skip the git history layer",
     "  --git-since DATE       only commits after DATE (anything `git log --since` takes)",
@@ -262,7 +353,9 @@ function usage(): string {
 function parseArgs(argv: string[]): Options {
   const tsconfigs: string[] = [];
   const python: string[] = [];
+  const go: string[] = [];
   const exclude: string[] = [];
+  let lang: Lang | undefined;
   let out = "code-facts-out";
   let root: string | undefined;
   let layers = new Set<Layer>(LAYERS);
@@ -280,6 +373,11 @@ function parseArgs(argv: string[]): Options {
       process.exit(0);
     } else if (a === "-o" || a === "--out") out = value(++i, a);
     else if (a === "--root") root = value(++i, a);
+    else if (a === "--lang") {
+      const l = value(++i, a);
+      if (l !== "ts" && l !== "python" && l !== "go") throw new Error(`code-facts: unknown language \`${l}\` (languages: ts, python, go)`);
+      lang = l;
+    }
     else if (a === "--exclude") exclude.push(value(++i, a));
     else if (a === "--no-git") layers.delete("git");
     else if (a === "--git-since") gitSince = value(++i, a);
@@ -296,11 +394,16 @@ function parseArgs(argv: string[]): Options {
       }
       layers = new Set<Layer>(["meta", "structure", ...(wanted.filter((w) => w !== "structure") as Layer[])]);
     } else if (a.startsWith("-")) throw new Error(`code-facts: unknown option ${a}\n\n${usage()}`);
-    else if (isPythonTarget(a)) python.push(a);
-    else tsconfigs.push(a);
+    else {
+      const which = lang ?? detectLang(a);
+      lang = undefined;
+      if (which === "go") go.push(a);
+      else if (which === "python") python.push(a);
+      else tsconfigs.push(a);
+    }
   }
-  if (tsconfigs.length + python.length === 0) throw new Error(`code-facts: give a tsconfig or a Python root\n\n${usage()}`);
-  return { tsconfigs, python, out, root, layers, exclude, gitSince, gitMaxCommits };
+  if (tsconfigs.length + python.length + go.length === 0) throw new Error(`code-facts: give a tsconfig, a go.mod or a Python root\n\n${usage()}`);
+  return { tsconfigs, python, go, out, root, layers, exclude, gitSince, gitMaxCommits };
 }
 
 function main(): void {
