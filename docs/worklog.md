@@ -24,6 +24,50 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-14 (small hours) — the Go frontend's refs layer
+
+Asked to do the Go reference layer.
+
+**Done**
+- `9567c80` refs:
+  - `ref` kinds (locals left to flow; basic types, `nil`, `iota` are no refs);
+  - `call_site` dispatch (concrete methods static; interface and type-parameter
+    methods virtual; function values indirect; adopted literals and builtins
+    static);
+  - `member_access` with `via_this` through the receiver, `type_ref` positions,
+    `symbol_type`, `unresolved_ref`;
+  - external ids down to outside struct fields (`ext:net/http#Server.Addr`).
+- In the same commit:
+  - `implements`/`overrides` from `types.Implements`, over project interfaces
+    and the outside ones the project names, compared in a package view that
+    reaches both;
+  - interface embedding as `extends`; a new `embeds` relation, with `overrides`
+    for hidden methods.
+- **P4-go**: the running program is the oracle (reflect's `Implements`, and
+  which declaration a reflect call runs). Rarest guard 140/400 (an embedded
+  interface). Mutations red: no pointer method set, promoted methods skipped,
+  no hiding overrides, no `extends`. **P2-go** gains `call_site` (calls
+  dispatched `virtual` → red).
+- Probes found two defects no test had yet: `is_any` true for a type parameter
+  (its underlying type is the constraint), and a call of `f := func…` classed
+  `indirect`. Seven new tests; `checks.dl` clean.
+
+**Decided** — `notes/go-java-frontends.md` § The Go refs layer, as built:
+conversions and composite literals are no calls, builtins are; `implements`
+only over interfaces the project names; generic types skipped.
+
+**Removed** — nothing in code; the oldest worklog entry.
+
+**Next up**
+- Go flow: a statement-level CFG over `go/ast` (`defer` as `finally`,
+  `panic`/`recover`, `goto`, `fallthrough`, `select`, range-over-func), `fn`
+  metrics, def/use, `concurrency_site`; P1-go, P3-go.
+- Then quality, dataflow (P5-go), the library pass, `reference/go.md`,
+  vendoring, a dogfood; Java after.
+- Carried: P3/P5 static blocks; rebuild `dist/`; code-analysis's
+  `reference/datalog.md` additions; the ablation control; push `trunk` when asked.
+- **Open**: `datalog/bugs/015`, `016`.
+
 ## 2026-09-14 (late night) — Go and Java frontends planned; Go's structure layer built
 
 Asked to plan Go and Java extractors: the project's toolchain assumed present,
@@ -106,50 +150,4 @@ regression test with widening P1 deferred, then asked for the widening too.
 - Carried: code-analysis's `reference/datalog.md` lacks the datalog skill's
   additions; rerun the ablation control; measure the code-analysis playbook.
 - Push `trunk` when the user says so.
-- **Open**: `datalog/bugs/015`, `016`.
-
-## 2026-09-14 (evening) — the datalog skill read as a stranger's agent would
-
-Asked for a fresh read of the datalog skill as published, by a user and agent who
-know nothing of this repo, on a general agent harness. Planned; the user chose to
-drop INSTALL.md's source pointer, reorder `SKILL.md`, and accept `--help`.
-
-**Done**
-- `253fd2d` **`SKILL.md`**:
-  - run by path (`<skill>/datalog`); `./datalog` needed the skill's directory as
-    the working directory;
-  - named arguments and `declare` (its own `-q` example failed without a schema);
-    comments, numeric types, `;` in queries, and import paths for scratch programs;
-  - the worked example before the sections that read its file; the gating
-    sentence says what it means.
-- `39cd64d` **The recipe** defines every table and relation it uses. Each rule
-  was run verbatim over a JSONL fixture, which caught two errors in the rewrite:
-  without `line`, `calls` merges call sites (the count trap read 2 = 2), and
-  dead code listed tests.
-- `9fed6c5`: `--help` / `-h` print the usage, which now names `?why` and the exit
-  codes, and exit 0.
-- `92c4638` **INSTALL.md**: install for any harness, no pointer to an unreachable source.
-  The bundle was built and run from outside the repo.
-- `bf74af4` **experiments**: an engine-arm skill copy carries the binary; the
-  ablation test follows the recipe block's text.
-- Most of the fixes already existed in code-analysis's fork of these texts.
-
-**Decided**
-- §17 2026-09-14 (evening); experiments `decisions.md` 2026-09-14 (evening).
-- ***Consequences*** on code-analysis 2026-09-13 (night ii): dual maintenance's
-  cost is silent; the fork's fixes never flowed back.
-
-**Removed** — the recipe's disjunction trap (now in `SKILL.md`), its anchored-join
-cost note, format claim and run counts; INSTALL.md's source pointer; `./datalog`;
-the oldest worklog entry.
-
-**Next up**
-- **The other direction:** code-analysis's `reference/datalog.md` lacks what this
-  session added (comments, `declare`, scratch import paths, the gating sentence,
-  `--help`).
-- An ablation compared across this session ran on other surrounding text; rerun
-  its control.
-- Push `trunk` when the user says so.
-- **Measure the code-analysis playbook** with a fresh agent and only the bundle;
-  that bundle still ships `tools/code-facts/src`, whose comments name subjects.
 - **Open**: `datalog/bugs/015`, `016`.

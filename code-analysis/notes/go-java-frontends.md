@@ -154,6 +154,29 @@ method reference is an `alloc` of kind `function`.
   `build.gradle(.kts)` / `settings.gradle(.kts)`; `pyproject.toml` or any other
   directory. `--lang` overrides for the next target (a plain Java directory).
 
+## The Go refs layer, as built
+
+- **What is no reference**: the basic types, `any`, `comparable`, `nil`, `true`,
+  `false`, `iota` — Go spells them as identifiers, TypeScript as keywords, and
+  counting them would swamp `ref`. `error` is a reference (`lib#error`), and so
+  is every builtin call (`lib#append`, `lib#panic`), with a `call_site`.
+- **A conversion `T(x)` is no call**: a `type` ref at position `assertion`. A
+  composite literal `T{…}` is ref kind `new`, with no `call_site` — nothing runs.
+- **Dispatch**: a concrete method is `static` (Go resolves it at compile time);
+  a method of an interface, or of a type parameter's constraint, `virtual`; a
+  project variable holding a function `indirect`, except one adopting a literal
+  (`f := func…`), which is that function and `static`, as in TypeScript.
+- **`implements` is asked, not read**, of every project named type against the
+  project's interfaces and each outside interface the project names — so
+  `lib#error` and `io.Reader` appear when code mentions them. Types and
+  interfaces from different packages are compared in a package view whose
+  imports reach both, since a test variant type-checks its package again.
+  Generic types and interfaces are skipped: uninstantiated, they satisfy nothing.
+- **A method promoted from an embedded type is named where it is declared**, in
+  `overrides` and `call_site` alike: the declaration that runs.
+- Code-facts drops exact duplicate rows, so two `unresolved_ref`s of one name on
+  one line are one row.
+
 ## Properties
 
 Each language gets P1 (CFG against real traces), P2 (module graph over modgen's
