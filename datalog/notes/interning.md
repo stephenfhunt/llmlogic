@@ -2,7 +2,7 @@
 
 *Drafted and reviewed 2026-09-14 (§17 2026-09-14). Step 4 of the fact store
 (`notes/fact-store.md` § Seek-heavy queries, measured), chosen over a B-tree for
-the older rows. Building on branch `fact-store`. The review's answers are at the
+the older rows. Shipped 2026-09-14 on trunk (§ Measured). The review's answers are at the
 end.*
 
 ## Why now, against the recorded judgement

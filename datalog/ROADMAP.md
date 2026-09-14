@@ -436,7 +436,7 @@ them. Except where noted these are documented v1 limits rather than defects.
   - **Fact references: shared tuples built and reverted 2026-09-13** — a `?why`
     43–50% smaller, runs up to 50% slower (§17 2026-09-13 (later iii),
     ***Falsified***). **A fact store with one owner** (the user's): reviewed
-    2026-09-13 (§17 (later iv)). _built on branch `fact-store`, awaiting the merge call:_ steps
+    2026-09-13 (§17 (later iv)). _shipped 2026-09-14_ (branch `fact-store`, fast-forwarded): steps
     1–4 (store, runs, flat imports, hash membership, premises by row, interning).
     Against `efcda71` every gate program is 30–66% faster, and smaller.
     Detail in `notes/fact-store.md`.
@@ -623,7 +623,7 @@ join is executed changes.
   `checks.dl` is **9.3 s / 1.8 GB** against 13.8 s / 3.2 GB. Counts byte-identical
   — the deduplication key is unchanged. It buys **memory**, and not always time:
   `coupling.dl` pays 27.5 s against 23.0 for half the residency. — §9/§12/engine.
-- **Interning values** — _built and measured on branch `fact-store` as its step 4_
+- **Interning values** — _shipped 2026-09-14, as the fact store's step 4_
   (§17 2026-09-14, `notes/interning.md` § Measured). On the fact store it is a **time** item, and the
   judgement below is about the engine before it. Previously: a **memory** item, not a time one.
   `Value::eq` plus libc `memcmp` is 2–3% of a run: the seek deletes the comparisons

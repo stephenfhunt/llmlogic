@@ -2658,6 +2658,11 @@ never say.
     they were first allocated. A B-tree, per E9, was not expected to recover it.
   - **Step 4 is value interning, designed first (the user's call).** The gate now
     includes the three queries.
+  ***Consequences 2026-09-14 (merge)*** — shipped: `fact-store` fast-forwarded to
+  trunk after step 4. The harness is byte-identical to `efcda71`, and deep seeds 2,
+  3 and random pass. Staging made the seek regression bisectable to one step
+  (`d9a4c5e`). `?whynot`'s cross case still copies `Program.facts`; that, and any
+  further seek work, is ordinary trunk work (the user's call).
 - **2026-09-13 (later iii)** — **A fact reference is a shared tuple, not an id**
   (engine, `ir::Tuple`; the user's call that references come next, and their
   question *why not a `&`?*). The design is in `notes/recorder-at-scale.md`

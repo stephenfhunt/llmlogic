@@ -1,7 +1,7 @@
 # A fact store with one owner — design
 
 *Designed 2026-09-13 and reviewed the same day (§17 2026-09-13 (later iv)); the
-answers are at the end. Building on branch `fact-store`. Prompted by the reverted
+answers are at the end. Shipped 2026-09-14 on trunk. Prompted by the reverted
 shared tuples (`recorder-at-scale.md` § Shared tuples, measured; §17 2026-09-13
 (later iii), ***Falsified***).*
 

@@ -48,14 +48,18 @@ measured before anything more is decided.
 - The user's, in review: accept the interner's process-lifetime leak; intern
   symbols and strings both; interning alone, measured first.
 - §17 2026-07-19's "interning deferred" is marked ***Superseded***.
+- The user's: merge to trunk now. The cross-case copy and any further seek work
+  are trunk work.
 
 **Removed** — `Value`'s owned `String`s; `coerce_borrowed`, folded into `coerce`;
 the oldest worklog entry (rotated).
 
 **Next up**
-- **The user's call: merge `fact-store`** (fast-forward), or more seek work first.
-  No gate program is slower than `efcda71`.
-- The gate's random-seed deep run on the interned tip (started at session end).
+- **Merged.** The random-seed deep run passed 525/525 (1,327 s, 1.1 GB); `trunk`
+  fast-forwarded to `fact-store`, and the branch deleted.
+- **The datalog skill's leaks** (the user's next): `SKILL.md`'s links out of the
+  bundle, the source-analysis recipe's dated narrative about this engine's own
+  code, and `§` citations in an example and nine CLI messages.
 - **Open**: `datalog/bugs/015`, `016`.
 
 ## 2026-09-14 (late morning) — fact store step 3: premises by row; a missed seek regression; interning next
