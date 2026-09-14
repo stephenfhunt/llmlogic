@@ -24,6 +24,36 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-14 (night) — GitHub issue #1: a class static block crashed code-facts
+
+Asked to reproduce and fix issue #1. Planned; the user chose a fix and a
+regression test, with widening P1 deferred.
+
+**Done**
+- `31dd7d7`: reproduced with a new `test/structure.test.ts` case, failing on the
+  issue's own frame (`structure.ts:473`). `hasBodyOrSignature` is now
+  `hasParameters` and excludes static blocks, so its `SignatureDeclaration`
+  guard is true. The test extracts every function-like kind through refs, flow,
+  dataflow and quality, and checks the static block's `fn`/`flow_node` rows and
+  every kind's `param` rows. Mutation: the old predicate turns it red.
+  `npm test` and typecheck green.
+- `code-analysis/bugs/resolved/006` records it. The commit says `Fixes #1`, so the
+  issue closes when `trunk` is pushed.
+
+**Decided** — nothing new: the issue's own "narrower predicate" alternative.
+
+**Removed** — `hasBodyOrSignature` (renamed); the oldest worklog entry.
+
+**Next up**
+- **Nothing in the tests contained a static block** before this, though flow,
+  dataflow and naming all special-case one. P1's generator emits no classes;
+  static blocks would give their CFG an execution oracle.
+- Rebuild `dist/` (`./package.sh`) before re-running on the reporter's project.
+- Carried: code-analysis's `reference/datalog.md` lacks the datalog skill's
+  additions; rerun the ablation control; measure the code-analysis playbook.
+- Push `trunk` when the user says so.
+- **Open**: `datalog/bugs/015`, `016`.
+
 ## 2026-09-14 (evening) — the datalog skill read as a stranger's agent would
 
 Asked for a fresh read of the datalog skill as published, by a user and agent who
@@ -106,42 +136,4 @@ links; ten section citations; the oldest worklog entry.
 - **Measure the code-analysis playbook** with a fresh agent and only the bundle.
 - The code-analysis bundle still ships `tools/code-facts/src`, whose comments
   name subjects and bugs.
-- **Open**: `datalog/bugs/015`, `016`.
-
-## 2026-09-14 (afternoon) — fact store step 4: values interned; faster than the baseline everywhere
-
-Asked, in the interning review, for both kinds interned and interning alone,
-measured before anything more is decided.
-
-**Done** — branch `fact-store`; per-commit gate green; harness diff empty
-(1,109 cases); deep seeds 2 and 3 pass 525/525 at 351 MB.
-- `60a5495`: `Value::Symbol` and `String` hold a `Sym`, interned once for the
-  process; a `Value` is 24 bytes; `Value::symbol`/`string` constructors.
-  - **A17**, interned equality is content equality, mutation-verified. Ordering by
-    pointer escapes every B-series differential; only A17 and hand tests catch it.
-- **Measured against `efcda71`**, one sitting, median of 3:
-  - `pointsto.dl` 10.6 → 7.4 s; its `?why` 9.1 → 6.0 s, 815 → 410 MB;
-  - `callreach.dl` `?why` 1.46 → 0.60 s; `sparse_800` 1.22 → 0.41 s;
-  - `q_coh.dl` 6.4 → 4.1 s, `lib/cohesion.dl` 7.8 → 4.8 s, `lib/flow.dl`
-    23.2 → 12.6 s.
-- **`bugs/015`:** seed 2 unskipped on `7ecfc33` failed an allocation at 14.2 GB,
-  with only B13 at `Deep` still running. Which test holds the memory is now
-  established.
-
-**Decided**
-- The user's, in review: accept the interner's process-lifetime leak; intern
-  symbols and strings both; interning alone, measured first.
-- §17 2026-07-19's "interning deferred" is marked ***Superseded***.
-- The user's: merge to trunk now. The cross-case copy and any further seek work
-  are trunk work.
-
-**Removed** — `Value`'s owned `String`s; `coerce_borrowed`, folded into `coerce`;
-the oldest worklog entry (rotated).
-
-**Next up**
-- **Merged.** The random-seed deep run passed 525/525 (1,327 s, 1.1 GB); `trunk`
-  fast-forwarded to `fact-store`, and the branch deleted.
-- **The datalog skill's leaks** (the user's next): `SKILL.md`'s links out of the
-  bundle, the source-analysis recipe's dated narrative about this engine's own
-  code, and `§` citations in an example and nine CLI messages.
 - **Open**: `datalog/bugs/015`, `016`.
