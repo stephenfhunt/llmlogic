@@ -275,6 +275,7 @@ it. A future audit starts here.
 | §10's std-builtin exemption | `ArithShape::StdBuiltin` | **C10**'s guard — the mutation lands on the classification, not the fixpoint |
 | Diagnostics as a branchable surface (§12) | `arb_corrupted_program_text` — the first generator that makes programs **fail** | **C16**, with `c16_generator_rejects_and_reaches_several_families`; the pinned set itself is `every_code_is_pinned_and_belongs_to_its_category` |
 | The physical access path (§15, evaluator-internal) | small collision-rich tuple pools with `absent`; prefixes drawn from the generated relation | **B12b/c**, with their guards, and B12a's sentence inside **B14a** — the differential is blind to an over-yield, so these are what pin the seek |
+| Membership by content (§15, evaluator-internal) | insert-and-lookup sequences under colliding, clustered and spread hashes | **B15** (the index against a map), and **B14a**'s `contains` over a real relation |
 | Semi-naive views (§15, evaluator-internal) | a history of written and skipped rounds over a four-cell pool; `arb_program_with_edb` and `arb_program_text_at(Medium)`, observed each delta pass | **B14a** (the relation against a ledger) and **B14b** (the views against round stamps), with a guard each |
 | Rule pruning (§15) | `arb_pruning_program` — a relation reachable only under `not` and one only inside an aggregate goal; `arb_program_with_edb`; the `tests/programs` corpus | **B13**, with a guard per level — the text level is the one either recorded mutation reddens |
 
@@ -747,6 +748,31 @@ compared keyed by predicate *name*, not `PredId`.
     - `b14b_generator_reaches_stale_blocks_and_split_views`, of 48: untiered, a
       stale block in 1 and split views in 10; at `Medium`, 9 and 29. So the
       `Medium` property guards stale blocks.
+
+- [x] **B15** **The row index is a set of row ids** (§15/engine, 2026-09-14;
+  `notes/fact-store.md`). `Relation::contains` asks an open-addressing table of
+  row ids by the row's hash (`engine/row_index.rs`), not each run by search.
+  `row_index::tests::b15_the_row_index_is_a_set_of_row_ids` replays any sequence
+  of inserts of absent keys and lookups against a `HashMap`. Every lookup finds
+  exactly the id the map holds, under three hashings:
+  - every key one hash, whose tag names the last slot, so every lookup compares
+    rows and every probe wraps;
+  - three tags, so collisions cluster and only the row test tells keys apart;
+  - a spread hash.
+
+  **B14a** checks `contains` end to end, over a relation's real hash.
+  - *Mutations (all killed):*
+
+    | mutation | red |
+    |---|---|
+    | a tag match accepted without the row test | B15 |
+    | probing stops at the first occupied slot that does not match | B15, B14a |
+    | growth drops one occupied entry | B15, B14a |
+    | the lookup probe wraps without its mask | B15, B14a (out of bounds) |
+    | `append` indexes a row under the wrong hash | B14a, among 59 |
+  - Guard: `b15_generator_reaches_every_hashing_and_two_growths`. Of 400 draws, the
+    number whose sequence inserts enough distinct keys to grow the table twice:
+    118 with every key one hash, 103 with three tags, 98 spread.
 
 ### Phase C — negation + type inference (roadmap step 4) — generalizes §16.2, §16.3
 

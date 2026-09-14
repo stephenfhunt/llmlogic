@@ -23,6 +23,11 @@
 //! content order. That is the order every consumer sees, from the join to the
 //! printed answer.
 //!
+//! # Membership is a hash index
+//!
+//! `contains` asks a [`RowIndex`] by the row's hash, not each run by search. The
+//! index holds row ids, which never move, so merging runs leaves it untouched.
+//!
 //! # Views are read by round
 //!
 //! The semi-naive rewrite joins each body position against one of three views
@@ -39,7 +44,9 @@
 //! (**E1**).
 
 use std::collections::BTreeSet;
+use std::hash::{Hash, Hasher};
 
+use super::row_index::RowIndex;
 use crate::ir::{Tuple, Value};
 
 /// Which slice of a relation a body position joins against.
@@ -64,6 +71,8 @@ pub struct Relation {
     rows: u32,
     /// Row ids in content order: sorted runs, the most recent apply's block last.
     runs: Vec<Vec<u32>>,
+    /// Every row id, by the row's hash: membership without a search.
+    index: RowIndex,
     /// The round whose apply wrote the newest run, or 0 when no round has.
     delta_round: u32,
 }
@@ -76,6 +85,7 @@ impl Relation {
             values: Vec::new(),
             rows: 0,
             runs: Vec::new(),
+            index: RowIndex::default(),
             delta_round: 0,
         }
     }
@@ -92,9 +102,9 @@ impl Relation {
 
     /// Whether `row` is a fact of this relation.
     pub fn contains(&self, row: &[Value]) -> bool {
-        self.runs
-            .iter()
-            .any(|run| run.binary_search_by(|&id| self.row(id).cmp(row)).is_ok())
+        self.index
+            .find(row_hash(row), |id| self.row(id) == row)
+            .is_some()
     }
 
     /// Every fact's row, in canonical order.
@@ -119,6 +129,12 @@ impl Relation {
         let (values, rows) = crate::ir::sort_dedup_rows(values, rows, self.arity);
         self.values = values;
         self.rows = u32::try_from(rows).expect("a relation holds fewer than 2^32 facts");
+        self.index.reserve(rows);
+        for id in 0..self.rows {
+            let start = id as usize * self.arity;
+            let hash = row_hash(&self.values[start..start + self.arity]);
+            self.index.insert(hash, id);
+        }
         if self.rows > 0 {
             self.runs.push((0..self.rows).collect());
         }
@@ -151,9 +167,12 @@ impl Relation {
         let rows = rows.into_iter();
         let first = self.rows;
         self.values.reserve_exact(rows.len() * self.arity);
+        self.index.reserve(rows.len());
         for Tuple(values) in rows {
             debug_assert_eq!(values.len(), self.arity, "a fact is its predicate's arity");
+            let hash = row_hash(&values);
             self.values.extend(values);
+            self.index.insert(hash, self.rows);
             self.rows = self
                 .rows
                 .checked_add(1)
@@ -231,6 +250,65 @@ impl Relation {
     #[cfg(test)]
     pub(crate) fn runs(&self) -> &[Vec<u32>] {
         &self.runs
+    }
+}
+
+/// The hash a row is indexed by: `Value`'s `Hash` through [`RowHasher`]. Equal rows
+/// hash alike, since `ir::F64` hashes its normalised bits.
+fn row_hash(row: &[Value]) -> u64 {
+    let mut hasher = RowHasher(0);
+    row.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// A multiply-rotate hasher with a final mix, so the high bits [`RowIndex`] reads
+/// are spread. Hand-written because the core takes no dependencies, and std's
+/// `DefaultHasher` spends more on each row than a membership test can afford.
+struct RowHasher(u64);
+
+impl RowHasher {
+    fn add(&mut self, word: u64) {
+        self.0 = (self.0.rotate_left(5) ^ word).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
+}
+
+impl Hasher for RowHasher {
+    fn finish(&self) -> u64 {
+        let mut hash = self.0;
+        hash ^= hash >> 33;
+        hash = hash.wrapping_mul(0xff51_afd7_ed55_8ccd);
+        hash ^= hash >> 33;
+        hash = hash.wrapping_mul(0xc4ce_b9fe_1a85_ec53);
+        hash ^ (hash >> 33)
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        let mut chunks = bytes.chunks_exact(8);
+        for chunk in &mut chunks {
+            self.add(u64::from_le_bytes(chunk.try_into().expect("eight bytes")));
+        }
+        let rest = chunks.remainder();
+        if !rest.is_empty() {
+            let mut word = [0u8; 8];
+            word[..rest.len()].copy_from_slice(rest);
+            self.add(u64::from_le_bytes(word));
+        }
+    }
+
+    fn write_u8(&mut self, n: u8) {
+        self.add(u64::from(n));
+    }
+
+    fn write_u32(&mut self, n: u32) {
+        self.add(u64::from(n));
+    }
+
+    fn write_u64(&mut self, n: u64) {
+        self.add(n);
+    }
+
+    fn write_usize(&mut self, n: usize) {
+        self.add(n as u64);
     }
 }
 

@@ -42,6 +42,7 @@
 #[cfg(test)]
 pub(crate) mod naive;
 mod relation;
+mod row_index;
 mod seek;
 
 use relation::AtomView;
