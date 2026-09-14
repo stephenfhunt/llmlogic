@@ -79,6 +79,11 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
   lives in. `exports.dl` takes its entry points from you as `entry/1`; reading
   them from `package.json` (the `package` facts carry none yet) is what is left.
   _queued._
+- **Go frontend** — every layer, through x/tools (vendored). _building_ —
+  `decisions.md` 2026-09-14, `notes/go-java-frontends.md`.
+- **Java frontend** — every layer, through the JDK compiler API; project model
+  from Maven/Gradle. Its Spring dogfood is the decorator item's subject. _queued_
+  — same entry.
 - **Python dataflow layer** (points-to and taint for Python). _parked_ until the
   first Python version has been used.
 - **A TypeScript 7 backend**, when its compiler API stabilizes. _parked._

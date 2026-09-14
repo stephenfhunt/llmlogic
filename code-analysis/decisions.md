@@ -14,6 +14,23 @@ with the long form in [`notes/code-facts.md`](notes/code-facts.md).
 
 ## Decisions
 
+- **2026-09-14** — **Go and Java frontends, in Python's shape, with the library's
+  vocabulary kept** (the user's choices: Go first; x/tools vendored; Java's
+  project model asked of Maven and Gradle; every layer including dataflow). Long
+  form: [`notes/go-java-frontends.md`](notes/go-java-frontends.md).
+  - **The project's toolchain is assumed present**; the skill bundles none of it.
+    Go resolves through `go/packages` + `go/types` + SSA, Java through the JDK's
+    compiler API — the checker that builds the project, as for TypeScript.
+  - **Constructs map onto existing `symbol.kind`s**, with the language's own name
+    in a new `symbol.form`, so `lib/` needs no per-language branch.
+  - **The module graph stays file-to-file**: a package or type import is one
+    `imports` row per file referenced, and a reference with no import is kind
+    `implicit`. *Rejected:* a `ref`-derived edge gated on `lang` in `modgraph.dl`,
+    and imports as written only — which misses same-package dependents in every
+    impact closure.
+  - Go's structural interfaces become `implements`/`overrides` rows via
+    `types.Implements`, so CHA needs no change.
+
 - **2026-09-13 (night ii)** — **The skill's texts are written for a stranger's
   project, and the skill owns every one of them** (the user's ruling).
   - **What ships is published, not project documentation.** That covers
