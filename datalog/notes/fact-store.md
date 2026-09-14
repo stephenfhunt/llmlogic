@@ -184,10 +184,15 @@ its worktree.
   the baseline's answers. The baseline diffed against itself must also be empty, or
   the oracle is flaky.
 - **The deep run,** `harness/deep.sh`: `DATALOG_PBT=deep cargo test --lib` under
-  `prlimit --as` (16 GB). It runs at `PROPTEST_RNG_SEED` 1, 2 and 3, which draw the
+  `prlimit --as` (16 GB). It runs at `PROPTEST_RNG_SEED` 2 and 3, which draw the
   baseline's cases while the generators are unchanged, plus one random seed. It
-  skips only the tests `bugs/015` exhausts memory on, as recorded in
-  `runs/deep-summary.txt`.
+  skips `b13_pruning_changes_no_live_relation_at_large` (`bugs/015`).
+  - **Baseline:** seeds 2 and 3 pass all 509 tests in 159 s and 130 s, peaking
+    under 1 GB.
+  - **Seed 1 is not in the gate.** It passes, but takes 6 hours: at `Deep`,
+    `b5_body_order_is_irrelevant_at_large` draws a pathological program.
+  - **Not chased, the user's call:** fix buggy behaviour on reasonable input, and
+    leave deliberately exponential generated input alone.
 - **New properties** are mutation-verified, and each mutation is written on its
   catalog line in `testing.md`.
 - **Performance,** `harness/measure.py BASELINE BRANCH`. The binaries are
