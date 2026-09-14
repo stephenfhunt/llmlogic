@@ -185,12 +185,15 @@ its worktree.
   the oracle is flaky.
 - **The deep run,** `harness/deep.sh`: `DATALOG_PBT=deep cargo test --lib` under
   `prlimit --as` (16 GB). It runs at `PROPTEST_RNG_SEED` 2 and 3, which draw the
-  baseline's cases while the generators are unchanged, plus one random seed. It
-  skips `b13_pruning_changes_no_live_relation_at_large` (`bugs/015`).
+  baseline's cases while the generators are unchanged. It skips
+  `b13_pruning_changes_no_live_relation_at_large` (`bugs/015`).
   - **Baseline:** seeds 2 and 3 pass all 509 tests in 159 s and 130 s, peaking
     under 1 GB.
-  - **Seed 1 is not in the gate.** It passes, but takes 6 hours: at `Deep`,
-    `b5_body_order_is_irrelevant_at_large` draws a pathological program.
+  - **Seeds 1 and random are not in the gate.** At `Deep`,
+    `b5_body_order_is_irrelevant_at_large` draws a pathological program. Seed 1
+    passes, but takes 6 hours. The random seed was stopped after 72 minutes in the
+    same test, and a random seed could not pair a baseline with a branch anyway.
+    The per-commit `cargo test` draws fresh cases on every run.
   - **Not chased, the user's call:** fix buggy behaviour on reasonable input, and
     leave deliberately exponential generated input alone.
 - **New properties** are mutation-verified, and each mutation is written on its
