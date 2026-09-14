@@ -250,15 +250,28 @@ cost is memory access, the shape the shared tuples had.
   | E3: E2 with all older runs merged at every apply (≤ 2 runs) | 13.36 s | 1.84 s | merging costs more than the runs it saves |
   | E4: E2 with each written row's emptied buffer leaked | **11.94 s**, misses 202 M | 1.52 s, 137 MB | **freed row buffers are most of `pointsto.dl`'s cost** |
 
-**What it says.** The two costs are separate.
-- **Freed row buffers.** `load_base` and `apply` move each row's values into the
-  store and free the row's own `Vec`. That is 508 K imported rows on
-  `pointsto.dl`, and the holes they leave cost what they cost the shared tuples.
-  Leaking them recovers about 57% of that program's regression. These are the
-  per-row `Vec`s that review answer 3 deferred until the gate showed them.
-- **Reading rows through runs.** The rest, and most of `sparse_800`'s cost, is
-  membership and seeking by binary search through the store: review answer 2's
-  condition for a content-to-row hash.
+**What E4 seemed to say, and what it did.** E4's leak sat in `append`, which
+wrote base rows *and* each round's block, so it could not say which freed buffers
+cost the time. Three follow-ups separate them. Each row below is measured against
+`efcda71` in the same sitting; `pointsto.dl` has no goals.
+
+| change | `pointsto.dl` | `sparse_800` | reading |
+|---|---|---|---|
+| `5f27f41`: imports flat end to end, never a `Vec` per row | 13.54 s, 479 MB | 1.62 s | memory −79 MB, time unchanged |
+| E5: `5f27f41` with derived rows' buffers leaked | 13.37 s | 1.53 s | derived rows are not `pointsto.dl`'s cost |
+| E6: `5f27f41` with the loader's *raw* row buffers leaked | **12.09 s**, 778 MB, misses 214 M | 1.61 s | **the holes that matter are the loader's** |
+
+**What it says now.** Two costs remain, and they are separate.
+- **Load-time holes (`pointsto.dl`, about 1.5 s).** `RawTable` holds one
+  `Vec<RawValue>` per row, which `finalize` consumes and `arrange`'s reorder
+  replaces. Both free a buffer per row among live data. In `efcda71` and step 1
+  the long-lived value rows filled those holes. With flat rows nothing does, so
+  evaluation's allocations land in them. The fix keeps the direction the user
+  chose: the raw table flat too, so the import path allocates no row on its own.
+- **Reading rows through runs** (the rest of `pointsto.dl`, and all of
+  `sparse_800`'s 0.37 s). Membership and seeks binary-search each run through the
+  store. This is review answer 2's condition for a content-to-row hash, taken up
+  after the load-time holes are gone and re-measured.
 
 ## Rules the build must keep
 
