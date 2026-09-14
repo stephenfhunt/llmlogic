@@ -110,6 +110,28 @@ run: size its default run count from the measured per-run rate, not by eye.
   pattern's `case_test` → red — the frontend's first version, which P1-py found.
 - [x] **P3-py** Cyclomatic two ways for Python, on exception-free programs.
   *Mutation:* a `match` guard's decision uncounted → red.
+- [x] **P1-go** CFG soundness against real Go executions, P1's method with Go's
+  constructs: three-clause, conditional, bare and `range` loops; labeled `break`
+  and `continue`; `goto`; tagged and tagless `switch` with `fallthrough`;
+  `select` with `default`; `defer` of a plain and of a recovering call; panics
+  from a statement and from `panic`. Three programs per run, the last "doomed" (a
+  recovering defer first, `panic(0)` last). Two harness rules: a `finally` node
+  may run no deferred call, so a path may pass it; probes of one node (a
+  select's channel operands) are evaluated together, so a step between two of
+  them is no edge. Guards: back, break, continue, throw, finally, case, default,
+  fallthrough, goto and select edges used; an elif (the rarest: 22 of 200 runs),
+  a select case, a default clause and both labeled jumps reached through probes
+  just before them; a recovery returning normally, in the doomed function too.
+  *Mutations:* implicit panics off → red; no resume at `exit` after a recovery →
+  red (**green** before the doomed function: wherever a function can end
+  normally, the edge is redundant); `fallthrough` carried by edge kind → red —
+  the first version, which P1-go found carrying a fallthrough through an empty
+  clause into the next; select operands evaluated at the cases → red; `goto`
+  edges dropped → red; labels ignored → red.
+- [x] **P3-go** Cyclomatic two ways for Go, on programs without panics or
+  defers (with `goto`, `fallthrough`, `select` and labeled jumps). Guard: if,
+  for, for_of and case decisions occur. *Mutation:* `range` decisions uncounted
+  → red.
 - [x] **P2-go** Module-graph fidelity for Go, over P2's model rendered as one package
   per directory: `imports` and `import_name` equal the graph — a row per file of
   another package the importer references, an `implicit` row per other file of

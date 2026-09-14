@@ -90,6 +90,8 @@ violation("use.var", V) :- use(var: V), not known(V).
 violation("captures.var", V) :- captures(var: V), not known(V).
 violation("closure.fn", F) :- closure(fn: F), not fn(id: F).
 violation("call_at.call_site", S) :- extracted(refs), call_at(call_site: C), not call_site(id: C), S = C as string.
+violation("concurrency_site.fn", F) :- concurrency_site(fn: F), not fn(id: F).
+violation("concurrency_site.node", S) :- concurrency_site(node: N), not flow_node(id: N), S = N as string.
 
 % ── dataflow ─────────────────────────────────────────────────────────────
 known_var(V) :- var(id: V).

@@ -31,7 +31,7 @@ reachable(B) :- reachable(A), succ(A, B).
 
 statement_kind(stmt). statement_kind(cond). statement_kind(loop_head). statement_kind(switch).
 statement_kind(case_test). statement_kind(return). statement_kind(throw). statement_kind(break).
-statement_kind(continue).
+statement_kind(continue). statement_kind(select). statement_kind(goto). statement_kind(fallthrough).
 unreachable(F, N, L) :- flow_node(id: N, fn: F, kind: K, line: L), statement_kind(K), not reachable(N).
 
 kills(N, V) :- def(node: N, var: V).

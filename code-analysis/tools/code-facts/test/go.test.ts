@@ -342,6 +342,243 @@ test("unresolved_ref: names the checker could not resolve, but not members of wh
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+const FLOW_SOURCE = `package f
+
+import (
+	"errors"
+	"fmt"
+)
+
+func Loops(xs []int, ch chan int) (total int) {
+	for i := 0; i < len(xs); i++ {
+		if xs[i] < 0 {
+			continue
+		}
+		total += xs[i]
+	}
+outer:
+	for _, x := range xs {
+		for {
+			if x > 10 {
+				break outer
+			}
+			break
+		}
+	}
+	for v := range ch {
+		total += v
+	}
+	return
+}
+
+func Switches(v any, n int) string {
+	switch t := v.(type) {
+	case int:
+		return fmt.Sprint(t + n)
+	case string, []byte:
+		_ = t
+	}
+	switch {
+	case n > 0 && n < 10:
+		n++
+		fallthrough
+	case n == 0:
+		n--
+	default:
+		goto done
+	}
+done:
+	return "x"
+}
+
+func Selects(a, b chan int) int {
+	select {
+	case v := <-a:
+		return v
+	case b <- 1:
+	default:
+	}
+	go func() { a <- 2 }()
+	return 0
+}
+
+func Defers() (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = errors.New("recovered")
+		}
+	}()
+	x := 0
+	f := func() { x++ }
+	f()
+	if x > 1 {
+		panic("too big")
+	}
+	return nil
+}
+
+var initial, other = compute(), 2
+
+func compute() int { return 1 }
+
+func Dead() int {
+	y := 1
+	y = 2
+	return y
+}
+`;
+
+test("flow: statement-level graphs with defer, goto, fallthrough and select; def/use, captures, metrics", { skip: NO_GO }, () => {
+  const dir = tempDir("go-flow");
+  const out = path.join(dir, "out");
+  writeFiles(dir, { "go.mod": "module example.com/f\n\ngo 1.26\n", "f.go": FLOW_SOURCE });
+  const { tables } = extractGo(dir, { out, layers: ["refs", "flow"] });
+  const nodes = new Map(tables.rows("flow_node").map((n) => [n.id as number, n]));
+  const at = (id: unknown) => {
+    const n = nodes.get(id as number);
+    return `${n?.kind}@${n?.line}`;
+  };
+  const edges = (fn: string) =>
+    tables
+      .rows("flow_edge")
+      .filter((e) => nodes.get(e.from as number)?.fn === `f.go#${fn}`)
+      .map((e) => `${at(e.from)} -${e.kind}-> ${at(e.to)}`)
+      .sort();
+  assert.deepEqual(
+    edges("Loops"),
+    [
+      "entry@8 -next-> stmt@9",
+      "stmt@9 -next-> loop_head@9",
+      "loop_head@9 -on_true-> cond@10",
+      "cond@10 -on_true-> continue@11",
+      // `continue` runs the post statement; the post statement loops back.
+      "continue@11 -continue-> stmt@9",
+      "cond@10 -on_false-> stmt@13",
+      "stmt@13 -next-> stmt@9",
+      "stmt@9 -back-> loop_head@9",
+      "loop_head@9 -on_false-> stmt@16",
+      "stmt@16 -next-> loop_head@16",
+      "loop_head@16 -on_true-> loop_head@17",
+      "loop_head@17 -on_true-> cond@18",
+      "cond@18 -on_true-> break@19",
+      "cond@18 -on_false-> break@21",
+      // The inner `break` ends the inner loop, and the outer body with it; `break outer` ends both.
+      "break@21 -break-> loop_head@16",
+      "loop_head@16 -on_false-> stmt@24",
+      "break@19 -break-> stmt@24",
+      "stmt@24 -next-> loop_head@24",
+      "loop_head@24 -on_true-> stmt@25",
+      "stmt@25 -back-> loop_head@24",
+      "loop_head@24 -on_false-> return@27",
+      "return@27 -return-> exit@28",
+    ].sort(),
+  );
+  assert.deepEqual(
+    edges("Switches"),
+    [
+      "entry@30 -next-> switch@31",
+      "switch@31 -next-> case_test@32",
+      "case_test@32 -on_false-> case_test@34",
+      "case_test@32 -case-> return@33",
+      "return@33 -return-> exit@48",
+      "case_test@34 -case-> stmt@35",
+      "case_test@34 -on_false-> switch@37",
+      "stmt@35 -next-> switch@37",
+      "switch@37 -next-> case_test@38",
+      "case_test@38 -on_false-> case_test@41",
+      "case_test@38 -case-> stmt@39",
+      "stmt@39 -next-> fallthrough@40",
+      "fallthrough@40 -fallthrough-> stmt@42",
+      "case_test@41 -case-> stmt@42",
+      "case_test@41 -default-> goto@44",
+      // The label a goto targets is a node.
+      "goto@44 -goto-> stmt@46",
+      "stmt@42 -next-> stmt@46",
+      "stmt@46 -next-> return@47",
+      "return@47 -return-> exit@48",
+    ].sort(),
+  );
+  assert.deepEqual(
+    edges("Selects"),
+    [
+      "entry@50 -next-> select@51",
+      "select@51 -next-> case_test@52",
+      "case_test@52 -on_false-> case_test@54",
+      "case_test@52 -case-> return@53",
+      "return@53 -return-> exit@59",
+      "case_test@54 -case-> stmt@57",
+      "case_test@54 -default-> stmt@57",
+      "stmt@57 -next-> return@58",
+      "return@58 -return-> exit@59",
+    ].sort(),
+  );
+  assert.deepEqual(
+    edges("Defers"),
+    [
+      "entry@61 -next-> stmt@62",
+      "stmt@62 -next-> stmt@67",
+      "stmt@67 -next-> stmt@68",
+      "stmt@68 -next-> stmt@69",
+      "stmt@69 -next-> cond@70",
+      "cond@70 -on_true-> throw@71",
+      "cond@70 -on_false-> return@73",
+      // In a function that defers, any node may panic into the deferred calls.
+      "stmt@62 -throw-> finally@74",
+      "stmt@67 -throw-> finally@74",
+      "stmt@68 -throw-> finally@74",
+      "stmt@69 -throw-> finally@74",
+      "cond@70 -throw-> finally@74",
+      "throw@71 -throw-> finally@74",
+      "return@73 -throw-> finally@74",
+      "return@73 -return-> finally@74",
+      // The deferred literal recovers, so a panic may end in a normal return.
+      "finally@74 -return-> exit@74",
+      "finally@74 -throw-> throw_exit@74",
+    ].sort(),
+  );
+
+  const fn = (id: string) => tables.rows("fn").find((f) => f.id === `f.go#${id}`);
+  const loops = fn("Loops");
+  assert.deepEqual(
+    [loops?.kind, loops?.cyclomatic, loops?.cognitive, loops?.statements, loops?.max_nesting, loops?.params, loops?.returns],
+    ["function", 6, 11, 15, 3, 2, 1],
+  );
+  assert.deepEqual([fn("Defers")?.throws, fn("Switches")?.cognitive, fn("Defers.f")?.kind], [1, 4, "function_expression"]);
+
+  const rowsAt = (rel: string, key: string) =>
+    tables.rows(rel).map((r) => `${at(r.node)}:${String(r[key]).replace("f.go#", "")}`).sort();
+  assert.ok(rowsAt("def", "var").includes("switch@31:Switches.t"), "a type switch's variable is defined at the switch");
+  assert.ok(rowsAt("def", "var").includes("case_test@52:Selects.v"), "a receive in a select case defines at the case");
+  assert.ok(rowsAt("use", "var").includes("return@27:Loops.total"), "a bare return reads the named results");
+  assert.ok(rowsAt("def", "var").includes("stmt@76:initial"), "a package-level variable is defined in its file's <module>");
+  const sites = new Map(tables.rows("call_site").map((c) => [c.id, c.callee]));
+  const deferred = tables.rows("call_at").filter((c) => nodes.get(c.node as number)?.kind === "finally").map((c) => sites.get(c.call_site));
+  assert.deepEqual(deferred, ["f.go#Defers.<function@62:8>"]);
+  assert.deepEqual(
+    tables.rows("captures").map((c) => [c.fn, c.var]),
+    [
+      ["f.go#Selects.<function@57:5>", "f.go#Selects.a"],
+      ["f.go#Defers.<function@62:8>", "f.go#Defers.err"],
+      ["f.go#Defers.f", "f.go#Defers.x"],
+    ],
+  );
+  assert.deepEqual(
+    tables.rows("concurrency_site").map((c) => `${at(c.node)}:${c.kind}`),
+    ["loop_head@24:chan_recv", "select@51:select", "case_test@52:chan_recv", "case_test@54:chan_send", "stmt@57:go", "stmt@57:chan_send", "stmt@62:defer"],
+  );
+
+  if (engineAvailable()) {
+    const r = datalog(path.join(out, "lib", "flow.dl"), ["dead_store(D, V, L)", "undefined_use(N, V)", "unreachable(F, N, L)"]);
+    assert.equal(r.code, 0, r.stderr);
+    const answers = r.stdout.split("\n").filter((l) => /^(dead_store|undefined_use|unreachable)\(/.test(l));
+    assert.equal(answers.length, 1, r.stdout);
+    assert.match(answers[0] ?? "", /^dead_store\(\d+, "f\.go#Dead\.y", 81\)\.$/);
+    const checks = datalog(path.join(out, "lib", "checks.dl"));
+    assert.equal(checks.code, 1, `expected a clean run, got exit ${checks.code}:\n${checks.stdout}${checks.stderr}`);
+  }
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test("checks.dl finds nothing wrong with the Go facts", { skip: NO_GO || !engineAvailable() }, () => {
   const r = datalog(path.join(out, "lib", "checks.dl"));
   assert.equal(r.code, 1, `expected a clean run, got exit ${r.code}:\n${r.stdout}${r.stderr}`);

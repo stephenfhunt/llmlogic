@@ -103,6 +103,9 @@ export const FLOW_NODE_KINDS = [
   "throw",
   "break",
   "continue",
+  "select",
+  "goto",
+  "fallthrough",
 ] as const;
 export type FlowNodeKind = (typeof FLOW_NODE_KINDS)[number];
 
@@ -117,6 +120,8 @@ export const FLOW_EDGE_KINDS = [
   "continue",
   "return",
   "throw",
+  "goto",
+  "fallthrough",
 ] as const;
 export type FlowEdgeKind = (typeof FLOW_EDGE_KINDS)[number];
 
@@ -687,6 +692,18 @@ export const RELATIONS: readonly Relation[] = [
     layer: "flow",
     doc: "This flow node suspends on `yield`.",
     columns: [col("node", "int", "`flow_node.id`")],
+  },
+  {
+    name: "concurrency_site",
+    layer: "flow",
+    doc: "Where a function starts a goroutine, defers a call, sends on or receives from a channel, or selects among channels.",
+    columns: [
+      col("fn", "string", "the function whose graph it belongs to"),
+      col("node", "int", "`flow_node.id` — for a receive or send in a `select` case, the case; the deferred call itself runs at the function's `finally` node"),
+      oneOf("kind", ["go", "defer", "chan_send", "chan_recv", "select"], "what happens"),
+      col("file", "string", FILE),
+      col("line", "int", LINE),
+    ],
   },
 
   // ── dataflow ────────────────────────────────────────────────────────────
