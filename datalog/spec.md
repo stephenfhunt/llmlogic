@@ -2624,6 +2624,17 @@ never say.
   with `pointsto.dl` 2.6% slower (the user's call, weighed against `sparse_800`'s
   26% and both `?why` runs). Deep seeds 2 and 3 pass 517 of 517. Step 3's design
   is `notes/fact-store.md` § Step 3 design.
+  ***Consequences 2026-09-14 (later iii)*** — step 2 was accepted on a gate that
+  had no seek-heavy query in it (`notes/fact-store.md` § Seek-heavy queries,
+  measured).
+  - **The regression.** `q_coh.dl`, `lib/cohesion.dl` and `lib/flow.dl` are
+    24–32% slower at `7ecfc33`, even at merge factor 8. The four gate programs
+    are faster and smaller.
+  - **Why the planned B-tree was dropped.** `heaptrack` shows the same joins and
+    string copies as `efcda71`. The cost is locality: rows' strings stay where
+    they were first allocated. A B-tree, per E9, was not expected to recover it.
+  - **Step 4 is value interning, designed first (the user's call).** The gate now
+    includes the three queries.
 - **2026-09-13 (later iii)** — **A fact reference is a shared tuple, not an id**
   (engine, `ir::Tuple`; the user's call that references come next, and their
   question *why not a `&`?*). The design is in `notes/recorder-at-scale.md`

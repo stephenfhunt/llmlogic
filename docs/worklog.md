@@ -24,6 +24,52 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-14 (late morning) — fact store step 3: premises by row; a missed seek regression; interning next
+
+Asked to approve step 3's design, then build it. A wider measurement found a
+regression the gate had missed, and the user chose each direction as the evidence
+came in.
+
+**Done** — branch `fact-store`; per-commit gate green at every commit; harness
+diffs empty at every engine commit.
+- **Step 3.**
+  - `7ae01a1`: seeks yield row ids.
+  - `4a27aff`: recorder keyed by row, rounds from blocks.
+  - `2950331`: premises as `FactRef` (16 bytes), derivations resolved at read.
+  - `efda16b`: E12 (proofs least by content) and E10's match clause. Two
+    mutations had survived the suite before these.
+- **`bugs/015`:** an uncapped per-commit run drew a 19.8 GB runaway, likely B13 at
+  `Large`.
+- **The regression.** Seek-heavy library queries got slower on the branch; the
+  four-program gate never timed them. Bisected to `d9a4c5e`, the runs.
+  - Cheap levers measured (E8–E10): only merge factor 8 helped, and it was
+    committed as `7ecfc33`.
+  - The rest is locality, per `heaptrack`: the joins and copies are the same as
+    `efcda71`'s, and cache misses are 2.5×.
+- **At `7ecfc33`, against `efcda71`:**
+  - `pointsto.dl` 10.5 → 10.0 s; its `?why` 9.2 → 7.7 s, 817 → 654 MB;
+  - `callreach.dl` `?why` 1.46 → 0.91 s, 379 → 206 MB;
+  - `sparse_800` 1.23 → 0.94 s;
+  - `q_coh.dl` +26%, `lib/cohesion.dl` +24%, `lib/flow.dl` +32%.
+
+**Decided**
+- The user's: approve step 3's design; merge factor 8, then a B-tree. The B-tree
+  was then replaced by value interning, designed first, on E9's and `heaptrack`'s
+  evidence.
+- The performance gate includes `q_coh.dl`, `lib/cohesion.dl` and `lib/flow.dl`.
+  Step 2's acceptance rested on a gate without them (§17 2026-09-13 (later iv),
+  consequences (later iii)).
+
+**Removed** — `Model.first_round` (rounds come from blocks); `Premise::Fact`'s
+copied fact; `ProofStep`'s borrowed derivation; the step-4 B-tree plan; the oldest
+worklog entry.
+
+**Next up**
+- **Design value interning with the user.** The hard question: §14 orders symbols
+  and strings by content, and runs, seeks and printing rely on that order.
+- Record the deep gate on `7ecfc33` (running at session end).
+- **Open**: `datalog/bugs/015`, `016`.
+
 ## 2026-09-14 (morning) — fact store step 2: runs, flat imports, hash membership; accepted at 2.6%
 
 Asked to file `bugs/016` and move to step 2, then chose each fix as the
@@ -111,53 +157,3 @@ start on the relation type.
 - **`bugs/016`**, filed on trunk (the user's): `cargo test --no-default-features`
   fails three import tests that `694a6ff` added without the `duckdb` gate.
 - **Open**: `datalog/bugs/015`, `016`.
-
-## 2026-09-13 (late night) — fact references: shared tuples built, slower, reverted; a store with one owner designed
-
-Asked to start the fact references design. The user asked why a premise had to be
-an id and not a `&`, chose design then build, and after the regression named the
-defect: nothing owns a fact.
-
-**Done** — datalog `cargo test`, clippy, fmt green at every commit
-- `aa1ae1d` designed shared tuples (`Rc<[Value]>`), not ids (§17 2026-09-13
-  (later iii)). `5035215` built them, with E12 and a killed mutation:
-  - `?why` byte-identical on 33 corpus goals and both `@grafana/ui` goals;
-  - `pointsto.dl` `?why` 836 → 474 MB, `callreach.dl` 389 → 196 MB.
-- **Measured only after committing, and slower.** `pointsto.dl` with no goals
-  went 8.4 → 12.7 s and `sparse_800` 1.83 → 2.19 s, on equal instructions and
-  83% more cache misses.
-- **Diagnosed** (`notes/recorder-at-scale.md` § Shared tuples, measured):
-  - ruled out: the seek prefix's allocation, count traffic, placement at apply;
-  - `Box<[Value]>` split the layout cost from sharing's;
-  - leaking imported rows' freed buffers gave 6.55 s, which is `pointsto.dl`'s
-    cost. `sparse_800`'s is not explained.
-- `efcda71` reverts the code and E12; §17 keeps the entry, ***Falsified***.
-- `notes/fact-store.md`:
-  - each relation owns its facts in a flat, append-only store, written once;
-  - everything else holds a `FactRef`, and order is kept as sorted runs of rows;
-  - a measurement gate, and six questions for review.
-
-**Decided**
-- The user's: the defect is ownership. Facts need *a single source of truth that
-  everything else refers back to*, designed and prototyped before trunk.
-- The user's: revert `5035215` rather than keep its memory win.
-- §17 2026-09-13 (later iii): ***Amended*** (a premise stays 32 bytes), then
-  ***Falsified***.
-
-**Removed** — `5035215`'s code and E12; the shared-tuple direction; the note's
-zero-arity question (v1 has no nullary predicates); the oldest worklog entry.
-
-**Next up**
-- **Review `notes/fact-store.md`'s six questions with the user first:**
-  - runs or a B-tree;
-  - membership;
-  - imports written into the store;
-  - `Program.facts`;
-  - the `?whynot` copy;
-  - scope (storage before provenance, recommended).
-- **Prototype in `~/.cache/recorder-wt`** against a frozen `efcda71` release
-  binary. The proof harness is in `~/.cache/recorder-wt/harness/`.
-- **Measure time, `perf stat` and memory before any commit.**
-- Re-learned: `cargo build | grep | tail && cp` copied a stale binary after a
-  failed build. Use `set -o pipefail`.
-- **Open**: `datalog/bugs/015`.
