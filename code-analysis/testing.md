@@ -24,10 +24,16 @@ non-vacuity guard that needs a shape to occur *once* is a coin flipped every
 run: size its default run count from the measured per-run rate, not by eye.
 
 - [x] **P1** CFG soundness against execution: every consecutive pair of probes in
-  a real trace is a path through probe-free nodes of the extracted graph; guard:
-  back, break, continue, throw, catch, finally, case and default edges all
-  exercised. *Mutation:* `implicitThrow` a no-op → red. Found, on its way in, a
-  `for…of` head that re-evaluated its iterable.
+  a real trace is a path through probe-free nodes of the extracted graph, whether
+  the statements run as a function body or as a class static block; guard: back,
+  break, continue, throw, catch, finally, case and default edges all exercised,
+  and inside static blocks both outcomes and back, break, throw, finally, case and
+  default (continue and catch are too clumped to guard there: fewest 2 and 7 in
+  ten runs). Acceptance (rule 4): Node compiles every generated static block, and
+  exactly one `static_block` fn is extracted for it. *Mutations:* `implicitThrow`
+  a no-op → red; `isOwner` skipping static blocks, so their calls belong to the
+  class → red; `extractFlow` skipping static blocks → red, on the acceptance
+  assertion. Found, on its way in, a `for…of` head that re-evaluated its iterable.
 - [x] **P2** Module-graph fidelity: `imports`, `import_name` (through namespaces
   and barrels) and `call_site` equal the generated graph; guard: cross-file
   imports, and a barrel. *Mutations:* no alias resolution → red; module-level

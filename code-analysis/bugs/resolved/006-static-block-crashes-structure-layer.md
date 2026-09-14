@@ -48,3 +48,6 @@ all the source layers and checks their `param` rows.
 
 Not done: P1's generator emits no classes, so static blocks' CFGs have no
 execution oracle.
+
+Later the same day, P1 (`testing.md`) widened: its generated statements also run as
+a class static block, so their graphs are checked against execution.

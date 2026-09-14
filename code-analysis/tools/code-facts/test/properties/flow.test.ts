@@ -7,7 +7,9 @@
 // iterable — each recording `k` when evaluated, each in its own flow node. For
 // consecutive probes j, k of a trace there must be a path node(j) → node(k)
 // through nodes that hold no probe (merges, loop heads, catch and finally
-// entries, jumps). The inputs drive the branches.
+// entries, jumps). The inputs drive the branches. The statements run either as a
+// function's body or as a class static block, which Node runs when the class is
+// defined; a static block cannot return, so there a `return` is a probe.
 //
 // P3 — two spellings of cyclomatic complexity agree. On programs without
 // exceptions, short-circuits or defaults, `fn.cyclomatic` (1 + decisions) equals
@@ -78,6 +80,7 @@ interface Scope {
   loops: (string | null)[]; // labels of enclosing loops (null: unlabelled)
   labels: string[]; // every label in scope (loops and blocks)
   breakable: boolean; // inside a loop or switch
+  returns: boolean; // inside a function, not a static block
 }
 
 /** Renders statements; probe numbers are allocated in order through `next`. */
@@ -93,7 +96,7 @@ function render(stmts: Stmt[], scope: Scope, next: () => number, labelNo: { n: n
         out.push(`t(${next()});`);
         break;
       case "return":
-        out.push("return;");
+        out.push(scope.returns ? "return;" : probe());
         break;
       case "break": {
         if (st.which % 2 === 0 && scope.breakable) out.push("break;");
@@ -118,7 +121,7 @@ function render(stmts: Stmt[], scope: Scope, next: () => number, labelNo: { n: n
       case "for":
       case "forof": {
         const label = st.label ? `L${labelNo.n++}` : null;
-        const inner: Scope = { loops: [...scope.loops, label], labels: label !== null ? [...scope.labels, label] : scope.labels, breakable: true };
+        const inner: Scope = { ...scope, loops: [...scope.loops, label], labels: label !== null ? [...scope.labels, label] : scope.labels, breakable: true };
         const prefix = label !== null ? `${label}: ` : "";
         if (st.t === "while") out.push(`${prefix}while (c(${next()})) {`, ...render(st.body, inner, next, labelNo), "}");
         else if (st.t === "do") {
@@ -211,9 +214,18 @@ interface Graph {
   kinds: Map<number, string>;
 }
 
-function graphOf(dir: string, source: string): { graph: Graph; cyclomatic: number; e: number; n: number; decisions: string[] } {
+/** Where the generated statements run. */
+type Host = "function" | "static_block";
+
+function graphOf(dir: string, source: string, host: Host): { graph: Graph; cyclomatic: number; e: number; n: number; decisions: string[] } {
   const { tables } = extract(dir, { layers: ["refs", "flow"] });
-  const fnId = "src/p.ts#run";
+  let fnId = "src/p.ts#run";
+  if (host === "static_block") {
+    // The widened shape is accepted: the one static block is extracted as one.
+    const blocks = tables.rows("fn").filter((r) => r.kind === "static_block");
+    assert.equal(blocks.length, 1, `expected one static_block fn, got ${blocks.map((b) => b.id)}\n${source}`);
+    fnId = blocks[0]?.id as string;
+  }
   const nodes = tables.rows("flow_node").filter((r) => r.fn === fnId);
   const ids = new Set(nodes.map((r) => r.id as number));
   const kinds = new Map(nodes.map((r) => [r.id as number, r.kind as string]));
@@ -267,9 +279,10 @@ function pathBetween(g: Graph, from: number, to: number): string[] | undefined {
   return undefined;
 }
 
-function projectFor(stmts: Stmt[]): { dir: string; source: string; body: string } {
+function projectFor(stmts: Stmt[], host: Host): { dir: string; source: string; body: string } {
   let k = 1;
-  const body = render(stmts, { loops: [], labels: [], breakable: false }, () => k++, { n: 0 }).join("\n");
+  const lines = render(stmts, { loops: [], labels: [], breakable: false, returns: host === "function" }, () => k++, { n: 0 });
+  const body = (host === "function" ? lines : ["class K {", "static {", ...lines, "}", "}"]).join("\n");
   const source = `${HEADER}\n${body}\n}\n`;
   const dir = tempDir("flow");
   writeProject(dir, { "src/p.ts": source }, {
@@ -281,13 +294,19 @@ function projectFor(stmts: Stmt[]): { dir: string; source: string; body: string 
 
 test("P1: every step of a real execution is a path in the control-flow graph", () => {
   const seen = new Map<string, number>();
+  const seenInBlock = new Map<string, number>();
+  const blockOutcomes = new Set<string>();
   let steps = 0;
+  let blockSteps = 0;
+  const hostArb = fc.constantFrom<Host>("function", "static_block");
   fc.assert(
-    fc.property(programArb(true), fc.array(fc.array(fc.nat(9), { minLength: 1, maxLength: 24 }), { minLength: 4, maxLength: 4 }), (stmts, inputSets) => {
-      const { dir, source, body } = projectFor(stmts);
-      const { graph } = graphOf(dir, source);
+    fc.property(programArb(true), hostArb, fc.array(fc.array(fc.nat(9), { minLength: 1, maxLength: 24 }), { minLength: 4, maxLength: 4 }), (stmts, host, inputSets) => {
+      const { dir, source, body } = projectFor(stmts, host);
+      const { graph } = graphOf(dir, source, host);
       for (const inputs of inputSets) {
+        // A shape Node rejects throws here, outside the probes' own catch: the other acceptance half.
         const { trace, outcome } = execute(body, inputs);
+        if (host === "static_block") blockOutcomes.add(outcome);
         let at = graph.entry;
         for (const k of trace) {
           const node = graph.probeNode.get(k);
@@ -295,7 +314,9 @@ test("P1: every step of a real execution is a path in the control-flow graph", (
           const path = pathBetween(graph, at, node);
           assert.ok(path !== undefined, `no path from node ${at} to probe ${k} (node ${node})\ninputs ${inputs}\ntrace ${trace}\n${source}`);
           for (const kind of path) seen.set(kind, (seen.get(kind) ?? 0) + 1);
+          if (host === "static_block") for (const kind of path) seenInBlock.set(kind, (seenInBlock.get(kind) ?? 0) + 1);
           steps++;
+          if (host === "static_block") blockSteps++;
           at = node;
         }
         if (outcome === "return") {
@@ -312,14 +333,23 @@ test("P1: every step of a real execution is a path in the control-flow graph", (
     assert.ok((seen.get(kind) ?? 0) > 0, `no executed step used ${kind}; saw ${[...seen.keys()]}`);
   }
   assert.ok(steps > RUNS * 4, `only ${steps} steps checked`);
+  // And inside static blocks: they ran to completion and out by an exception, over
+  // the shapes that occurred in every one of ten measured runs (the fewest of each
+  // beside it). A continue (2) or a catch (7) is too clumped to guard here; the
+  // guard above keeps them.
+  for (const outcome of ["return", "throw"]) assert.ok(blockOutcomes.has(outcome), `no static block ended by ${outcome}`);
+  for (const kind of ["back" /* 85 */, "break" /* 65 */, "throw" /* 52 */, "finally" /* 174 */, "case" /* 42 */, "default" /* 34 */]) {
+    assert.ok((seenInBlock.get(kind) ?? 0) > 0, `no step inside a static block used ${kind}; saw ${[...seenInBlock.keys()]}`);
+  }
+  assert.ok(blockSteps > RUNS * 2, `only ${blockSteps} steps checked inside static blocks`); // fewest 2,163 at 200 runs
 });
 
 test("P3: cyclomatic complexity from decisions equals E − N + 2 over the graph", () => {
   const kinds = new Set<string>();
   fc.assert(
     fc.property(programArb(false), (stmts) => {
-      const { dir, source } = projectFor(stmts);
-      const { cyclomatic, e, n, decisions } = graphOf(dir, source);
+      const { dir, source } = projectFor(stmts, "function");
+      const { cyclomatic, e, n, decisions } = graphOf(dir, source, "function");
       assert.equal(cyclomatic, e - n + 2, `decisions ${decisions}\n${source}`);
       for (const d of decisions) kinds.add(d);
       fs.rmSync(dir, { recursive: true, force: true });
