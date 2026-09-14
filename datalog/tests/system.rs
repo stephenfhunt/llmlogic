@@ -546,6 +546,21 @@ fn lone_dash_q_is_a_usage_error() {
 }
 
 #[test]
+fn help_prints_the_usage_and_succeeds() {
+    for flag in ["--help", "-h"] {
+        let out = run_args(&[flag]);
+        assert_eq!(out.code, 0, "{flag}");
+        assert!(out.stdout.starts_with("usage: datalog"), "{}", out.stdout);
+        assert!(out.stdout.contains("?whynot"), "{}", out.stdout);
+        assert!(out.stderr.is_empty(), "{}", out.stderr);
+    }
+    // Help wins over anything else on the line, so it never runs a program.
+    let out = run_file_args("16_1_ancestry.dl", &["-q", "ancestor(X, Y)", "--help"]);
+    assert_eq!(out.code, 0);
+    assert!(out.stdout.starts_with("usage: datalog"), "{}", out.stdout);
+}
+
+#[test]
 fn an_unknown_flag_is_a_usage_error() {
     let out = run_args(&["--json"]);
     assert_eq!(out.code, 2);

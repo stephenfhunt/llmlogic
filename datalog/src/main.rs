@@ -42,10 +42,19 @@ usage: datalog [<program-file> | -] [-q <query>]…
   Evaluates a Datalog program and prints query answers as canonical facts.
   The source is a file, or `-` for stdin, or omitted for an empty base program.
   Each -q appends a one-shot query: a bare atom (or comma-body) is answered
-  directly; a `head :- body` rule is defined and its head queried.";
+  directly; a `head :- body` rule is defined and its head queried.
+  `-q '?why <fact>'` explains how a fact was derived; `-q '?whynot <fact>'`,
+  how far each rule got toward one that was not.
+  Exit 0: rows found · 1: no rows · 2: the run did not answer.";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // Asking for help is not a usage mistake: the usage goes to stdout and the
+    // run succeeds, wherever the flag sits among the other arguments.
+    if args.iter().any(|arg| arg == "-h" || arg == "--help") {
+        println!("{USAGE}");
+        return ExitCode::SUCCESS;
+    }
     let cli = match parse_args(&args) {
         Ok(cli) => cli,
         Err(message) => {
