@@ -102,14 +102,17 @@ impl Relation {
 
     /// Whether `row` is a fact of this relation.
     pub fn contains(&self, row: &[Value]) -> bool {
-        self.index
-            .find(row_hash(row), |id| self.row(id) == row)
-            .is_some()
+        self.find(row).is_some()
+    }
+
+    /// The id of the row holding `row`'s values, if the relation holds them.
+    pub(crate) fn find(&self, row: &[Value]) -> Option<u32> {
+        self.index.find(row_hash(row), |id| self.row(id) == row)
     }
 
     /// Every fact's row, in canonical order.
     pub fn iter(&self) -> impl Iterator<Item = &[Value]> + '_ {
-        self.merged(&self.runs, &[])
+        self.merged(&self.runs, &[]).map(|(_, row)| row)
     }
 
     /// The values of row `id`, which are the same for the rest of the run from the
@@ -210,13 +213,13 @@ impl Relation {
     }
 
     /// The rows of `view` whose leading columns equal `prefix`, for a join
-    /// collecting `round`, in canonical order.
+    /// collecting `round`, in canonical order, each beside its row id.
     pub(crate) fn seek<'a>(
         &'a self,
         view: AtomView,
         round: u32,
         prefix: &'a [Value],
-    ) -> Box<dyn Iterator<Item = &'a [Value]> + 'a> {
+    ) -> Box<dyn Iterator<Item = (u32, &'a [Value])> + 'a> {
         let current = self.delta_is_current(round);
         let newest = self.runs.len().saturating_sub(1);
         let runs = match view {
@@ -322,9 +325,9 @@ struct Merged<'a> {
 }
 
 impl<'a> Iterator for Merged<'a> {
-    type Item = &'a [Value];
+    type Item = (u32, &'a [Value]);
 
-    fn next(&mut self) -> Option<&'a [Value]> {
+    fn next(&mut self) -> Option<(u32, &'a [Value])> {
         let relation = self.relation;
         let (index, _) = self
             .cursors
@@ -341,7 +344,7 @@ impl<'a> Iterator for Merged<'a> {
         } else {
             self.cursors.swap_remove(index);
         }
-        Some(relation.row(id))
+        Some((id, relation.row(id)))
     }
 }
 
@@ -486,7 +489,7 @@ mod tests {
     ) -> Vec<Vec<Value>> {
         relation
             .seek(view, round, prefix)
-            .map(|row| row.to_vec())
+            .map(|(_, row)| row.to_vec())
             .collect()
     }
 
@@ -575,7 +578,10 @@ mod tests {
     fn an_empty_prefix_seeks_the_whole_relation() {
         let mut relation = Relation::new(1);
         relation.load_base(vec![symbol("b"), Value::Absent, symbol("a")], 3);
-        let all: Vec<&[Value]> = relation.seek(AtomView::Full, 0, &[]).collect();
+        let all: Vec<&[Value]> = relation
+            .seek(AtomView::Full, 0, &[])
+            .map(|(_, row)| row)
+            .collect();
         assert_eq!(
             all,
             vec![&[Value::Absent][..], &[symbol("a")][..], &[symbol("b")][..]]
@@ -600,7 +606,10 @@ mod tests {
         );
         relation.apply(BTreeSet::from([Tuple(vec![symbol("a"), Value::Int(1)])]), 1);
         let prefix = [symbol("a")];
-        let sought: Vec<&[Value]> = relation.seek(AtomView::Full, 2, &prefix).collect();
+        let sought: Vec<&[Value]> = relation
+            .seek(AtomView::Full, 2, &prefix)
+            .map(|(_, row)| row)
+            .collect();
         assert_eq!(
             sought,
             vec![

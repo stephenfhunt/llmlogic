@@ -391,7 +391,7 @@ mod tests {
         assert!(
             stored
                 .seek(AtomView::Full, 0, &prefix.0)
-                .any(|row| pattern.matches(row))
+                .any(|(_, row)| pattern.matches(row))
         );
 
         // The join's side of the same asymmetry, for contrast.

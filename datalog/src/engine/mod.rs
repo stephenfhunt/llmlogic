@@ -1028,7 +1028,7 @@ fn enumerate_literal(
                 .model
                 .relation(atom.pred)
                 .seek(cx.views[idx], cx.round, &prefix.0);
-            for row in candidates {
+            for (_, row) in candidates {
                 if let Some(bound) = try_match(atom, row, bindings) {
                     premises[idx] = Some(Premise::Fact(Fact {
                         pred: atom.pred,
@@ -1074,7 +1074,7 @@ fn enumerate_literal(
                 .model
                 .relation(atom.pred)
                 .seek(AtomView::Full, cx.round, &prefix.0)
-                .any(|row| pattern.matches(row))
+                .any(|(_, row)| pattern.matches(row))
             {
                 return Ok(());
             }
@@ -4448,7 +4448,7 @@ mod tests {
                     let view = |view| -> Vec<Vec<Value>> {
                         relation
                             .seek(view, round, &[])
-                            .map(|row| row.to_vec())
+                            .map(|(_, row)| row.to_vec())
                             .collect()
                     };
                     let (delta, old) = (view(AtomView::Delta), view(AtomView::Old));
