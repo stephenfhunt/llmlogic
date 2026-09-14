@@ -75,6 +75,10 @@ pub struct Relation {
     index: RowIndex,
     /// The round whose apply wrote the newest run, or 0 when no round has.
     delta_round: u32,
+    /// How many rows are base facts: the rows `load_base` wrote, first.
+    base_rows: u32,
+    /// Each applied block's first row and the round that wrote it, in row order.
+    blocks: Vec<(u32, u32)>,
 }
 
 impl Relation {
@@ -87,6 +91,8 @@ impl Relation {
             runs: Vec::new(),
             index: RowIndex::default(),
             delta_round: 0,
+            base_rows: 0,
+            blocks: Vec::new(),
         }
     }
 
@@ -138,6 +144,7 @@ impl Relation {
             let hash = row_hash(&self.values[start..start + self.arity]);
             self.index.insert(hash, id);
         }
+        self.base_rows = self.rows;
         if self.rows > 0 {
             self.runs.push((0..self.rows).collect());
         }
@@ -157,6 +164,9 @@ impl Relation {
             self.runs.push(merged);
         }
         let run = self.append(block);
+        if let Some(&first) = run.first() {
+            self.blocks.push((first, round));
+        }
         self.runs.push(run);
         self.delta_round = round;
     }
@@ -205,6 +215,22 @@ impl Relation {
                 .all(|pair| self.row(pair[0]) < self.row(pair[1]))
         );
         merged
+    }
+
+    /// Whether row `id` is a base fact: one `load_base` wrote, before any round.
+    pub(crate) fn is_base_row(&self, id: u32) -> bool {
+        id < self.base_rows
+    }
+
+    /// The round that wrote row `id`: 0 for a base fact, and otherwise the round
+    /// of the applied block holding it. Every row of a block shares its round,
+    /// because application is batched (**E1**).
+    pub(crate) fn round_of(&self, id: u32) -> u32 {
+        if self.is_base_row(id) {
+            return 0;
+        }
+        let block = self.blocks.partition_point(|&(first, _)| first <= id);
+        self.blocks[block - 1].1
     }
 
     /// Whether the newest run is the delta for a join collecting `round`.

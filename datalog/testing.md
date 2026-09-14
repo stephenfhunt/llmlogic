@@ -1510,14 +1510,21 @@ and the asking form, which is also what unblocked E5.
     that the generator reaches a near-miss carrying both a satisfied premise and
     a fact-naming repair.
 - [x] **E11** **Base facts are the program's, at round 0; every other held fact
-  is stamped from round 1.** The recorder keeps no base set. A held fact with no
-  round stamp is a base fact, because every base fact loads before the first
-  round and a round stamps only what it inserts. The claim is stated from
-  `program.facts`, not from the stamp, so it fails if either half breaks. Over
-  `arb_program_with_edb`, and at `Tier::Medium` (`Large` in the deep run).
-  - *Mutations (both killed, with E1 and E2):* `insert_base` stamps round 0;
-    a rediscovered fact is stamped. Non-vacuity: a guard pins that the generator
-    re-derives an asserted fact, the case the second mutation is about (4 of 48).
+  is from round 1.** The recorder keeps no base set and no per-fact round stamp.
+  A relation knows how many of its rows its base load wrote, and the round that
+  wrote each applied block (`Relation::is_base_row`, `Relation::round_of`). So a
+  base fact is a row the base load wrote, and a derived fact's round is its
+  block's. The claim is stated from `program.facts`, not from the rows, so it
+  fails if either half breaks. Over `arb_program_with_edb`, and at `Tier::Medium`
+  (`Large` in the deep run).
+  - *Mutations (killed, 2026-09-14, against the row ranges):*
+    - base membership off by one at the base count: E11 at both tiers;
+    - `round_of` reading the block after the one holding the row: E1 and E2.
+
+    Against the earlier stamp map, `insert_base` stamping round 0 and a
+    rediscovered fact being stamped were killed with E1 and E2.
+  - Non-vacuity: a guard pins that the generator re-derives an asserted fact,
+    the case where a base fact is also derived (4 of 48).
 
 ### Phase F — §13 imports (roadmap step 7) — generalizes §16.5, §16.7
 

@@ -105,6 +105,15 @@ pub enum Provenance {
     Unrecorded,
 }
 
+/// A fact by its place: the row its relation wrote it into. A relation writes a
+/// fact once and never moves it (`testing.md` **B14c**), so a reference names
+/// the same fact for the rest of the run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct FactRef {
+    pub pred: PredId,
+    pub row: u32,
+}
+
 /// The result of evaluation: every predicate's full extent, plus provenance.
 ///
 /// Each predicate's facts are a [`Relation`], which iterates in the §14
@@ -116,18 +125,11 @@ pub enum Provenance {
 pub struct Model {
     /// Indexed by `PredId`: the predicate's full extent (base ∪ derived).
     relations: Vec<Relation>,
-    /// All derivations per derived fact, rule-instance-deduplicated.
-    derivations: HashMap<Fact, BTreeSet<Derivation>>,
-    /// Fixpoint round each *derived* fact first appeared in, from 1. Monotone
-    /// across strata; guarantees a well-founded derivation choice exists for
-    /// every fact, so proof trees are finite.
-    ///
-    /// Base facts carry no entry: every one is loaded before the first round,
-    /// and a fact is stamped only when a round inserts it, so a held fact with
-    /// no stamp is exactly a base fact, at round 0. A fact both asserted and
-    /// derived is base. Keeping the base set as its own map held every base
-    /// fact twice more (`testing.md` **E11**).
-    first_round: HashMap<Fact, u32>,
+    /// All derivations per fact, by the fact's row, rule-instance-deduplicated.
+    /// A fact's first round is not stored beside it: a relation knows the round
+    /// that wrote each row, and a base fact is a row its base load wrote
+    /// ([`Relation::round_of`], `testing.md` **E11**).
+    derivations: HashMap<FactRef, BTreeSet<Derivation>>,
     /// Whether the maps above were populated at all.
     provenance: Provenance,
 }
@@ -140,7 +142,6 @@ impl Model {
                 .map(|info| Relation::new(info.arity as usize))
                 .collect(),
             derivations: HashMap::new(),
-            first_round: HashMap::new(),
             provenance,
         }
     }
@@ -179,14 +180,28 @@ impl Model {
 
     /// All recorded derivations of `fact`, `Ord`-least first.
     pub fn derivations_of<'a>(&'a self, fact: &Fact) -> impl Iterator<Item = &'a Derivation> {
-        self.derivations.get(fact).into_iter().flatten()
+        self.fact_ref(fact)
+            .and_then(|reference| self.derivations.get(&reference))
+            .into_iter()
+            .flatten()
+    }
+
+    /// The row `fact` is held in, if the model holds it.
+    pub(crate) fn fact_ref(&self, fact: &Fact) -> Option<FactRef> {
+        self.relations[fact.pred.0 as usize]
+            .find(&fact.tuple.0)
+            .map(|row| FactRef {
+                pred: fact.pred,
+                row,
+            })
     }
 
     /// Was `fact` asserted by the program (as opposed to only derived)?
     pub fn is_base(&self, fact: &Fact) -> bool {
         self.provenance == Provenance::Recorded
-            && !self.first_round.contains_key(fact)
-            && self.contains(fact)
+            && self.fact_ref(fact).is_some_and(|reference| {
+                self.relations[fact.pred.0 as usize].is_base_row(reference.row)
+            })
     }
 
     /// The fixpoint round `fact` first appeared in (0 for base facts), or
@@ -200,10 +215,11 @@ impl Model {
     /// Facts derived in the same round are therefore never ordered against each
     /// other, and never need to be.
     pub fn first_round(&self, fact: &Fact) -> Option<u32> {
-        match self.first_round.get(fact) {
-            Some(&round) => Some(round),
-            None => self.is_base(fact).then_some(0),
+        if self.provenance != Provenance::Recorded {
+            return None;
         }
+        let reference = self.fact_ref(fact)?;
+        Some(self.relations[fact.pred.0 as usize].round_of(reference.row))
     }
 
     /// Answers a query as a projection over the model (spec §17): one row per
@@ -329,6 +345,7 @@ impl Model {
     fn apply_round(&mut self, pending: &mut Pending, round: u32) -> bool {
         debug_assert!(pending.unkept.is_empty() || self.provenance != Provenance::Recorded);
         let mut blocks = std::mem::take(&mut pending.unkept);
+        let mut stored: Vec<(Fact, Derivation)> = Vec::new();
         for (fact, derivation) in pending.kept.drain(..) {
             let store = match self.provenance {
                 Provenance::Recorded => true,
@@ -343,27 +360,34 @@ impl Model {
                 Provenance::Reports => derivation.reports(),
                 Provenance::Unrecorded => false,
             };
-            if store {
-                self.derivations
-                    .entry(fact.clone())
-                    .or_default()
-                    .insert(derivation);
-            }
             let held = self.relations[fact.pred.0 as usize].contains(&fact.tuple.0)
                 || blocks
                     .get(&fact.pred)
                     .is_some_and(|block| block.contains(&fact.tuple));
-            if held {
-                continue;
+            if !held {
+                blocks
+                    .entry(fact.pred)
+                    .or_default()
+                    .insert(fact.tuple.clone());
             }
-            if self.provenance == Provenance::Recorded {
-                self.first_round.insert(fact.clone(), round);
+            if store {
+                stored.push((fact, derivation));
             }
-            blocks.entry(fact.pred).or_default().insert(fact.tuple);
         }
         let grew = !blocks.is_empty();
         for (pred, block) in blocks {
             self.relations[pred.0 as usize].apply(block, round);
+        }
+        // A derivation is filed under its head's row, which a new fact has only
+        // once its block is written.
+        for (fact, derivation) in stored {
+            let reference = self
+                .fact_ref(&fact)
+                .expect("a kept match's head is held once its round is applied");
+            self.derivations
+                .entry(reference)
+                .or_default()
+                .insert(derivation);
         }
         grew
     }
