@@ -2586,6 +2586,23 @@ never say.
 
 ### Decisions
 
+- **2026-09-14 (evening)** — **The skill reads in a stranger's project, not only
+  without our history** (skill/CLI; the user's calls on INSTALL.md, the order and
+  `--help`; experiments `decisions.md` 2026-09-14 (evening)).
+  - **Run by path.** `SKILL.md` names `<skill>/datalog`, as code-analysis does:
+    `./datalog` held only with the skill's directory as working directory, which a
+    user's project never is. The harness's skill copy now carries the binary.
+  - **Everything on the page runs as written.** The named-argument `-q` example
+    failed for want of a schema, and the recipe used six relations it never
+    defined. Added: named arguments and `declare`, comments, the numeric types, `;`
+    in queries, import paths for scratch programs; the recipe's schemas and rules,
+    run over a fixture. `calls` keeps `line`: without it two call sites are one
+    row, and the count trap showed nothing.
+  - **Order:** the worked example before its file is read; the language before
+    output. `SKILL.md`'s blocks unchanged; both recipe blocks edited.
+  - **Removed:** the recipe's disjunction trap, anchored-join cost note and format
+    claim; INSTALL.md's pointer to a source a stranger cannot find.
+  - `--help` / `-h` print the usage and exit 0.
 - **2026-09-14 (afternoon)** — **The skill's texts and the binary's messages are
   written for a stranger's project** (skill/CLI; the user's call for the skill,
   the messages by the same rule; code-analysis `decisions.md` 2026-09-13 (night ii)).

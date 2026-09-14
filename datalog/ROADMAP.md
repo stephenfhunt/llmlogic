@@ -740,8 +740,12 @@ workaround and §16's preamble-vs-§16.4 contradiction fixed alongside.
 ### Agent skill
 
 - **`skill/recipes/source-analysis.md`** — the source-analysis recipe: extract
-  with a real parser, import, ask; the five traps. Bundled by `cargo
+  with a real parser, import, ask; the traps. Bundled by `cargo
   package-skill`, so `recipes/` is now a shipped part of the skill. ✅ 2026-07-27.
+- **The skill reads in a stranger's project** — no provenance (§17 2026-09-14
+  (afternoon)); run by path from the skill's directory, every table and command
+  on the page runs as written, `--help` answers. ✅ 2026-09-14 — §17 2026-09-14
+  (evening).
 - **`ts-facts` — a TypeScript project as facts** — moved 2026-09-11 to its own
   project, `../code-analysis/` (renamed `code-facts`). ✅ 2026-09-10 here — §17.
 - **"Big external fact base" demo** — the motivating import demo; unblocked by

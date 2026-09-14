@@ -30,6 +30,12 @@ with the long form in [`notes/code-facts.md`](notes/code-facts.md).
     (against 2026-09-12 evening), and links to files the bundle lacks.
   - Guarded by `test/published-text.test.ts`, which cannot see context-dependent
     prose; that stays a reading discipline (`AGENTS.md`).
+  - ***Consequences*** (2026-09-14): dual maintenance's cost showed within a day.
+    This fork had introduced named arguments, defined its recipe's relations,
+    stated `;` in queries and run the engine by path; none of it reached the
+    datalog skill until a stranger's read found them there
+    (`../datalog/spec.md` §17 2026-09-14 (evening)). The accepted cost is real
+    and silent, so a fix to one copy wants a look at the other.
 
 - **2026-09-13 (night)** — **The playbook teaches investigation, not only
   measurement.** It read as a menu of libraries. Yet the best Grafana result came

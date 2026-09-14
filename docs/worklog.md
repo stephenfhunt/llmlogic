@@ -24,6 +24,52 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-14 (evening) — the datalog skill read as a stranger's agent would
+
+Asked for a fresh read of the datalog skill as published, by a user and agent who
+know nothing of this repo, on a general agent harness. Planned; the user chose to
+drop INSTALL.md's source pointer, reorder `SKILL.md`, and accept `--help`.
+
+**Done**
+- `253fd2d` **`SKILL.md`**:
+  - run by path (`<skill>/datalog`); `./datalog` needed the skill's directory as
+    the working directory;
+  - named arguments and `declare` (its own `-q` example failed without a schema);
+    comments, numeric types, `;` in queries, and import paths for scratch programs;
+  - the worked example before the sections that read its file; the gating
+    sentence says what it means.
+- `39cd64d` **The recipe** defines every table and relation it uses. Each rule
+  was run verbatim over a JSONL fixture, which caught two errors in the rewrite:
+  without `line`, `calls` merges call sites (the count trap read 2 = 2), and
+  dead code listed tests.
+- `9fed6c5`: `--help` / `-h` print the usage, which now names `?why` and the exit
+  codes, and exit 0.
+- `92c4638` **INSTALL.md**: install for any harness, no pointer to an unreachable source.
+  The bundle was built and run from outside the repo.
+- `bf74af4` **experiments**: an engine-arm skill copy carries the binary; the
+  ablation test follows the recipe block's text.
+- Most of the fixes already existed in code-analysis's fork of these texts.
+
+**Decided**
+- §17 2026-09-14 (evening); experiments `decisions.md` 2026-09-14 (evening).
+- ***Consequences*** on code-analysis 2026-09-13 (night ii): dual maintenance's
+  cost is silent; the fork's fixes never flowed back.
+
+**Removed** — the recipe's disjunction trap (now in `SKILL.md`), its anchored-join
+cost note, format claim and run counts; INSTALL.md's source pointer; `./datalog`;
+the oldest worklog entry.
+
+**Next up**
+- **The other direction:** code-analysis's `reference/datalog.md` lacks what this
+  session added (comments, `declare`, scratch import paths, the gating sentence,
+  `--help`).
+- An ablation compared across this session ran on other surrounding text; rerun
+  its control.
+- Push `trunk` when the user says so.
+- **Measure the code-analysis playbook** with a fresh agent and only the bundle;
+  that bundle still ships `tools/code-facts/src`, whose comments name subjects.
+- **Open**: `datalog/bugs/015`, `016`.
+
 ## 2026-09-14 (late afternoon) — the fact store merged; the datalog skill's texts written for a stranger
 
 Asked to merge `fact-store` to trunk, then to clean up the datalog skill's leaks,
@@ -98,50 +144,4 @@ the oldest worklog entry (rotated).
 - **The datalog skill's leaks** (the user's next): `SKILL.md`'s links out of the
   bundle, the source-analysis recipe's dated narrative about this engine's own
   code, and `§` citations in an example and nine CLI messages.
-- **Open**: `datalog/bugs/015`, `016`.
-
-## 2026-09-14 (late morning) — fact store step 3: premises by row; a missed seek regression; interning next
-
-Asked to approve step 3's design, then build it. A wider measurement found a
-regression the gate had missed, and the user chose each direction as the evidence
-came in.
-
-**Done** — branch `fact-store`; per-commit gate green at every commit; harness
-diffs empty at every engine commit.
-- **Step 3.**
-  - `7ae01a1`: seeks yield row ids.
-  - `4a27aff`: recorder keyed by row, rounds from blocks.
-  - `2950331`: premises as `FactRef` (16 bytes), derivations resolved at read.
-  - `efda16b`: E12 (proofs least by content) and E10's match clause. Two
-    mutations had survived the suite before these.
-- **`bugs/015`:** an uncapped per-commit run drew a 19.8 GB runaway, likely B13 at
-  `Large`.
-- **The regression.** Seek-heavy library queries got slower on the branch; the
-  four-program gate never timed them. Bisected to `d9a4c5e`, the runs.
-  - Cheap levers measured (E8–E10): only merge factor 8 helped, and it was
-    committed as `7ecfc33`.
-  - The rest is locality, per `heaptrack`: the joins and copies are the same as
-    `efcda71`'s, and cache misses are 2.5×.
-- **At `7ecfc33`, against `efcda71`:**
-  - `pointsto.dl` 10.5 → 10.0 s; its `?why` 9.2 → 7.7 s, 817 → 654 MB;
-  - `callreach.dl` `?why` 1.46 → 0.91 s, 379 → 206 MB;
-  - `sparse_800` 1.23 → 0.94 s;
-  - `q_coh.dl` +26%, `lib/cohesion.dl` +24%, `lib/flow.dl` +32%.
-
-**Decided**
-- The user's: approve step 3's design; merge factor 8, then a B-tree. The B-tree
-  was then replaced by value interning, designed first, on E9's and `heaptrack`'s
-  evidence.
-- The performance gate includes `q_coh.dl`, `lib/cohesion.dl` and `lib/flow.dl`.
-  Step 2's acceptance rested on a gate without them (§17 2026-09-13 (later iv),
-  consequences (later iii)).
-
-**Removed** — `Model.first_round` (rounds come from blocks); `Premise::Fact`'s
-copied fact; `ProofStep`'s borrowed derivation; the step-4 B-tree plan; the oldest
-worklog entry.
-
-**Next up**
-- **Design value interning with the user.** The hard question: §14 orders symbols
-  and strings by content, and runs, seeks and printing rely on that order.
-- Record the deep gate on `7ecfc33` (running at session end).
 - **Open**: `datalog/bugs/015`, `016`.
