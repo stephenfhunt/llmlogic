@@ -161,13 +161,13 @@ func (x *extractor) addSymbol(id, name string, d declared, s *source, parent str
 	x.symOrder = append(x.symOrder, id)
 }
 
-func (x *extractor) addExternal(id, name, kind, origin, pkg string) {
+func (x *extractor) addExternal(id, name, kind, origin, pkg, parent string) {
 	if _, ok := x.symbols[id]; ok {
 		return
 	}
 	x.symbols[id] = row{
 		"id": id, "name": name, "kind": kind, "origin": origin,
-		"file": nil, "line": nil, "end_line": nil, "parent": nil,
+		"file": nil, "line": nil, "end_line": nil, "parent": nullable(parent),
 		"package": nullable(pkg), "exported": false, "visibility": nil,
 		"is_static": false, "is_abstract": false, "is_async": false, "is_generator": false,
 		"is_readonly": false, "is_optional": false, "is_ambient": true, "form": nil,
@@ -220,6 +220,8 @@ func (x *extractor) declare(obj types.Object, s *source, container string, node 
 	}
 	id := x.claim(member(container, obj.Name()), key, obj.Pos())
 	x.idByKey[key] = id
+	x.objOf[id] = obj
+	x.viewOf[id] = s.pkg.Types
 	end := x.line(obj.Pos())
 	if node != nil {
 		end = x.line(node.End())
@@ -375,6 +377,10 @@ func (v *idVisitor) Visit(n ast.Node) ast.Visitor {
 			id = x.claim(member(v.container, segment), key, n.Pos())
 			x.idByKey[key] = id
 			x.addSymbol(id, "<function>", declared{kind: "function"}, s, v.container, x.line(n.Pos()), x.line(n.End()))
+			if tv, ok := info.Types[n]; ok {
+				x.litTypes[id] = tv.Type
+				x.viewOf[id] = s.pkg.Types
+			}
 		}
 		if tv, ok := info.Types[n]; ok {
 			x.declareUnnamedSignature(tv.Type, s, id)
@@ -485,6 +491,8 @@ func (x *extractor) declareUnnamedSignature(t types.Type, s *source, fnID string
 		}
 		id := x.claim(member(fnID, fmt.Sprintf("<param@%d>", i)), key, p.Pos())
 		x.idByKey[key] = id
+		x.objOf[id] = p
+		x.viewOf[id] = s.pkg.Types
 		x.addSymbol(id, "<unnamed>", declared{kind: "parameter"}, s, fnID, x.line(p.Pos()), x.line(p.Pos()))
 	}
 }

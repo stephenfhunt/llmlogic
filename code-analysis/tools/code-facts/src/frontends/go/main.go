@@ -87,6 +87,9 @@ func main() {
 	}
 	x.assignIDs()
 	x.emitStructure()
+	if wanted["refs"] {
+		x.emitRefs()
+	}
 	x.flushSymbols()
 	x.em.emit("__counters__", row{"call_site": x.nextCallSite, "flow_node": x.nextFlowNode})
 	if err := out.Flush(); err != nil {

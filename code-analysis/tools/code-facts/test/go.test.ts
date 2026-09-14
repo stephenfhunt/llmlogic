@@ -10,7 +10,7 @@ import { datalog, engineAvailable, extractGo, fixture, goAvailable, tempDir, wri
 
 const NO_GO = goAvailable() ? false : "needs the `go` command";
 const out = tempDir("go-basic");
-const go = NO_GO === false ? extractGo(fixture("go-basic"), { out, layers: [] }) : undefined;
+const go = NO_GO === false ? extractGo(fixture("go-basic"), { out, layers: ["refs"] }) : undefined;
 const rows = (rel: string) => go?.tables.rows(rel) ?? [];
 
 function symbol(id: string) {
@@ -121,6 +121,225 @@ test("doc comments, and a `Deprecated:` paragraph as the deprecated tag", { skip
   assert.deepEqual([doc("shapes.go#Register")?.has_doc, doc("shapes.go#Register")?.lines], [true, 3]);
   assert.deepEqual([doc("shapes.go#<module>")?.has_doc, doc("base.go#base")?.has_doc], [true, false]);
   assert.deepEqual(rows("jsdoc_tag"), [{ symbol: "shapes.go#Register", tag: "deprecated", text: "keep a map of your own." }]);
+});
+
+test("ref: each resolved name from its enclosing declaration, and how it is used", { skip: NO_GO }, () => {
+  const refs = (from: string) => rows("ref").filter((r) => r.from === from).map((r) => [r.to, r.kind, r.line]);
+  assert.deepEqual(refs("cmd/app/main.go#main"), [
+    ["shapes.go#Circle", "new", 12],
+    ["shapes.go#Circle.R", "write", 12],
+    ["square.go#Square", "type", 13],
+    ["ext:fmt#Println", "call", 14],
+    ["shapes.go#Circle.Area", "call", 14],
+    ["square.go#Square.Area", "call", 14],
+    ["internal/geom/geom.go#Hypot", "call", 14],
+  ]);
+  assert.deepEqual(refs("cmd/app/main.go#tally"), [
+    ["square.go#Square", "type", 21],
+    ["shapes.go#Circle", "type", 21],
+    ["cmd/app/main.go#count", "readwrite", 22],
+    ["cmd/app/main.go#count", "write", 23],
+    ["lib#len", "call", 23],
+    ["cmd/app/main.go#names", "read", 23],
+    ["cmd/app/main.go#names", "write", 24],
+    ["lib#append", "call", 24],
+    ["cmd/app/main.go#names", "read", 24],
+    ["cmd/app/main.go#describe", "call", 25],
+    ["shapes.go#Circle.Area", "value", 25],
+  ]);
+  // Locals, parameters and type parameters are the flow layer's; basic types are written like keywords.
+  assert.deepEqual(refs("shapes.go#Map"), [
+    ["lib#make", "call", 35],
+    ["lib#len", "call", 35],
+    ["lib#append", "call", 37],
+  ]);
+  assert.deepEqual(refs("base.go#NamedShape"), [
+    ["shapes.go#Shape", "extends", 22],
+    ["base.go#Namer", "extends", 23],
+  ]);
+  // A field owns its type's reference; a package-level variable its initializer's.
+  assert.deepEqual(refs("square.go#Square.base"), [["base.go#base", "type", 5]]);
+  assert.deepEqual(refs("shapes.go#registry"), [["shapes.go#Shape", "type", 24]]);
+});
+
+test("call_site: functions and concrete methods are static, interface methods virtual, function values indirect", { skip: NO_GO }, () => {
+  const sites = (caller: string, name: string) =>
+    rows("call_site").filter((c) => c.caller === caller && c.callee_name === name).map((c) => [c.callee, c.dispatch, c.args]);
+  assert.deepEqual(sites("cmd/app/main.go#main", "Area"), [
+    ["shapes.go#Circle.Area", "static", 0],
+    ["square.go#Square.Area", "static", 0],
+  ]);
+  assert.deepEqual(sites("cmd/app/main.go#describe", "Area"), [["shapes.go#Shape.Area", "virtual", 0]]);
+  assert.deepEqual(sites("cmd/app/main.go#describe", "area"), [["cmd/app/main.go#describe.area", "indirect", 0]]);
+  assert.deepEqual(sites("cmd/app/main.go#tally", "append"), [["lib#append", "static", 2]]);
+  // A method promoted from an unexported embedded type is named where it is declared.
+  assert.deepEqual(sites("shapes_test.go#TestArea", "Fatal"), [["ext:testing#common.Fatal", "static", 1]]);
+  const ids = rows("call_site").map((c) => c.id);
+  assert.deepEqual(ids, ids.map((_, i) => i + 1));
+});
+
+test("implements and overrides: the interfaces each type's method set satisfies, and the methods that satisfy them", { skip: NO_GO }, () => {
+  assert.deepEqual(
+    rows("implements").map((r) => [r.class, r.interface]),
+    [
+      ["base.go#base", "lib#error"],
+      ["shapes.go#Circle", "shapes.go#Shape"],
+      // Area has a pointer receiver, and Error is promoted from base: both through *Square.
+      ["square.go#Square", "shapes.go#Shape"],
+      ["square.go#Square", "lib#error"],
+    ],
+  );
+  assert.deepEqual(
+    rows("overrides").map((r) => [r.member, r.base]),
+    [
+      ["base.go#base.Error", "lib#error.Error"],
+      ["shapes.go#Circle.Area", "shapes.go#Shape.Area"],
+      ["square.go#Square.Area", "shapes.go#Shape.Area"],
+    ],
+  );
+  assert.deepEqual(rows("extends").map((r) => [r.child, r.parent]), [
+    ["base.go#NamedShape", "shapes.go#Shape"],
+    ["base.go#NamedShape", "base.go#Namer"],
+  ]);
+  assert.deepEqual(rows("embeds"), [{ outer: "square.go#Square", inner: "base.go#base", pointer: false }]);
+});
+
+test("member_access: fields and methods of project types, via_this through the method's receiver", { skip: NO_GO }, () => {
+  const access = (fn: string) => rows("member_access").filter((a) => a.fn === fn).map((a) => [a.member, a.owner, a.mode, a.via_this]);
+  assert.deepEqual(access("base.go#base.Error"), [["base.go#base.Name", "base.go#base", "call", true]]);
+  assert.deepEqual(access("cmd/app/main.go#main"), [
+    ["shapes.go#Circle.R", "shapes.go#Circle", "write", false],
+    ["shapes.go#Circle.Area", "shapes.go#Circle", "call", false],
+    ["square.go#Square.Area", "square.go#Square", "call", false],
+  ]);
+  assert.deepEqual(access("cmd/app/main.go#tally"), [["shapes.go#Circle.Area", "shapes.go#Circle", "read", false]]);
+  assert.deepEqual(access("cmd/app/main.go#describe"), [["shapes.go#Shape.Area", "shapes.go#Shape", "call", false]]);
+});
+
+test("type_ref positions, and each declaration's type as go/types prints it", { skip: NO_GO }, () => {
+  const positions = rows("type_ref").map((r) => [r.from, r.to, r.position]);
+  for (const expected of [
+    ["cmd/app/main.go#tally", "square.go#Square", "param"],
+    ["base.go#base.Err", "lib#error", "return"],
+    ["base.go#Round", "shapes.go#Circle", "alias"],
+    ["cmd/app/main.go#main", "square.go#Square", "variable"],
+    ["square.go#Square.base", "base.go#base", "property"],
+  ]) {
+    assert.ok(positions.some((p) => JSON.stringify(p) === JSON.stringify(expected)), `no type_ref ${expected.join(" ")}`);
+  }
+  const type = (id: string) => {
+    const t = rows("symbol_type").find((r) => r.symbol === id);
+    return [t?.text, t?.is_function, t?.is_any];
+  };
+  assert.deepEqual(type("cmd/app/main.go#describe"), ["func(sh shapes.Shape, area func() float64) float64", true, false]);
+  assert.deepEqual(type("square.go#Square.Area.s"), ["*Square", false, false]);
+  // A type parameter constrained by `any` is not itself `any`.
+  assert.deepEqual(type("shapes.go#Map.x"), ["T", false, false]);
+  assert.equal(rows("unresolved_ref").length, 0);
+});
+
+test("refs outside the root: embedded interfaces, fields of outside structs, conversions, generics, function literals", { skip: NO_GO }, () => {
+  const dir = tempDir("go-refs");
+  writeFiles(dir, {
+    "go.mod": "module example.com/r\n\ngo 1.26\n",
+    "r.go": [
+      "package r",
+      "",
+      'import (\n\t"fmt"\n\t"io"\n\t"net/http"\n)',
+      "",
+      "type Reader struct {\n\tio.Reader\n\tn int\n}",
+      "",
+      "func (r *Reader) Read(p []byte) (int, error) {\n\tr.n++\n\treturn r.Reader.Read(p)\n}",
+      "",
+      "type Temp float64",
+      "",
+      "func (t Temp) String() string { return fmt.Sprint(float64(t)) }",
+      "",
+      "var _ fmt.Stringer = Temp(0)",
+      "",
+      "type Number interface{ ~int | ~float64 }",
+      "",
+      "func Sum[T Number](xs ...T) (s T) {\n\tfor _, x := range xs {\n\t\ts += x\n\t}\n\treturn s\n}",
+      "",
+      "type Named interface{ Name() string }",
+      "",
+      "func Names[T Named](xs []T) []string {\n\tvar out []string\n\tfor _, x := range xs {\n\t\tout = append(out, x.Name())\n\t}\n\treturn out\n}",
+      "",
+      'func Serve() *http.Server {\n\tsrv := &http.Server{Addr: ":80"}\n\tsrv.Addr = ":81"\n\ttotal := Sum[int](1, 2)\n\t_ = total\n\tf := func() {}\n\tf()\n\tfunc() {}()\n\treturn srv\n}',
+      "",
+    ].join("\n"),
+  });
+  const { tables } = extractGo(dir, { layers: ["refs"] });
+  const pairs = (rel: string, a: string, b: string) => tables.rows(rel).map((r) => [r[a], r[b]]);
+  assert.deepEqual(pairs("implements", "class", "interface"), [
+    ["r.go#Reader", "ext:io#Reader"],
+    ["r.go#Temp", "ext:fmt#Stringer"],
+  ]);
+  // Reader's Read hides the embedded io.Reader's, and satisfies it.
+  assert.deepEqual(pairs("overrides", "member", "base"), [
+    ["r.go#Reader.Read", "ext:io#Reader.Read"],
+    ["r.go#Temp.String", "ext:fmt#Stringer.String"],
+  ]);
+  assert.deepEqual(tables.rows("embeds"), [{ outer: "r.go#Reader", inner: "ext:io#Reader", pointer: false }]);
+  assert.deepEqual(
+    tables.rows("call_site").map((c) => [c.caller, c.callee, c.callee_name, c.dispatch]),
+    [
+      ["r.go#Reader.Read", "ext:io#Reader.Read", "Read", "virtual"],
+      ["r.go#Temp.String", "ext:fmt#Sprint", "Sprint", "static"],
+      ["r.go#Names", "lib#append", "append", "static"],
+      // A method of a type parameter dispatches through its constraint.
+      ["r.go#Names", "r.go#Named.Name", "Name", "virtual"],
+      ["r.go#Serve", "r.go#Sum", "Sum", "static"],
+      // `f := func() {…}` is that function; a literal called where it stands is itself.
+      ["r.go#Serve", "r.go#Serve.f", "f", "static"],
+      ["r.go#Serve", "r.go#Serve.<function@51:2>", null, "static"],
+    ],
+  );
+  const ref = (from: string) => tables.rows("ref").filter((r) => r.from === from).map((r) => [r.to, r.kind]);
+  assert.deepEqual(ref("r.go#Serve").slice(0, 4), [
+    ["ext:net/http#Server", "type"],
+    ["ext:net/http#Server", "new"],
+    ["ext:net/http#Server.Addr", "write"],
+    ["ext:net/http#Server.Addr", "write"],
+  ]);
+  const addr = tables.rows("symbol").find((s) => s.id === "ext:net/http#Server.Addr");
+  assert.deepEqual([addr?.kind, addr?.parent, addr?.package], ["property", "ext:net/http#Server", "net/http"]);
+  // `Temp(0)` is a conversion: a type in an assertion position, and no call.
+  assert.deepEqual(
+    tables.rows("type_ref").filter((r) => r.from === "r.go#<module>").map((r) => [r.to, r.position]),
+    [
+      ["ext:fmt#Stringer", "variable"],
+      ["r.go#Temp", "assertion"],
+    ],
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("unresolved_ref: names the checker could not resolve, but not members of what it could not type", { skip: NO_GO }, () => {
+  const dir = tempDir("go-unresolved");
+  writeFiles(dir, {
+    "go.mod": "module example.com/u\n\ngo 1.26\n",
+    "u.go":
+      'package u\n\nimport "example.com/missing/pkg"\n\ntype T struct {\n\tA Unknown\n}\n\nfunc F(t T) int {\n\tt.nope = 1\n\treturn undefinedFn() + pkg.X + missingVar +\n\t\tmissingVar.field\n}\n',
+  });
+  const { tables } = extractGo(dir, { layers: ["refs"] });
+  // `field`, a member of the unresolved `missingVar`, is that gap again and has no row.
+  assert.deepEqual(
+    tables.rows("unresolved_ref").map((u) => [u.from, u.name, u.kind, u.line]),
+    [
+      ["u.go#T.A", "Unknown", "type", 6],
+      ["u.go#F", "nope", "read", 10],
+      ["u.go#F", "undefinedFn", "call", 11],
+      ["u.go#F", "X", "read", 11],
+      ["u.go#F", "missingVar", "read", 11],
+      ["u.go#F", "missingVar", "read", 12],
+    ],
+  );
+  assert.deepEqual(
+    tables.rows("call_site").map((c) => [c.callee, c.callee_name, c.dispatch]),
+    [[null, "undefinedFn", "unresolved"]],
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test("checks.dl finds nothing wrong with the Go facts", { skip: NO_GO || !engineAvailable() }, () => {

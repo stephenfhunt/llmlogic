@@ -63,6 +63,8 @@ violation("extends.child", C) :- extends(child: C), not known(C).
 violation("extends.parent", P) :- extends(parent: P), not known(P).
 violation("implements.class", C) :- implements(class: C), not known(C).
 violation("implements.interface", I) :- implements(interface: I), not known(I).
+violation("embeds.outer", O) :- embeds(outer: O), not known(O).
+violation("embeds.inner", I) :- embeds(inner: I), not known(I).
 violation("overrides.member", M) :- overrides(member: M), not known(M).
 violation("overrides.base", B) :- overrides(base: B), not known(B).
 violation("member_access.member", M) :- member_access(member: M), not known(M).

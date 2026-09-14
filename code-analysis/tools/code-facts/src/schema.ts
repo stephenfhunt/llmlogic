@@ -490,14 +490,26 @@ export const RELATIONS: readonly Relation[] = [
   {
     name: "extends",
     layer: "refs",
-    doc: "Class or interface inheritance, direct edges only.",
+    doc: "Class or interface inheritance, direct edges only — for Go, an interface embedding another.",
     columns: [col("child", "string", ID), col("parent", "string", ID)],
   },
   {
     name: "implements",
     layer: "refs",
-    doc: "A class's `implements` clause, direct edges only.",
+    doc:
+      "A class's `implements` clause, direct edges only. Go writes none: there a row is the type checker's answer — a named type whose method set (or its pointer's) satisfies a project interface, or an outside one the project names.",
     columns: [col("class", "string", ID), col("interface", "string", ID)],
+  },
+  {
+    name: "embeds",
+    layer: "refs",
+    doc:
+      "A Go struct embedding a type: the embedded type's fields and methods are promoted to the outer one. Composition, not inheritance — `extends` does not have these rows.",
+    columns: [
+      col("outer", "string", "the struct: its named type, or the field holding an anonymous struct"),
+      col("inner", "string", "the embedded type"),
+      col("pointer", "bool", "embedded as a pointer (`*T`)"),
+    ],
   },
   {
     name: "overrides",

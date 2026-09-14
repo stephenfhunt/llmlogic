@@ -116,8 +116,21 @@ run: size its default run count from the measured per-run rate, not by eye.
   its own package, at the first reference. References between packages keep one
   direction (Go forbids import cycles). Guards: imports across packages (276 of
   400 runs), within one (204), and an import naming two files of its package
-  (73 — so 40 runs by default). *Mutations:* no `implicit` rows → red; one row
-  per import spec rather than per file referenced → red.
+  (73 — so 40 runs by default). And `call_site` equals the generated calls, each
+  `static`, within a package and across one. *Mutations:* no `implicit` rows →
+  red; one row per import spec rather than per file referenced → red; function
+  calls dispatched `virtual` → red.
+- [x] **P4-go** Hierarchies for Go: `implements` and `overrides` equal what the
+  compiled program says, and `extends` and `embeds` equal the generated
+  embedding, over interfaces that embed others and structs that declare methods
+  with value or pointer receivers and embed by value or pointer. The oracle is
+  independent: the program runs, reflect says whether *T implements I, and each
+  method called through reflect prints the declaration that ran (the satisfying
+  method, or the one a declaration hides). Guards, at 400 runs: implemented
+  (248) and not (388), satisfied by a promoted method (182), only through the
+  pointer (321), an embedded interface (140), a hidden method (205). *Mutations:*
+  no pointer method set → red; promoted methods skipped → red; no hiding
+  overrides → red; no interface `extends` → red.
 - [x] **P6-go** Determinism for Go: permuting a go.work's `use` order changes no
   output byte, over P2-go's module and three more whose two `init`s collide.
   Guard: most runs reorder. *Mutation:* sources left in load order → red.

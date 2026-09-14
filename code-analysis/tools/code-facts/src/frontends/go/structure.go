@@ -269,7 +269,7 @@ func (x *extractor) packageSymbol(path string, meta *packages.Package) string {
 	if meta.Module != nil {
 		pkg = meta.Module.Path
 	}
-	x.addExternal(id, meta.Name, "namespace", "external", pkg)
+	x.addExternal(id, meta.Name, "namespace", "external", pkg, "")
 	return id
 }
 

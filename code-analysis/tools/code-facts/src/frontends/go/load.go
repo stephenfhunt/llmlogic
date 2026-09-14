@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"go/types"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -59,6 +60,15 @@ type extractor struct {
 	symbols   map[string]row
 	pkgSymbol map[string]string // import path → the package's symbol id
 
+	objOf    map[string]types.Object     // project id → the object declared (the first view's)
+	viewOf   map[string]*types.Package   // project id → the package view that declared it
+	litTypes map[string]types.Type       // an anonymous function's id → its signature
+	extTypes map[string]*types.TypeName  // an interface outside the root that project code names
+	callSite map[string]int              // call expression position → call-site id
+
+	fieldOwners   map[*types.Var]string   // a field outside the root → its struct's name path
+	ownersIndexed map[*types.Package]bool
+
 	nextCallSite, nextFlowNode int
 }
 
@@ -72,6 +82,14 @@ func newExtractor(root string, layers map[string]bool, exclude []*regexp.Regexp,
 		keyByID:   map[string]string{},
 		symbols:   map[string]row{},
 		pkgSymbol: map[string]string{},
+
+		objOf:         map[string]types.Object{},
+		viewOf:        map[string]*types.Package{},
+		litTypes:      map[string]types.Type{},
+		extTypes:      map[string]*types.TypeName{},
+		callSite:      map[string]int{},
+		fieldOwners:   map[*types.Var]string{},
+		ownersIndexed: map[*types.Package]bool{},
 	}
 }
 

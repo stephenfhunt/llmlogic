@@ -37,6 +37,7 @@ interface Rendered {
   files: Record<string, string>;
   imports: string[][];
   names: string[][];
+  calls: string[][];
   crossRows: number;
   implicitRows: number;
   multiFileImports: number;
@@ -47,7 +48,7 @@ function sorted<T>(xs: T[]): T[] {
 }
 
 function render(model: ProjectModel): Rendered {
-  const out: Rendered = { files: { "go.mod": `module ${MODULE}\n\ngo 1.26\n` }, imports: [], names: [], crossRows: 0, implicitRows: 0, multiFileImports: 0 };
+  const out: Rendered = { files: { "go.mod": `module ${MODULE}\n\ngo 1.26\n` }, imports: [], names: [], calls: [], crossRows: 0, implicitRows: 0, multiFileImports: 0 };
   const paths = model.files.map((f) => goPath(f.path));
   const rank = (k: number) => PACKAGES.indexOf(dirOf(paths[k] ?? ""));
   model.files.forEach((f, i) => {
@@ -73,8 +74,9 @@ function render(model: ProjectModel): Rendered {
     }
     for (const [k, j] of refs) lines.push(`var _ = ${ref(k, j)}`);
     for (let j = 0; j < f.fnCount; j++) {
-      const body = (f.calls[j] ?? []).filter(([k, fn]) => k === i || refs.some(([a, b]) => a === k && b === fn)).map(([k, fn]) => `\t${ref(k, fn)}()`);
-      lines.push("", `func ${goName(i, j)}() {`, ...body, "}");
+      const calls = (f.calls[j] ?? []).filter(([k, fn]) => k === i || refs.some(([a, b]) => a === k && b === fn));
+      for (const [k, fn] of calls) out.calls.push([`${paths[i]}#${goName(i, j)}`, `${paths[k]}#${goName(k, fn)}`, "static"]);
+      lines.push("", `func ${goName(i, j)}() {`, ...calls.map(([k, fn]) => `\t${ref(k, fn)}()`), "}");
     }
     out.files[paths[i] ?? ""] = `${lines.join("\n")}\n`;
 
@@ -104,7 +106,7 @@ function render(model: ProjectModel): Rendered {
   return out;
 }
 
-test("P2-go: imports, implicit rows and imported names are exactly the generated module graph", { skip: NO_GO }, () => {
+test("P2-go: imports, implicit rows, imported names and calls are exactly the generated module graph", { skip: NO_GO }, () => {
   let crossRuns = 0;
   let implicitRuns = 0;
   let multiFileRuns = 0;
@@ -113,11 +115,14 @@ test("P2-go: imports, implicit rows and imported names are exactly the generated
       const r = render(normalizeCalls(raw));
       const dir = tempDir("p2-go");
       writeFiles(dir, r.files);
-      const { tables } = extractGo(dir, { layers: [] });
+      const { tables } = extractGo(dir, { layers: ["refs"] });
       const imports = tables.rows("imports").map((i) => [i.file, i.specifier, i.kind, i.target_file] as string[]);
       assert.deepEqual(sorted(imports), sorted(r.imports));
       const names = tables.rows("import_name").map((n) => [n.file, n.local, n.imported, n.target] as string[]);
       assert.deepEqual(sorted(names), sorted(r.names));
+      // Every call resolves to the function it names, within a package and across one.
+      const calls = tables.rows("call_site").map((c) => [c.caller, c.callee, c.dispatch] as string[]);
+      assert.deepEqual(sorted(calls), sorted(r.calls));
       crossRuns += r.crossRows > 0 ? 1 : 0;
       implicitRuns += r.implicitRows > 0 ? 1 : 0;
       multiFileRuns += r.multiFileImports > 0 ? 1 : 0;

@@ -16,3 +16,15 @@ type Namer interface {
 	Name() string
 	format(int, string) string
 }
+
+// NamedShape is a Shape with a name.
+type NamedShape interface {
+	Shape
+	Namer
+}
+
+// Error lets a base stand for an error.
+func (b *base) Error() string { return b.Name() }
+
+// Err is b as an error.
+func (b *base) Err() error { return b }
