@@ -144,10 +144,7 @@ fn read_csv(conn: &Connection, source: &str, shape_bytes: &[u8]) -> Result<RawTa
     // An empty file is a legal (schema-required) empty table; DuckDB itself
     // refuses to read it.
     if shape_bytes.is_empty() {
-        return Ok(RawTable {
-            columns: None,
-            rows: Vec::new(),
-        });
+        return Ok(RawTable::new(None));
     }
     // Sniffing is disabled entirely — DuckDB's dialect sniffer both is
     // non-deterministic surface and rejects legal edge shapes (a file that is
@@ -168,9 +165,9 @@ fn read_csv(conn: &Connection, source: &str, shape_bytes: &[u8]) -> Result<RawTa
     );
     let mut stmt = conn.prepare(&sql).map_err(|e| source_error(source, e))?;
     let mut rows = stmt.query([]).map_err(|e| source_error(source, e))?;
-    let mut out = Vec::new();
+    let mut out = RawTable::new(None);
+    let mut cells = Vec::with_capacity(width);
     while let Some(row) = rows.next().map_err(|e| source_error(source, e))? {
-        let mut cells = Vec::with_capacity(width);
         for col in 0..width {
             match row.get_ref(col).map_err(|e| source_error(source, e))? {
                 ValueRef::Text(bytes) => cells.push(RawValue::Text(utf8(bytes, source)?)),
@@ -189,12 +186,9 @@ fn read_csv(conn: &Connection, source: &str, shape_bytes: &[u8]) -> Result<RawTa
                 }
             }
         }
-        out.push(cells);
+        out.push_row(cells.drain(..));
     }
-    Ok(RawTable {
-        columns: None,
-        rows: out,
-    })
+    Ok(out)
 }
 
 /// Scans the first logical record (quote-aware, so embedded newlines and `""`
@@ -238,10 +232,7 @@ fn read_jsonl(conn: &Connection, path: &str) -> Result<RawTable, Error> {
     let no_records = columns.is_empty()
         || (columns.len() == 1 && columns[0] == "json" && jsonl_record_count(conn, path)? == 0);
     if no_records {
-        return Ok(RawTable {
-            columns: Some(Vec::new()),
-            rows: Vec::new(),
-        });
+        return Ok(RawTable::new(Some(Vec::new())));
     }
 
     // Phase 2: force every column to the JSON type so each value's own JSON
@@ -257,11 +248,11 @@ fn read_jsonl(conn: &Connection, path: &str) -> Result<RawTable, Error> {
     );
     let mut stmt = conn.prepare(&sql).map_err(|e| source_error(path, e))?;
     let mut rows = stmt.query([]).map_err(|e| source_error(path, e))?;
-    let mut out = Vec::new();
+    let mut out = RawTable::new(None);
+    let mut cells = Vec::with_capacity(columns.len());
     let mut row_number = 0usize;
     while let Some(row) = rows.next().map_err(|e| source_error(path, e))? {
         row_number += 1;
-        let mut cells = Vec::with_capacity(columns.len());
         for (col, name) in columns.iter().enumerate() {
             match row.get_ref(col).map_err(|e| source_error(path, e))? {
                 // A missing key surfaces as a NULL → the absent value (§4/§13);
@@ -278,12 +269,10 @@ fn read_jsonl(conn: &Connection, path: &str) -> Result<RawTable, Error> {
                 }
             }
         }
-        out.push(cells);
+        out.push_row(cells.drain(..));
     }
-    Ok(RawTable {
-        columns: Some(columns),
-        rows: out,
-    })
+    out.columns = Some(columns);
+    Ok(out)
 }
 
 fn jsonl_record_count(conn: &Connection, path: &str) -> Result<u64, Error> {
@@ -438,11 +427,11 @@ fn read_parquet(conn: &Connection, path: &str) -> Result<RawTable, Error> {
     let mut stmt = conn.prepare(&sql).map_err(|e| source_error(path, e))?;
     let mut rows = stmt.query([]).map_err(|e| source_error(path, e))?;
     let columns: Vec<String> = described.iter().map(|(name, _)| name.clone()).collect();
-    let mut out = Vec::new();
+    let mut out = RawTable::new(None);
+    let mut cells = Vec::with_capacity(columns.len());
     let mut row_number = 0usize;
     while let Some(row) = rows.next().map_err(|e| source_error(path, e))? {
         row_number += 1;
-        let mut cells = Vec::with_capacity(columns.len());
         for (col, name) in columns.iter().enumerate() {
             let value = row.get_ref(col).map_err(|e| source_error(path, e))?;
             let mapped = map_typed_value(value, path, row_number, name)?;
@@ -451,12 +440,10 @@ fn read_parquet(conn: &Connection, path: &str) -> Result<RawTable, Error> {
                 None => mapped,
             });
         }
-        out.push(cells);
+        out.push_row(cells.drain(..));
     }
-    Ok(RawTable {
-        columns: Some(columns),
-        rows: out,
-    })
+    out.columns = Some(columns);
+    Ok(out)
 }
 
 /// Maps one natively-typed DuckDB value onto [`RawValue`].

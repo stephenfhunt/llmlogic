@@ -48,7 +48,56 @@ impl LoadedTable {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct RawTable {
     pub columns: Option<Vec<String>>,
-    pub rows: Vec<Vec<RawValue>>,
+    /// Every row's cells, row after row, so no row is its own allocation
+    /// (`notes/fact-store.md`). Rows may be ragged — a CSV row can have too few or
+    /// too many cells, which [`finalize`] reports — so each row's end is kept.
+    pub cells: Vec<RawValue>,
+    /// Where each row ends in `cells`.
+    pub ends: Vec<usize>,
+}
+
+impl RawTable {
+    pub(crate) fn new(columns: Option<Vec<String>>) -> RawTable {
+        RawTable {
+            columns,
+            cells: Vec::new(),
+            ends: Vec::new(),
+        }
+    }
+
+    /// Appends one row.
+    pub(crate) fn push_row(&mut self, cells: impl IntoIterator<Item = RawValue>) {
+        self.cells.extend(cells);
+        self.ends.push(self.cells.len());
+    }
+
+    pub(crate) fn row_count(&self) -> usize {
+        self.ends.len()
+    }
+
+    fn row_start(&self, index: usize) -> usize {
+        if index == 0 { 0 } else { self.ends[index - 1] }
+    }
+
+    pub(crate) fn row(&self, index: usize) -> &[RawValue] {
+        &self.cells[self.row_start(index)..self.ends[index]]
+    }
+
+    fn row_mut(&mut self, index: usize) -> &mut [RawValue] {
+        let start = self.row_start(index);
+        &mut self.cells[start..self.ends[index]]
+    }
+
+    /// Drops the first row (a CSV header), shifting the rest down in one pass.
+    fn remove_first_row(&mut self) {
+        if let Some(&end) = self.ends.first() {
+            self.cells.drain(..end);
+            self.ends.remove(0);
+            for row_end in &mut self.ends {
+                *row_end -= end;
+            }
+        }
+    }
 }
 
 /// One backend-produced cell.
@@ -93,7 +142,8 @@ pub(crate) fn finalize(
 
     let mut errors = Vec::new();
     let arity = fields.len();
-    for (index, row) in data.iter().enumerate() {
+    for index in 0..data.row_count() {
+        let row = data.row(index);
         if row.len() != arity {
             errors.push(Error::new(
                 ErrorCode::SourceSchemaMismatch,
@@ -138,11 +188,13 @@ pub(crate) fn finalize(
         }
     }
 
-    let row_count = data.len();
+    let row_count = data.row_count();
+    let mut data = data;
     let mut values: Vec<Value> = Vec::with_capacity(row_count * arity);
-    for (index, row) in data.into_iter().enumerate() {
-        for (col, cell) in row.into_iter().enumerate() {
+    for index in 0..row_count {
+        for (col, cell) in data.row_mut(index).iter_mut().enumerate() {
             let Some(ty) = types[col] else { continue };
+            let cell = std::mem::replace(cell, RawValue::Absent);
             match coerce(cell, ty) {
                 Ok(value) => values.push(value),
                 Err(reason) => column_errors[col].push(Error::new(
@@ -172,7 +224,7 @@ pub(crate) fn finalize(
 /// [`arrange`]'s result: the field names, the data rows (reordered to field
 /// order where binding is by name), and the 1-based source row number of the
 /// first data row (for error messages).
-type Arranged = (Vec<String>, Vec<Vec<RawValue>>, usize);
+type Arranged = (Vec<String>, RawTable, usize);
 
 /// Resolves field names and the data-row window: header extraction for CSV,
 /// name binding for self-describing sources.
@@ -181,15 +233,16 @@ fn arrange(
     schema: Option<&[FieldDecl]>,
     source: &str,
 ) -> Result<Arranged, Vec<Error>> {
+    let no_rows = raw.ends.is_empty();
     match (raw.columns, schema) {
         // A self-describing source with no records (an empty JSONL file) has no
         // keys to bind by name. Under an explicit schema it is exactly the empty
         // relation; without one nothing names its fields — the empty-CSV rule.
-        (Some(columns), schema) if columns.is_empty() && raw.rows.is_empty() => match schema {
+        (Some(columns), schema) if columns.is_empty() && no_rows => match schema {
             Some(schema) => {
                 let fields: Vec<String> = schema.iter().map(|f| f.name.name.clone()).collect();
                 validate_field_names(&fields, source)?;
-                Ok((fields, Vec::new(), 1))
+                Ok((fields, RawTable::new(None), 1))
             }
             None => Err(vec![Error::new(
                 ErrorCode::SourceSchemaMismatch,
@@ -202,7 +255,15 @@ fn arrange(
         // Self-describing source, inferred schema: the source's names win.
         (Some(columns), None) => {
             validate_field_names(&columns, source)?;
-            Ok((columns, raw.rows, 1))
+            Ok((
+                columns,
+                RawTable {
+                    columns: None,
+                    cells: raw.cells,
+                    ends: raw.ends,
+                },
+                1,
+            ))
         }
         // Self-describing source, explicit schema: bind by name (set
         // equality), reorder to schema order.
@@ -244,22 +305,28 @@ fn arrange(
             }
             // The positions are distinct — the schema's fields are, and each
             // binds the one column of its name — so each cell moves out once.
-            let rows = raw
-                .rows
-                .into_iter()
-                .map(|mut row| {
+            let mut data = RawTable::new(None);
+            data.cells.reserve(raw.cells.len());
+            let (mut cells, mut start) = (raw.cells, 0);
+            for end in raw.ends {
+                let row = &mut cells[start..end];
+                data.push_row(
                     positions
                         .iter()
-                        .map(|&p| std::mem::replace(&mut row[p], RawValue::Absent))
-                        .collect()
-                })
-                .collect();
-            Ok((fields, rows, 1))
+                        .map(|&p| std::mem::replace(&mut row[p], RawValue::Absent)),
+                );
+                start = end;
+            }
+            Ok((fields, data, 1))
         }
         // CSV, inferred schema: the first row is the header.
         (None, None) => {
-            let mut rows = raw.rows.into_iter();
-            let Some(header) = rows.next() else {
+            let mut data = RawTable {
+                columns: None,
+                cells: raw.cells,
+                ends: raw.ends,
+            };
+            if data.row_count() == 0 {
                 return Err(vec![Error::new(
                     ErrorCode::SourceSchemaMismatch,
                     format!(
@@ -267,10 +334,11 @@ fn arrange(
                      schema) is required"
                     ),
                 )]);
-            };
-            let names: Vec<String> = header.iter().map(raw_text).collect();
+            }
+            let names: Vec<String> = data.row(0).iter().map(raw_text).collect();
             validate_field_names(&names, source)?;
-            Ok((names, rows.collect(), 2))
+            data.remove_first_row();
+            Ok((names, data, 2))
         }
         // CSV, explicit schema: every row is data — except a first row whose
         // cells exactly equal the schema's field names, which is a header and
@@ -278,16 +346,19 @@ fn arrange(
         (None, Some(schema)) => {
             let fields: Vec<String> = schema.iter().map(|f| f.name.name.clone()).collect();
             validate_field_names(&fields, source)?;
-            let mut rows = raw.rows;
+            let mut data = RawTable {
+                columns: None,
+                cells: raw.cells,
+                ends: raw.ends,
+            };
             let mut first_data_row = 1;
-            if rows
-                .first()
-                .is_some_and(|row| row.iter().map(raw_text).collect::<Vec<_>>() == fields)
+            if data.row_count() > 0
+                && data.row(0).iter().map(raw_text).collect::<Vec<_>>() == fields
             {
-                rows.remove(0);
+                data.remove_first_row();
                 first_data_row = 2;
             }
-            Ok((fields, rows, first_data_row))
+            Ok((fields, data, first_data_row))
         }
     }
 }
@@ -346,13 +417,14 @@ fn validate_field_names(names: &[String], source: &str) -> Result<(), Vec<Error>
 /// value. Typed sources widen int/float and otherwise conflict as an error
 /// (the strict-typing pillar; there is no text to fall back to).
 fn infer_column(
-    data: &[Vec<RawValue>],
+    data: &RawTable,
     col: usize,
     field: &str,
     source: &str,
 ) -> Result<TypeName, Vec<Error>> {
     let mut inferred: Option<TypeName> = None;
-    for (index, row) in data.iter().enumerate() {
+    for index in 0..data.row_count() {
+        let row = data.row(index);
         let cell_ty = match &row[col] {
             // Absent is type-neutral (§4): it does not participate in the
             // column's type, so a numeric column with gaps still infers int/float.
@@ -571,11 +643,17 @@ mod tests {
             .collect()
     }
 
-    fn csv(rows: &[&[&str]]) -> RawTable {
-        RawTable {
-            columns: None,
-            rows: rows.iter().map(|r| text_row(r)).collect(),
+    /// A raw table from literal rows (fixtures only; a reader pushes flat).
+    fn raw_table(columns: Option<Vec<String>>, rows: Vec<Vec<RawValue>>) -> RawTable {
+        let mut table = RawTable::new(columns);
+        for row in rows {
+            table.push_row(row);
         }
+        table
+    }
+
+    fn csv(rows: &[&[&str]]) -> RawTable {
+        raw_table(None, rows.iter().map(|r| text_row(r)).collect())
     }
 
     fn field(name: &str, ty: Option<TypeName>) -> FieldDecl {
@@ -654,15 +732,15 @@ mod tests {
         // (§4/§13): it does not force the column to string — the other cells
         // still type it int, and the gap materializes as `absent`.
         let table = ok(
-            RawTable {
-                columns: None,
-                rows: vec![
+            raw_table(
+                None,
+                vec![
                     text_row(&["n"]),
                     text_row(&["1"]),
                     vec![RawValue::Absent],
                     text_row(&["3"]),
                 ],
-            },
+            ),
             None,
         );
         assert_eq!(
@@ -694,14 +772,14 @@ mod tests {
         // No non-absent cell ⇒ no inferable type; every cell is absent, and the
         // predicate's column is left to use-site flow (unpinned here).
         let table = ok(
-            RawTable {
-                columns: None,
-                rows: vec![
+            raw_table(
+                None,
+                vec![
                     text_row(&["c"]),
                     vec![RawValue::Absent],
                     vec![RawValue::Absent],
                 ],
-            },
+            ),
             None,
         );
         assert_eq!(table_rows(&table), vec![vec![Value::Absent]]);
@@ -785,10 +863,7 @@ mod tests {
         let schema = [field("age", Some(TypeName::Int))];
         // An absent cell under `int` coerces to absent, not a type error…
         let table = ok(
-            RawTable {
-                columns: None,
-                rows: vec![vec![RawValue::Int(30)], vec![RawValue::Absent]],
-            },
+            raw_table(None, vec![vec![RawValue::Int(30)], vec![RawValue::Absent]]),
             Some(&schema),
         );
         assert_eq!(
@@ -875,10 +950,7 @@ mod tests {
 
     #[test]
     fn a_self_describing_source_with_no_records_needs_a_schema() {
-        let empty = || RawTable {
-            columns: Some(Vec::new()),
-            rows: Vec::new(),
-        };
+        let empty = || raw_table(Some(Vec::new()), Vec::new());
         let errors = err(empty(), None);
         assert!(
             errors[0].to_string().contains("no records"),
@@ -970,10 +1042,7 @@ mod tests {
     // --- Typed (self-describing) sources ---
 
     fn typed(columns: &[&str], rows: Vec<Vec<RawValue>>) -> RawTable {
-        RawTable {
-            columns: Some(columns.iter().map(|c| c.to_string()).collect()),
-            rows,
-        }
+        raw_table(Some(columns.iter().map(|c| c.to_string()).collect()), rows)
     }
 
     #[test]
