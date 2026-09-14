@@ -114,8 +114,7 @@ impl TemporalError {
                     .to_string(),
             ),
             TemporalError::Zone(_) => Some(
-                "drop the offset; a zoned source column is converted to UTC at import (§13)"
-                    .to_string(),
+                "drop the offset; a zoned source column is converted to UTC at import".to_string(),
             ),
             _ => None,
         }

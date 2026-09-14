@@ -1,4 +1,4 @@
-# Aggregation (§9): the set-builder form  op { Expr | Goal }.
+# Aggregation: the set-builder form  op { Expr | Goal }.
 #
 # op is one of count / sum / min / max / avg. Grouping is implicit — one result
 # per binding of the rule's variables that appear OUTSIDE the aggregate.

@@ -2291,8 +2291,8 @@ fn apply_arith(op: ArithOp, lhs: Value, rhs: Value) -> Result<Value> {
             None => Err(Error::new(
                 ErrorCode::TypeMismatch,
                 format!(
-                    "arithmetic `{}` requires two ints, two floats, or one of \
-                 §8's temporal operations, got {} and {}",
+                    "arithmetic `{}` requires two ints, two floats, or a temporal \
+                 operation, got {} and {}",
                     arith_symbol(op),
                     value_type_name(&lhs),
                     value_type_name(&rhs),

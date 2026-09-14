@@ -825,7 +825,7 @@ impl Parser<'_> {
                     return Err(self.error(
                         ErrorCode::CompoundTerm,
                         span,
-                        "compound terms are not supported; arguments are flat (§4)",
+                        "compound terms are not supported; arguments are flat",
                     ));
                 }
                 let c = Constant::Symbol(name.clone());
@@ -896,7 +896,7 @@ impl Parser<'_> {
                 return Err(self.error(
                     ErrorCode::UnsupportedConstruct,
                     span,
-                    "cannot mix positional and named arguments in one literal (§4)",
+                    "cannot mix positional and named arguments in one literal",
                 ));
             }
             args.push(self.parse_expr()?);
@@ -923,7 +923,7 @@ impl Parser<'_> {
                 && matches!(self.kind_at(1), TokenKind::Colon))
             {
                 return Err(self.error_expected(
-                    "a named argument `field: value` (a literal is all-named or all-positional, §4)",
+                    "a named argument `field: value` (a literal is all-named or all-positional)",
                 ));
             }
             let field = self.expect_lowercase_ident("a field name")?;

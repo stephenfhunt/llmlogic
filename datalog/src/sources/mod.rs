@@ -131,7 +131,7 @@ fn open_table(path: &str, table: Option<&str>) -> Result<Box<dyn FactSource>, Ve
             ErrorCode::UnsupportedFormat,
             format!(
                 "`{path}`: database imports are not yet implemented (the `table \"…\"` \
-             syntax is reserved; spec §13)"
+             syntax is reserved)"
             ),
         )]);
     }

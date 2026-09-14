@@ -94,6 +94,14 @@ normative home — consult it and implement the relevant phase as each layer lan
 builds the release binary on first use). Build a standalone bundle with `cargo
 package-skill`. Try-it tasks are in [`EXPERIMENTS.md`](EXPERIMENTS.md).
 
+**The skill's texts are published.** `SKILL.md`, `recipes/`, `examples/` and every
+message the binary prints are read by an agent in someone else's project, with none
+of this repository's history. State a case, never its provenance: no spec sections,
+defect ids, dates, subject codebases, session narrative or paths into this repo —
+those live in §17, `bugs/` and `notes/`. `tests/published_text.rs` catches the
+common leaks; it cannot catch prose that only makes sense with the background, so
+read a change as a stranger would. Why: §17 2026-09-14 (afternoon).
+
 **Activation is deliberate, and `.claude/skills/` is gitignored so it stays that
 way.** A project's skill is a deliverable, not development infrastructure —
 building the engine needs `cargo`, not a logic engine in context — and a skill's

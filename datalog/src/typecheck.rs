@@ -162,7 +162,7 @@ fn temporal_arith_error(op: ArithOp, lhs: TypeName, rhs: TypeName) -> (String, S
         );
     }
     (
-        format!("{operation} is not one of §8's temporal operations"),
+        format!("{operation} is not a temporal operation"),
         "point - point is a duration; point ± duration is a point; duration / duration \
          is a number"
             .to_string(),
@@ -800,7 +800,7 @@ impl<'a> TypeChecker<'a> {
                     format!(
                         "cannot tell what `{}` means here — {} is temporal, and \
                      the other operand's type is never fixed, so the result could be a \
-                     point or a duration (§8)",
+                     point or a duration",
                         arith_symbol(constraint.op),
                         known
                             .iter()

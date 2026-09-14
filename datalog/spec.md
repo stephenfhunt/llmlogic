@@ -2586,6 +2586,21 @@ never say.
 
 ### Decisions
 
+- **2026-09-14 (afternoon)** — **The skill's texts and the binary's messages are
+  written for a stranger's project** (skill/CLI; the user's call for the skill,
+  the messages by the same rule; code-analysis `decisions.md` 2026-09-13 (night ii)).
+  - **What ships:** `skill/SKILL.md`, `recipes/`, `examples/`, and every message
+    the binary prints. None carries spec sections, defect ids, dates, subject
+    codebases, session narrative or paths into this repository.
+  - **Swept:** `SKILL.md`'s links to three documents the bundle lacks; the recipe's
+    dated run on this engine's own source (module names, timings, counts, and a
+    numeric-id tip left from strings having no order); an example's section
+    citation; section citations in nine CLI messages.
+  - **Measured text moved:** `verify-before-you-believe` keeps its guidance, its
+    narrative rewritten as a case, so an ablation of it before this ran on other
+    words. The other three named blocks are unchanged.
+  - Guarded by `tests/published_text.rs`; prose that needs the background stays a
+    reading discipline (`AGENTS.md`).
 - **2026-09-14** — **A string is held once: `Symbol` and `String` values intern**
   (§4/engine; `notes/interning.md`; the user's calls in review).
   - **What a value holds.** A `Sym`, a thin reference into a process-global

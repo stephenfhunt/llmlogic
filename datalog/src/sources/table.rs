@@ -389,7 +389,7 @@ fn validate_field_names(names: &[String], source: &str) -> Result<(), Vec<Error>
                 ErrorCode::SourceSchemaMismatch,
                 format!(
                     "in `{source}`: field {} (`{name}`) is not a legal field name \
-                 (§3: lowercase-initial identifier); give the import an explicit \
+                 (it must be a lowercase-initial identifier); give the import an explicit \
                  schema to rename it",
                     index + 1
                 ),

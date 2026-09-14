@@ -263,7 +263,6 @@ DL
 
 - **Recipes** for whole use cases — `recipes/source-analysis.md` (analysing a
   codebase: extract facts with a real parser, import, ask; the traps).
-- Full usage guide: [`../docs/agent-skill.md`](../docs/agent-skill.md).
-- Canonical example programs (recursion, negation, arithmetic, named args):
-  `../spec.md` §16 and `../tests/programs/*.dl`.
-- Try-it tasks with expected answers: [`../EXPERIMENTS.md`](../EXPERIMENTS.md).
+- **Examples** — `examples/aggregation.dl` (the set-builder form and implicit
+  grouping) and `examples/houses_puzzle.dl` (a logic-grid puzzle solved by
+  generate-and-test).

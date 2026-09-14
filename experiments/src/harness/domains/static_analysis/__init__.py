@@ -4,8 +4,8 @@ Every other pack hands the subject a fact base. This one hands it 4,300 lines of
 someone else's Python and asks questions whose facts do not exist yet: the
 subject has to extract them first, and *how* it extracts them is the finding.
 The recipe this domain carries (`../../../../datalog/skill/recipes/source-analysis.md`)
-says the shape is `real parser → fact tables → import → ask`, and that every
-false result in the original run came from extracting with a regex instead.
+says the shape is `real parser → fact tables → import → ask`, and that extracting
+with a regex makes false findings a parser does not.
 
 The corpus is `sqlparse`, **fetched and pinned** rather than vendored
 (`harness.corpus`), so nothing here is a copy of someone else's licence.

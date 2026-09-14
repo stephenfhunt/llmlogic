@@ -24,6 +24,44 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-14 (late afternoon) — the fact store merged; the datalog skill's texts written for a stranger
+
+Asked to merge `fact-store` to trunk, then to clean up the datalog skill's leaks,
+the code-analysis skill's sweep applied to this one.
+
+**Done**
+- **Merged.** The random-seed deep run passed 525/525; `trunk` fast-forwarded to
+  `11231b2`, the branch deleted. Not pushed.
+- **The sweep** (§17 2026-09-14 (afternoon)):
+  - `SKILL.md`'s *More* linked three documents the bundle lacks; it now points at
+    `examples/`.
+  - The source-analysis recipe narrated a dated run on this engine's own source:
+    module names, timings, counts, "the crate above", and a numeric-id tip left
+    from strings having no order. Rewritten as cases; its four traps re-checked
+    against the binary.
+  - A section citation in `examples/aggregation.dl`, and in nine CLI messages.
+  - `experiments`' `static_analysis` docstring, which paraphrased the recipe.
+- **Guard:** `tests/published_text.rs` scans the shipped skill files and every
+  source line the binary can print from. Each check has a caught sample and
+  lookalikes; a `§4` put back in a parser message, and a dated line in the
+  recipe, each turn it red.
+
+**Decided**
+- The user's: the datalog skill's texts are published for a stranger, as
+  code-analysis's are. The binary's messages follow the same rule.
+- `verify-before-you-believe` keeps its guidance with its narrative rewritten, so
+  ablations of it before today ran on other words.
+
+**Removed** — the recipe's run narrative and numbers; `SKILL.md`'s out-of-bundle
+links; ten section citations; the oldest worklog entry.
+
+**Next up**
+- Push `trunk` when the user says so (42+ commits ahead of `github/trunk`).
+- **Measure the code-analysis playbook** with a fresh agent and only the bundle.
+- The code-analysis bundle still ships `tools/code-facts/src`, whose comments
+  name subjects and bugs.
+- **Open**: `datalog/bugs/015`, `016`.
+
 ## 2026-09-14 (afternoon) — fact store step 4: values interned; faster than the baseline everywhere
 
 Asked, in the interning review, for both kinds interned and interning alone,
@@ -106,48 +144,4 @@ worklog entry.
 - **Design value interning with the user.** The hard question: §14 orders symbols
   and strings by content, and runs, seeks and printing rely on that order.
 - Record the deep gate on `7ecfc33` (running at session end).
-- **Open**: `datalog/bugs/015`, `016`.
-
-## 2026-09-14 (morning) — fact store step 2: runs, flat imports, hash membership; accepted at 2.6%
-
-Asked to file `bugs/016` and move to step 2, then chose each fix as the
-measurements came in.
-
-**Done** — branch `fact-store`; per-commit gate green at every commit. At each code
-commit, the harness diff is empty (1,109 cases) and deep seeds 2 and 3 pass.
-- `bfc8324` (trunk): `bugs/016`, three import tests fail without `duckdb`. The
-  branch was rebased onto it.
-- `d9a4c5e` flat store and sorted runs, with B14c; B12a folded into B14a; nine
-  mutations killed. Correct, and 30% slower.
-- **Diagnosis** (`notes/fact-store.md` § Step 2, measured): profiles and
-  scratch builds E1–E7.
-  - Not the cause: cursor allocation, comparison style, merge factor.
-  - The causes: the loader's freed per-row buffers, and binary-search membership.
-- `5f27f41` imports flat (−79 MB, no time); `de461ce` raw table flat (`pointsto.dl`
-  13.5 → 10.8 s); `29378cd` hash row index and B15, five mutations
-  (`sparse_800` 1.64 → 0.92 s).
-- **`29378cd` against `efcda71`:** `pointsto.dl` 10.45 → 10.72 s; its `?why`
-  9.13 → 8.94 s and 825 → 809 MB; `callreach.dl` `?why` 1.44 → 1.30 s;
-  `sparse_800` 1.24 → 0.92 s.
-- `bugs/015`: an uncapped per-commit run drew a 19.8 GB runaway, likely B13 at
-  `Large`.
-- Step 3's design, written for review (§ Step 3 design).
-
-**Decided**
-- The user's: no per-row vectors first; membership by hash; accept
-  `pointsto.dl`'s 2.6% and go to step 3.
-- Review answers 3 and 4 were reversed on measurement: imports are flat blocks,
-  not `Program.facts` (§17 2026-09-13 (later iv), consequences).
-- The deep gate runs seeds 2 and 3 only; seeds 1 and random draw pathological B5.
-
-**Removed** — `seek::tuples_with_prefix` and B12a's own property (B14a carries
-it); `retire_delta` and `Model.delta_holders`; per-row vectors in `LoadedTable`
-and `RawTable`; binary-search membership; the oldest worklog entry.
-
-**Next up**
-- **Review step 3's design with the user, then build it:** `Premise<FactRef>`,
-  a row-keyed recorder, proof selection by content, B13 resolved.
-- Re-measure `bugs/015`'s `Deep` draws after step 3.
-- `pointsto.dl`'s 2.6% sits in seeks through runs. An unordered join seek is the
-  separate, audited optimisation.
 - **Open**: `datalog/bugs/015`, `016`.
