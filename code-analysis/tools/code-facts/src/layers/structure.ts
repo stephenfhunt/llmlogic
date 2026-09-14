@@ -431,7 +431,9 @@ function extractExports(ctx: Context, info: SourceInfo): void {
   }
 }
 
-function hasBodyOrSignature(node: ts.Node): node is ts.SignatureDeclaration {
+/** Declarations with a parameter list: function-likes and member signatures. A static block has a body but no parameters. */
+function hasParameters(node: ts.Node): node is ts.SignatureDeclaration {
+  if (ts.isClassStaticBlockDeclaration(node)) return false;
   return isFunctionLike(node) || ts.isMethodSignature(node) || ts.isCallSignatureDeclaration(node) || ts.isConstructSignatureDeclaration(node);
 }
 
@@ -468,7 +470,7 @@ function isApiLevel(node: ts.Node): boolean {
 function extractDeclarationDetail(ctx: Context, info: SourceInfo): void {
   const t = ctx.tables;
   const visit = (node: ts.Node): void => {
-    if (hasBodyOrSignature(node)) {
+    if (hasParameters(node)) {
       const fnId = ctx.idOfDecl(node);
       node.parameters.forEach((p, index) => {
         t.add("param", {

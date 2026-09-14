@@ -228,3 +228,50 @@ test("an unresolved bare specifier is a guess, never a target_package (bugs/002)
   // A resolved specifier carries no guess.
   assert.ok(rows("imports").every((i) => i.unresolved_package === null));
 });
+
+test("a class static block is a function with no parameters, beside every kind that has them (bugs/006)", () => {
+  const dir = tempDir("static-block");
+  writeProject(dir, {
+    "src/kinds.ts": [
+      "export function decl(a: number, b = 2, ...rest: number[]): number { return a + b + rest.length; }",
+      "export class K {",
+      "  static count = 0;",
+      "  static {",
+      "    K.count = decl(1);",
+      "  }",
+      "  constructor(public x: number, y?: string) {}",
+      "  method(m: string): string { return m; }",
+      "  get g(): number { return this.x; }",
+      "  set g(v: number) { this.x = v; }",
+      "}",
+      "export const fe = function (e: number): number { return e; };",
+      "export const af = (a1: string): string => a1;",
+      "export interface Sig {",
+      "  ms(s: number): void;",
+      "  (c: string): void;",
+      "  new (n: boolean): Sig;",
+      "}",
+    ].join("\n"),
+  });
+  const r = extract(dir, { layers: ["refs", "flow", "dataflow", "quality"] });
+  const block = "src/kinds.ts#K.<static@4:3>";
+  assert.ok(r.tables.rows("fn").some((f) => f.id === block), "the static block is a function");
+  assert.ok(r.tables.rows("flow_node").some((n) => n.fn === block), "and has a control-flow graph");
+  assert.deepEqual(
+    r.tables.rows("param").map((p) => [p.fn, p.index, p.name, p.optional, p.rest, p.has_default]),
+    [
+      ["src/kinds.ts#decl", 0, "a", false, false, false],
+      ["src/kinds.ts#decl", 1, "b", true, false, true],
+      ["src/kinds.ts#decl", 2, "rest", false, true, false],
+      ["src/kinds.ts#K.constructor", 0, "x", false, false, false],
+      ["src/kinds.ts#K.constructor", 1, "y", true, false, false],
+      ["src/kinds.ts#K.method", 0, "m", false, false, false],
+      ["src/kinds.ts#K.g@10", 0, "v", false, false, false], // the setter; the getter holds the bare name
+      ["src/kinds.ts#fe", 0, "e", false, false, false],
+      ["src/kinds.ts#af", 0, "a1", false, false, false],
+      ["src/kinds.ts#Sig.ms", 0, "s", false, false, false],
+      ["src/kinds.ts#Sig.<call@16:3>", 0, "c", false, false, false],
+      ["src/kinds.ts#Sig.<new@17:3>", 0, "n", false, false, false],
+    ],
+  );
+});
