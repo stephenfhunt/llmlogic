@@ -8,6 +8,7 @@
 
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
@@ -80,8 +81,7 @@ export function run(opts: Options): Result {
   const anchors = [...opts.tsconfigs, ...python.map((p) => (fs.existsSync(p) && fs.statSync(p).isDirectory() ? path.join(p, "__target__") : p))];
   const root = opts.root !== undefined ? path.resolve(opts.root) : findRoot(anchors);
   const tables = new Tables();
-  let callSites = 1;
-  let flowNodes = 1;
+  let ids: Counters = { callSite: 1, flowNode: 1 };
 
   if (opts.tsconfigs.length > 0) {
     const loaded = timed("load", () => load(opts.tsconfigs, root, exclude, opts.shareSourceFiles ?? true));
@@ -109,12 +109,15 @@ export function run(opts: Options): Result {
     if (layers.has("dataflow")) timed("dataflow", () => extractDataflow(ctx));
     if (layers.has("quality")) timed("quality", () => extractQuality(ctx));
     ctx.flushSymbols();
-    callSites = ctx.callSitesUsed;
-    flowNodes = ctx.nextFlowNode;
+    ids = { callSite: ctx.callSitesUsed, flowNode: ctx.nextFlowNode };
   }
   let pythonVersion: string | null = null;
   if (python.length > 0) {
-    pythonVersion = timed("python", () => runPython(python, root, layers, exclude, callSites, flowNodes, tables));
+    pythonVersion = timed("python", () => {
+      const r = runPython(python, root, layers, exclude, ids, tables);
+      ids = r.ids;
+      return r.version;
+    });
   }
   emitDirectories(tables);
   if (layers.has("git")) {
@@ -138,20 +141,79 @@ export function run(opts: Options): Result {
   return { tables, root, layers, timings };
 }
 
+/** The next free call-site and flow-node ids: one id-space across every frontend. */
+interface Counters {
+  callSite: number;
+  flowNode: number;
+}
+
 /**
- * The Python frontend, `frontends/python/py_facts.py`: it streams rows as JSON
- * lines, and each one is validated here against schema.ts like any other. Its
- * call-site and flow-node ids continue from the TypeScript side's.
+ * A frontend written in its language's own toolchain. It writes one
+ * `{"relation": …, "row": {…}}` JSON object per line, each validated here against
+ * schema.ts like any other row, and ends with a `__counters__` row naming the next
+ * free ids, so the next frontend continues from them.
+ *
+ * Rows go to a file rather than a pipe: a large repository's facts outgrow any
+ * buffer `spawnSync` could be given, and a file is read back in chunks.
  */
+function runFrontend(label: string, command: string, args: string[], env: NodeJS.ProcessEnv, ids: Counters, tables: Tables): Counters {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "code-facts-rows-"));
+  const rowsFile = path.join(dir, "rows.jsonl");
+  try {
+    const fd = fs.openSync(rowsFile, "w");
+    let r: ReturnType<typeof spawnSync>;
+    try {
+      r = spawnSync(command, args, { stdio: ["ignore", fd, "pipe"], encoding: "utf8", maxBuffer: 1 << 28, env });
+    } finally {
+      fs.closeSync(fd);
+    }
+    if (r.error !== undefined) throw new Error(`code-facts: cannot run ${command} for the ${label} frontend: ${r.error.message}`);
+    if (r.status !== 0) throw new Error(`code-facts: the ${label} frontend failed (exit ${r.status}):\n${r.stderr}`);
+    let next = ids;
+    forEachLine(rowsFile, (line) => {
+      const { relation, row } = JSON.parse(line) as { relation: string; row: Record<string, string | number | boolean | null> };
+      if (relation === "__counters__") next = { callSite: row.call_site as number, flowNode: row.flow_node as number };
+      else tables.add(relation, row);
+    });
+    return next;
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** Calls `f` with each non-empty line of a UTF-8 file, reading it in chunks. */
+function forEachLine(file: string, f: (line: string) => void): void {
+  const fd = fs.openSync(file, "r");
+  try {
+    const chunk = Buffer.alloc(1 << 24);
+    let carry = Buffer.alloc(0);
+    for (;;) {
+      const n = fs.readSync(fd, chunk, 0, chunk.length, null);
+      if (n === 0) break;
+      // Splitting on the newline byte is safe in UTF-8: no multi-byte sequence contains it.
+      const buf = carry.length > 0 ? Buffer.concat([carry, chunk.subarray(0, n)]) : chunk.subarray(0, n);
+      let start = 0;
+      for (let nl = buf.indexOf(10, start); nl !== -1; nl = buf.indexOf(10, start)) {
+        if (nl > start) f(buf.toString("utf8", start, nl));
+        start = nl + 1;
+      }
+      carry = Buffer.from(buf.subarray(start));
+    }
+    if (carry.length > 0) f(carry.toString("utf8"));
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/** The Python frontend, `frontends/python/py_facts.py`. */
 function runPython(
   targets: string[],
   root: string,
   layers: ReadonlySet<Layer>,
   exclude: RegExp[],
-  firstCallSite: number,
-  firstFlowNode: number,
+  ids: Counters,
   tables: Tables,
-): string {
+): { ids: Counters; version: string } {
   const args = [
     PY_FRONTEND,
     "--root",
@@ -159,25 +221,17 @@ function runPython(
     "--layers",
     [...layers].join(","),
     "--first-call-site",
-    String(firstCallSite),
+    String(ids.callSite),
     "--first-flow-node",
-    String(firstFlowNode),
+    String(ids.flowNode),
     ...exclude.flatMap((re) => ["--exclude", re.source]),
     ...targets.map((t) => path.resolve(t)),
   ];
   const python = process.env.CODE_FACTS_PYTHON ?? "python3";
   // No __pycache__ written beside the frontend: it may live in an installed skill.
-  const r = spawnSync(python, args, { encoding: "utf8", maxBuffer: 1 << 30, env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" } });
-  if (r.error !== undefined) throw new Error(`code-facts: cannot run ${python} for the Python frontend: ${r.error.message}`);
-  if (r.status !== 0) throw new Error(`code-facts: the Python frontend failed (exit ${r.status}):\n${r.stderr}`);
-  for (const line of r.stdout.split("\n")) {
-    if (line === "") continue;
-    const { relation, row } = JSON.parse(line) as { relation: string; row: Record<string, string | number | boolean | null> };
-    if (relation === "__counters__") continue;
-    tables.add(relation, row);
-  }
+  const next = runFrontend("Python", python, args, { ...process.env, PYTHONDONTWRITEBYTECODE: "1" }, ids, tables);
   const v = spawnSync(python, ["-c", "import sys; print('.'.join(map(str, sys.version_info[:3])))"], { encoding: "utf8" });
-  return v.stdout.trim();
+  return { ids: next, version: v.stdout.trim() };
 }
 
 /** A pyproject.toml, or a directory with no tsconfig.json in it. */
