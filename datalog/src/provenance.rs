@@ -16,6 +16,7 @@
 //! "manager")` rather than eight positional columns (§17, 2026-07-20).
 
 use crate::ast::{AggOp, CmpOp, TypeName};
+use crate::engine::FactRef;
 use crate::engine::{Model, Provenance};
 use crate::ir::{Fact, PredId, RuleId, Value};
 
@@ -61,16 +62,18 @@ impl NoMatchPattern {
 /// One premise of a derivation, aligned with its body literal
 /// ([`crate::ir::BodyIdx`]).
 ///
-/// Every kind but [`Premise::Fact`] is boxed, so a premise is a [`Fact`] wide.
-/// A recorded run holds one premise per body literal of every derivation, and
-/// fact premises are nearly all of them; sized for the widest kind, every slot
-/// cost 80 bytes where a fact needs 32. A no-match pattern is no wider than a
-/// fact, but two inline variants of the same shape leave the enum no spare bits
-/// for its tag, which costs every slot another 8.
+/// A fact premise is the row the literal matched ([`FactRef`]), so a recorded run
+/// holds no copy of a fact's values (`notes/fact-store.md` § Step 3 design). Where
+/// no model is at hand to resolve a row, a premise holds the fact itself:
+/// [`NearMiss::satisfied`], and [`Model::derivations_of`]'s answers.
+///
+/// Every kind but [`Premise::Fact`] is boxed, so a premise is 16 bytes: a row
+/// reference and the tag. A recorded run holds one premise per body literal of
+/// every derivation, and fact premises are nearly all of them.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub enum Premise {
+pub enum Premise<F = FactRef> {
     /// The fact that matched a positive literal.
-    Fact(Fact),
+    Fact(F),
     /// The pattern no fact matched, satisfying a negated literal.
     NoMatch(Box<NoMatchPattern>),
     /// A satisfied comparison/assignment builtin (§8). Self-justifying — like
@@ -147,12 +150,12 @@ pub struct LostConversion {
 /// derivations per fact" storage (spec §17): the same instance rediscovered in
 /// a later round collapses to one record.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct Derivation {
+pub struct Derivation<F = FactRef> {
     pub rule: RuleId,
-    pub premises: Vec<Premise>,
+    pub premises: Vec<Premise<F>>,
 }
 
-impl Derivation {
+impl<F> Derivation<F> {
     /// Does this instance carry something a §9 or §12 warning reads?
     ///
     /// The two reporting surfaces — an aggregate that skipped `absent` inputs,
@@ -168,7 +171,9 @@ impl Derivation {
 
 /// [`Derivation::reports`] over premises not yet collected into a derivation —
 /// which is what lets the fixpoint decide whether to build one at all.
-pub(crate) fn premises_report<'a>(premises: impl IntoIterator<Item = &'a Premise>) -> bool {
+pub(crate) fn premises_report<'a, F: 'a>(
+    premises: impl IntoIterator<Item = &'a Premise<F>>,
+) -> bool {
     premises.into_iter().any(|premise| match premise {
         Premise::Aggregate(aggregate) => aggregate.skipped > 0,
         Premise::Builtin(builtin) => builtin.lost.is_some(),
@@ -202,7 +207,7 @@ pub struct NearMiss {
     pub rule: RuleId,
     /// Premises for the literals the body satisfied, at their true
     /// [`crate::ir::BodyIdx`]; `None` from the block onwards.
-    pub satisfied: Vec<Option<Premise>>,
+    pub satisfied: Vec<Option<Premise<Fact>>>,
     /// The body index of the first literal the body could not satisfy.
     pub blocked: usize,
     /// For a blocked **comparison**, the operand values it was evaluated on, so
@@ -290,12 +295,13 @@ pub enum ProofTree {
 
 /// One step of a proof: how [`ProofTree::explain`] justifies a fact before it
 /// recurses into the step's premises.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum ProofStep<'a> {
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum ProofStep {
     /// A base fact: the proof is a leaf.
     Leaf,
-    /// A derived fact: the proof is built on this derivation.
-    Derived(&'a Derivation),
+    /// A derived fact: the proof is built on this derivation, its premises
+    /// resolved, so steps from two models compare by content (**B13**).
+    Derived(Derivation<Fact>),
 }
 
 /// What an evaluated model can say about one fact — §11's union, minus the
@@ -369,7 +375,7 @@ impl ProofTree {
     /// premises first appeared in strictly earlier rounds. So two models whose
     /// steps agree on a fact and on every fact below it prove it the same way —
     /// which is how `testing.md` **B13** compares proofs without building them.
-    pub(crate) fn step<'a>(model: &'a Model, fact: &Fact) -> Option<ProofStep<'a>> {
+    pub(crate) fn step(model: &Model, fact: &Fact) -> Option<ProofStep> {
         if !model.contains(fact) {
             return None;
         }
@@ -457,8 +463,14 @@ mod tests {
     /// every derivation, so a payload wider than a [`Fact`] belongs behind a box
     /// like the three self-justifying kinds, not inline.
     #[test]
-    fn a_premise_is_a_fact_wide() {
-        assert_eq!(std::mem::size_of::<Premise>(), std::mem::size_of::<Fact>());
+    fn a_premise_is_a_row_reference_wide() {
+        // A row reference and the tag: half a fact's 32 bytes, which is what a
+        // premise cost when it held a copy of the fact.
+        assert_eq!(std::mem::size_of::<Premise>(), 16);
+        assert_eq!(
+            std::mem::size_of::<Premise>() * 2,
+            std::mem::size_of::<Fact>()
+        );
     }
 
     #[test]

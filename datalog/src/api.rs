@@ -575,7 +575,7 @@ pub(crate) fn absent_skip_warnings(
     // (rule, body index) → (target type, total values lost).
     let mut lost_sites: BTreeMap<(u32, usize), (&'static str, usize)> = BTreeMap::new();
     for fact in model.facts() {
-        for derivation in model.derivations_of(&fact) {
+        for derivation in model.derivation_refs(&fact) {
             for (idx, premise) in derivation.premises.iter().enumerate() {
                 if let crate::provenance::Premise::Aggregate(aggregate) = premise
                     && aggregate.skipped > 0

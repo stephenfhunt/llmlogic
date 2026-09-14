@@ -179,11 +179,60 @@ impl Model {
     }
 
     /// All recorded derivations of `fact`, `Ord`-least first.
-    pub fn derivations_of<'a>(&'a self, fact: &Fact) -> impl Iterator<Item = &'a Derivation> {
+    pub fn derivations_of(&self, fact: &Fact) -> std::vec::IntoIter<Derivation<Fact>> {
+        let mut resolved: Vec<Derivation<Fact>> = self
+            .derivation_refs(fact)
+            .map(|derivation| self.resolve_derivation(derivation))
+            .collect();
+        resolved.sort();
+        resolved.into_iter()
+    }
+
+    /// `fact`'s recorded derivations as they are stored: premises by row, in no
+    /// order a reader may rely on.
+    pub(crate) fn derivation_refs<'a>(
+        &'a self,
+        fact: &Fact,
+    ) -> impl Iterator<Item = &'a Derivation> + 'a {
         self.fact_ref(fact)
             .and_then(|reference| self.derivations.get(&reference))
             .into_iter()
             .flatten()
+    }
+
+    /// The fact a row reference names.
+    pub fn fact_at(&self, reference: FactRef) -> Fact {
+        Fact {
+            pred: reference.pred,
+            tuple: Tuple(
+                self.relations[reference.pred.0 as usize]
+                    .row(reference.row)
+                    .to_vec(),
+            ),
+        }
+    }
+
+    /// `premise` with its fact, if any, resolved from its row.
+    pub fn resolve_premise(&self, premise: &Premise) -> Premise<Fact> {
+        match premise {
+            Premise::Fact(reference) => Premise::Fact(self.fact_at(*reference)),
+            Premise::NoMatch(pattern) => Premise::NoMatch(pattern.clone()),
+            Premise::Builtin(builtin) => Premise::Builtin(builtin.clone()),
+            Premise::Presence(presence) => Premise::Presence(presence.clone()),
+            Premise::Aggregate(aggregate) => Premise::Aggregate(aggregate.clone()),
+        }
+    }
+
+    /// `derivation` with every fact premise resolved from its row.
+    pub fn resolve_derivation(&self, derivation: &Derivation) -> Derivation<Fact> {
+        Derivation {
+            rule: derivation.rule,
+            premises: derivation
+                .premises
+                .iter()
+                .map(|premise| self.resolve_premise(premise))
+                .collect(),
+        }
     }
 
     /// The row `fact` is held in, if the model holds it.
@@ -1052,11 +1101,11 @@ fn enumerate_literal(
                 .model
                 .relation(atom.pred)
                 .seek(cx.views[idx], cx.round, &prefix.0);
-            for (_, row) in candidates {
+            for (row_id, row) in candidates {
                 if let Some(bound) = try_match(atom, row, bindings) {
-                    premises[idx] = Some(Premise::Fact(Fact {
+                    premises[idx] = Some(Premise::Fact(FactRef {
                         pred: atom.pred,
-                        tuple: Tuple(row.to_vec()),
+                        row: row_id,
                     }));
                     let result = enumerate_from(cx, order, depth + 1, bindings, premises, on_match);
                     premises[idx] = None;
@@ -1279,7 +1328,15 @@ pub fn trace_failure(program: &Program, model: &Model, goal: &Fact) -> Result<Fa
         };
         near_misses.push(NearMiss {
             rule: RuleId(index as u32),
-            satisfied: probe.premises,
+            satisfied: probe
+                .premises
+                .iter()
+                .map(|premise| {
+                    premise
+                        .as_ref()
+                        .map(|premise| model.resolve_premise(premise))
+                })
+                .collect(),
             blocked,
             blocked_values: blocked_comparison(&rule.body[blocked], &probe.bindings),
             repair: repair_for(program, model, &rule.body[blocked], &probe.bindings),
@@ -2687,10 +2744,8 @@ mod tests {
         let model = eval(&program).unwrap();
         assert_eq!(model.relation(path).len(), 5); // 4 edges + path("a","d")
 
-        let derivations: Vec<Derivation> = model
-            .derivations_of(&fact2(path, "a", "d"))
-            .cloned()
-            .collect();
+        let derivations: Vec<Derivation<Fact>> =
+            model.derivations_of(&fact2(path, "a", "d")).collect();
         assert_eq!(
             derivations,
             vec![
@@ -2712,10 +2767,7 @@ mod tests {
         );
 
         // A single-derivation fact for contrast.
-        let single: Vec<Derivation> = model
-            .derivations_of(&fact2(path, "a", "b"))
-            .cloned()
-            .collect();
+        let single: Vec<Derivation<Fact>> = model.derivations_of(&fact2(path, "a", "b")).collect();
         assert_eq!(
             single,
             vec![Derivation {
@@ -3411,7 +3463,7 @@ mod tests {
             pred: parent,
             args: vec![None, Some(string_value("alice"))],
         };
-        let derivations: Vec<Derivation> = model.derivations_of(&alice).cloned().collect();
+        let derivations: Vec<Derivation<Fact>> = model.derivations_of(&alice).collect();
         assert_eq!(
             derivations,
             vec![Derivation {
@@ -4106,7 +4158,7 @@ mod tests {
                 };
                 model
                     .derivations_of(&fact)
-                    .flat_map(|d| d.premises.iter())
+                    .flat_map(|d| d.premises)
                     .filter_map(move |premise| match premise {
                         Premise::NoMatch(pattern) if pattern.pred == q => {
                             Some((x, pattern.args.clone()))
@@ -4573,7 +4625,7 @@ mod tests {
             // And it kept nothing the full store did not: a subset claim,
             // which needs no predicate of its own to state.
             for fact in reports.facts() {
-                let full: Vec<&Derivation> = recorded.derivations_of(&fact).collect();
+                let full: Vec<Derivation<Fact>> = recorded.derivations_of(&fact).collect();
                 for derivation in reports.derivations_of(&fact) {
                     prop_assert!(
                         full.contains(&derivation),
@@ -4726,13 +4778,13 @@ mod tests {
                     .collect()
             };
             // `None`: the fact does not hold; `Some(None)`: a leaf.
-            let steps = |model: &Model, facts: &[Fact]| -> Vec<Option<Option<Derivation>>> {
+            let steps = |model: &Model, facts: &[Fact]| -> Vec<Option<Option<Derivation<Fact>>>> {
                 facts
                     .iter()
                     .map(|fact| {
                         ProofTree::step(model, fact).map(|step| match step {
                             ProofStep::Leaf => None,
-                            ProofStep::Derived(derivation) => Some(derivation.clone()),
+                            ProofStep::Derived(derivation) => Some(derivation),
                         })
                     })
                     .collect()
@@ -5107,7 +5159,7 @@ mod tests {
         /// aggregate, whose fold is over the model this helper does not have —
         /// its value is bound rather than recomputed, and the fold has its own
         /// properties (B11).
-        fn replay(program: &Program, derivation: &Derivation) -> Option<Fact> {
+        fn replay(program: &Program, derivation: &Derivation<Fact>) -> Option<Fact> {
             let rule = program.rules.get(derivation.rule.0 as usize)?;
             if derivation.premises.len() != rule.body.len() {
                 return None;
@@ -6231,14 +6283,13 @@ mod tests {
                     let after = eval(&swapped).unwrap();
 
                     for fact in base.facts() {
-                        let want: BTreeSet<Derivation> =
-                            base.derivations_of(&fact).cloned().collect();
+                        let want: BTreeSet<Derivation<Fact>> =
+                            base.derivations_of(&fact).collect();
                         // Un-swap: premises follow their body literal, so the
                         // two moved positions come back before comparing.
-                        let got: BTreeSet<Derivation> = after
+                        let got: BTreeSet<Derivation<Fact>> = after
                             .derivations_of(&fact)
-                            .map(|d| {
-                                let mut d = d.clone();
+                            .map(|mut d| {
                                 if d.rule.0 as usize == rule_idx && a != b {
                                     d.premises.swap(a, b);
                                 }
@@ -6260,10 +6311,10 @@ mod tests {
                     // Rule ids are unchanged by a stratum reordering, so this
                     // half needs no remapping at all.
                     for fact in base.facts() {
-                        let want: BTreeSet<Derivation> =
-                            base.derivations_of(&fact).cloned().collect();
-                        let got: BTreeSet<Derivation> =
-                            after.derivations_of(&fact).cloned().collect();
+                        let want: BTreeSet<Derivation<Fact>> =
+                            base.derivations_of(&fact).collect();
+                        let got: BTreeSet<Derivation<Fact>> =
+                            after.derivations_of(&fact).collect();
                         prop_assert_eq!(
                             got, want,
                             "reordering rules within a stratum changed the \
@@ -6376,7 +6427,7 @@ mod tests {
                                 }
                             }
                         }
-                        let replayed = replay(&program, derivation);
+                        let replayed = replay(&program, &derivation);
                         prop_assert_eq!(replayed.as_ref(), Some(&fact));
                     }
                 }
@@ -6406,7 +6457,7 @@ mod tests {
                 let Ok(model) = eval(&program) else { return Ok(()) };
                 for fact in model.facts() {
                     for derivation in model.derivations_of(&fact) {
-                        let replayed = replay(&program, derivation);
+                        let replayed = replay(&program, &derivation);
                         prop_assert_eq!(
                             replayed.as_ref(),
                             Some(&fact),
@@ -6793,7 +6844,7 @@ mod tests {
                 if rounds >= 8 {
                     deep += 1;
                 }
-                let derived_round = |premise: &Premise| match premise {
+                let derived_round = |premise: &Premise<Fact>| match premise {
                     Premise::Fact(fact) if !model.is_base(fact) => model.first_round(fact),
                     _ => None,
                 };
@@ -6837,7 +6888,7 @@ mod tests {
                     .current();
                 let recorded = eval(&program).unwrap();
                 let paired = recorded.facts().any(|fact| {
-                    let (reporting, plain): (Vec<&Derivation>, Vec<&Derivation>) =
+                    let (reporting, plain): (Vec<Derivation<Fact>>, Vec<Derivation<Fact>>) =
                         recorded.derivations_of(&fact).partition(|d| d.reports());
                     !reporting.is_empty() && !plain.is_empty()
                 });

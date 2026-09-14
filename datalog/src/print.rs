@@ -594,7 +594,7 @@ fn trace_lines(trace: &FailureTrace, program: &ir::Program, out: &mut Vec<String
 /// anchor**: a trace claims only that the literal matched this row, and the row
 /// may well be derived — where a proof's leaf is a base fact by construction.
 /// The self-justifying kinds are identical in both, so they share [`node_text`].
-fn premise_text(premise: &Premise, program: &ir::Program, site: Site<'_>) -> String {
+fn premise_text(premise: &Premise<ir::Fact>, program: &ir::Program, site: Site<'_>) -> String {
     match premise {
         Premise::Fact(fact) => print_ir_fact(fact, program),
         Premise::NoMatch(pattern) => {
