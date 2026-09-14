@@ -101,3 +101,19 @@ testing-first ruling this gates, so the choice is theirs.
 - **This file waits on the fact store with one owner** (`notes/fact-store.md`).
   Its premises are row references, which removes the cloned premise tuples a
   recorded `Deep` run spends most of its store on.
+
+## 2026-09-14 — seen again at the per-commit tier
+
+- **Where:** branch `fact-store`, after imports became flat blocks. One uncapped
+  `cargo test --lib` held 19.8 GB RSS at 10 minutes and was killed. The test was
+  not named.
+- **Ten reruns** under a 4 GB `prlimit --as` cap all passed, in 13–30 s. One took
+  108 s, with `b13_pruning_changes_no_live_relation_at_large` running past 60 s:
+  the recorded B13 this file is about, at its per-commit tier.
+- **So a per-commit `cargo test` can draw a case that exhausts memory,** not only
+  the deep run. This agrees with the 16 GB per-commit draw recorded earlier. That
+  the runaway was B13 is likely, not established.
+- **Not implicated:** the branch's import change, since generated programs contain
+  no imports. The flat store beneath it is not ruled out.
+- **Under an address-space cap,** a runaway is a named allocation failure with a
+  saved seed, not a killed process.
