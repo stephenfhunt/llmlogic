@@ -305,6 +305,70 @@ at 10.69 and 10.59 s.
   store. This is review answer 2's condition for a content-to-row hash, taken up
   after the load-time holes are gone and re-measured.
 
+## Step 3 design: provenance by row reference (2026-09-14, for review)
+
+*Step 2 is accepted at `29378cd`, with `pointsto.dl`'s 2.6% (the user's call).
+This section is the design for the review; nothing in it is built.*
+
+**The change.**
+- **`Premise::Fact` holds a `FactRef { pred, row }`,** not a copied `Fact`. A
+  premise shrinks from 32 to 16 bytes. The join already reads rows out of a
+  relation, so `Relation::seek` yields each row's id beside its values.
+- **The recorder keys by row.** The derivation store and the round stamps are
+  keyed by `FactRef`, so a recorded run holds no copy of a fact's values:
+  - not in a premise;
+  - not in a derivation store key;
+  - not in a round stamp's key.
+
+  What `bugs/015`'s `Deep` draws spend most of their store on is those copies.
+- **The boundary stays owned.**
+  - The public accessors (`contains`, `derivations_of`, `first_round`,
+    `is_base`) take a `Fact` and resolve it through the relation's index
+    (`Relation::find`).
+  - `ProofTree` nodes and `FailureTrace` hold owned facts.
+  - `api.rs`'s warning walk reads only aggregate and builtin premises, so it is
+    untouched.
+
+**Decisions this forces**, each with the property that guards it:
+
+1. **Premises are generic over how a fact is held:** `Premise<F = FactRef>`.
+   - The recorder stores `Premise<FactRef>`.
+   - A `?whynot` trace holds `Premise<Fact>`, because its printer has the program
+     and not the model (`print.rs`, `premise_text`), and a trace is built from a
+     finished model where resolving is cheap.
+   - The alternative, a trace-only premise type, is a second copy of five
+     variants.
+   - Guards: E10, and the harness's 237 `?whynot` goals.
+2. **Derivations per fact are a set deduplicated by reference:**
+   `HashMap<FactRef, HashSet<Derivation>>`.
+   - A fact has one row, so reference equality is content equality, and a
+     rediscovered instance still collapses to one record.
+   - `BTreeSet` cannot be kept, because its order would be by row id.
+   - Guards: E1, E3, and C14's derivation-level comparison.
+3. **Proof selection compares content through the model at read time.**
+   - `ProofTree::step` picks the least well-founded derivation. Premises are
+     compared variant first, then fact premises by predicate and the row's
+     values, and the other kinds by their derived `Ord`. That is exactly today's
+     derived `Ord` over `Premise<Fact>`, so which proof prints cannot move.
+   - `derivations_of` keeps its "least first" contract by sorting under the same
+     comparison. The warning walk takes an unsorted crate-internal iterator.
+   - Guards: the harness's 557 `?why` goals byte for byte, B5, B13, §16.6's
+     golden.
+4. **Round stamps are a `Vec<u32>` per relation,** indexed by row id minus the
+   base count, and **base membership is `row < base_count`** (E11 restated). A
+   head still has no row while its round collects. `apply_round` finds its row
+   after the block is written, then stamps it and files its derivations.
+5. **B13 compares steps resolved to content.** Its full and pruned runs issue
+   different row ids for the same fact, and a test that compared references
+   would fail on a correct engine. The step is resolved to
+   `Option<Option<Derivation<Fact>>>` before comparing. Mutation to rerun: the
+   pruned run restarts round stamps each stratum.
+
+**Measured as step 2 was.** Harness diff, deep seeds 2 and 3, and `measure.py`.
+Add the `?why` memory on `pointsto.dl` (809 MB at `29378cd`), `callreach.dl`,
+and `Deep` draws 119 and 129 through the instrumentation patch. `bugs/015`'s
+acceptance is a finished deep run under a cap.
+
 ## Rules the build must keep
 
 - **Delta is the rows this stratum's previous apply wrote, not the newest run.** A

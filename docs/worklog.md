@@ -24,6 +24,50 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-14 (morning) — fact store step 2: runs, flat imports, hash membership; accepted at 2.6%
+
+Asked to file `bugs/016` and move to step 2, then chose each fix as the
+measurements came in.
+
+**Done** — branch `fact-store`; per-commit gate green at every commit. At each code
+commit, the harness diff is empty (1,109 cases) and deep seeds 2 and 3 pass.
+- `bfc8324` (trunk): `bugs/016`, three import tests fail without `duckdb`. The
+  branch was rebased onto it.
+- `d9a4c5e` flat store and sorted runs, with B14c; B12a folded into B14a; nine
+  mutations killed. Correct, and 30% slower.
+- **Diagnosis** (`notes/fact-store.md` § Step 2, measured): profiles and
+  scratch builds E1–E7.
+  - Not the cause: cursor allocation, comparison style, merge factor.
+  - The causes: the loader's freed per-row buffers, and binary-search membership.
+- `5f27f41` imports flat (−79 MB, no time); `de461ce` raw table flat (`pointsto.dl`
+  13.5 → 10.8 s); `29378cd` hash row index and B15, five mutations
+  (`sparse_800` 1.64 → 0.92 s).
+- **`29378cd` against `efcda71`:** `pointsto.dl` 10.45 → 10.72 s; its `?why`
+  9.13 → 8.94 s and 825 → 809 MB; `callreach.dl` `?why` 1.44 → 1.30 s;
+  `sparse_800` 1.24 → 0.92 s.
+- `bugs/015`: an uncapped per-commit run drew a 19.8 GB runaway, likely B13 at
+  `Large`.
+- Step 3's design, written for review (§ Step 3 design).
+
+**Decided**
+- The user's: no per-row vectors first; membership by hash; accept
+  `pointsto.dl`'s 2.6% and go to step 3.
+- Review answers 3 and 4 were reversed on measurement: imports are flat blocks,
+  not `Program.facts` (§17 2026-09-13 (later iv), consequences).
+- The deep gate runs seeds 2 and 3 only; seeds 1 and random draw pathological B5.
+
+**Removed** — `seek::tuples_with_prefix` and B12a's own property (B14a carries
+it); `retire_delta` and `Model.delta_holders`; per-row vectors in `LoadedTable`
+and `RawTable`; binary-search membership; the oldest worklog entry.
+
+**Next up**
+- **Review step 3's design with the user, then build it:** `Premise<FactRef>`,
+  a row-keyed recorder, proof selection by content, B13 resolved.
+- Re-measure `bugs/015`'s `Deep` draws after step 3.
+- `pointsto.dl`'s 2.6% sits in seeks through runs. An unordered join seek is the
+  separate, audited optimisation.
+- **Open**: `datalog/bugs/015`, `016`.
+
 ## 2026-09-14 (early) — the fact store's branch, its gate, and step 1: a `Relation` type, nothing moved
 
 Asked to set up the fact-ownership refactor on a branch, more rigorously than
@@ -116,52 +160,4 @@ zero-arity question (v1 has no nullary predicates); the oldest worklog entry.
 - **Measure time, `perf stat` and memory before any commit.**
 - Re-learned: `cargo build | grep | tail && cp` copied a stale binary after a
   failed build. Use `set -o pipefail`.
-- **Open**: `datalog/bugs/015`.
-
-## 2026-09-13 (later that night) — the recorder cut by constants: `pointsto.dl` `?why` 1,428 → 848 MB, every derivation kept
-
-Asked where the derivation-tracking changes stood: references rather than copies
-a clear win, one derivation per fact held back unless it is what code-analysis
-hits. It is not. Planned, approved, and steps 1–3 built.
-
-**Done** — datalog `cargo test` (every binary), clippy, fmt; each commit green
-- **The answer.** Library programs store 1.11–1.12 derivations per fact, 95–97%
-  of them first-round. They pay for representation and base-fact bookkeeping,
-  not count, and the base set does not need the one-derivation direction.
-- `91b730a` — no base set: a held fact with no round stamp is base. **E11**,
-  stated from `program.facts`. Mutations killed: `insert_base` stamps round 0; a
-  rediscovered fact is stamped. Guard: 4 of 48.
-- `ef82398` — a premise is a fact wide (80 → 32 bytes). Every kind but `Fact` is
-  boxed, `NoMatch` too, since two inline variants of one shape leave no niche for
-  the tag (40). Pinned by `a_premise_is_a_fact_wide`.
-- Against a frozen `8c6bc91` release binary:
-  - `?why` is byte-identical on 43 §16-corpus goals and both `@grafana/ui` goals;
-  - `pointsto.dl` 1,428 MB / 14.7 s → 848 MB / 9.1 s;
-  - `callreach.dl` 466 → 389 MB.
-- `Deep` draws, with the note's harness rebased in `~/.cache/recorder-wt`:
-  idx 129 6.96 → 5.43 GB, idx 119 3.58 → 2.78 GB. Most of what remains is cloned
-  premise tuples (3.06 GB on idx 129).
-- **The deep run still does not finish**: it failed an allocation at 372 s and
-  18.1 GB under a 20 GB cap. In `bugs/015`, with a 16 GB per-commit-tier draw
-  seen once and not reproduced.
-
-**Decided**
-- datalog §17 2026-07-19 ***Consequences 2026-09-13 (later)***: the reopening
-  stands, narrowed to what all-derivations costs a dense program.
-- One derivation per fact is not built; the plan was the user's.
-- The user's, after the measurements: fact references come next, designed first;
-  `bugs/015` keeps waiting on the recorder design rather than a generator cap.
-
-**Removed** — `Model::base`; base facts' round-0 stamps; `Premise`'s inline
-payloads; the note's unverified `base` direction; the oldest worklog entry.
-
-**Next up**
-- **Fact references next, as a design pass** (the user's). Stable ids reach into
-  evaluator storage: `BTreeSet<Tuple>` relations, the seek, the deltas. The
-  numbers are in the note's § After the first two cuts.
-- **`bugs/015` waits on the recorder design** (the user's): no generator cap.
-- Not chosen for now: dropping `api::run`'s fact copy for a `?why` (233 MB on
-  `pointsto.dl`).
-- Re-learned: `ps -C cc,c++` misses DuckDB's `clang++` workers, so a working
-  release build looked hung and was killed once.
 - **Open**: `datalog/bugs/015`.

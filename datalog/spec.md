@@ -2620,6 +2620,10 @@ never say.
     1.24 s. **B15** guards it.
   - **What remains:** `pointsto.dl` with no goals is 2.6% slower, in seeks
     through runs.
+  ***Consequences 2026-09-14 (later ii)*** — **step 2 is accepted at `29378cd`**,
+  with `pointsto.dl` 2.6% slower (the user's call, weighed against `sparse_800`'s
+  26% and both `?why` runs). Deep seeds 2 and 3 pass 517 of 517. Step 3's design
+  is `notes/fact-store.md` § Step 3 design.
 - **2026-09-13 (later iii)** — **A fact reference is a shared tuple, not an id**
   (engine, `ir::Tuple`; the user's call that references come next, and their
   question *why not a `&`?*). The design is in `notes/recorder-at-scale.md`
