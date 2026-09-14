@@ -147,11 +147,11 @@ B5 and B13.
   §16.6 goldens.
 - **New properties the store needs:**
   - *a row never moves:* a `FactRef` taken in any round resolves to the same values
-    in the finished model;
+    in the finished model. **Built in step 2** as **B14c** over evaluations, and
+    within a relation's history in **B14a**;
   - *the index is the relation:* every run is sorted, the runs together are a
     permutation of the rows, and a merge of them iterates exactly the sorted set of
-    held facts. B14a states its observable half; the runs half comes with them in
-    step 2.
+    held facts. **Built in step 2** as `testing.md` **B14a**.
   - *views:* `Delta` is the facts first held in the last round and `Old` the rest,
     stated from round stamps rather than watermarks. **Built in step 1** as
     `testing.md` **B14b**, with **B14a** stating the index and views against a

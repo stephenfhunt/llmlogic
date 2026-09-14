@@ -53,8 +53,8 @@ use crate::Result;
 use crate::ast::{AggOp, ArithOp, BuiltinOp, CmpOp, TypeName};
 use crate::error::{Error, ErrorCode};
 use crate::ir::{
-    Atom, BodyLiteral, BodyLiteralKind, Expr, F64, Fact, PredId, Program, Query, Rule, RuleId,
-    Term, Tuple, Value, f64_as_exact_i64, i64_as_exact_f64,
+    Atom, BodyLiteral, BodyLiteralKind, Expr, F64, Fact, PredId, PredicateInfo, Program, Query,
+    Rule, RuleId, Term, Tuple, Value, f64_as_exact_i64, i64_as_exact_f64,
 };
 use crate::lexer::{CellClass, classify_cell, classify_symbol};
 use crate::provenance::{
@@ -115,9 +115,6 @@ pub enum Provenance {
 pub struct Model {
     /// Indexed by `PredId`: the predicate's full extent (base ∪ derived).
     relations: Vec<Relation>,
-    /// The relations holding a block from the most recent apply, whose blocks the
-    /// next apply retires ([`Relation::retire_delta`]).
-    delta_holders: Vec<PredId>,
     /// All derivations per derived fact, rule-instance-deduplicated.
     derivations: HashMap<Fact, BTreeSet<Derivation>>,
     /// Fixpoint round each *derived* fact first appeared in, from 1. Monotone
@@ -135,10 +132,12 @@ pub struct Model {
 }
 
 impl Model {
-    fn new(num_predicates: usize, provenance: Provenance) -> Model {
+    fn new(predicates: &[PredicateInfo], provenance: Provenance) -> Model {
         Model {
-            relations: vec![Relation::default(); num_predicates],
-            delta_holders: Vec::new(),
+            relations: predicates
+                .iter()
+                .map(|info| Relation::new(info.arity as usize))
+                .collect(),
             derivations: HashMap::new(),
             first_round: HashMap::new(),
             provenance,
@@ -293,8 +292,14 @@ impl Model {
     /// ([`first_round`](Self::first_round)'s field), because each as a map of
     /// its own was a fact-keyed copy of the whole EDB — on an imported table,
     /// most of what a recorded run held.
-    fn insert_base(&mut self, fact: Fact) {
-        self.relations[fact.pred.0 as usize].insert_base(fact.tuple);
+    fn load_base(&mut self, facts: impl IntoIterator<Item = Fact>) {
+        let mut rows: Vec<Vec<Tuple>> = vec![Vec::new(); self.relations.len()];
+        for fact in facts {
+            rows[fact.pred.0 as usize].push(fact.tuple);
+        }
+        for (relation, rows) in self.relations.iter_mut().zip(rows) {
+            relation.load_base(rows);
+        }
     }
 
     /// Applies one round's matches, returning whether any fact was new.
@@ -344,15 +349,9 @@ impl Model {
             }
             blocks.entry(fact.pred).or_default().insert(fact.tuple);
         }
-        for pred in std::mem::take(&mut self.delta_holders) {
-            if !blocks.contains_key(&pred) {
-                self.relations[pred.0 as usize].retire_delta();
-            }
-        }
         let grew = !blocks.is_empty();
         for (pred, block) in blocks {
             self.relations[pred.0 as usize].apply(block, round);
-            self.delta_holders.push(pred);
         }
         grew
     }
@@ -495,10 +494,8 @@ fn eval_seeded(
     on_round: &mut dyn FnMut(&Model, u32),
 ) -> std::result::Result<Model, Capped> {
     validate(program).map_err(Capped::Failed)?;
-    let mut model = Model::new(program.predicates.len(), provenance);
-    for fact in facts {
-        model.insert_base(fact);
-    }
+    let mut model = Model::new(&program.predicates, provenance);
+    model.load_base(facts);
     let mut round = 0;
     for stratum in &program.strata {
         let stratum: Vec<RuleId> = match live {
@@ -4455,6 +4452,38 @@ mod tests {
             }
         }
 
+        /// **B14c** for one program: a row never moves. Every row id a relation
+        /// has issued by the start of any delta pass names, in the finished model,
+        /// the values it named then.
+        fn b14c_holds(program: &Program) -> std::result::Result<(), TestCaseError> {
+            let mut issued: Vec<Vec<Vec<Value>>> = vec![Vec::new(); program.predicates.len()];
+            let mut observe = |model: &Model, _round: u32| {
+                for (index, rows) in issued.iter_mut().enumerate() {
+                    let relation = model.relation(PredId(index as u32));
+                    for id in rows.len() as u32..relation.len() as u32 {
+                        rows.push(relation.row(id).to_vec());
+                    }
+                }
+            };
+            let model = eval_observed(program, ROUND_CAP, Provenance::Unrecorded, &mut observe)
+                .map_err(|capped| {
+                    TestCaseError::fail(format!("evaluation did not finish: {capped:?}"))
+                })?;
+            for (index, rows) in issued.iter().enumerate() {
+                let relation = model.relation(PredId(index as u32));
+                for (id, values) in rows.iter().enumerate() {
+                    prop_assert_eq!(
+                        relation.row(id as u32),
+                        values.as_slice(),
+                        "{} row {} moved",
+                        program.pred_info(PredId(index as u32)).name,
+                        id
+                    );
+                }
+            }
+            Ok(())
+        }
+
         /// **E9**'s claims about one program, shared by the property over
         /// [`arb_program_with_edb`] and the one over shaped programs.
         fn e9_holds(program: &Program) -> std::result::Result<(), TestCaseError> {
@@ -4940,6 +4969,14 @@ mod tests {
                 generated in crate::testgen::arb_program_text_at(Tier::Medium.scaled()),
             ) {
                 b14b_holds(&generated.1)?;
+            }
+
+            /// **B14c at `Tier::Medium`** — and `Large` in the deep run.
+            #[test]
+            fn b14c_a_row_never_moves_at_medium(
+                generated in crate::testgen::arb_program_text_at(Tier::Medium.scaled()),
+            ) {
+                b14c_holds(&generated.1)?;
             }
         }
 
@@ -6241,6 +6278,12 @@ mod tests {
             #[test]
             fn b14b_views_are_the_round_stamps(program in arb_program_with_edb()) {
                 b14b_holds(&program)?;
+            }
+
+            /// B14c — a row never moves.
+            #[test]
+            fn b14c_a_row_never_moves(program in arb_program_with_edb()) {
+                b14c_holds(&program)?;
             }
 
             /// E2 — every fact has a proof, and every leaf is a base fact.

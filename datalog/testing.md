@@ -274,7 +274,7 @@ it. A future audit starts here.
 | The failure trace (§11) | `arb_program_with_edb`, goals built from the model's own value pool that do **not** hold | **E10** — five claims about a near-miss, including *a repair must repair*, which found `Repair::AbsentKey` |
 | §10's std-builtin exemption | `ArithShape::StdBuiltin` | **C10**'s guard — the mutation lands on the classification, not the fixpoint |
 | Diagnostics as a branchable surface (§12) | `arb_corrupted_program_text` — the first generator that makes programs **fail** | **C16**, with `c16_generator_rejects_and_reaches_several_families`; the pinned set itself is `every_code_is_pinned_and_belongs_to_its_category` |
-| The physical access path (§15, evaluator-internal) | small collision-rich tuple pools with `absent`; prefixes drawn from the generated relation | **B12a/b/c**, with their three guards — the differential is blind to an over-yield, so these are what pin the seek |
+| The physical access path (§15, evaluator-internal) | small collision-rich tuple pools with `absent`; prefixes drawn from the generated relation | **B12b/c**, with their guards, and B12a's sentence inside **B14a** — the differential is blind to an over-yield, so these are what pin the seek |
 | Semi-naive views (§15, evaluator-internal) | a history of written and skipped rounds over a four-cell pool; `arb_program_with_edb` and `arb_program_text_at(Medium)`, observed each delta pass | **B14a** (the relation against a ledger) and **B14b** (the views against round stamps), with a guard each |
 | Rule pruning (§15) | `arb_pruning_program` — a relation reachable only under `not` and one only inside an aggregate goal; `arb_program_with_edb`; the `tests/programs` corpus | **B13**, with a guard per level — the text level is the one either recorded mutation reddens |
 
@@ -633,12 +633,11 @@ compared keyed by predicate *name*, not `PredId`.
   nothing.
 - [x] **B12** **The seek is the scan** (§15/engine, 2026-08-21) — the equivalence
   the prefix seek rests on, in three parts, all in `src/engine/seek.rs`.
-  - **B12a** `b12a_the_seek_is_the_scan` — `tuples_with_prefix` yields exactly
-    what `set.iter().filter(starts_with)` yields, in the same order. The oracle
-    is the filter: an independent restatement, not a call to the code under
-    test. Its prefix is usually drawn *from* the generated relation, so the range
-    is non-empty by construction. *Mutation*: `.range(prefix..)` →
-    `.range(prefix..).skip(1)`.
+  - **B12a** — the seek yields exactly the rows a scan would keep, in the same
+    order. It is carried by **B14a**'s `Full` case: over histories that split
+    rows across runs, from a pool that mixes every fact type, with B14a's
+    `proper` count as its non-vacuity. *Mutation (killed)*: the per-run lower
+    bound off by one.
   - **B12b** `b12b_the_bound_prefix_loses_no_match` — every tuple `try_match`
     accepts starts with `bound_prefix`'s key, and a `None` key means no tuple is
     accepted. This is the half that licenses replacing the scan; it never calls
@@ -652,9 +651,7 @@ compared keyed by predicate *name*, not `PredId`.
   callers re-check every candidate, so a seek that returns *too many* tuples is
   silently corrected and only costs time. The differential (`naive.rs` scans,
   the engine seeks) therefore cannot see an over-yield at all, and every
-  mutation above is deliberately an **under**-yielding one. Guards: B12a's
-  `b12a_generator_reaches_a_proper_non_empty_sub_range` (some tuples kept *and*
-  some rejected, or contiguity is untested); B12b's
+  mutation above is deliberately an **under**-yielding one. Guards: B12b's
   `b12b_generator_reaches_matches_with_a_prefix_and_both_impossibilities` (a
   match on a non-empty prefix, plus `None` reached from a constant `absent` and
   from a slot bound to one); B12c's
@@ -702,37 +699,54 @@ compared keyed by predicate *name*, not `PredId`.
     the thing it guards; `b13_generator_prunes_a_rule_beside_a_derived_live_fact`;
     the corpus test asserts some program prunes.
 
-- [x] **B14** **A relation's views are its round stamps** (§15/engine,
-  2026-09-14; `notes/fact-store.md`). The semi-naive rewrite reads each body
-  position through `Full`, `Delta` or `Old`. A relation keeps its most recent
-  block and the round that wrote it, and a join asks for a view by the round it is
-  collecting. Stated at two levels, because retiring a stale block hides the round
-  check from the evaluator.
+- [x] **B14** **A relation is its facts: its index is its rows in order, its views
+  are its round stamps, and a row never moves** (§15/engine, 2026-09-14;
+  `notes/fact-store.md`). A relation writes each fact once, as a row in a flat
+  store. Content order is kept as sorted runs of row ids, and the newest run is
+  the most recent apply's block. A join asks for `Full`, `Delta` or `Old` by the
+  round it is collecting.
   - **B14a** `relation::tests::b14a_a_relation_is_its_facts_and_its_views_are_by_round`
-    — after any history of base rows and rounds that write or skip (retiring the
-    block or not):
-    - iteration is strictly ascending and is exactly the rows held;
-    - `contains` agrees on every row the pool forms;
-    - `Full`, `Delta` and `Old` under any prefix, for the round after the last and
-      the one after that, are the held rows, the block the round just before
-      wrote, and the rest.
+    — after any history of base rows and rounds that write or skip:
+    - iteration is strictly ascending and is exactly the rows held, and
+      `contains` agrees on every row the pool forms;
+    - every run is sorted, the runs hold every row id once, and there are at most
+      `log2(n) + 2` of them;
+    - every row id names, at the end, what it named when issued;
+    - `Full`, `Delta` and `Old` under any prefix are the held rows, the previous
+      round's block, and the rest.
 
-    The oracle is an in-test ledger that re-derives each view from the history.
-    *Mutations (all killed):* the round check ignored (**B14a only**: retirement
-    empties a stale block before the evaluator can read it); `Old` unfiltered; the
-    previous block left as the delta; the delta read as this round's block.
-    Guard: `b14a_generator_reaches_current_and_stale_blocks_and_proper_ranges`
-    (155 current, 29 stale kept, 29 stale retired, 135 proper ranges of 400).
+    Its `Full` case is **B12a**'s sentence over runs. The oracle is an in-test
+    ledger. Cells mix a five-value pool with `testgen::arb_fact_value`, so order
+    is exercised across every type.
   - **B14b** `b14b_views_are_the_round_stamps`, and `…_at_medium` (`Large` in
-    the deep run) — at the start of every delta pass (`eval_observed`), each
-    relation's `Delta` is exactly its facts first held in the previous round, and
-    `Old` is the rest. It is stated from `first_round`, never from the relation.
-    *Mutations (all killed):* `Old` unfiltered; the previous block left as the
-    delta; the delta read as this round's block; and the round check ignored
-    **together with** no retirement, the stale-delta hazard end to end. Guard:
-    `b14b_generator_reaches_stale_blocks_and_split_views`. Untiered, a stale block
-    in 1 of 48 draws and split views in 10. At `Medium`, 9 and 29. So the `Medium`
-    property is the one that guards stale blocks.
+    the deep run) — at every delta pass (`eval_observed`), each relation's
+    `Delta` is exactly its facts first held the round before, and `Old` is the
+    rest. It is stated from `first_round`, never from the relation.
+  - **B14c** `b14c_a_row_never_moves`, and `…_at_medium` — every row id a relation
+    has issued by any delta pass names the same values in the finished model.
+  - *Mutations (all killed, 2026-09-14, against the flat store):*
+
+    | mutation | red |
+    |---|---|
+    | a merge drops the newer run's tail | B14a, B14c; the full suite does not finish |
+    | the per-run lower bound off by one | B14a, among 107 |
+    | the round check ignored | B14a, B14b |
+    | `Old` includes the newest run | B14a, B14b |
+    | membership searches only the newest run | B14a, B14b, B14c, among 49 |
+    | base facts not deduplicated | B14a, B14b and B14c at `Medium`, among 22 |
+    | the merger takes the first cursor, not the least row | B14a |
+    | runs never merge | **B14a's run bound alone** |
+    | the new block is merged into an older run as it is written | B14a, B14b |
+
+    Against the earlier `BTreeSet` relation, retiring a stale block hid the round
+    check from B14b. With no copy to retire, B14b now sees it.
+  - Guards:
+    - `b14a_generator_reaches_views_merges_and_proper_ranges`, of 400: a current
+      delta 266, a newest run that is not the delta 100, merged runs 303, three
+      or more runs 187, a proper range 139, three or more types 395.
+    - `b14b_generator_reaches_stale_blocks_and_split_views`, of 48: untiered, a
+      stale block in 1 and split views in 10; at `Medium`, 9 and 29. So the
+      `Medium` property guards stale blocks.
 
 ### Phase C — negation + type inference (roadmap step 4) — generalizes §16.2, §16.3
 

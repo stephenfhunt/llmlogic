@@ -1,28 +1,45 @@
 //! One predicate's facts, and the views of them the semi-naive join reads.
 //!
-//! A [`Relation`] is the owner of its predicate's facts (`notes/fact-store.md`):
-//! the evaluator adds to it only through [`Relation::insert_base`] before the
-//! first round and [`Relation::apply`] once per round, and reads it only through
-//! [`Relation::seek`], [`Relation::contains`] and [`Relation::iter`].
+//! A [`Relation`] owns its predicate's facts (`notes/fact-store.md`). Each fact
+//! is written into it once, as a row of `arity` values appended to one flat store,
+//! and a row never moves: a row id taken at any point names the same values for
+//! the rest of the run (`testing.md` **B14c**). The evaluator writes only through
+//! [`Relation::load_base`], before the first round, and [`Relation::apply`], once
+//! per round. It reads only through [`Relation::seek`], [`Relation::contains`]
+//! and [`Relation::iter`].
+//!
+//! # Content order is an index of sorted runs
+//!
+//! Rows sit in the store in the order they were written, so content order is kept
+//! beside them, as runs of row ids each sorted by the rows' values. The base facts
+//! are one run, sorted before they are written, and each round's block is
+//! another, since a block is written in sorted order. Before a round's run is
+//! added, the last two runs are merged while the older holds at most twice the
+//! newer's rows. Every run but the newest therefore holds more than twice the
+//! next, and a relation of `n` facts holds at most `log2(n) + 2` runs. Merging
+//! reorders ids inside the index and never moves a row.
+//!
+//! A seek binary-searches each run for its prefix and merges the runs' ranges in
+//! content order. That is the order every consumer sees, from the join to the
+//! printed answer.
 //!
 //! # Views are read by round
 //!
 //! The semi-naive rewrite joins each body position against one of three views
-//! ([`AtomView`]). `Delta` is the block the previous round's apply added, and
-//! `Old` is everything else. A relation keeps its most recent block and the round
-//! that wrote it, and a view is asked for *by the round collecting*: the block is
-//! the delta only when it was written by the round just before. A relation no
-//! round wrote last time — one a lower stratum finished, or one this round's
-//! rules left unchanged — has an empty delta, whatever block it holds. This is
-//! `testing.md`'s views property, stated from round stamps.
+//! ([`AtomView`]). The newest run is always the most recent apply's block. A view
+//! is asked for *by the round collecting*: `Delta` is the newest run when the round
+//! that wrote it is the one just before, `Old` is every other run, and `Full` is
+//! all of them. A relation no round wrote last time — one a lower stratum
+//! finished, or one this round's rules left unchanged — has an empty delta,
+//! whatever its newest run holds (**B14a**, and **B14b** stated from round
+//! stamps).
 //!
 //! The rewrite is sound only because application is batched: nothing is added
-//! while a round collects, so every row not in the previous block was held
-//! before it (**E1**).
+//! while a round collects, so every row outside the newest run was held before it
+//! (**E1**).
 
 use std::collections::BTreeSet;
 
-use super::seek;
 use crate::ir::{Tuple, Value};
 
 /// Which slice of a relation a body position joins against.
@@ -37,61 +54,138 @@ pub(crate) enum AtomView {
 }
 
 /// One predicate's extent, base and derived, in canonical (§14) order.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Relation {
-    facts: BTreeSet<Tuple>,
-    /// The block the most recent apply added, when that apply was `delta_round`.
-    delta: BTreeSet<Tuple>,
-    /// The round whose apply wrote `delta`, or 0 when no round has.
+    arity: usize,
+    /// Every fact's values, `arity` to a row, in the order the rows were written.
+    values: Vec<Value>,
+    /// How many rows are written; counted apart from `values`, which a relation
+    /// of arity 0 leaves empty.
+    rows: u32,
+    /// Row ids in content order: sorted runs, the most recent apply's block last.
+    runs: Vec<Vec<u32>>,
+    /// The round whose apply wrote the newest run, or 0 when no round has.
     delta_round: u32,
 }
 
 impl Relation {
+    /// An empty relation whose facts are `arity` values wide.
+    pub(crate) fn new(arity: usize) -> Relation {
+        Relation {
+            arity,
+            values: Vec::new(),
+            rows: 0,
+            runs: Vec::new(),
+            delta_round: 0,
+        }
+    }
+
     /// How many facts the relation holds.
     pub fn len(&self) -> usize {
-        self.facts.len()
+        self.rows as usize
     }
 
     /// Whether the relation holds no fact.
     pub fn is_empty(&self) -> bool {
-        self.facts.is_empty()
+        self.rows == 0
     }
 
     /// Whether `row` is a fact of this relation.
     pub fn contains(&self, row: &[Value]) -> bool {
-        self.facts.contains(row)
+        self.runs
+            .iter()
+            .any(|run| run.binary_search_by(|&id| self.row(id).cmp(row)).is_ok())
     }
 
     /// Every fact's row, in canonical order.
     pub fn iter(&self) -> impl Iterator<Item = &[Value]> + '_ {
-        self.facts.iter().map(|tuple| tuple.0.as_slice())
+        self.merged(&self.runs, &[])
     }
 
-    /// Loads a program-asserted fact, before the first round. A fact asserted
+    /// The values of row `id`, which are the same for the rest of the run from the
+    /// moment the row is written.
+    pub(crate) fn row(&self, id: u32) -> &[Value] {
+        let start = id as usize * self.arity;
+        &self.values[start..start + self.arity]
+    }
+
+    /// Writes the program-asserted facts, before the first round. A fact asserted
     /// twice is one fact.
-    pub(crate) fn insert_base(&mut self, tuple: Tuple) {
-        debug_assert_eq!(self.delta_round, 0, "base facts load before any round");
-        self.facts.insert(tuple);
+    pub(crate) fn load_base(&mut self, mut rows: Vec<Tuple>) {
+        debug_assert!(
+            self.rows == 0 && self.delta_round == 0,
+            "base facts load once, before any round"
+        );
+        rows.sort_unstable();
+        rows.dedup();
+        if !rows.is_empty() {
+            let run = self.append(rows);
+            self.runs.push(run);
+        }
     }
 
     /// Adds `round`'s block of new facts, which becomes the delta the next round
     /// reads. Every fact in `block` must be one the relation does not hold.
     pub(crate) fn apply(&mut self, block: BTreeSet<Tuple>, round: u32) {
         debug_assert!(round > self.delta_round, "rounds apply in order");
-        debug_assert!(block.iter().all(|tuple| !self.facts.contains(tuple)));
-        self.facts.extend(block.iter().cloned());
-        self.delta = block;
+        debug_assert!(block.iter().all(|tuple| !self.contains(&tuple.0)));
+        while let [.., older, newer] = self.runs.as_slice()
+            && older.len() <= 2 * newer.len()
+        {
+            let newer = self.runs.pop().expect("two runs");
+            let older = self.runs.pop().expect("two runs");
+            let merged = self.merge(&older, &newer);
+            self.runs.push(merged);
+        }
+        let run = self.append(block);
+        self.runs.push(run);
         self.delta_round = round;
     }
 
-    /// Frees a block no later round reads as a delta. It changes no view, since
-    /// views read by round; it only keeps a relation from holding its last block
-    /// for the rest of the run.
-    pub(crate) fn retire_delta(&mut self) {
-        self.delta = BTreeSet::new();
+    /// Writes sorted, distinct rows to the end of the store, returning their ids,
+    /// which are therefore a sorted run.
+    fn append(
+        &mut self,
+        rows: impl IntoIterator<Item = Tuple, IntoIter: ExactSizeIterator>,
+    ) -> Vec<u32> {
+        let rows = rows.into_iter();
+        let first = self.rows;
+        self.values.reserve_exact(rows.len() * self.arity);
+        for Tuple(values) in rows {
+            debug_assert_eq!(values.len(), self.arity, "a fact is its predicate's arity");
+            self.values.extend(values);
+            self.rows = self
+                .rows
+                .checked_add(1)
+                .expect("a relation holds fewer than 2^32 facts");
+        }
+        (first..self.rows).collect()
     }
 
-    /// Whether the held block is the delta for a join collecting `round`.
+    /// Two disjoint sorted runs as one.
+    fn merge(&self, older: &[u32], newer: &[u32]) -> Vec<u32> {
+        let mut merged = Vec::with_capacity(older.len() + newer.len());
+        let (mut i, mut j) = (0, 0);
+        while i < older.len() && j < newer.len() {
+            if self.row(older[i]) < self.row(newer[j]) {
+                merged.push(older[i]);
+                i += 1;
+            } else {
+                merged.push(newer[j]);
+                j += 1;
+            }
+        }
+        merged.extend_from_slice(&older[i..]);
+        merged.extend_from_slice(&newer[j..]);
+        debug_assert!(
+            merged
+                .windows(2)
+                .all(|pair| self.row(pair[0]) < self.row(pair[1]))
+        );
+        merged
+    }
+
+    /// Whether the newest run is the delta for a join collecting `round`.
     fn delta_is_current(&self, round: u32) -> bool {
         self.delta_round != 0 && self.delta_round + 1 == round
     }
@@ -105,23 +199,72 @@ impl Relation {
         prefix: &'a [Value],
     ) -> Box<dyn Iterator<Item = &'a [Value]> + 'a> {
         let current = self.delta_is_current(round);
-        match view {
-            AtomView::Full => Box::new(rows_with_prefix(&self.facts, prefix)),
-            AtomView::Delta if current => Box::new(rows_with_prefix(&self.delta, prefix)),
-            AtomView::Delta => Box::new(std::iter::empty()),
-            AtomView::Old if current => Box::new(
-                rows_with_prefix(&self.facts, prefix).filter(move |row| !self.delta.contains(*row)),
-            ),
-            AtomView::Old => Box::new(rows_with_prefix(&self.facts, prefix)),
+        let newest = self.runs.len().saturating_sub(1);
+        let runs = match view {
+            AtomView::Full => &self.runs[..],
+            AtomView::Delta if current => &self.runs[newest..],
+            AtomView::Delta => &[],
+            AtomView::Old if current => &self.runs[..newest],
+            AtomView::Old => &self.runs[..],
+        };
+        Box::new(self.merged(runs, prefix))
+    }
+
+    /// The rows of `runs` that start with `prefix`, merged in content order.
+    fn merged<'a>(&'a self, runs: &'a [Vec<u32>], prefix: &'a [Value]) -> Merged<'a> {
+        let cursors = runs
+            .iter()
+            .map(|run| &run[run.partition_point(|&id| self.row(id) < prefix)..])
+            .filter(|rest| {
+                rest.first()
+                    .is_some_and(|&id| self.row(id).starts_with(prefix))
+            })
+            .collect();
+        Merged {
+            relation: self,
+            prefix,
+            cursors,
         }
+    }
+
+    /// The index's runs, for the properties that check it.
+    #[cfg(test)]
+    pub(crate) fn runs(&self) -> &[Vec<u32>] {
+        &self.runs
     }
 }
 
-fn rows_with_prefix<'a>(
-    set: &'a BTreeSet<Tuple>,
+/// Runs' ranges merged in content order. Each cursor is the rest of one run's
+/// range, and is dropped once it is empty or its next row leaves the prefix, so
+/// every cursor held starts at a row that belongs in the output.
+struct Merged<'a> {
+    relation: &'a Relation,
     prefix: &'a [Value],
-) -> impl Iterator<Item = &'a [Value]> + 'a {
-    seek::tuples_with_prefix(set, prefix).map(|tuple| tuple.0.as_slice())
+    cursors: Vec<&'a [u32]>,
+}
+
+impl<'a> Iterator for Merged<'a> {
+    type Item = &'a [Value];
+
+    fn next(&mut self) -> Option<&'a [Value]> {
+        let relation = self.relation;
+        let (index, _) = self
+            .cursors
+            .iter()
+            .enumerate()
+            .min_by(|(_, a), (_, b)| relation.row(a[0]).cmp(relation.row(b[0])))?;
+        let id = self.cursors[index][0];
+        let rest = &self.cursors[index][1..];
+        if rest
+            .first()
+            .is_some_and(|&next| relation.row(next).starts_with(self.prefix))
+        {
+            self.cursors[index] = rest;
+        } else {
+            self.cursors.swap_remove(index);
+        }
+        Some(relation.row(id))
+    }
 }
 
 /// A relation equals a set when it holds exactly the set's tuples, compared in
@@ -133,8 +276,8 @@ impl PartialEq<BTreeSet<Tuple>> for Relation {
     }
 }
 
-/// Two relations are equal when they hold the same facts; the delta is
-/// evaluation state, not content.
+/// Two relations are equal when they hold the same facts; where the rows sit and
+/// how the index is split is evaluation state, not content.
 #[cfg(test)]
 impl PartialEq for Relation {
     fn eq(&self, other: &Relation) -> bool {
@@ -147,48 +290,55 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
-    /// One step applied to a relation: a block of rows written in a round, or a
-    /// round that writes nothing, which may also retire the held block.
+    /// One round applied to a relation: a block of rows, or nothing written.
     #[derive(Debug, Clone)]
     enum Step {
         Write(Vec<Vec<Value>>),
-        Skip { retire: bool },
+        Skip,
     }
 
-    /// A tiny collision-rich pool, so blocks overlap held rows (which a block
-    /// must then leave out) and prefixes select proper sub-ranges.
+    /// Mostly a tiny collision-rich pool, so blocks overlap held rows (which a
+    /// block must then leave out) and prefixes select proper sub-ranges; and
+    /// sometimes any fact value, so content order is exercised across every type
+    /// §14 orders.
     fn arb_cell() -> impl Strategy<Value = Value> {
         prop_oneof![
-            Just(Value::Symbol("a".to_string())),
-            Just(Value::Symbol("b".to_string())),
-            Just(Value::Int(1)),
-            Just(Value::Absent),
+            4 => prop_oneof![
+                Just(Value::Symbol("a".to_string())),
+                Just(Value::Symbol("b".to_string())),
+                Just(Value::Int(1)),
+                Just(Value::Int(2)),
+                Just(Value::Absent),
+            ],
+            1 => crate::testgen::arb_fact_value(),
         ]
     }
 
     fn arb_row() -> impl Strategy<Value = Vec<Value>> {
-        prop::collection::vec(arb_cell(), 2)
+        prop::collection::vec(arb_cell(), 3)
     }
 
     /// Base rows, then rounds 1.. of steps, then a prefix to seek.
     fn arb_history() -> impl Strategy<Value = (Vec<Vec<Value>>, Vec<Step>, Vec<Value>)> {
         let step = prop_oneof![
-            3 => prop::collection::vec(arb_row(), 0..6).prop_map(Step::Write),
-            1 => any::<bool>().prop_map(|retire| Step::Skip { retire }),
+            4 => prop::collection::vec(arb_row(), 0..8).prop_map(Step::Write),
+            1 => Just(Step::Skip),
         ];
         (
-            prop::collection::vec(arb_row(), 0..6),
-            prop::collection::vec(step, 0..6),
+            prop::collection::vec(arb_row(), 0..10),
+            prop::collection::vec(step, 0..12),
             prop::collection::vec(arb_cell(), 0..=2),
         )
     }
 
-    /// What a view must yield, restated from the history: the rows held, the
-    /// block written by the round just before `round`, and the rest.
+    /// What a relation must hold, restated from the history.
     struct Ledger {
         held: BTreeSet<Vec<Value>>,
         /// Each round that wrote, with the rows it added.
         written: Vec<(u32, BTreeSet<Vec<Value>>)>,
+        /// Every row id the relation had issued after each step, with the values
+        /// it named then.
+        issued: Vec<(u32, Vec<Value>)>,
     }
 
     impl Ledger {
@@ -201,39 +351,40 @@ mod tests {
         }
     }
 
-    /// Replays a history onto a relation and, independently, onto a ledger.
+    /// Replays a history onto a relation and, independently, onto a ledger. The
+    /// only thing the ledger takes from the relation is what each newly issued row
+    /// id named at the time, which is the claim B14a checks at the end.
     fn replay(base: &[Vec<Value>], steps: &[Step]) -> (Relation, Ledger, u32) {
-        let mut relation = Relation::default();
+        let mut relation = Relation::new(3);
         let mut ledger = Ledger {
             held: BTreeSet::new(),
             written: Vec::new(),
+            issued: Vec::new(),
         };
-        for row in base {
-            relation.insert_base(Tuple(row.clone()));
-            ledger.held.insert(row.clone());
-        }
+        let issue = |relation: &Relation, ledger: &mut Ledger| {
+            for id in ledger.issued.len() as u32..relation.len() as u32 {
+                ledger.issued.push((id, relation.row(id).to_vec()));
+            }
+        };
+        relation.load_base(base.iter().cloned().map(Tuple).collect());
+        ledger.held.extend(base.iter().cloned());
+        issue(&relation, &mut ledger);
         let mut round = 0;
         for step in steps {
             round += 1;
-            match step {
-                Step::Write(rows) => {
-                    let new: BTreeSet<Vec<Value>> = rows
-                        .iter()
-                        .filter(|row| !ledger.held.contains(*row))
-                        .cloned()
-                        .collect();
-                    if new.is_empty() {
-                        continue;
-                    }
-                    relation.apply(new.iter().cloned().map(Tuple).collect(), round);
-                    ledger.held.extend(new.iter().cloned());
-                    ledger.written.push((round, new));
+            if let Step::Write(rows) = step {
+                let new: BTreeSet<Vec<Value>> = rows
+                    .iter()
+                    .filter(|row| !ledger.held.contains(*row))
+                    .cloned()
+                    .collect();
+                if new.is_empty() {
+                    continue;
                 }
-                Step::Skip { retire } => {
-                    if *retire {
-                        relation.retire_delta();
-                    }
-                }
+                relation.apply(new.iter().cloned().map(Tuple).collect(), round);
+                ledger.held.extend(new.iter().cloned());
+                ledger.written.push((round, new));
+                issue(&relation, &mut ledger);
             }
         }
         (relation, ledger, round)
@@ -262,20 +413,24 @@ mod tests {
     }
 
     proptest! {
-        /// **B14a** — a relation is its facts, and its views are read by round.
-        /// After any history of base rows and rounds that write or skip:
-        /// iteration is strictly ascending and is exactly the rows held;
-        /// `contains` agrees on every row the pool can form; and for a join
-        /// collecting the round after the last and the one after that, `Full`,
-        /// `Delta` and `Old` under any prefix are the held rows, the block the
-        /// round just before wrote, and the rest — each in canonical order.
+        /// **B14a** — a relation is its facts, its index is its rows in order, and
+        /// its views are read by round. After any history of base rows and rounds
+        /// that write or skip:
+        /// - iteration is strictly ascending and is exactly the rows held, and
+        ///   `contains` agrees on every row the pool can form;
+        /// - every run is strictly ascending by content, the runs together hold
+        ///   every row id exactly once, and there are at most `log2(n) + 2` of
+        ///   them;
+        /// - every row id names, at the end, the values it named when issued;
+        /// - for a join collecting the round after the last and the one after
+        ///   that, `Full`, `Delta` and `Old` under any prefix are the held rows,
+        ///   the block the round just before wrote, and the rest, each in
+        ///   canonical order. The `Full` case is the seek against the scan it
+        ///   replaces (B12a's sentence, over runs).
         ///
-        /// The oracle is the ledger, which re-derives each view from the
-        /// history and never calls the relation.
+        /// The oracle is the ledger, which re-derives each view from the history.
         ///
-        /// *Mutations (killed):* `delta_is_current` ignoring the round; `Old`
-        /// not filtering the delta; `apply` leaving the previous block as the
-        /// delta.
+        /// *Mutations (killed):* recorded on `testing.md`'s B14 line.
         #[test]
         fn b14a_a_relation_is_its_facts_and_its_views_are_by_round(
             (base, steps, prefix) in arb_history()
@@ -286,18 +441,40 @@ mod tests {
             prop_assert!(rows.windows(2).all(|pair| pair[0] < pair[1]), "not strictly ascending");
             prop_assert_eq!(&rows, &ledger.held.iter().cloned().collect::<Vec<_>>());
             prop_assert_eq!(relation.len(), ledger.held.len());
-
             let cells = [
                 Value::Symbol("a".to_string()),
                 Value::Symbol("b".to_string()),
                 Value::Int(1),
+                Value::Int(2),
                 Value::Absent,
             ];
             for x in &cells {
                 for y in &cells {
-                    let row = [x.clone(), y.clone()];
-                    prop_assert_eq!(relation.contains(&row), ledger.held.contains(row.as_slice()));
+                    for z in &cells {
+                        let row = [x.clone(), y.clone(), z.clone()];
+                        prop_assert_eq!(relation.contains(&row), ledger.held.contains(row.as_slice()));
+                    }
                 }
+            }
+
+            let mut ids: Vec<u32> = Vec::new();
+            for run in relation.runs() {
+                prop_assert!(
+                    run.windows(2).all(|pair| relation.row(pair[0]) < relation.row(pair[1])),
+                    "a run is not sorted"
+                );
+                ids.extend(run);
+            }
+            ids.sort_unstable();
+            prop_assert_eq!(ids, (0..relation.len() as u32).collect::<Vec<_>>());
+            if !relation.is_empty() {
+                prop_assert!(
+                    relation.runs().len() <= relation.len().ilog2() as usize + 2,
+                    "{} runs for {} rows", relation.runs().len(), relation.len()
+                );
+            }
+            for (id, values) in &ledger.issued {
+                prop_assert_eq!(relation.row(*id), values.as_slice(), "row {} moved", id);
             }
 
             for round in [last + 1, last + 2] {
@@ -310,19 +487,64 @@ mod tests {
         }
     }
 
-    /// **B14a's non-vacuity guard**, read against its sentence: the views are
-    /// only distinguished when the delta is non-empty beside older rows, when a
-    /// held block is *not* the delta (a skipped round after a write, retired or
-    /// not), and when a prefix selects part of a view and not all of it. Floors
-    /// at about two thirds of what was measured: 155, 29, 29 and 135 of 400.
+    fn symbol(name: &str) -> Value {
+        Value::Symbol(name.to_string())
+    }
+
+    /// The cases the properties are too coarse to pin: an empty prefix, and a
+    /// prefix whose range has rows of other types on both sides.
     #[test]
-    fn b14a_generator_reaches_current_and_stale_blocks_and_proper_ranges() {
+    fn an_empty_prefix_seeks_the_whole_relation() {
+        let mut relation = Relation::new(1);
+        relation.load_base(vec![
+            Tuple(vec![symbol("b")]),
+            Tuple(vec![Value::Absent]),
+            Tuple(vec![symbol("a")]),
+        ]);
+        let all: Vec<&[Value]> = relation.seek(AtomView::Full, 0, &[]).collect();
+        assert_eq!(
+            all,
+            vec![&[Value::Absent][..], &[symbol("a")][..], &[symbol("b")][..]]
+        );
+    }
+
+    #[test]
+    fn a_prefix_seeks_a_contiguous_range_across_types_and_runs() {
+        // `absent < symbol < int` is the §14 cross-type order, so the `a` rows are
+        // one block with rows on both sides of them, and here they sit in two runs.
+        let mut relation = Relation::new(2);
+        relation.load_base(vec![
+            Tuple(vec![Value::Absent, symbol("z")]),
+            Tuple(vec![symbol("a"), Value::Int(2)]),
+            Tuple(vec![symbol("b"), Value::Int(1)]),
+        ]);
+        relation.apply(BTreeSet::from([Tuple(vec![symbol("a"), Value::Int(1)])]), 1);
+        let prefix = [symbol("a")];
+        let sought: Vec<&[Value]> = relation.seek(AtomView::Full, 2, &prefix).collect();
+        assert_eq!(
+            sought,
+            vec![
+                &[symbol("a"), Value::Int(1)][..],
+                &[symbol("a"), Value::Int(2)][..]
+            ]
+        );
+    }
+
+    /// **B14a's non-vacuity guard**, read against its sentence. The views are
+    /// only distinguished when a delta sits beside older rows and when the newest
+    /// run is *not* the delta (a skipped round after a write). The index is only
+    /// tested when a history merges runs and still holds several. And a prefix
+    /// must select part of a view and not all of it. Floors at about two thirds
+    /// of what was measured: 266, 100, 303, 187, 139 and 395 of 400.
+    #[test]
+    fn b14a_generator_reaches_views_merges_and_proper_ranges() {
         use proptest::strategy::ValueTree;
         use proptest::test_runner::TestRunner;
 
         let mut runner = TestRunner::deterministic();
         let strategy = arb_history();
-        let (mut current, mut stale_kept, mut stale_retired, mut proper) = (0, 0, 0, 0);
+        let (mut current, mut stale, mut merged, mut several, mut proper, mut typed) =
+            (0, 0, 0, 0, 0, 0);
         for _ in 0..400 {
             let (base, steps, prefix) = strategy
                 .new_tree(&mut runner)
@@ -333,15 +555,28 @@ mod tests {
             if !delta.is_empty() && delta.len() < ledger.held.len() {
                 current += 1;
             }
-            let last_write = ledger.written.last().map(|(round, _)| *round);
-            if let (Some(written), Some(Step::Skip { retire })) = (last_write, steps.last())
-                && written < last
+            if ledger
+                .written
+                .last()
+                .is_some_and(|(written, _)| *written < last)
             {
-                if *retire {
-                    stale_retired += 1;
-                } else {
-                    stale_kept += 1;
-                }
+                stale += 1;
+            }
+            let blocks = ledger.written.len() + usize::from(!base.is_empty());
+            if relation.runs().len() < blocks {
+                merged += 1;
+            }
+            if relation.runs().len() >= 3 {
+                several += 1;
+            }
+            let types: std::collections::HashSet<std::mem::Discriminant<Value>> = ledger
+                .held
+                .iter()
+                .flatten()
+                .map(std::mem::discriminant)
+                .collect();
+            if types.len() >= 3 {
+                typed += 1;
             }
             let full = sought(&relation, AtomView::Full, last + 1, &prefix).len();
             if full > 0 && full < relation.len() {
@@ -349,22 +584,21 @@ mod tests {
             }
         }
         eprintln!(
-            "current {current}, stale kept {stale_kept}, stale retired {stale_retired}, proper {proper} of 400"
+            "current {current}, stale {stale}, merged {merged}, 3+ runs {several}, proper {proper}, 3+ types {typed} of 400"
         );
+        assert!(typed >= 263, "rows of three or more types: {typed} of 400");
         assert!(
-            current >= 100,
+            current >= 177,
             "a current delta beside older rows: {current} of 400"
         );
         assert!(
-            stale_kept >= 19,
-            "a stale block still held: {stale_kept} of 400"
+            stale >= 66,
+            "a newest run that is not the delta: {stale} of 400"
         );
+        assert!(merged >= 202, "a history that merged runs: {merged} of 400");
+        assert!(several >= 124, "three or more runs: {several} of 400");
         assert!(
-            stale_retired >= 19,
-            "a stale block retired: {stale_retired} of 400"
-        );
-        assert!(
-            proper >= 90,
+            proper >= 92,
             "a proper non-empty sub-range: {proper} of 400"
         );
     }

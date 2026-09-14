@@ -1,9 +1,8 @@
 //! Seeking a bound prefix instead of scanning a relation.
 //!
-//! A relation is a `BTreeSet<Tuple>` and [`Tuple`] is `Vec<Value>` with a
-//! derived `Ord`, so the set is **lexicographically ordered by column** and the
-//! tuples agreeing with a given prefix of leading column values form one
-//! contiguous range. Body-goal enumeration knows those leading values — they are
+//! A relation's index is runs of rows, each **lexicographically ordered by
+//! column** (`engine/relation.rs`), so within a run the rows agreeing with a given
+//! prefix of leading column values form one contiguous range. Body-goal enumeration knows those leading values — they are
 //! the atom's constants and its already-bound variables — so it can seek that
 //! range instead of walking the relation and rejecting tuples one at a time
 //! (`notes/profile-2026-08-20.md`).
@@ -50,25 +49,8 @@
 //! and lowering rejects a predicate used at two arities, so every tuple in a
 //! relation is exactly as wide as every atom over it.
 
-use std::collections::BTreeSet;
-
 use crate::ir::{Atom, Term, Tuple, Value};
 use crate::provenance::NoMatchPattern;
-
-/// The tuples of `set` whose leading columns equal `prefix`, in set order.
-///
-/// Exactly `set.iter().filter(|t| t.0.starts_with(&prefix.0))`, seeked rather
-/// than scanned (`testing.md` B12a states that as a property). An empty prefix
-/// needs no special case: the empty tuple sorts below every tuple, so the range
-/// is the whole set, and `starts_with(&[])` holds everywhere.
-pub(crate) fn tuples_with_prefix<'a>(
-    set: &'a BTreeSet<Tuple>,
-    prefix: &'a [Value],
-) -> impl Iterator<Item = &'a Tuple> + 'a {
-    use std::ops::Bound;
-    set.range::<[Value], _>((Bound::Included(prefix), Bound::Unbounded))
-        .take_while(move |tuple| tuple.0.starts_with(prefix))
-}
 
 /// The bound prefix of `atom` under `bindings` — its leading arguments whose
 /// value is already known — or `None` when the atom can match nothing.
@@ -119,6 +101,9 @@ pub(crate) fn closed_prefix(pattern: &NoMatchPattern) -> Tuple {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
+
+    use super::super::relation::{AtomView, Relation};
     use super::*;
     use crate::ir::{PredId, Var};
     use proptest::prelude::*;
@@ -135,13 +120,6 @@ mod tests {
         tuples.iter().map(|t| tuple(t)).collect()
     }
 
-    /// What the seek must equal: the scan it replaces.
-    fn scan<'a>(set: &'a BTreeSet<Tuple>, prefix: &'a Tuple) -> Vec<&'a Tuple> {
-        set.iter()
-            .filter(|tuple| tuple.0.starts_with(&prefix.0))
-            .collect()
-    }
-
     /// A deliberately tiny cell pool, `absent` included.
     ///
     /// `testgen`'s pools feed whole programs and are broad on purpose; B12b
@@ -156,79 +134,6 @@ mod tests {
             Just(Value::Int(1)),
             Just(Value::Absent),
         ]
-    }
-
-    // ---- B12a: the seek is the scan -------------------------------------
-
-    /// A relation and a prefix, the prefix usually drawn *from* the relation so
-    /// the range is non-empty. Index selection rather than `prop_flat_map`,
-    /// per `testgen`'s generator rules.
-    fn arb_set_and_prefix() -> impl Strategy<Value = (BTreeSet<Tuple>, Tuple)> {
-        (
-            prop::collection::vec(
-                prop::collection::vec(crate::testgen::arb_fact_value(), 1..=3),
-                0..10,
-            ),
-            any::<prop::sample::Index>(),
-            0usize..=3,
-            prop::collection::vec(crate::testgen::arb_fact_value(), 0..=3),
-            0u8..4,
-        )
-            .prop_map(|(rows, pick, take, free, use_free)| {
-                let set: BTreeSet<Tuple> = rows.iter().map(|r| Tuple(r.clone())).collect();
-                let prefix = if use_free == 0 || rows.is_empty() {
-                    Tuple(free)
-                } else {
-                    let row = &rows[pick.index(rows.len())];
-                    Tuple(row[..take.min(row.len())].to_vec())
-                };
-                (set, prefix)
-            })
-    }
-
-    proptest! {
-        /// **B12a** — `tuples_with_prefix` yields exactly the tuples a scan
-        /// would have kept, in the same order.
-        ///
-        /// The oracle is the filter itself: an independent restatement of the
-        /// claim (`testing.md`'s oracle corollary), not a call to the code
-        /// under test.
-        ///
-        /// *Mutation:* `set.range(prefix..)` → `set.range(prefix..).skip(1)`.
-        #[test]
-        fn b12a_the_seek_is_the_scan((set, prefix) in arb_set_and_prefix()) {
-            let sought: Vec<&Tuple> = tuples_with_prefix(&set, &prefix.0).collect();
-            prop_assert_eq!(sought, scan(&set, &prefix));
-        }
-    }
-
-    /// **B12a's non-vacuity guard.** The property is satisfied whenever both
-    /// sides are empty, which proves nothing about contiguity. Checked against
-    /// B12a's *sentence* — "exactly the tuples a scan would have kept" — so
-    /// what the guard must see is a **proper** non-empty sub-range: some tuples
-    /// kept and some rejected, in one relation.
-    #[test]
-    fn b12a_generator_reaches_a_proper_non_empty_sub_range() {
-        use proptest::strategy::{Strategy, ValueTree};
-        use proptest::test_runner::TestRunner;
-
-        let mut runner = TestRunner::deterministic();
-        let strategy = arb_set_and_prefix();
-        let mut proper = 0;
-        for _ in 0..400 {
-            let (set, prefix) = strategy
-                .new_tree(&mut runner)
-                .expect("strategy produces a value")
-                .current();
-            let kept = tuples_with_prefix(&set, &prefix.0).count();
-            if kept > 0 && kept < set.len() {
-                proper += 1;
-            }
-        }
-        assert!(
-            proper >= 20,
-            "the generator reached a proper non-empty sub-range only {proper} times in 400"
-        );
     }
 
     // ---- B12b: the prefix is sound against `try_match` -------------------
@@ -267,9 +172,9 @@ mod tests {
         /// **B12b** — every tuple `try_match` accepts starts with the atom's
         /// bound prefix, and a `None` prefix means no tuple is accepted.
         ///
-        /// This is the half that actually licenses replacing the scan: B12a
-        /// says the range is the tuples carrying a prefix, and this says the
-        /// prefix loses no match. It never calls the seek.
+        /// This is the half that actually licenses replacing the scan: B14a
+        /// says a seek yields exactly the rows carrying a prefix, and this says
+        /// the prefix loses no match. It never calls the seek.
         ///
         /// *Mutation:* let `bound_prefix` keep extending past an unbound
         /// variable (drop the `extending` flag), so a bound column at a
@@ -421,35 +326,6 @@ mod tests {
     // ---- the cases the properties are too coarse to pin ------------------
 
     #[test]
-    fn an_empty_prefix_yields_the_whole_relation() {
-        let set = relation(&[&[sym("a")], &[sym("b")], &[Value::Absent]]);
-        let everything = Tuple(Vec::new());
-        let all: Vec<&Tuple> = tuples_with_prefix(&set, &everything.0).collect();
-        assert_eq!(all, set.iter().collect::<Vec<_>>());
-    }
-
-    #[test]
-    fn a_prefix_selects_a_contiguous_range_across_types() {
-        // `absent < symbol < int` is the §14 cross-type order, so the `a` rows
-        // are one block with rows on both sides of them.
-        let set = relation(&[
-            &[Value::Absent, sym("z")],
-            &[sym("a"), Value::Int(1)],
-            &[sym("a"), Value::Int(2)],
-            &[sym("b"), Value::Int(1)],
-        ]);
-        let prefix = Tuple(vec![sym("a")]);
-        let sought: Vec<&Tuple> = tuples_with_prefix(&set, &prefix.0).collect();
-        assert_eq!(
-            sought,
-            vec![
-                &tuple(&[sym("a"), Value::Int(1)]),
-                &tuple(&[sym("a"), Value::Int(2)])
-            ]
-        );
-    }
-
-    #[test]
     fn a_constant_absent_makes_the_atom_impossible() {
         // `p(absent, X)` matches nothing (§4), so there is no range to seek.
         let atom = Atom {
@@ -507,7 +383,13 @@ mod tests {
             args: vec![Some(Value::Absent)],
         };
         let prefix = closed_prefix(&pattern);
-        assert!(tuples_with_prefix(&set, &prefix.0).any(|tuple| pattern.matches(&tuple.0)));
+        let mut stored = Relation::new(1);
+        stored.load_base(set.iter().cloned().collect());
+        assert!(
+            stored
+                .seek(AtomView::Full, 0, &prefix.0)
+                .any(|row| pattern.matches(row))
+        );
 
         // The join's side of the same asymmetry, for contrast.
         let atom = Atom {
