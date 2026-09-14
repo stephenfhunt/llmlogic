@@ -359,6 +359,9 @@ Against `efcda71`, medians of 2, runs interleaved:
 | `lib/cohesion.dl` | 7.84 s | 9.73 s |
 | `lib/flow.dl` | 23.38 s, 438 MB | 30.82 s, 499 MB; cache misses 246 → 621 M, instructions 285 → 256 G |
 
+**The deep gate at `7ecfc33`:** seeds 2 and 3 pass 522 of 522 in 121 s and 72 s. They
+peak at 442 MB, about 980 MB before step 3: the recorder no longer copies facts.
+
 **E9: the older rows always one run, beside the newest.** E9 merges every run at
 each apply, on `7ecfc33`, so a seek searches at most two runs.
 - `q_coh.dl`: 7.41 s.

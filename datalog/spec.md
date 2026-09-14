@@ -2586,6 +2586,22 @@ never say.
 
 ### Decisions
 
+- **2026-09-14** — **A string is held once: `Symbol` and `String` values intern**
+  (§4/engine; `notes/interning.md`; the user's calls in review).
+  - **What a value holds.** A `Sym`, a thin reference into a process-global
+    interner that leaks each distinct string once.
+  - **How values compare.** Equality and hashing are by pointer. That is correct
+    only because the interner makes every `Sym`, which is why the field is
+    private. Order is by content, with a pointer fast path, so §14's canonical
+    order cannot move.
+  - **Why now, against ROADMAP's "memory, not time".** That judgement was of an
+    engine where each value's string sat beside its row. On the fact store,
+    `lib/flow.dl` spends 35% of its cycles copying strings. The joins' work is
+    unchanged from `efcda71`'s (`notes/fact-store.md` § Seek-heavy queries,
+    measured).
+  - **The cost:** a process-lifetime leak of distinct strings. The fix, if a
+    long-lived library user needs one, is an interner per `Program`.
+  - **Scope:** interning alone, measured on the widened gate before the merge.
 - **2026-09-13 (later iv)** — **A fact store with one owner: the review's answers,
   built on a branch** (engine; `notes/fact-store.md`; the user's calls).
   - **Sorted runs, membership by binary search per run.** A B-tree over rows or a
