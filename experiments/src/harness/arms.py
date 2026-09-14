@@ -156,15 +156,19 @@ def _link_binary(destination: Path) -> Path:
     """
     bin_dir = destination / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
-    target = bin_dir / "datalog"
+    _place_binary(bin_dir)
+    return bin_dir
+
+
+def _place_binary(directory: Path) -> None:
+    target = directory / "datalog"
     if target.exists():
-        return bin_dir
+        return
     source = DATALOG_BIN_DIR / "datalog"
     try:
         os.link(source, target)
     except OSError:
         shutil.copy2(source, target)
-    return bin_dir
 
 
 #: What a workspace's skill copy carries beside `SKILL.md`. The one list both
@@ -182,6 +186,9 @@ def _copy_skill(destination: Path, ablate: str | None = None) -> None:
         source = DATALOG_SKILL_DIR / subdir
         if source.is_dir():
             shutil.copytree(source, skill_root / subdir, dirs_exist_ok=True)
+    # The engine beside SKILL.md, as a packaged bundle ships it: the skill tells
+    # the subject to run the executable in the skill's own directory.
+    _place_binary(skill_root)
     # Always: the block markers come out of every copy, so an ablated cell and
     # its control differ by the cut and not by a comment the model can read.
     apply_ablation(skill_root, ablate)

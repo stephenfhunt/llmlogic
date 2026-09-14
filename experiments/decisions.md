@@ -15,6 +15,21 @@ Entries cap at ~15 lines; long-form goes to `notes/` and is linked.
 
 ## Decisions
 
+- **2026-09-14 (evening)** — **An engine-arm skill copy carries the binary
+  beside `SKILL.md`, as the packaged bundle does** (`../datalog/spec.md` §17
+  2026-09-14 (evening)).
+  - `SKILL.md` now runs `<skill>/datalog`, the executable in the skill's own
+    directory, since a stranger's working directory is never the skill's.
+    `_copy_skill` links it there; `bin/` on `PATH` stays, because the forced
+    arm's mandate names it.
+  - **Measured text moved**, so runs before and after read other words:
+    `SKILL.md`'s sections reordered around an unchanged `count-wildcard` and
+    `absent-under-negation`; `source-analysis-count-trap` lost its two counts;
+    `verify-before-you-believe` says "import" for "`use` edge"; the recipe's
+    disjunction trap is gone.
+  - `engine_use` already counted a path to the binary as running it; a test now
+    pins the skill-directory spelling.
+
 - **2026-09-11 (later iv)** — **A `truth.py` may reimplement a *graph*; it may
   not reimplement a *measure*.** Both were built for `code_design` and checked
   against `code-facts` the way `testing.md`'s P8 checks elision — two copies

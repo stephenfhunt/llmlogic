@@ -122,6 +122,16 @@ def test_an_ordinary_engine_workspace_carries_no_markers(tmp_path):
         assert "<!-- /block" not in text, f"{document.name} shipped a marker"
 
 
+def test_the_skill_copy_carries_the_engine_it_tells_the_subject_to_run(tmp_path):
+    # SKILL.md runs the executable in the skill's own directory, as a packaged
+    # bundle ships it; a copy without one would teach a command that fails.
+    path = _engine_workspace(tmp_path, None)
+    beside = path / SKILL_ROOT / "datalog"
+    assert beside.is_file()
+    assert beside.stat().st_mode & 0o111
+    assert filecmp.cmp(beside, path / "bin" / "datalog", shallow=False)
+
+
 def test_the_ablated_workspace_is_missing_exactly_the_block(tmp_path):
     control = _engine_workspace(tmp_path, None)
     ablated = _engine_workspace(tmp_path, "source-analysis-count-trap")

@@ -83,3 +83,9 @@ def test_an_unbalanced_quote_does_not_crash_the_detector():
     # Heredocs and stray quotes are normal in agent transcripts; a parser error
     # here would lose the cell.
     assert invokes_engine("datalog <<'EOF'\np(X) :- q(X).\nEOF") is True
+
+
+def test_running_the_binary_beside_the_skill_is_running_the_engine():
+    # The skill tells the subject to run the executable in its own directory.
+    assert invokes_engine(".claude/skills/datalog/datalog facts.dl")
+    assert invokes_engine("/ws/.claude/skills/datalog/datalog - -q 'p(X)'")
