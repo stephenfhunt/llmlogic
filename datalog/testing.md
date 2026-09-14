@@ -711,7 +711,8 @@ compared keyed by predicate *name*, not `PredId`.
     - iteration is strictly ascending and is exactly the rows held, and
       `contains` agrees on every row the pool forms;
     - every run is sorted, the runs hold every row id once, and there are at most
-      `log2(n) + 2` of them;
+      `log8(n) + 2` of them (runs merge while the older is at most eight times the
+      newer, since 2026-09-14);
     - every row id names, at the end, what it named when issued;
     - `Full`, `Delta` and `Old` under any prefix are the held rows, the previous
       round's block, and the rest.
@@ -736,15 +737,15 @@ compared keyed by predicate *name*, not `PredId`.
     | membership searches only the newest run | B14a, B14b, B14c, among 49 |
     | base facts not deduplicated | B14a, B14b and B14c at `Medium`, among 22 |
     | the merger takes the first cursor, not the least row | B14a |
-    | runs never merge | **B14a's run bound alone** |
+    | runs never merge | **B14a's run bound alone**; re-verified at merge factor 8 |
     | the new block is merged into an older run as it is written | B14a, B14b |
 
     Against the earlier `BTreeSet` relation, retiring a stale block hid the round
     check from B14b. With no copy to retire, B14b now sees it.
   - Guards:
     - `b14a_generator_reaches_views_merges_and_proper_ranges`, of 400: a current
-      delta 266, a newest run that is not the delta 100, merged runs 303, three
-      or more runs 187, a proper range 139, three or more types 395.
+      delta 266, a newest run that is not the delta 100, merged runs 317, three
+      or more runs 63, a proper range 139, three or more types 395.
     - `b14b_generator_reaches_stale_blocks_and_split_views`, of 48: untiered, a
       stale block in 1 and split views in 10; at `Medium`, 9 and 29. So the
       `Medium` property guards stale blocks.

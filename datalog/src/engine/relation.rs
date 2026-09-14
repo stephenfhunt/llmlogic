@@ -14,9 +14,11 @@
 //! beside them, as runs of row ids each sorted by the rows' values. The base facts
 //! are one run, sorted before they are written, and each round's block is
 //! another, since a block is written in sorted order. Before a round's run is
-//! added, the last two runs are merged while the older holds at most twice the
-//! newer's rows. Every run but the newest therefore holds more than twice the
-//! next, and a relation of `n` facts holds at most `log2(n) + 2` runs. Merging
+//! added, the last two runs are merged while the older holds at most eight times
+//! the newer's rows. Every run but the newest therefore holds more than eight
+//! times the next, and a relation of `n` facts holds at most `log8(n) + 2` runs.
+//! Eight, not two: a seek searches every run, and seek-heavy queries paid for the
+//! extra runs (`notes/fact-store.md` § Seek-heavy queries, measured). Merging
 //! reorders ids inside the index and never moves a row.
 //!
 //! A seek binary-searches each run for its prefix and merges the runs' ranges in
@@ -156,7 +158,7 @@ impl Relation {
         debug_assert!(round > self.delta_round, "rounds apply in order");
         debug_assert!(block.iter().all(|tuple| !self.contains(&tuple.0)));
         while let [.., older, newer] = self.runs.as_slice()
-            && older.len() <= 2 * newer.len()
+            && older.len() <= 8 * newer.len()
         {
             let newer = self.runs.pop().expect("two runs");
             let older = self.runs.pop().expect("two runs");
@@ -526,7 +528,7 @@ mod tests {
         /// - iteration is strictly ascending and is exactly the rows held, and
         ///   `contains` agrees on every row the pool can form;
         /// - every run is strictly ascending by content, the runs together hold
-        ///   every row id exactly once, and there are at most `log2(n) + 2` of
+        ///   every row id exactly once, and there are at most `log8(n) + 2` of
         ///   them;
         /// - every row id names, at the end, the values it named when issued;
         /// - for a join collecting the round after the last and the one after
@@ -576,7 +578,7 @@ mod tests {
             prop_assert_eq!(ids, (0..relation.len() as u32).collect::<Vec<_>>());
             if !relation.is_empty() {
                 prop_assert!(
-                    relation.runs().len() <= relation.len().ilog2() as usize + 2,
+                    relation.runs().len() <= relation.len().ilog(8) as usize + 2,
                     "{} runs for {} rows", relation.runs().len(), relation.len()
                 );
             }
@@ -650,7 +652,7 @@ mod tests {
     /// run is *not* the delta (a skipped round after a write). The index is only
     /// tested when a history merges runs and still holds several. And a prefix
     /// must select part of a view and not all of it. Floors at about two thirds
-    /// of what was measured: 266, 100, 303, 187, 139 and 395 of 400.
+    /// of what was measured: 266, 100, 317, 63, 139 and 395 of 400.
     #[test]
     fn b14a_generator_reaches_views_merges_and_proper_ranges() {
         use proptest::strategy::ValueTree;
@@ -710,8 +712,8 @@ mod tests {
             stale >= 66,
             "a newest run that is not the delta: {stale} of 400"
         );
-        assert!(merged >= 202, "a history that merged runs: {merged} of 400");
-        assert!(several >= 124, "three or more runs: {several} of 400");
+        assert!(merged >= 211, "a history that merged runs: {merged} of 400");
+        assert!(several >= 42, "three or more runs: {several} of 400");
         assert!(
             proper >= 92,
             "a proper non-empty sub-range: {proper} of 400"
