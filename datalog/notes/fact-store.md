@@ -369,6 +369,16 @@ B-tree would not pay. It is still 14–15% slower than `efcda71`. So a B-tree al
 is not expected to close the gap. `flow.dl`'s extra cost has a different shape:
 fewer instructions, and 2.5× the cache misses.
 
+**E10: `append` reserving with geometric growth** (`reserve`, not
+`reserve_exact`), on `7ecfc33`. The hypothesis was that exact reservation copies
+the whole value buffer on every apply, which would be `flow.dl`'s 35% `memmove`.
+Measured, it is not:
+- `flow.dl` 30.84 → 30.64 s, though its memory fell 508 → 406 MB;
+- `q_coh.dl` 8.16 → 7.99 s;
+- `lib/cohesion.dl` 9.63 → 9.59 s.
+
+The `memmove` is still unexplained, pending a call-graph profile.
+
 ## Step 3 design: provenance by row reference (2026-09-14, for review)
 
 *Step 2 is accepted at `29378cd`, with `pointsto.dl`'s 2.6% (the user's call).
