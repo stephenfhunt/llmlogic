@@ -2601,6 +2601,14 @@ never say.
   - **Guards:** output byte-identical to a frozen `efcda71` binary (the note's §
     Gate); the capped deep run on pinned seeds; and the note's three new
     properties, each mutation-verified.
+  ***Consequences 2026-09-14*** — step 1, the `Relation` type, landed with output
+  byte-identical over the harness and no measured slowdown.
+  - **The design had not named one rule:** a delta is the block the *previous
+    round* wrote, not the newest block. Otherwise a lower stratum's last block reads
+    as a higher stratum's delta. It is pinned by `testing.md` **B14a** and
+    **B14b**.
+  - **The deep gate is seeds 2 and 3.** B5 at `Deep` draws pathological programs
+    at seed 1 and at a random seed; these are not chased (the user's).
 - **2026-09-13 (later iii)** — **A fact reference is a shared tuple, not an id**
   (engine, `ir::Tuple`; the user's call that references come next, and their
   question *why not a `&`?*). The design is in `notes/recorder-at-scale.md`

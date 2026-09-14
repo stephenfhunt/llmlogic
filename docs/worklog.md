@@ -24,6 +24,50 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-14 (early) — the fact store's branch, its gate, and step 1: a `Relation` type, nothing moved
+
+Asked to set up the fact-ownership refactor on a branch, more rigorously than
+usual. Planned; the user answered the design's review questions, then asked to
+start on the relation type.
+
+**Done** — branch `fact-store`; `cargo test`, clippy, fmt green at every commit
+- `07d123d` the review's answers: runs, binary-search membership, imports stay in
+  `Program.facts`, storage before provenance. §17 2026-09-13 (later iv), and
+  `AGENTS.md`'s one branch exception.
+- **The gate**, in `~/.cache/fact-store/` (its README): a frozen `efcda71`;
+  `diff.py`, 1,109 cases (corpus, every grafana-ui library and query file asked
+  for every relation it defines, 250 cross-engine and generated programs, 794
+  goals), whose baseline self-diff is empty; `deep.sh`; `measure.py`.
+- `4bc722b` **`Relation`**: facts and delta behind one type, views read by the
+  collecting round, `apply_round` for both insert paths, rows as `&[Value]`.
+- `1479c84` **B14a** (the relation against a ledger) and **B14b** (views against
+  round stamps, via `eval_observed`). Five mutations killed.
+- **Step 1's gate at `1479c84`:** harness diff empty; deep seeds 2 and 3 pass 514
+  in 158 and 126 s (baseline 159, 130); `pointsto.dl` 10.55 → 10.37 s, its `?why`
+  9.23 → 8.25 s; `sparse_800` 1.24 → 1.27 s, 126 → 133 MB.
+
+**Decided**
+- The user's: the branch in this checkout; storage first, staged; runs with
+  binary-search membership; a capped deep gate run detached (foreground stops at
+  10 min; background tasks were killed for "low memory" at 22 GB available).
+- The user's: B5's pathological `Deep` draws are not chased (seed 1 took 6 h, the
+  random seed was stopped at 72 min). The gate runs seeds 2 and 3.
+- A delta is tagged with the round that wrote it. So a lower stratum's last block
+  is never a higher stratum's delta.
+
+**Removed** — `insert_derived`, `insert_unkept`, and the delta map threaded through
+`JoinCx`; `recorder-wt`'s scratch instrumentation (saved as a patch) and
+`proofs.sh` (replaced by `diff.py`); the oldest worklog entry.
+
+**Next up**
+- **Step 2: the flat store, sorted runs and watermark views, inside `Relation`**
+  (`notes/fact-store.md` § Rules). It adds the property *a row never moves*, and
+  B14a gains the runs half.
+- `sparse_800`'s +0.03 s and +7 MB are inside run-to-run noise; re-measure at step 2.
+- **`bugs/016`**, filed on trunk (the user's): `cargo test --no-default-features`
+  fails three import tests that `694a6ff` added without the `duckdb` gate.
+- **Open**: `datalog/bugs/015`, `016`.
+
 ## 2026-09-13 (late night) — fact references: shared tuples built, slower, reverted; a store with one owner designed
 
 Asked to start the fact references design. The user asked why a premise had to be
@@ -121,53 +165,3 @@ payloads; the note's unverified `base` direction; the oldest worklog entry.
 - Re-learned: `ps -C cc,c++` misses DuckDB's `clang++` workers, so a working
   release build looked hung and was killed once.
 - **Open**: `datalog/bugs/015`.
-
-## 2026-09-13 (night) — code-analysis from the user's chair: the playbook investigates, and its texts stop leaking
-
-Asked what the skill tells a user, what it won't, and whether agents dig or only
-run the table. Assessed in plan mode; the user chose the playbook follow-up, then
-asked for an audit of what in the skill's texts leaks this project's background.
-
-**Done** — code-facts `npm test`, typecheck; bundle rebuilt (`dist/` untracked)
-- **Assessment**: the facts and libraries outrun the playbook, which taught
-  measuring, not investigating or synthesising; no library reads the quality
-  layer, and nothing diffs commits, recovers structure or measures digging.
-- **`SKILL.md`**:
-  - find the question first; *How to investigate* (go down, refute, `?whynot`
-    on negatives, sample precision);
-  - impact and two-commit `diff` recipes, and a hazards row; *Synthesise, then
-    report*.
-  - Each recipe ran on `~/.cache/code-facts/grafana-ui` first (impact 1.6 s,
-    drill 11 s); the diff ran on code-facts itself.
-- **The leak sweep.** The bundle read like this repo's notebook:
-  - "the project above" nine times, and sqlparse with the experiments' answer
-    key;
-  - bug ids and "found dogfooding" in seven library headers;
-  - the extractor's size note and dated schema comment;
-  - `datalog.md`'s links out of the bundle, and `bring-your-own.md`'s dated
-    crate narrative.
-  - All rewritten as cases. `SKILL.md` now reads for a novel project: its own
-    scratch directory, a user it may not reach, worktree cleanup, its report
-    conventions.
-- `reference/datalog.md` and `bring-your-own.md` are this skill's own files, not
-  symlinks. `test/published-text.test.ts` fails on provenance in what ships.
-
-**Decided** (code-analysis `decisions.md`)
-- 2026-09-13 (night): no impact library, no diff tool.
-- 2026-09-13 (night ii), the user's: **skill texts are published for a stranger's
-  project**; each skill owns its texts. This supersedes 2026-09-11's
-  single-homing.
-
-**Removed** — the two reference symlinks and `package.sh`'s frontmatter
-stripping; every provenance line above; the extractor's size note; the probe
-files and scratch worktree; the oldest worklog entry.
-
-**Next up**
-- **Measure the playbook**: re-run the `@grafana/ui` dogfood with a fresh agent
-  and only the bundle.
-- **The datalog skill has the same leaks** (`More` links, dated recipe
-  narrative) — its own session, since the experiments measure it.
-- The bundle still ships `tools/code-facts/src`, whose comments name subjects and
-  bugs.
-- Queued on code-analysis ROADMAP: quality-layer libraries, structure recovery,
-  an eval of open-ended analysis. **Open**: `datalog/bugs/015`.
