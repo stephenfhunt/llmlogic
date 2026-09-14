@@ -150,9 +150,12 @@ B5 and B13.
     in the finished model;
   - *the index is the relation:* every run is sorted, the runs together are a
     permutation of the rows, and a merge of them iterates exactly the sorted set of
-    held facts;
+    held facts. B14a states its observable half; the runs half comes with them in
+    step 2.
   - *views:* `Delta` is the facts first held in the last round and `Old` the rest,
-    stated from round stamps rather than watermarks.
+    stated from round stamps rather than watermarks. **Built in step 1** as
+    `testing.md` **B14b**, with **B14a** stating the index and views against a
+    ledger.
 - **Each ships with a mutation and a non-vacuity guard** (`testing.md`'s rules).
   The generator must reach a relation with several runs and a merge.
 

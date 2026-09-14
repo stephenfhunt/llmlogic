@@ -275,6 +275,7 @@ it. A future audit starts here.
 | §10's std-builtin exemption | `ArithShape::StdBuiltin` | **C10**'s guard — the mutation lands on the classification, not the fixpoint |
 | Diagnostics as a branchable surface (§12) | `arb_corrupted_program_text` — the first generator that makes programs **fail** | **C16**, with `c16_generator_rejects_and_reaches_several_families`; the pinned set itself is `every_code_is_pinned_and_belongs_to_its_category` |
 | The physical access path (§15, evaluator-internal) | small collision-rich tuple pools with `absent`; prefixes drawn from the generated relation | **B12a/b/c**, with their three guards — the differential is blind to an over-yield, so these are what pin the seek |
+| Semi-naive views (§15, evaluator-internal) | a history of written and skipped rounds over a four-cell pool; `arb_program_with_edb` and `arb_program_text_at(Medium)`, observed each delta pass | **B14a** (the relation against a ledger) and **B14b** (the views against round stamps), with a guard each |
 | Rule pruning (§15) | `arb_pruning_program` — a relation reachable only under `not` and one only inside an aggregate goal; `arb_program_with_edb`; the `tests/programs` corpus | **B13**, with a guard per level — the text level is the one either recorded mutation reddens |
 
 **The 2026-08-20 audit's lesson, for whoever reads this map next.** Every row
@@ -700,6 +701,38 @@ compared keyed by predicate *name*, not `PredId`.
     **unpruned** — its first draft ran pruned and went quiet under mutation 1,
     the thing it guards; `b13_generator_prunes_a_rule_beside_a_derived_live_fact`;
     the corpus test asserts some program prunes.
+
+- [x] **B14** **A relation's views are its round stamps** (§15/engine,
+  2026-09-14; `notes/fact-store.md`). The semi-naive rewrite reads each body
+  position through `Full`, `Delta` or `Old`. A relation keeps its most recent
+  block and the round that wrote it, and a join asks for a view by the round it is
+  collecting. Stated at two levels, because retiring a stale block hides the round
+  check from the evaluator.
+  - **B14a** `relation::tests::b14a_a_relation_is_its_facts_and_its_views_are_by_round`
+    — after any history of base rows and rounds that write or skip (retiring the
+    block or not):
+    - iteration is strictly ascending and is exactly the rows held;
+    - `contains` agrees on every row the pool forms;
+    - `Full`, `Delta` and `Old` under any prefix, for the round after the last and
+      the one after that, are the held rows, the block the round just before
+      wrote, and the rest.
+
+    The oracle is an in-test ledger that re-derives each view from the history.
+    *Mutations (all killed):* the round check ignored (**B14a only**: retirement
+    empties a stale block before the evaluator can read it); `Old` unfiltered; the
+    previous block left as the delta; the delta read as this round's block.
+    Guard: `b14a_generator_reaches_current_and_stale_blocks_and_proper_ranges`
+    (155 current, 29 stale kept, 29 stale retired, 135 proper ranges of 400).
+  - **B14b** `b14b_views_are_the_round_stamps`, and `…_at_medium` (`Large` in
+    the deep run) — at the start of every delta pass (`eval_observed`), each
+    relation's `Delta` is exactly its facts first held in the previous round, and
+    `Old` is the rest. It is stated from `first_round`, never from the relation.
+    *Mutations (all killed):* `Old` unfiltered; the previous block left as the
+    delta; the delta read as this round's block; and the round check ignored
+    **together with** no retirement, the stale-delta hazard end to end. Guard:
+    `b14b_generator_reaches_stale_blocks_and_split_views`. Untiered, a stale block
+    in 1 of 48 draws and split views in 10. At `Medium`, 9 and 29. So the `Medium`
+    property is the one that guards stale blocks.
 
 ### Phase C — negation + type inference (roadmap step 4) — generalizes §16.2, §16.3
 

@@ -141,3 +141,231 @@ impl PartialEq for Relation {
         self.iter().eq(other.iter())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    /// One step applied to a relation: a block of rows written in a round, or a
+    /// round that writes nothing, which may also retire the held block.
+    #[derive(Debug, Clone)]
+    enum Step {
+        Write(Vec<Vec<Value>>),
+        Skip { retire: bool },
+    }
+
+    /// A tiny collision-rich pool, so blocks overlap held rows (which a block
+    /// must then leave out) and prefixes select proper sub-ranges.
+    fn arb_cell() -> impl Strategy<Value = Value> {
+        prop_oneof![
+            Just(Value::Symbol("a".to_string())),
+            Just(Value::Symbol("b".to_string())),
+            Just(Value::Int(1)),
+            Just(Value::Absent),
+        ]
+    }
+
+    fn arb_row() -> impl Strategy<Value = Vec<Value>> {
+        prop::collection::vec(arb_cell(), 2)
+    }
+
+    /// Base rows, then rounds 1.. of steps, then a prefix to seek.
+    fn arb_history() -> impl Strategy<Value = (Vec<Vec<Value>>, Vec<Step>, Vec<Value>)> {
+        let step = prop_oneof![
+            3 => prop::collection::vec(arb_row(), 0..6).prop_map(Step::Write),
+            1 => any::<bool>().prop_map(|retire| Step::Skip { retire }),
+        ];
+        (
+            prop::collection::vec(arb_row(), 0..6),
+            prop::collection::vec(step, 0..6),
+            prop::collection::vec(arb_cell(), 0..=2),
+        )
+    }
+
+    /// What a view must yield, restated from the history: the rows held, the
+    /// block written by the round just before `round`, and the rest.
+    struct Ledger {
+        held: BTreeSet<Vec<Value>>,
+        /// Each round that wrote, with the rows it added.
+        written: Vec<(u32, BTreeSet<Vec<Value>>)>,
+    }
+
+    impl Ledger {
+        fn delta_for(&self, round: u32) -> BTreeSet<Vec<Value>> {
+            self.written
+                .iter()
+                .find(|(written, _)| *written + 1 == round)
+                .map(|(_, rows)| rows.clone())
+                .unwrap_or_default()
+        }
+    }
+
+    /// Replays a history onto a relation and, independently, onto a ledger.
+    fn replay(base: &[Vec<Value>], steps: &[Step]) -> (Relation, Ledger, u32) {
+        let mut relation = Relation::default();
+        let mut ledger = Ledger {
+            held: BTreeSet::new(),
+            written: Vec::new(),
+        };
+        for row in base {
+            relation.insert_base(Tuple(row.clone()));
+            ledger.held.insert(row.clone());
+        }
+        let mut round = 0;
+        for step in steps {
+            round += 1;
+            match step {
+                Step::Write(rows) => {
+                    let new: BTreeSet<Vec<Value>> = rows
+                        .iter()
+                        .filter(|row| !ledger.held.contains(*row))
+                        .cloned()
+                        .collect();
+                    if new.is_empty() {
+                        continue;
+                    }
+                    relation.apply(new.iter().cloned().map(Tuple).collect(), round);
+                    ledger.held.extend(new.iter().cloned());
+                    ledger.written.push((round, new));
+                }
+                Step::Skip { retire } => {
+                    if *retire {
+                        relation.retire_delta();
+                    }
+                }
+            }
+        }
+        (relation, ledger, round)
+    }
+
+    fn with_prefix<'a>(
+        rows: impl IntoIterator<Item = &'a Vec<Value>>,
+        prefix: &[Value],
+    ) -> Vec<Vec<Value>> {
+        rows.into_iter()
+            .filter(|row| row.starts_with(prefix))
+            .cloned()
+            .collect()
+    }
+
+    fn sought(
+        relation: &Relation,
+        view: AtomView,
+        round: u32,
+        prefix: &[Value],
+    ) -> Vec<Vec<Value>> {
+        relation
+            .seek(view, round, prefix)
+            .map(|row| row.to_vec())
+            .collect()
+    }
+
+    proptest! {
+        /// **B14a** — a relation is its facts, and its views are read by round.
+        /// After any history of base rows and rounds that write or skip:
+        /// iteration is strictly ascending and is exactly the rows held;
+        /// `contains` agrees on every row the pool can form; and for a join
+        /// collecting the round after the last and the one after that, `Full`,
+        /// `Delta` and `Old` under any prefix are the held rows, the block the
+        /// round just before wrote, and the rest — each in canonical order.
+        ///
+        /// The oracle is the ledger, which re-derives each view from the
+        /// history and never calls the relation.
+        ///
+        /// *Mutations (killed):* `delta_is_current` ignoring the round; `Old`
+        /// not filtering the delta; `apply` leaving the previous block as the
+        /// delta.
+        #[test]
+        fn b14a_a_relation_is_its_facts_and_its_views_are_by_round(
+            (base, steps, prefix) in arb_history()
+        ) {
+            let (relation, ledger, last) = replay(&base, &steps);
+
+            let rows: Vec<Vec<Value>> = relation.iter().map(|row| row.to_vec()).collect();
+            prop_assert!(rows.windows(2).all(|pair| pair[0] < pair[1]), "not strictly ascending");
+            prop_assert_eq!(&rows, &ledger.held.iter().cloned().collect::<Vec<_>>());
+            prop_assert_eq!(relation.len(), ledger.held.len());
+
+            let cells = [
+                Value::Symbol("a".to_string()),
+                Value::Symbol("b".to_string()),
+                Value::Int(1),
+                Value::Absent,
+            ];
+            for x in &cells {
+                for y in &cells {
+                    let row = [x.clone(), y.clone()];
+                    prop_assert_eq!(relation.contains(&row), ledger.held.contains(row.as_slice()));
+                }
+            }
+
+            for round in [last + 1, last + 2] {
+                let delta = ledger.delta_for(round);
+                let old: BTreeSet<Vec<Value>> = ledger.held.difference(&delta).cloned().collect();
+                prop_assert_eq!(sought(&relation, AtomView::Full, round, &prefix), with_prefix(&ledger.held, &prefix));
+                prop_assert_eq!(sought(&relation, AtomView::Delta, round, &prefix), with_prefix(&delta, &prefix));
+                prop_assert_eq!(sought(&relation, AtomView::Old, round, &prefix), with_prefix(&old, &prefix));
+            }
+        }
+    }
+
+    /// **B14a's non-vacuity guard**, read against its sentence: the views are
+    /// only distinguished when the delta is non-empty beside older rows, when a
+    /// held block is *not* the delta (a skipped round after a write, retired or
+    /// not), and when a prefix selects part of a view and not all of it. Floors
+    /// at about two thirds of what was measured: 155, 29, 29 and 135 of 400.
+    #[test]
+    fn b14a_generator_reaches_current_and_stale_blocks_and_proper_ranges() {
+        use proptest::strategy::ValueTree;
+        use proptest::test_runner::TestRunner;
+
+        let mut runner = TestRunner::deterministic();
+        let strategy = arb_history();
+        let (mut current, mut stale_kept, mut stale_retired, mut proper) = (0, 0, 0, 0);
+        for _ in 0..400 {
+            let (base, steps, prefix) = strategy
+                .new_tree(&mut runner)
+                .expect("strategy produces a value")
+                .current();
+            let (relation, ledger, last) = replay(&base, &steps);
+            let delta = ledger.delta_for(last + 1);
+            if !delta.is_empty() && delta.len() < ledger.held.len() {
+                current += 1;
+            }
+            let last_write = ledger.written.last().map(|(round, _)| *round);
+            if let (Some(written), Some(Step::Skip { retire })) = (last_write, steps.last())
+                && written < last
+            {
+                if *retire {
+                    stale_retired += 1;
+                } else {
+                    stale_kept += 1;
+                }
+            }
+            let full = sought(&relation, AtomView::Full, last + 1, &prefix).len();
+            if full > 0 && full < relation.len() {
+                proper += 1;
+            }
+        }
+        eprintln!(
+            "current {current}, stale kept {stale_kept}, stale retired {stale_retired}, proper {proper} of 400"
+        );
+        assert!(
+            current >= 100,
+            "a current delta beside older rows: {current} of 400"
+        );
+        assert!(
+            stale_kept >= 19,
+            "a stale block still held: {stale_kept} of 400"
+        );
+        assert!(
+            stale_retired >= 19,
+            "a stale block retired: {stale_retired} of 400"
+        );
+        assert!(
+            proper >= 90,
+            "a proper non-empty sub-range: {proper} of 400"
+        );
+    }
+}

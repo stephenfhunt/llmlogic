@@ -409,7 +409,14 @@ pub fn eval_pruned_moving_facts(
     live: Option<&[bool]>,
 ) -> Result<Model> {
     let facts = std::mem::take(&mut program.facts);
-    uncapped(eval_seeded(program, facts, u32::MAX, provenance, live))
+    uncapped(eval_seeded(
+        program,
+        facts,
+        u32::MAX,
+        provenance,
+        live,
+        &mut |_, _| {},
+    ))
 }
 
 fn uncapped(result: std::result::Result<Model, Capped>) -> Result<Model> {
@@ -453,17 +460,39 @@ pub(crate) fn eval_capped(
         max_rounds,
         provenance,
         live,
+        &mut |_, _| {},
+    )
+}
+
+/// [`eval_capped`] with every rule live, calling `on_round` with the model and
+/// the round at the start of each delta pass, before it collects. For **tests
+/// only**: `testing.md` **B14b** reads each round's views through it.
+#[cfg(test)]
+pub(crate) fn eval_observed(
+    program: &Program,
+    max_rounds: u32,
+    provenance: Provenance,
+    on_round: &mut dyn FnMut(&Model, u32),
+) -> std::result::Result<Model, Capped> {
+    eval_seeded(
+        program,
+        program.facts.iter().cloned(),
+        max_rounds,
+        provenance,
+        None,
+        on_round,
     )
 }
 
 /// [`eval_capped`] over base facts the caller supplies — `program.facts`, copied
-/// or moved out of it.
+/// or moved out of it — calling `on_round` at the start of each delta pass.
 fn eval_seeded(
     program: &Program,
     facts: impl IntoIterator<Item = Fact>,
     max_rounds: u32,
     provenance: Provenance,
     live: Option<&[bool]>,
+    on_round: &mut dyn FnMut(&Model, u32),
 ) -> std::result::Result<Model, Capped> {
     validate(program).map_err(Capped::Failed)?;
     let mut model = Model::new(program.predicates.len(), provenance);
@@ -480,7 +509,7 @@ fn eval_seeded(
                 .collect(),
             None => stratum.clone(),
         };
-        round = eval_stratum(program, &stratum, &mut model, round, max_rounds)?;
+        round = eval_stratum(program, &stratum, &mut model, round, max_rounds, on_round)?;
     }
     Ok(model)
 }
@@ -687,13 +716,15 @@ fn validate_body_seeded(
 }
 
 /// Runs one stratum to fixpoint, semi-naively. Returns the updated round
-/// counter (monotone across strata, for `first_round` stamping).
+/// counter (monotone across strata, for `first_round` stamping). `on_round` sees
+/// the model at the start of each delta pass, before it collects.
 fn eval_stratum(
     program: &Program,
     stratum: &[RuleId],
     model: &mut Model,
     mut round: u32,
     max_rounds: u32,
+    on_round: &mut dyn FnMut(&Model, u32),
 ) -> std::result::Result<u32, Capped> {
     // Seed pass: every rule against the full current relations. This finds
     // every instance derivable from base facts and earlier strata.
@@ -734,6 +765,7 @@ fn eval_stratum(
         // one delta premise is enumerated exactly once; instance-level
         // deduplication in the Model absorbs any overlap regardless.
         round += 1;
+        on_round(model, round);
         for &rule_id in stratum {
             let rule = &program.rules[rule_id.0 as usize];
             for delta_pos in 0..rule.body.len() {
@@ -4368,6 +4400,61 @@ mod tests {
             Ok(())
         }
 
+        /// **B14b** for one program: at the start of every delta pass, each
+        /// relation's `Delta` view is exactly its facts first held in the round
+        /// before, and its `Old` view exactly the rest — stated from round stamps,
+        /// never from the relation's own bookkeeping.
+        fn b14b_holds(program: &Program) -> std::result::Result<(), TestCaseError> {
+            let mut failure: Option<String> = None;
+            let mut observe = |model: &Model, round: u32| {
+                if failure.is_some() {
+                    return;
+                }
+                for index in 0..program.predicates.len() {
+                    let pred = PredId(index as u32);
+                    let relation = model.relation(pred);
+                    let (mut want_delta, mut want_old) = (Vec::new(), Vec::new());
+                    for row in relation.iter() {
+                        let fact = Fact {
+                            pred,
+                            tuple: Tuple(row.to_vec()),
+                        };
+                        match model.first_round(&fact) {
+                            Some(first) if first + 1 == round => want_delta.push(row.to_vec()),
+                            Some(_) => want_old.push(row.to_vec()),
+                            None => {
+                                failure =
+                                    Some(format!("held {fact:?} has no round in round {round}"));
+                                return;
+                            }
+                        }
+                    }
+                    let view = |view| -> Vec<Vec<Value>> {
+                        relation
+                            .seek(view, round, &[])
+                            .map(|row| row.to_vec())
+                            .collect()
+                    };
+                    let (delta, old) = (view(AtomView::Delta), view(AtomView::Old));
+                    if delta != want_delta || old != want_old {
+                        failure = Some(format!(
+                            "{} in round {round}: Delta {delta:?} (stamps say {want_delta:?}), \
+                             Old {old:?} (stamps say {want_old:?})",
+                            program.pred_info(pred).name
+                        ));
+                        return;
+                    }
+                }
+            };
+            eval_observed(program, ROUND_CAP, Provenance::Recorded, &mut observe).map_err(
+                |capped| TestCaseError::fail(format!("evaluation did not finish: {capped:?}")),
+            )?;
+            match failure {
+                Some(message) => Err(TestCaseError::fail(message)),
+                None => Ok(()),
+            }
+        }
+
         /// **E9**'s claims about one program, shared by the property over
         /// [`arb_program_with_edb`] and the one over shaped programs.
         fn e9_holds(program: &Program) -> std::result::Result<(), TestCaseError> {
@@ -4680,6 +4767,61 @@ mod tests {
             assert!(reached >= 3, "{reached} of 48 (floor 3)");
         }
 
+        /// B14b's non-vacuity guard, read against its sentence: the views are
+        /// only tested where a delta pass sees a relation whose derived facts are
+        /// not all from the round before — a block a lower stratum or an earlier
+        /// round wrote, which must not be the delta — and one whose delta sits
+        /// beside older facts. Counted over 48 samples at each generator B14b
+        /// draws; floors at about two thirds of what was measured (untiered:
+        /// split 10; `Medium`: stale 9, split 29). The untiered generator reaches
+        /// a stale block in only 1 of 48, so the `Medium` property is the one that
+        /// guards stale blocks, and only its count has a floor.
+        #[test]
+        fn b14b_generator_reaches_stale_blocks_and_split_views() {
+            let untiered = sample(arb_program_with_edb(), 48);
+            let medium: Vec<Program> =
+                sample(crate::testgen::arb_program_text_at(Tier::Medium), 48)
+                    .into_iter()
+                    .map(|(_, program)| program)
+                    .collect();
+            for (name, programs) in [("untiered", &untiered), ("medium", &medium)] {
+                let (mut stale, mut split) = (0, 0);
+                for program in programs.iter() {
+                    let (mut saw_stale, mut saw_split) = (false, false);
+                    let mut observe = |model: &Model, round: u32| {
+                        for index in 0..program.predicates.len() {
+                            let pred = PredId(index as u32);
+                            let rounds: Vec<u32> = model
+                                .relation(pred)
+                                .iter()
+                                .filter_map(|row| {
+                                    model.first_round(&Fact {
+                                        pred,
+                                        tuple: Tuple(row.to_vec()),
+                                    })
+                                })
+                                .collect();
+                            let delta = rounds.iter().filter(|&&r| r + 1 == round).count();
+                            let derived_elsewhere =
+                                rounds.iter().filter(|&&r| r >= 1 && r + 1 != round).count();
+                            saw_stale |= derived_elsewhere > 0 && delta == 0;
+                            saw_split |= delta > 0 && delta < rounds.len();
+                        }
+                    };
+                    eval_observed(program, ROUND_CAP, Provenance::Recorded, &mut observe)
+                        .expect("evaluates");
+                    stale += usize::from(saw_stale);
+                    split += usize::from(saw_split);
+                }
+                eprintln!("{name}: stale block {stale} of 48, split views {split} of 48");
+                let (stale_floor, split_floor) = if name == "medium" { (6, 19) } else { (0, 6) };
+                assert!(
+                    stale >= stale_floor && split >= split_floor,
+                    "{name}: stale {stale} (floor {stale_floor}), split {split} (floor {split_floor})"
+                );
+            }
+        }
+
         /// The growth guard for [`arb_program_with_edb_at`] (`testing.md` rule 2):
         /// each tier reaches, on the recorded run, what the tier below does not —
         /// deeper fixpoints (rounds, strata), larger models (derived facts, the
@@ -4790,6 +4932,14 @@ mod tests {
                 generated in crate::testgen::arb_program_text_at(Tier::Medium.scaled()),
             ) {
                 e11_holds(&generated.1)?;
+            }
+
+            /// **B14b at `Tier::Medium`** — and `Large` in the deep run.
+            #[test]
+            fn b14b_views_are_the_round_stamps_at_medium(
+                generated in crate::testgen::arb_program_text_at(Tier::Medium.scaled()),
+            ) {
+                b14b_holds(&generated.1)?;
             }
         }
 
@@ -6085,6 +6235,12 @@ mod tests {
             #[test]
             fn e11_base_facts_are_the_programs_at_round_zero(program in arb_program_with_edb()) {
                 e11_holds(&program)?;
+            }
+
+            /// B14b — each round's views are its round stamps.
+            #[test]
+            fn b14b_views_are_the_round_stamps(program in arb_program_with_edb()) {
+                b14b_holds(&program)?;
             }
 
             /// E2 — every fact has a proof, and every leaf is a base fact.
