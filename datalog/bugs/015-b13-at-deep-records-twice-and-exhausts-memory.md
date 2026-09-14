@@ -117,3 +117,15 @@ testing-first ruling this gates, so the choice is theirs.
   no imports. The flat store beneath it is not ruled out.
 - **Under an address-space cap,** a runaway is a named allocation failure with a
   saved seed, not a killed process.
+
+## 2026-09-14 (later) — the runaway is B13, on the fact store
+
+- **Where:** branch `fact-store` at `7ecfc33`, deep tier, seed 2, nothing skipped,
+  under a 16 GB `prlimit --as` cap.
+- **It failed an allocation at 385 s, at 14.2 GB peak RSS.** 522 of 523 tests had
+  passed, B5 at `Large` among them. The one still running was
+  `b13_pruning_changes_no_live_relation_at_large`. So the test holding the memory is
+  B13, established where the entries above could say only likely.
+- **The fact store did not close this file.** With B13 skipped, the gate's seeds 2
+  and 3 peak at 442 MB (from about 980 MB), but this draw still exhausts 16 GB.
+- **Left open, as ruled:** chasing it is not the refactor's point.

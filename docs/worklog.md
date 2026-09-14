@@ -24,6 +24,40 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-14 (afternoon) — fact store step 4: values interned; faster than the baseline everywhere
+
+Asked, in the interning review, for both kinds interned and interning alone,
+measured before anything more is decided.
+
+**Done** — branch `fact-store`; per-commit gate green; harness diff empty
+(1,109 cases); deep seeds 2 and 3 pass 525/525 at 351 MB.
+- `60a5495`: `Value::Symbol` and `String` hold a `Sym`, interned once for the
+  process; a `Value` is 24 bytes; `Value::symbol`/`string` constructors.
+  - **A17**, interned equality is content equality, mutation-verified. Ordering by
+    pointer escapes every B-series differential; only A17 and hand tests catch it.
+- **Measured against `efcda71`**, one sitting, median of 3:
+  - `pointsto.dl` 10.6 → 7.4 s; its `?why` 9.1 → 6.0 s, 815 → 410 MB;
+  - `callreach.dl` `?why` 1.46 → 0.60 s; `sparse_800` 1.22 → 0.41 s;
+  - `q_coh.dl` 6.4 → 4.1 s, `lib/cohesion.dl` 7.8 → 4.8 s, `lib/flow.dl`
+    23.2 → 12.6 s.
+- **`bugs/015`:** seed 2 unskipped on `7ecfc33` failed an allocation at 14.2 GB,
+  with only B13 at `Deep` still running. Which test holds the memory is now
+  established.
+
+**Decided**
+- The user's, in review: accept the interner's process-lifetime leak; intern
+  symbols and strings both; interning alone, measured first.
+- §17 2026-07-19's "interning deferred" is marked ***Superseded***.
+
+**Removed** — `Value`'s owned `String`s; `coerce_borrowed`, folded into `coerce`;
+the oldest worklog entry (rotated).
+
+**Next up**
+- **The user's call: merge `fact-store`** (fast-forward), or more seek work first.
+  No gate program is slower than `efcda71`.
+- The gate's random-seed deep run on the interned tip (started at session end).
+- **Open**: `datalog/bugs/015`, `016`.
+
 ## 2026-09-14 (late morning) — fact store step 3: premises by row; a missed seek regression; interning next
 
 Asked to approve step 3's design, then build it. A wider measurement found a
@@ -112,48 +146,4 @@ and `RawTable`; binary-search membership; the oldest worklog entry.
 - Re-measure `bugs/015`'s `Deep` draws after step 3.
 - `pointsto.dl`'s 2.6% sits in seeks through runs. An unordered join seek is the
   separate, audited optimisation.
-- **Open**: `datalog/bugs/015`, `016`.
-
-## 2026-09-14 (early) — the fact store's branch, its gate, and step 1: a `Relation` type, nothing moved
-
-Asked to set up the fact-ownership refactor on a branch, more rigorously than
-usual. Planned; the user answered the design's review questions, then asked to
-start on the relation type.
-
-**Done** — branch `fact-store`; `cargo test`, clippy, fmt green at every commit
-- `07d123d` the review's answers: runs, binary-search membership, imports stay in
-  `Program.facts`, storage before provenance. §17 2026-09-13 (later iv), and
-  `AGENTS.md`'s one branch exception.
-- **The gate**, in `~/.cache/fact-store/` (its README): a frozen `efcda71`;
-  `diff.py`, 1,109 cases (corpus, every grafana-ui library and query file asked
-  for every relation it defines, 250 cross-engine and generated programs, 794
-  goals), whose baseline self-diff is empty; `deep.sh`; `measure.py`.
-- `4bc722b` **`Relation`**: facts and delta behind one type, views read by the
-  collecting round, `apply_round` for both insert paths, rows as `&[Value]`.
-- `1479c84` **B14a** (the relation against a ledger) and **B14b** (views against
-  round stamps, via `eval_observed`). Five mutations killed.
-- **Step 1's gate at `1479c84`:** harness diff empty; deep seeds 2 and 3 pass 514
-  in 158 and 126 s (baseline 159, 130); `pointsto.dl` 10.55 → 10.37 s, its `?why`
-  9.23 → 8.25 s; `sparse_800` 1.24 → 1.27 s, 126 → 133 MB.
-
-**Decided**
-- The user's: the branch in this checkout; storage first, staged; runs with
-  binary-search membership; a capped deep gate run detached (foreground stops at
-  10 min; background tasks were killed for "low memory" at 22 GB available).
-- The user's: B5's pathological `Deep` draws are not chased (seed 1 took 6 h, the
-  random seed was stopped at 72 min). The gate runs seeds 2 and 3.
-- A delta is tagged with the round that wrote it. So a lower stratum's last block
-  is never a higher stratum's delta.
-
-**Removed** — `insert_derived`, `insert_unkept`, and the delta map threaded through
-`JoinCx`; `recorder-wt`'s scratch instrumentation (saved as a patch) and
-`proofs.sh` (replaced by `diff.py`); the oldest worklog entry.
-
-**Next up**
-- **Step 2: the flat store, sorted runs and watermark views, inside `Relation`**
-  (`notes/fact-store.md` § Rules). It adds the property *a row never moves*, and
-  B14a gains the runs half.
-- `sparse_800`'s +0.03 s and +7 MB are inside run-to-run noise; re-measure at step 2.
-- **`bugs/016`**, filed on trunk (the user's): `cargo test --no-default-features`
-  fails three import tests that `694a6ff` added without the `duckdb` gate.
 - **Open**: `datalog/bugs/015`, `016`.

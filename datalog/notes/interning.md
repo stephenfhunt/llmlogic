@@ -123,3 +123,29 @@ shrinks 2.7× (`notes/memory-profile-2026-09-12.md`).
 2. **Both symbols and strings are interned.**
 3. **Interning alone,** measured on the widened gate before anything more about
    seek cost or the merge is decided.
+
+## Measured (2026-09-14): faster than the baseline on every gate program
+
+Built as `60a5495`. The harness diff is empty over 1,109 cases. Deep seeds 2 and 3
+pass 525 of 525, peaking at 351 and 348 MB (442 MB at `7ecfc33`). One sitting,
+interleaved, median of 3:
+
+| program | `efcda71` s | `7ecfc33` s | interned s | RSS MB, `efcda71` → interned |
+|---|---|---|---|---|
+| `pointsto.dl` | 10.56 | 10.00 | 7.40 | 533 → 318 |
+| `pointsto.dl` `?why` | 9.11 | 7.62 | 5.96 | 815 → 410 |
+| `callreach.dl` `?why` | 1.46 | 0.91 | 0.60 | 379 → 145 |
+| `sparse_800` | 1.22 | 0.91 | 0.41 | 125 → 61 |
+| `q_coh.dl` | 6.42 | 8.03 | 4.09 | 251 → 220 |
+| `lib/cohesion.dl` | 7.77 | 9.60 | 4.80 | 259 → 207 |
+| `lib/flow.dl` | 23.19 | 30.67 | 12.58 | 438 → 288 |
+
+- **The seek regression is closed without a B-tree.** `lib/flow.dl`'s cycles fall
+  from 139.9 to 57.0 G against `7ecfc33`, and its cache misses from 619 to 142 M
+  (`efcda71`: 247 M).
+- **Instructions fall too** (`lib/flow.dl` 256 → 199 G): a binding copies 16 bytes
+  instead of cloning a `String`, and equality compares a pointer.
+- **Not separated:** how much comes from pointer comparison and how much from the
+  smaller `Value`. Nothing here depends on it.
+- **Not measured:** the leak's cost to a long-lived library user, and lock
+  contention, which a single-threaded engine does not have.

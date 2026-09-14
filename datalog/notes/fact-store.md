@@ -513,3 +513,11 @@ acceptance is a finished deep run under a cap.
    4. then the cross case, and imports if the gate calls for them.
 
    Each step is a series of green commits on branch `fact-store`.
+
+## Step 4, value interning, measured (2026-09-14)
+
+Built as `60a5495`; the numbers are in `notes/interning.md` § Measured. Against
+`efcda71`, every gate program is faster and smaller: `q_coh.dl` 6.42 → 4.09 s,
+`lib/cohesion.dl` 7.77 → 4.80 s, `lib/flow.dl` 23.19 → 12.58 s, and `pointsto.dl`
+`?why` 9.11 → 5.96 s at 815 → 410 MB. § Seek-heavy queries' regression is closed
+without a B-tree. The harness diff is empty, and deep seeds 2 and 3 pass.

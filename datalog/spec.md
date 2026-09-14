@@ -2602,6 +2602,13 @@ never say.
   - **The cost:** a process-lifetime leak of distinct strings. The fix, if a
     long-lived library user needs one, is an interner per `Program`.
   - **Scope:** interning alone, measured on the widened gate before the merge.
+  ***Consequences 2026-09-14*** — built (`60a5495`), and the rationale held.
+  Against `efcda71`, every gate program is 30–66% faster and smaller: `lib/flow.dl`
+  23.2 → 12.6 s with cache misses 247 → 142 M, and `pointsto.dl` `?why` 815 →
+  410 MB (`notes/interning.md` § Measured). Output is byte-identical over the
+  harness. Ordering by pointer survives every B-series differential, since both
+  sides share the order: **A17** is what catches it. The rejected B-tree was not
+  needed to close the seek regression.
 - **2026-09-13 (later iv)** — **A fact store with one owner: the review's answers,
   built on a branch** (engine; `notes/fact-store.md`; the user's calls).
   - **Sorted runs, membership by binary search per run.** A B-tree over rows or a
@@ -4663,6 +4670,8 @@ never say.
   node; the IR keeps clause- and literal-level spans for post-lowering errors.
   **Symbol interning deferred**: `Value::Symbol(String)` in v1; `Value` is the
   single choke point, so an interner is a later drop-in if profiling justifies.
+  ***Superseded by 2026-09-14*** (interning only): symbols and strings are
+  interned, on the fact store's profile (`notes/interning.md`).
 - **2026-07-19** — **Property-based testing adopted; `proptest` is the first
   dev-dependency.** Strategy and property catalog live in `testing.md`
   (single source of truth; AGENTS.md points there). Dev-dependencies don't
