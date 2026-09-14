@@ -80,7 +80,7 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
   them from `package.json` (the `package` facts carry none yet) is what is left.
   _queued._
 - **Go frontend** — every layer, through x/tools (vendored). _building_ —
-  structure and refs layers, P2-go/P4-go/P6-go in; flow next. `decisions.md` 2026-09-14,
+  structure, refs and flow layers, P1–P4-go and P6-go in; quality next. `decisions.md` 2026-09-14,
   `notes/go-java-frontends.md`.
 - **Java frontend** — every layer, through the JDK compiler API; project model
   from Maven/Gradle. Its Spring dogfood is the decorator item's subject. _queued_

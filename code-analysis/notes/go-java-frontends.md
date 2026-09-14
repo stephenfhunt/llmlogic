@@ -177,6 +177,33 @@ method reference is an `alloc` of kind `function`.
 - Code-facts drops exact duplicate rows, so two `unresolved_ref`s of one name on
   one line are one row.
 
+## The Go flow layer, as built
+
+- **`defer` is one `finally` node per function that defers**, around the whole
+  body: a `defer` registers dynamically, so no lexical frame fits. The body's
+  end, every `return` and every panic enter it. It has a `back` edge to itself
+  when more than one call may be deferred (several `defer`s, or one in a loop),
+  since the deferred calls drain in a loop. The deferred call's `call_at` is that
+  node; its function value and arguments are evaluated at the `defer` statement.
+- **A panic may resume at `exit`** when a deferred call may `recover`. `recover`
+  works only in the deferred function itself, so a literal or a project function
+  is read for a direct call; the standard library and builtins cannot; anything
+  else (a function value, an outside module) may.
+- **Implicit panics exist only in functions that defer**, as TypeScript's exist
+  only inside `try`: outside one, a panic leaves the function and no edge is
+  needed to say so.
+- **`select` evaluates every channel operand at its own node**, then tests its
+  cases in turn like a switch; without `default` the last case is taken when
+  none before it is, and is no decision. A receive's assignment is at its case.
+- **A label is a node only when a `goto` targets it.** `fallthrough` is carried
+  exactly from a clause ending in it (the one place Go allows it).
+- A type switch's variable is defined at the switch; a channel `range` is a
+  receive at the loop head; package-level initializers run in their file's
+  `<module>` in source order, where Go orders them by dependency.
+- `fn.kind` is `function`, `method`, `function_expression` (a literal) or
+  `module`. Cognitive complexity follows the TypeScript layer's counting, with
+  `goto` and labeled jumps +1 each.
+
 ## Properties
 
 Each language gets P1 (CFG against real traces), P2 (module graph over modgen's

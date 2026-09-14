@@ -24,6 +24,52 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-14 (dawn) — the Go frontend's flow layer
+
+Asked to carry on; the user installed Maven, and found no Gradle package.
+
+**Done**
+- `4110d3d` flow: a statement-level CFG per function over `go/ast`.
+  - `defer` is one `finally` node per deferring function. Returns, the body's
+    end and panics enter it; it loops when several calls may be deferred, and
+    resumes at `exit` when a deferred call may `recover`.
+  - Implicit panics only where a function defers. `goto`/`fallthrough` node and
+    edge kinds. `select` evaluates its operands on entry, its cases chained.
+  - A type switch's variable is defined at the switch; package initializers
+    run in `<module>`.
+  - def/use, `captures`, `closure`, `call_at` (a deferred call at `finally`),
+    decisions, `fn` metrics, and a new `concurrency_site`; `flow.dl` counts the
+    new statement kinds.
+- **P1-go** runs generated functions against their graphs. It found
+  `fallthrough` carried through an empty clause into the next. Two harness
+  rules were needed: a `finally` may run no deferred call, and a select's
+  operand probes share a node.
+- Guards were too rare at first (a labeled jump in 3% of runs, a recovery in
+  6.5%). Two generator shapes (`nest`, `risky`) and probes before labeled
+  jumps now observe them directly. Rarest guard ~10% → 100 runs.
+- The mutation "no resume after recover" stayed **green**: the edge is
+  redundant wherever a function can end normally. A doomed last function (a
+  recovering defer, then `panic(0)`) made it red. The other six mutations are
+  red; **P3-go** red on `range` uncounted.
+- A flow test over a module with every construct, whose edge multisets were
+  checked by hand; `flow.dl` finds exactly its one dead store.
+
+**Decided** — `notes/go-java-frontends.md` § The Go flow layer, as built.
+
+**Removed** — nothing in code; the oldest worklog entry.
+
+**Next up**
+- Go quality: `diagnostic` (go/types errors), `lint_directive` (`//nolint`,
+  `//lint:ignore`), `compiler_directive`, `comment_marker`, `literal`,
+  `assertion` (`type_assert`), `any_site`, `throw_site`/`catch_site`
+  (panic/recover), `ignored_error`.
+- Then dataflow (P5-go), the library pass, `reference/go.md`, vendoring, a
+  dogfood; Java after. Gradle: the user to choose SDKMAN, a Gradle zip, or a
+  Gradle-wrapper-only fixture before Java's project model.
+- Carried: P3/P5 static blocks; rebuild `dist/`; code-analysis's
+  `reference/datalog.md` additions; the ablation control; push `trunk` when asked.
+- **Open**: `datalog/bugs/015`, `016`.
+
 ## 2026-09-14 (small hours) — the Go frontend's refs layer
 
 Asked to do the Go reference layer.
@@ -113,41 +159,4 @@ project model asked of Maven/Gradle, and every layer including dataflow.
   Gradle are not installed here.
 - Carried: P3/P5 static blocks; rebuild `dist/`; code-analysis's
   `reference/datalog.md` additions; the ablation control; push `trunk` when asked.
-- **Open**: `datalog/bugs/015`, `016`.
-
-## 2026-09-14 (night) — GitHub issue #1: a class static block crashed code-facts
-
-Asked to reproduce and fix issue #1. Planned; the user chose a fix and a
-regression test with widening P1 deferred, then asked for the widening too.
-
-**Done**
-- `31dd7d7`: reproduced with a new `test/structure.test.ts` case, failing on the
-  issue's own frame (`structure.ts:473`). `hasBodyOrSignature` is now
-  `hasParameters` and excludes static blocks, so its `SignatureDeclaration`
-  guard is true. The test extracts every function-like kind through refs, flow,
-  dataflow and quality, and checks the static block's `fn`/`flow_node` rows and
-  every kind's `param` rows. Mutation: the old predicate turns it red.
-  `npm test` and typecheck green.
-- `code-analysis/bugs/resolved/006` records it. The commit says `Fixes #1`, so the
-  issue closes when `trunk` is pushed.
-- `5e72020`: **P1 widened.** Its statements also run as a class static block
-  (a `return` renders as a probe). The acceptance half: Node compiles each block
-  and one `static_block` fn is extracted. The in-block guard is sized from ten
-  runs; `continue` (fewest 2) and `catch` (7) stay unguarded there. The widening
-  found no CFG defect.
-  - *Mutations* redden it: `isOwner` skipping static blocks, and `extractFlow`
-    skipping them. `executorOf` skipping them stays green: `call_site.caller`
-    comes from `ownerOf`.
-
-**Decided** — nothing new: the issue's own "narrower predicate" alternative.
-
-**Removed** — `hasBodyOrSignature` (renamed); the oldest worklog entry.
-
-**Next up**
-- P3 and P5 still generate function bodies only; static blocks' cyclomatic
-  counts and points-to facts have no property.
-- Rebuild `dist/` (`./package.sh`) before re-running on the reporter's project.
-- Carried: code-analysis's `reference/datalog.md` lacks the datalog skill's
-  additions; rerun the ablation control; measure the code-analysis playbook.
-- Push `trunk` when the user says so.
 - **Open**: `datalog/bugs/015`, `016`.
