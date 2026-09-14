@@ -130,11 +130,11 @@ def test_the_ablated_workspace_is_missing_exactly_the_block(tmp_path):
     kept = (control / SKILL_ROOT / recipe).read_text(encoding="utf-8")
     cut = (ablated / SKILL_ROOT / recipe).read_text(encoding="utf-8")
 
-    assert "36 — call sites" in kept
-    assert "36 — call sites" not in cut
+    assert "call sites, not callers" in kept
+    assert "call sites, not callers" not in cut
     # The neighbours stay: an ablation that takes the section with it measures
     # the section, and the finding would be attributed to one paragraph.
-    for neighbour in ("A join across two id-spaces", "Disjunction is rule-only"):
+    for neighbour in ("A join across two id-spaces", "No string operations"):
         assert neighbour in cut
 
 
