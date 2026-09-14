@@ -161,6 +161,7 @@ export const RELATIONS: readonly Relation[] = [
       col("layers", "string", "the layers extracted, comma-separated"),
       col("time", "timestamp", "when the extraction ran (UTC)"),
       opt("git_head", "string", "HEAD commit of the repository, if it is one"),
+      opt("go_version", "string", "the Go toolchain that read the Go sources, if any were read"),
     ],
   },
   {
@@ -204,7 +205,7 @@ export const RELATIONS: readonly Relation[] = [
       opt("package", "string", "name in the nearest enclosing package.json"),
       oneOf(
         "lang",
-        ["ts", "tsx", "mts", "cts", "dts", "js", "jsx", "mjs", "cjs", "py", "pyi", "json"],
+        ["ts", "tsx", "mts", "cts", "dts", "js", "jsx", "mjs", "cjs", "py", "pyi", "go", "json"],
         "file flavour. `json` is **data, not source** — a file a module imports rather than one that was compiled; exclude it wherever you mean code",
       ),
       col("loc", "int", "lines"),
@@ -212,6 +213,21 @@ export const RELATIONS: readonly Relation[] = [
       col("is_test", "bool", "a test file (`*.test.*`, `*.spec.*`, `__tests__/`, `test(s)/`, or only in a test tsconfig)"),
       col("is_decl", "bool", "a `.d.ts` file"),
       col("is_generated", "bool", "a heuristic: the header says `@generated`, `auto-generated` or `DO NOT EDIT`, or the name is `*.gen.*`, `*.generated.*`, `*_pb.*`/`*_pb2.py`/`*.pb.*`, or under `__generated__/`"),
+      opt(
+        "namespace",
+        "string",
+        "the language's own name for the unit the file belongs to: a Go import path (`…_test` for an external test package), a Python dotted module; absent for TypeScript, where the file is the module",
+      ),
+    ],
+  },
+  {
+    name: "excluded_file",
+    layer: "structure",
+    doc: "A source file under a target that the build leaves out, so no other relation describes it — count these before a negative answer.",
+    columns: [
+      col("path", "string", FILE),
+      oneOf("reason", ["build_constraint"], "`build_constraint`: a Go build constraint or file-name suffix excludes it for this platform"),
+      opt("detail", "string", "the constraint as written, when there is one"),
     ],
   },
   {
@@ -256,6 +272,7 @@ export const RELATIONS: readonly Relation[] = [
       oneOf("kind", ["prod", "dev", "peer", "optional"], "which dependency block"),
       col("range", "string", "the version range as written"),
       opt("types_for", "string", "for an `@types/` package, the package it types (`@types/node` → `node`)"),
+      opt("scope", "string", "the build's own word for the dependency, where `kind` summarises it: `require`, `indirect` or `tool` in a go.mod"),
     ],
   },
   {
@@ -278,8 +295,11 @@ export const RELATIONS: readonly Relation[] = [
           "reexport",
           "reexport_all",
           "type_query",
+          "dot",
+          "cgo",
+          "implicit",
         ],
-        "`type_only` is `import type`; `type_query` is `import(\"x\").T` in a type",
+        "`type_only` is `import type`; `type_query` is `import(\"x\").T` in a type; `dot` is Go's `import . \"x\"`, `cgo` its `import \"C\"`; `implicit` is no statement at all — a reference to another file of the same package, which that language needs no import for (at the first reference, `specifier` the name referenced)",
       ),
       opt(
         "runtime",
@@ -299,6 +319,11 @@ export const RELATIONS: readonly Relation[] = [
         "unresolved_package",
         "string",
         "TypeScript only: for a bare specifier the compiler could not resolve, its first segment (`@scope/pkg` for a scoped one) — a *guess* at a package, never a `target_package`, because a bundler alias (`vendor/x.css`) looks the same as a package that is not installed. Python fills `target_package` by name instead: it has no aliases",
+      ),
+      opt(
+        "target_dir",
+        "string",
+        "Go: the directory of the package imported, when it is under the root. An import names a package, not a file, so one import statement is a row per file of that package it references — each with `target_file` — and a row with `target_dir` alone when it references none (a `_` import runs the package's `init`)",
       ),
     ],
   },
@@ -351,8 +376,8 @@ export const RELATIONS: readonly Relation[] = [
       {
         name: "visibility",
         type: "symbol",
-        doc: "class members only: `hash_private` is an ECMAScript `#name`",
-        values: ["public", "protected", "private", "hash_private"],
+        doc: "class members only: `hash_private` is an ECMAScript `#name`; `package` is visible within its package only (a Go member with a lower-case name)",
+        values: ["public", "protected", "private", "hash_private", "package"],
         nullable: true,
       },
       col("is_static", "bool", "`static` member"),
@@ -362,6 +387,14 @@ export const RELATIONS: readonly Relation[] = [
       col("is_readonly", "bool", "`readonly` / `const`"),
       col("is_optional", "bool", "optional member or parameter"),
       col("is_ambient", "bool", "`declare`d or in a .d.ts"),
+      {
+        name: "form",
+        type: "symbol",
+        doc:
+          "the language's own construct, where `kind` is the nearest shared one: a Go `struct` or `defined_type` (`type Celsius float64`) is kind `class`, an `embedded` field kind `property`",
+        values: ["struct", "defined_type", "embedded"],
+        nullable: true,
+      },
     ],
   },
   {

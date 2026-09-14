@@ -42,8 +42,10 @@ violation("project symbol without a file", I) :- symbol(id: I, origin: project, 
 % An ambient `declare module "*.css"` resolves a specifier that names no file
 % and no package, so `target_ambient` is a target too — see `imports` in SCHEMA.md.
 violation("resolved import without a target", F) :-
-  imports(file: F, resolved: true, target_file: T, target_package: P, target_ambient: A),
-  T is absent, P is absent, A is absent.
+  imports(file: F, resolved: true, target_file: T, target_package: P, target_ambient: A, target_dir: D),
+  T is absent, P is absent, A is absent, D is absent.
+violation("imports.target_dir", D) :- imports(target_dir: D), D is not absent, not dir(path: D).
+violation("excluded_file is also a file", F) :- excluded_file(path: F), known_file(F).
 % A guess at a package is only for what did not resolve.
 violation("imports.unresolved_package on a resolved import", F) :-
   imports(file: F, resolved: true, unresolved_package: U), U is not absent.

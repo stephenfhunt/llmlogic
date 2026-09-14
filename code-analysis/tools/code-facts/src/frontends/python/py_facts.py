@@ -774,7 +774,7 @@ class Frontend:
             emit("file", path=src.path, dir=src.path.rsplit("/", 1)[0] if "/" in src.path else ".", package=src.package,
                  lang="pyi" if src.path.endswith(".pyi") else "py", loc=src.text.count("\n") + (0 if src.text.endswith("\n") else 1),
                  sloc=sloc(src.text), is_test=bool(TEST_PATH.search(src.path)), is_decl=src.path.endswith(".pyi"),
-                 is_generated=bool(GENERATED.search(src.text[:600]) or GENERATED_PATH.search(src.path)))
+                 is_generated=bool(GENERATED.search(src.text[:600]) or GENERATED_PATH.search(src.path)), namespace=src.module)
         for d, (name, data) in sorted(self.packages.items()):
             proj = data.get("project") or {}
             emit("package", name=name, dir=self.rel(d), version=proj.get("version"), private=False)
