@@ -217,6 +217,49 @@ Also reported: rounds per stratum and runs per relation, which price the merge
 policy. `perf stat` goes beside every time (instructions, cycles, cache misses),
 since the shared-tuple failure hid behind equal instruction counts.
 
+## Step 2, measured (2026-09-14): correct, and 30% slower
+
+`d9a4c5e`, the flat store and sorted runs, passes every correctness gate. The
+harness diff is empty over 1,109 cases, and deep seeds 2 and 3 pass 514 of 514.
+It fails the performance gate. Release CLI, medians of 3, runs interleaved with
+the `efcda71` baseline:
+
+| program | `efcda71` | `d9a4c5e` | cycles | cache misses | RSS |
+|---|---|---|---|---|---|
+| `pointsto.dl` | 10.54 s | 13.75 s | 46.4 → 61.1 G | 226 → 305 M | 520 → 560 MB |
+| `pointsto.dl` `?why` | 9.13 s | 9.46 s | 40.2 → 41.7 G | 199 → 143 M | 828 → 790 MB |
+| `callreach.dl` `?why` | 1.45 s | 1.41 s | 5.9 → 5.8 G | 34 → 32 M | 382 → 375 MB |
+| `sparse_800` | 1.26 s | 1.62 s | 5.4 → 7.3 G | 14 → 19 M | 126 → 95 MB |
+
+Instructions are flat or lower (`sparse_800` 12.8 → 11.0 G) while cycles rise: the
+cost is memory access, the shape the shared tuples had.
+
+- **Profiles.** `sparse_800` spends 31% in `Relation::contains`, plus most of 40%
+  in `memcmp` under it: a head check binary-searches up to 12 runs through the
+  store. `pointsto.dl` gains `partition_point` (5%), `Value::partial_cmp` (7.5%)
+  and glibc's `unlink_chunk` (2% → 7%).
+- **Runs are few.** `pointsto.dl` has 44 of 54 relations in one run and 9 at most.
+  `callreach.dl` has 4 on `reaches`, and `sparse_800` 12 on `path` (637,603 rows;
+  the bound allows 21).
+- **Experiments**, each a scratch build of `d9a4c5e`:
+
+  | variant | `pointsto.dl` | `sparse_800` | reading |
+  |---|---|---|---|
+  | E1: seek cursors on the stack, no per-seek `Vec` | 13.90 s | 1.63 s | not it |
+  | E2: E1 with `Ord::cmp` for slice `<` | 13.86 s | 1.62 s | not it |
+  | E3: E2 with all older runs merged at every apply (≤ 2 runs) | 13.36 s | 1.84 s | merging costs more than the runs it saves |
+  | E4: E2 with each written row's emptied buffer leaked | **11.94 s**, misses 202 M | 1.52 s, 137 MB | **freed row buffers are most of `pointsto.dl`'s cost** |
+
+**What it says.** The two costs are separate.
+- **Freed row buffers.** `load_base` and `apply` move each row's values into the
+  store and free the row's own `Vec`. That is 508 K imported rows on
+  `pointsto.dl`, and the holes they leave cost what they cost the shared tuples.
+  Leaking them recovers about 57% of that program's regression. These are the
+  per-row `Vec`s that review answer 3 deferred until the gate showed them.
+- **Reading rows through runs.** The rest, and most of `sparse_800`'s cost, is
+  membership and seeking by binary search through the store: review answer 2's
+  condition for a content-to-row hash.
+
 ## Rules the build must keep
 
 - **Delta is the rows this stratum's previous apply wrote, not the newest run.** A
