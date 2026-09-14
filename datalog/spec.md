@@ -2609,6 +2609,17 @@ never say.
     **B14b**.
   - **The deep gate is seeds 2 and 3.** B5 at `Deep` draws pathological programs
     at seed 1 and at a random seed; these are not chased (the user's).
+  ***Consequences 2026-09-14 (later)*** — step 2 landed correct and 30% slower on
+  `pointsto.dl` and `sparse_800`. Two review answers were reversed on measurement
+  (`notes/fact-store.md` § Step 2, measured).
+  - **Imports no longer stay in `Program.facts`.** They are flat blocks, and so
+    is the raw table. The loader's freed per-row buffers were `pointsto.dl`'s
+    cost.
+  - **Membership is a hash index of row ids, not a binary search per run** (the
+    user's call). `sparse_800` went from 1.64 to 0.92 s, against `efcda71`'s
+    1.24 s. **B15** guards it.
+  - **What remains:** `pointsto.dl` with no goals is 2.6% slower, in seeks
+    through runs.
 - **2026-09-13 (later iii)** — **A fact reference is a shared tuple, not an id**
   (engine, `ir::Tuple`; the user's call that references come next, and their
   question *why not a `&`?*). The design is in `notes/recorder-at-scale.md`

@@ -276,6 +276,23 @@ does not close `sparse_800`'s gap. Merging while the older run is at most 4× or
 8× the newer, not 2×, measured `sparse_800` at 1.59 and 1.62 s, and `pointsto.dl`
 at 10.69 and 10.59 s.
 
+**Membership by hash, `29378cd`** (the user's call; `engine/row_index.rs`,
+`testing.md` **B15**), against `efcda71` in one sitting:
+
+| program | `efcda71` | `de461ce` (runs) | `29378cd` (hash index) |
+|---|---|---|---|
+| `pointsto.dl` | 10.45 s, 512 MB | 10.73 s, 481 MB | 10.72 s, 531 MB |
+| `pointsto.dl` `?why` | 9.13 s, 825 MB | 8.93 s, 790 MB | 8.94 s, 809 MB |
+| `callreach.dl` `?why` | 1.44 s | 1.34 s | 1.30 s |
+| `sparse_800` | 1.24 s, 124 MB | 1.64 s, 95 MB | **0.92 s**, 104 MB; instructions 12.8 → 6.6 G |
+
+- **Beats the baseline:** three programs. `sparse_800` is 26% faster than
+  `efcda71`, and 44% faster than the runs alone.
+- **Still slower:** `pointsto.dl` with no goals, by 2.6% (cycles 46.6 → 48.3 G).
+  It has held at that across every measurement since `de461ce`, and its profile
+  puts the cost in seeks through runs.
+- **What the index costs:** about 50 MB on `pointsto.dl`.
+
 **What E6 said.** Two costs, and they are separate.
 - **Load-time holes (`pointsto.dl`, about 1.5 s).** `RawTable` holds one
   `Vec<RawValue>` per row, which `finalize` consumes and `arrange`'s reorder
