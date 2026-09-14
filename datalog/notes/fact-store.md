@@ -260,8 +260,18 @@ cost the time. Three follow-ups separate them. Each row below is measured agains
 | `5f27f41`: imports flat end to end, never a `Vec` per row | 13.54 s, 479 MB | 1.62 s | memory −79 MB, time unchanged |
 | E5: `5f27f41` with derived rows' buffers leaked | 13.37 s | 1.53 s | derived rows are not `pointsto.dl`'s cost |
 | E6: `5f27f41` with the loader's *raw* row buffers leaked | **12.09 s**, 778 MB, misses 214 M | 1.61 s | **the holes that matter are the loader's** |
+| `de461ce`: the raw table flat too | **10.77 s**, 492 MB, misses 176 M | 1.64 s | **the load-time holes are gone** |
 
-**What it says now.** Two costs remain, and they are separate.
+**At `de461ce`**, against `efcda71` in one sitting:
+- `pointsto.dl` 10.45 → 10.77 s, 524 → 492 MB, and cache misses 221 → 176 M;
+- its `?why` 9.12 → 8.93 s and 824 → 779 MB;
+- `callreach.dl` `?why` 1.44 → 1.33 s;
+- `sparse_800` 1.25 → 1.64 s.
+
+The first cost below is fixed. The second is what remains, and `sparse_800` has
+no imports.
+
+**What E6 said.** Two costs, and they are separate.
 - **Load-time holes (`pointsto.dl`, about 1.5 s).** `RawTable` holds one
   `Vec<RawValue>` per row, which `finalize` consumes and `arrange`'s reorder
   replaces. Both free a buffer per row among live data. In `efcda71` and step 1
