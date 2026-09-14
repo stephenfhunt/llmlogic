@@ -357,6 +357,20 @@ Value layer (`src/ir.rs`):
   duration (§14).
 - [x] **A5** `Fact` set semantics: `HashSet` size equals Ord-dedup size under
   arbitrary duplication.
+- [x] **A17** Interned equality is content equality (§17 2026-09-14,
+  `notes/interning.md`). `ir::tests::properties::a17_interned_equality_is_content_equality`
+  draws pairs of texts: one rebuilt in a fresh allocation, one with a character
+  replaced, or an unrelated one, over one- and multi-byte characters and empty
+  texts. Two `Sym`s are equal exactly when their texts are, hash alike when equal,
+  and order as `str` does. So do the `Value`s made from them, and a symbol never
+  equals the string of its text.
+  - *Mutations (both killed):* interning a text already held into a fresh copy
+    (A17 among 121 red); ordering by pointer (A17 among 15). No B-series
+    differential catches the second, since both sides share the order.
+  - Guard: `a17_generator_reaches_equal_near_and_ordered_texts`. Of 400 draws:
+    equal and non-empty 137, the same length but different 108, less 120,
+    greater 92, with an empty text 115, with a multi-byte text 284. Floors at two
+    thirds.
 
 **The value pools reached all eight types on 2026-08-20, not before.**
 `arb_constant` drew symbol/string/int/float/bool and `arb_value` carried an

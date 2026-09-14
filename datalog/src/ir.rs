@@ -188,13 +188,82 @@ impl Ord for F64 {
     }
 }
 
+/// A symbol's or string's text, held once for the process (§17 2026-09-14,
+/// `notes/interning.md`). Equal texts are one reference, so equality and hashing
+/// compare pointers; order compares the texts, which is §14's order. The field is
+/// private: every `Sym` comes from the interner, and pointer equality is content
+/// equality only because of that. The interner never frees a text, which is the
+/// design's recorded cost for a long-lived process.
+#[derive(Clone, Copy)]
+pub struct Sym(&'static str);
+
+impl Sym {
+    /// The text, interned: the one `Sym` held for it, made on first sight.
+    pub fn intern(text: &str) -> Sym {
+        use std::collections::HashSet;
+        use std::sync::{Mutex, OnceLock};
+        static INTERNER: OnceLock<Mutex<HashSet<&'static str>>> = OnceLock::new();
+        let mut held = INTERNER
+            .get_or_init(Default::default)
+            .lock()
+            .expect("the interner's lock is not poisoned");
+        if let Some(&existing) = held.get(text) {
+            return Sym(existing);
+        }
+        let text: &'static str = Box::leak(text.to_owned().into_boxed_str());
+        held.insert(text);
+        Sym(text)
+    }
+
+    /// The text.
+    pub fn as_str(&self) -> &'static str {
+        self.0
+    }
+}
+
+impl PartialEq for Sym {
+    fn eq(&self, other: &Sym) -> bool {
+        std::ptr::eq(self.0, other.0)
+    }
+}
+
+impl Eq for Sym {}
+
+impl Hash for Sym {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        (self.0.as_ptr() as usize).hash(state);
+    }
+}
+
+impl Ord for Sym {
+    fn cmp(&self, other: &Sym) -> std::cmp::Ordering {
+        if std::ptr::eq(self.0, other.0) {
+            std::cmp::Ordering::Equal
+        } else {
+            self.0.cmp(other.0)
+        }
+    }
+}
+
+impl PartialOrd for Sym {
+    fn partial_cmp(&self, other: &Sym) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl std::fmt::Debug for Sym {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(self.0, f)
+    }
+}
+
 /// A ground value: the missing-data value [`absent`](Value::Absent), or one of
 /// the five primitive types (§4).
 ///
 /// The derived `Ord` fixes the canonical cross-type sort order — absent <
 /// symbol < string < int < float < bool, then within-type — used for
-/// deterministic output (§14). Symbols are plain `String`s in v1; interning is
-/// a deferred drop-in behind this single choke point (§17).
+/// deterministic output (§14). A symbol's or string's text is a [`Sym`], held once
+/// for the process (§17 2026-09-14, `notes/interning.md`).
 ///
 /// # Two notions of "same" (§4)
 ///
@@ -232,8 +301,8 @@ pub enum Value {
     /// two-valued (annihilates in arithmetic, false in comparisons). First
     /// variant so the derived `Ord` sorts it before every typed value.
     Absent,
-    Symbol(String),
-    String(String),
+    Symbol(Sym),
+    String(Sym),
     Int(i64),
     Float(F64),
     Bool(bool),
@@ -247,6 +316,16 @@ pub enum Value {
 }
 
 impl Value {
+    /// The symbol `text`, interned.
+    pub fn symbol(text: &str) -> Value {
+        Value::Symbol(Sym::intern(text))
+    }
+
+    /// The string `text`, interned.
+    pub fn string(text: &str) -> Value {
+        Value::String(Sym::intern(text))
+    }
+
     /// Is this the missing-data value? A **structural** test — `absent` is
     /// perfectly identifiable, it just does not *match* anything (§4).
     pub fn is_absent(&self) -> bool {
@@ -641,7 +720,7 @@ pub(crate) mod fixtures {
     use crate::ast::Span;
 
     pub(crate) fn string_value(s: &str) -> Value {
-        Value::String(s.to_string())
+        Value::string(s)
     }
 
     pub(crate) fn fact2(pred: PredId, a: &str, b: &str) -> Fact {
@@ -1021,8 +1100,8 @@ mod tests {
             Value::Bool(false),
             Value::Float(F64::new(1.0).unwrap()),
             Value::Int(5),
-            Value::String("a".to_string()),
-            Value::Symbol("z".to_string()),
+            Value::string("a"),
+            Value::symbol("z"),
         ];
         values.sort();
         assert!(matches!(values[0], Value::Symbol(_)));
@@ -1034,10 +1113,7 @@ mod tests {
 
     #[test]
     fn symbols_and_strings_never_compare_equal() {
-        assert_ne!(
-            Value::Symbol("alice".to_string()),
-            Value::String("alice".to_string())
-        );
+        assert_ne!(Value::symbol("alice"), Value::string("alice"));
     }
 
     #[test]
@@ -1063,7 +1139,7 @@ mod tests {
         assert_eq!(program.pred_info(a).name, "ancestor");
     }
 
-    // --- Phase A properties A1–A5 (testing.md) ---
+    // --- Phase A properties A1–A5 and A17 (testing.md) ---
 
     mod properties {
         use std::collections::HashSet;
@@ -1078,6 +1154,38 @@ mod tests {
             let mut hasher = DefaultHasher::new();
             value.hash(&mut hasher);
             hasher.finish()
+        }
+
+        /// The characters texts are drawn from: one-byte and multi-byte.
+        const TEXT_CHARS: [char; 4] = ['a', 'b', 'é', '日'];
+
+        /// Two texts: the first text rebuilt in a fresh allocation, the first text
+        /// with one character replaced, or an unrelated draw. Either may be empty.
+        fn arb_text_pair() -> impl Strategy<Value = (String, String)> {
+            let text = || {
+                proptest::collection::vec(prop::sample::select(TEXT_CHARS.to_vec()), 0..4)
+                    .prop_map(|chars| chars.into_iter().collect::<String>())
+            };
+            (
+                text(),
+                text(),
+                0usize..3,
+                any::<prop::sample::Index>(),
+                prop::sample::select(TEXT_CHARS.to_vec()),
+            )
+                .prop_map(|(first, unrelated, shape, at, replacement)| {
+                    let mut chars: Vec<char> = first.chars().collect();
+                    let second = match shape {
+                        0 => chars.into_iter().collect(),
+                        1 if !chars.is_empty() => {
+                            let position = at.index(chars.len());
+                            chars[position] = replacement;
+                            chars.into_iter().collect()
+                        }
+                        _ => unrelated,
+                    };
+                    (first, second)
+                })
         }
 
         /// Rank of a value's type in the canonical cross-type order (§14):
@@ -1189,7 +1297,90 @@ mod tests {
                     prop_assert!(hashed.contains(fact));
                 }
             }
+
+            /// **A17** — interned equality is content equality. Two interned texts
+            /// are equal exactly when the texts are, hash alike when equal, and
+            /// order as the texts do; so do the symbol and string values made from
+            /// them, and a symbol never equals the string of the same text.
+            ///
+            /// The oracle is `str`'s own `Eq` and `Ord`.
+            ///
+            /// *Mutations (killed):* recorded on `testing.md`'s A17 line.
+            #[test]
+            fn a17_interned_equality_is_content_equality((first, second) in arb_text_pair()) {
+                let (x, y) = (Sym::intern(&first), Sym::intern(&second));
+                prop_assert_eq!(x.as_str(), first.as_str());
+                prop_assert_eq!(y.as_str(), second.as_str());
+                prop_assert_eq!(x == y, first == second);
+                if x == y {
+                    prop_assert_eq!(hash_of(&x), hash_of(&y));
+                }
+                prop_assert_eq!(x.cmp(&y), first.cmp(&second));
+                prop_assert_eq!(Value::symbol(&first) == Value::symbol(&second), first == second);
+                prop_assert_eq!(
+                    Value::string(&first).cmp(&Value::string(&second)),
+                    first.cmp(&second)
+                );
+                prop_assert_ne!(Value::symbol(&first), Value::string(&first));
+            }
         }
+
+        /// **A17's non-vacuity guard**, read against its sentence: pairs of equal
+        /// texts in separate allocations, pairs of the same length differing in a
+        /// character, both orders, empty texts and multi-byte texts are all drawn.
+        /// Floors at about two thirds of what was measured, of 400: equal 137, near 108,
+        /// less 120, greater 92, empty 115, multi-byte 284.
+        #[test]
+        fn a17_generator_reaches_equal_near_and_ordered_texts() {
+            use proptest::strategy::ValueTree;
+            use proptest::test_runner::TestRunner;
+
+            let mut runner = TestRunner::deterministic();
+            let strategy = arb_text_pair();
+            let (mut equal, mut near, mut less, mut greater, mut empty, mut multibyte) =
+                (0, 0, 0, 0, 0, 0);
+            for _ in 0..400 {
+                let (first, second) = strategy
+                    .new_tree(&mut runner)
+                    .expect("strategy produces a value")
+                    .current();
+                match first.cmp(&second) {
+                    std::cmp::Ordering::Equal if !first.is_empty() => equal += 1,
+                    std::cmp::Ordering::Less => less += 1,
+                    std::cmp::Ordering::Greater => greater += 1,
+                    _ => {}
+                }
+                if first != second && first.chars().count() == second.chars().count() {
+                    near += 1;
+                }
+                if first.is_empty() || second.is_empty() {
+                    empty += 1;
+                }
+                if !first.is_ascii() || !second.is_ascii() {
+                    multibyte += 1;
+                }
+            }
+            eprintln!(
+                "equal {equal}, near {near}, less {less}, greater {greater}, empty {empty}, multibyte {multibyte}"
+            );
+            for (name, count, floor) in [
+                ("equal non-empty", equal, 91),
+                ("same length, different", near, 72),
+                ("less", less, 80),
+                ("greater", greater, 61),
+                ("with an empty text", empty, 77),
+                ("with a multi-byte text", multibyte, 189),
+            ] {
+                assert!(count >= floor, "{name}: {count} pairs (floor {floor})");
+            }
+        }
+    }
+
+    #[test]
+    fn a_value_is_a_tag_and_a_string_reference_wide() {
+        // A `Sym` is a pointer and a length, where a `String` added a capacity.
+        assert_eq!(std::mem::size_of::<Sym>(), 16);
+        assert_eq!(std::mem::size_of::<Value>(), 24);
     }
 
     #[test]

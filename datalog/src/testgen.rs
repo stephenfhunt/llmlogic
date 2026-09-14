@@ -112,8 +112,8 @@ pub(crate) fn arb_fact_constant() -> impl Strategy<Value = Constant> {
 /// The IR value a surface constant denotes.
 fn constant_value(constant: Constant) -> ir::Value {
     match constant {
-        Constant::Symbol(s) => ir::Value::Symbol(s),
-        Constant::String(s) => ir::Value::String(s),
+        Constant::Symbol(s) => ir::Value::symbol(&s),
+        Constant::String(s) => ir::Value::string(&s),
         Constant::Int(i) => ir::Value::Int(i),
         Constant::Float(f) => ir::Value::Float(ir::F64::new(f).expect("pool floats are not NaN")),
         Constant::Bool(b) => ir::Value::Bool(b),
@@ -2789,8 +2789,8 @@ pub(crate) fn fold_ground_atom_args(program: &Program) -> Program {
     /// The `ir::Value` a constant denotes, mirroring `Lowerer::lower_constant`.
     fn value_of(constant: &Constant) -> Option<ir::Value> {
         Some(match constant {
-            Constant::Symbol(s) => ir::Value::Symbol(s.clone()),
-            Constant::String(s) => ir::Value::String(s.clone()),
+            Constant::Symbol(s) => ir::Value::symbol(s),
+            Constant::String(s) => ir::Value::string(s),
             Constant::Int(i) => ir::Value::Int(*i),
             Constant::Bool(b) => ir::Value::Bool(*b),
             Constant::Absent => ir::Value::Absent,
@@ -2806,8 +2806,8 @@ pub(crate) fn fold_ground_atom_args(program: &Program) -> Program {
     /// The inverse, for writing the folded value back as source.
     fn constant_of(value: &ir::Value) -> Option<Constant> {
         Some(match value {
-            ir::Value::Symbol(s) => Constant::Symbol(s.clone()),
-            ir::Value::String(s) => Constant::String(s.clone()),
+            ir::Value::Symbol(s) => Constant::Symbol(s.as_str().to_owned()),
+            ir::Value::String(s) => Constant::String(s.as_str().to_owned()),
             ir::Value::Int(i) => Constant::Int(*i),
             ir::Value::Bool(b) => Constant::Bool(*b),
             ir::Value::Float(f) => Constant::Float(f.get()),

@@ -931,7 +931,7 @@ impl Lowerer {
                 self.errors.push(
                     self.semantic(
                         ErrorCode::BuiltinMisuse,
-                        format!("`{name}` is not a truncation unit"),
+                        format!("`{}` is not a truncation unit", name.as_str()),
                     )
                     .suggest(format!(
                         "one of: {}",
@@ -1274,8 +1274,8 @@ impl Lowerer {
 
     fn lower_constant(&mut self, constant: &ast::Constant) -> ir::Value {
         match constant {
-            ast::Constant::Symbol(s) => ir::Value::Symbol(s.clone()),
-            ast::Constant::String(s) => ir::Value::String(s.clone()),
+            ast::Constant::Symbol(s) => ir::Value::symbol(s),
+            ast::Constant::String(s) => ir::Value::string(s),
             ast::Constant::Int(i) => ir::Value::Int(*i),
             ast::Constant::Bool(b) => ir::Value::Bool(*b),
             ast::Constant::Absent => ir::Value::Absent,
@@ -2795,10 +2795,7 @@ mod tests {
             other => panic!("expected a positive atom, got {other:?}"),
         };
         assert_eq!(args.len(), 4, "atom carries full arity");
-        assert_eq!(
-            args[3],
-            ir::Term::Const(ir::Value::String("manager".into()))
-        );
+        assert_eq!(args[3], ir::Term::Const(ir::Value::string("manager")));
 
         // id and dept are fresh, unnamed, and distinct from each other.
         let fresh: Vec<ir::Var> = [0, 2]
@@ -3819,7 +3816,7 @@ mod tests {
                 .expect("next_year predicate") as u32,
         );
         let expected: std::collections::BTreeSet<ir::Tuple> = std::iter::once(ir::Tuple(vec![
-            ir::Value::String("alice".to_string()),
+            ir::Value::string("alice"),
             ir::Value::Int(31),
         ]))
         .collect();

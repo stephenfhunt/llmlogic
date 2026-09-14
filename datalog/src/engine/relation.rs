@@ -413,8 +413,8 @@ mod tests {
     fn arb_cell() -> impl Strategy<Value = Value> {
         prop_oneof![
             4 => prop_oneof![
-                Just(Value::Symbol("a".to_string())),
-                Just(Value::Symbol("b".to_string())),
+                Just(Value::symbol("a")),
+                Just(Value::symbol("b")),
                 Just(Value::Int(1)),
                 Just(Value::Int(2)),
                 Just(Value::Absent),
@@ -551,8 +551,8 @@ mod tests {
             prop_assert_eq!(&rows, &ledger.held.iter().cloned().collect::<Vec<_>>());
             prop_assert_eq!(relation.len(), ledger.held.len());
             let cells = [
-                Value::Symbol("a".to_string()),
-                Value::Symbol("b".to_string()),
+                Value::symbol("a"),
+                Value::symbol("b"),
                 Value::Int(1),
                 Value::Int(2),
                 Value::Absent,
@@ -597,7 +597,7 @@ mod tests {
     }
 
     fn symbol(name: &str) -> Value {
-        Value::Symbol(name.to_string())
+        Value::symbol(name)
     }
 
     /// The cases the properties are too coarse to pin: an empty prefix, and a

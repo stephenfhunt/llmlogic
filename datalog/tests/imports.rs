@@ -76,7 +76,7 @@ fn write_jsonl(keys: &[String], rows: &[Vec<Value>]) -> String {
 
 fn json_value(value: &Value) -> String {
     match value {
-        Value::String(s) => json_string(s),
+        Value::String(s) => json_string(s.as_str()),
         Value::Int(n) => n.to_string(),
         // `{:?}` is the shortest round-tripping form and is JSON-legal.
         Value::Float(f) => format!("{:?}", f.get()),
@@ -135,7 +135,7 @@ fn type_name(ty: TypeName) -> &'static str {
 /// quotes are — a CSV cell holds `2026-08-19`, not `@2026-08-19`.
 fn cell_text(value: &Value) -> String {
     match value {
-        Value::String(s) => s.clone(),
+        Value::String(s) => s.as_str().to_owned(),
         Value::Date(d) => d.to_string(),
         Value::Timestamp(t) => t.to_string(),
         Value::Duration(d) => d.to_string(),
@@ -203,7 +203,11 @@ fn arb_typed_column(rows: usize) -> BoxedStrategy<Vec<Value>> {
         )
         .boxed(),
         proptest::collection::vec(any::<bool>().prop_map(Value::Bool), rows..=rows).boxed(),
-        proptest::collection::vec(arb_cell().prop_map(Value::String), rows..=rows).boxed(),
+        proptest::collection::vec(
+            arb_cell().prop_map(|cell| Value::string(&cell)),
+            rows..=rows
+        )
+        .boxed(),
     ]
     .boxed()
 }
@@ -233,7 +237,7 @@ proptest! {
         let expected = as_set(
             table
                 .iter()
-                .map(|row| row.iter().cloned().map(Value::String).collect())
+                .map(|row| row.iter().map(|cell| Value::string(cell)).collect())
                 .collect(),
         );
         prop_assert_eq!(table_rows(&loaded), expected);
@@ -439,20 +443,20 @@ fn f7_parquet_round_trip() {
         vec![
             vec![
                 Value::Int(1),
-                Value::String("alice".to_string()),
+                Value::string("alice"),
                 f(9.5),
                 Value::Bool(true),
             ],
             vec![
                 Value::Int(2),
-                Value::String("bob, \"the builder\"".to_string()),
+                Value::string("bob, \"the builder\""),
                 f(-0.25),
                 Value::Bool(false),
             ],
             vec![
                 Value::Int(3),
                 // A VARCHAR `42` stays a string: the file is the authority.
-                Value::String("42".to_string()),
+                Value::string("42"),
                 f(3.0),
                 Value::Bool(true),
             ],
@@ -538,9 +542,9 @@ fn csv_empty_cell_is_absent_and_keeps_the_column_numeric() {
     assert_eq!(
         table_rows(&loaded),
         vec![
-            vec![Value::String("apple".into()), Value::Int(5)],
-            vec![Value::String("banana".into()), Value::Absent],
-            vec![Value::String("cherry".into()), Value::Int(7)],
+            vec![Value::string("apple"), Value::Int(5)],
+            vec![Value::string("banana"), Value::Absent],
+            vec![Value::string("cherry"), Value::Int(7)],
         ]
     );
 }
@@ -595,8 +599,8 @@ fn csv_quoted_empty_is_a_string_unquoted_empty_is_absent() {
     assert_eq!(
         table_rows(&loaded),
         vec![
-            vec![Value::String("apple".into()), Value::String(String::new())],
-            vec![Value::String("banana".into()), Value::Absent],
+            vec![Value::string("apple"), Value::string("")],
+            vec![Value::string("banana"), Value::Absent],
         ]
     );
 }
@@ -798,7 +802,7 @@ fn a_declared_timestamp_reads_what_inference_leaves_alone() {
     let inferred = load_table(path.to_str().unwrap(), None, None).expect("loads");
     assert_eq!(
         table_rows(&inferred)[0][0],
-        Value::String("2026-08-19 10:30:00".to_string()),
+        Value::string("2026-08-19 10:30:00"),
         "inference is strict about the form"
     );
 

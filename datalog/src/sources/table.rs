@@ -165,9 +165,9 @@ pub(crate) fn finalize(
     };
 
     // Every column's type is fixed before any cell is converted, so the raw rows
-    // can then be consumed as they are typed: a cell's text moves into its value
-    // instead of being copied, and a table is held once rather than three times
-    // over (`notes/memory-profile-2026-09-12.md`). Errors still come out column
+    // can then be consumed as they are typed: each cell is freed once its interned
+    // value exists, and a table is held once rather than three times over
+    // (`notes/memory-profile-2026-09-12.md`). Errors still come out column
     // by column — a column whose type cannot be inferred reports only that.
     let mut types: Vec<Option<TypeName>> = Vec::with_capacity(arity);
     let mut column_errors: Vec<Vec<Error>> = Vec::with_capacity(arity);
@@ -195,7 +195,7 @@ pub(crate) fn finalize(
         for (col, cell) in data.row_mut(index).iter_mut().enumerate() {
             let Some(ty) = types[col] else { continue };
             let cell = std::mem::replace(cell, RawValue::Absent);
-            match coerce(cell, ty) {
+            match coerce(&cell, ty) {
                 Ok(value) => values.push(value),
                 Err(reason) => column_errors[col].push(Error::new(
                     ErrorCode::UnconvertibleCell,
@@ -484,19 +484,7 @@ fn infer_column(
 
 /// Converts one cell to a declared/inferred column type, or returns the clause
 /// explaining why it could not (the caller prefixes source, row and column).
-///
-/// Takes the cell by value so a string column's text moves into its value —
-/// most of an import's bytes are strings, and this is the one arm that would
-/// otherwise copy them.
-fn coerce(value: RawValue, ty: TypeName) -> Result<Value, String> {
-    match (value, ty) {
-        (RawValue::Text(t) | RawValue::Str(t), TypeName::String) => Ok(Value::String(t)),
-        (value, ty) => coerce_borrowed(&value, ty),
-    }
-}
-
-/// [`coerce`] for every cell whose value is not moved.
-fn coerce_borrowed(value: &RawValue, ty: TypeName) -> Result<Value, String> {
+fn coerce(value: &RawValue, ty: TypeName) -> Result<Value, String> {
     let fail = |value: &RawValue| Err(format!("{} is not {}", render(value), type_label(ty)));
     // A missing value inhabits any column (§4): it is coerced to `absent`
     // regardless of the column's type, and is never a type violation. Real
@@ -532,12 +520,12 @@ fn coerce_borrowed(value: &RawValue, ty: TypeName) -> Result<Value, String> {
             _ => fail(value),
         },
         TypeName::String => match value {
-            RawValue::Text(t) | RawValue::Str(t) => Ok(Value::String(t.clone())),
+            RawValue::Text(t) | RawValue::Str(t) => Ok(Value::string(t)),
             _ => fail(value),
         },
         TypeName::Symbol => match value {
             RawValue::Text(t) | RawValue::Str(t) => match classify_symbol(t) {
-                Some(name) => Ok(Value::Symbol(name)),
+                Some(name) => Ok(Value::symbol(&name)),
                 None => fail(value),
             },
             _ => fail(value),
@@ -719,10 +707,7 @@ mod tests {
         let table = ok(csv(&[&["b"], &["TRUE"], &["false"]]), None);
         assert_eq!(
             table_rows(&table),
-            vec![
-                vec![Value::String("TRUE".to_string())],
-                vec![Value::String("false".to_string())],
-            ]
+            vec![vec![Value::string("TRUE")], vec![Value::string("false")],]
         );
     }
 
@@ -760,10 +745,7 @@ mod tests {
         let table = ok(csv(&[&["n"], &["1"], &[""]]), None);
         assert_eq!(
             table_rows(&table),
-            vec![
-                vec![Value::String(String::new())],
-                vec![Value::String("1".to_string())],
-            ]
+            vec![vec![Value::string("")], vec![Value::string("1")],]
         );
     }
 
@@ -794,9 +776,9 @@ mod tests {
         assert_eq!(
             strings,
             [
-                &Value::String("1 2".to_string()),
-                &Value::String("NaN".to_string()),
-                &Value::String("inf".to_string()),
+                &Value::string("1 2"),
+                &Value::string("NaN"),
+                &Value::string("inf"),
             ]
         );
     }
@@ -812,7 +794,7 @@ mod tests {
             Value::Float(_) => assert!(lexes_as_float),
             Value::String(s) => {
                 assert!(!lexes_as_float);
-                assert_eq!(s, cell);
+                assert_eq!(s.as_str(), cell);
             }
             other => panic!("unexpected value {other:?}"),
         }
@@ -832,10 +814,7 @@ mod tests {
     fn explicit_string_keeps_a_numeric_cell_verbatim() {
         let schema = [field("code", Some(TypeName::String))];
         let table = ok(csv(&[&["42"]]), Some(&schema));
-        assert_eq!(
-            table_rows(&table),
-            vec![vec![Value::String("42".to_string())]]
-        );
+        assert_eq!(table_rows(&table), vec![vec![Value::string("42")]]);
     }
 
     #[test]
@@ -844,10 +823,7 @@ mod tests {
         let table = ok(csv(&[&["red"], &["blue"]]), Some(&schema));
         assert_eq!(
             table_rows(&table),
-            vec![
-                vec![Value::Symbol("blue".to_string())],
-                vec![Value::Symbol("red".to_string())],
-            ]
+            vec![vec![Value::symbol("blue")], vec![Value::symbol("red")],]
         );
 
         // Uppercase-initial text is a variable, not a symbol literal.
@@ -1059,10 +1035,7 @@ mod tests {
         );
         assert_eq!(
             table_rows(&table),
-            vec![
-                vec![Value::String("42".to_string())],
-                vec![Value::String("true".to_string())],
-            ]
+            vec![vec![Value::string("42")], vec![Value::string("true")],]
         );
     }
 

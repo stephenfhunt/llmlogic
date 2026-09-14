@@ -113,7 +113,7 @@ mod tests {
     }
 
     fn sym(s: &str) -> Value {
-        Value::Symbol(s.to_string())
+        Value::symbol(s)
     }
 
     fn relation(tuples: &[&[Value]]) -> BTreeSet<Tuple> {

@@ -1066,7 +1066,7 @@ mod tests {
         for (name, years) in [("alice", 30), ("bob", 15)] {
             program.facts.push(Fact {
                 pred: age,
-                tuple: Tuple(vec![Value::String(name.to_string()), Value::Int(years)]),
+                tuple: Tuple(vec![Value::string(name), Value::Int(years)]),
             });
         }
         program.rules.push(Rule {
@@ -1101,14 +1101,11 @@ mod tests {
         let age = program.intern_pred("age", 2);
         program.facts.push(Fact {
             pred: age,
-            tuple: Tuple(vec![Value::String("bob".to_string()), Value::Int(30)]),
+            tuple: Tuple(vec![Value::string("bob"), Value::Int(30)]),
         });
         program.facts.push(Fact {
             pred: age,
-            tuple: Tuple(vec![
-                Value::String("carol".to_string()),
-                Value::String("old".to_string()),
-            ]),
+            tuple: Tuple(vec![Value::string("carol"), Value::string("old")]),
         });
         let errors = typecheck(&program).expect_err("type conflict");
         assert!(
@@ -1132,7 +1129,7 @@ mod tests {
         });
         program.facts.push(Fact {
             pred: q,
-            tuple: Tuple(vec![Value::String("x".to_string())]),
+            tuple: Tuple(vec![Value::string("x")]),
         });
         program.rules.push(Rule {
             head: atom(r, vec![Term::Var(Var(0))]),
@@ -1194,7 +1191,7 @@ mod tests {
         let t = program.intern_pred("t", 1);
         program.facts.push(Fact {
             pred: p,
-            tuple: Tuple(vec![Value::String("x".to_string())]),
+            tuple: Tuple(vec![Value::string("x")]),
         });
         program.rules.push(Rule {
             head: atom(t, vec![Term::Var(Var(0))]),
@@ -1203,7 +1200,7 @@ mod tests {
                 lit(BodyLiteralKind::Compare {
                     op: CmpOp::Gt,
                     lhs: Expr::Term(Term::Var(Var(0))),
-                    rhs: Expr::Term(Term::Const(Value::String("a".to_string()))),
+                    rhs: Expr::Term(Term::Const(Value::string("a"))),
                 }),
             ],
             var_names: vec![Some("X".to_string())],
@@ -1223,7 +1220,7 @@ mod tests {
         let t = program.intern_pred("t", 1);
         program.facts.push(Fact {
             pred: p,
-            tuple: Tuple(vec![Value::String("x".to_string())]),
+            tuple: Tuple(vec![Value::string("x")]),
         });
         program.rules.push(Rule {
             head: atom(t, vec![Term::Var(Var(0))]),
@@ -1267,7 +1264,7 @@ mod tests {
         let person = program.intern_pred("person", 2);
         program.facts.push(Fact {
             pred: person,
-            tuple: Tuple(vec![Value::String("alice".to_string()), Value::Int(30)]),
+            tuple: Tuple(vec![Value::string("alice"), Value::Int(30)]),
         });
         declare_schema(
             &mut program,
@@ -1290,7 +1287,7 @@ mod tests {
         let person = program.intern_pred("person", 2);
         program.facts.push(Fact {
             pred: person,
-            tuple: Tuple(vec![Value::String("alice".to_string()), Value::Int(30)]),
+            tuple: Tuple(vec![Value::string("alice"), Value::Int(30)]),
         });
         declare_schema(
             &mut program,
@@ -1318,7 +1315,7 @@ mod tests {
         let person = program.intern_pred("person", 2);
         program.facts.push(Fact {
             pred: person,
-            tuple: Tuple(vec![Value::String("alice".to_string()), Value::Int(30)]),
+            tuple: Tuple(vec![Value::string("alice"), Value::Int(30)]),
         });
         declare_schema(&mut program, person, &[("name", None), ("age", None)]);
         let env = typecheck(&program).expect("untyped declaration adds no constraint");

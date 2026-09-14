@@ -1990,15 +1990,16 @@ fn truncate_value(args: &[Value]) -> Result<Value> {
             ),
         ));
     };
+    let unit = unit.as_str();
     match value {
         Value::Date(date) => truncate_date(*date, unit).map(Value::Date),
         Value::Timestamp(timestamp) => {
             let (_, _, _, hour, minute, _, _) = timestamp.parts();
-            match unit.as_str() {
+            match unit {
                 // Below a day the period lives inside the timestamp itself.
                 "hour" | "minute" => {
                     let date = truncate_date(timestamp.date(), "day")?;
-                    let kept = match unit.as_str() {
+                    let kept = match unit {
                         "hour" => hour * 3_600_000_000,
                         _ => hour * 3_600_000_000 + minute * 60_000_000,
                     };
@@ -2135,7 +2136,7 @@ pub(super) fn apply_cast(value: Value, ty: TypeName) -> Result<Value> {
             Value::Float(f) => f64_as_exact_i64(f.get())
                 .map(Value::Int)
                 .ok_or_else(|| lossy(&value, ty)),
-            Value::String(s) => Ok(match classify_cell(s) {
+            Value::String(s) => Ok(match classify_cell(s.as_str()) {
                 CellClass::Int(n) => Value::Int(n),
                 _ => Value::Absent,
             }),
@@ -2144,7 +2145,7 @@ pub(super) fn apply_cast(value: Value, ty: TypeName) -> Result<Value> {
         TypeName::Float => match &value {
             Value::Float(_) => Ok(value),
             Value::Int(n) => widen(*n, &value),
-            Value::String(s) => match classify_cell(s) {
+            Value::String(s) => match classify_cell(s.as_str()) {
                 CellClass::Float(f) => F64::new(f).map(Value::Float),
                 // An integral string widens under the same exactness rule a
                 // literal int does — §13's import coercion reads a float column
@@ -2156,7 +2157,7 @@ pub(super) fn apply_cast(value: Value, ty: TypeName) -> Result<Value> {
         },
         TypeName::Bool => match &value {
             Value::Bool(_) => Ok(value),
-            Value::String(s) => Ok(match classify_cell(s) {
+            Value::String(s) => Ok(match classify_cell(s.as_str()) {
                 CellClass::Bool(b) => Value::Bool(b),
                 _ => Value::Absent,
             }),
@@ -2165,7 +2166,7 @@ pub(super) fn apply_cast(value: Value, ty: TypeName) -> Result<Value> {
         // Every typed value has a canonical spelling, so rendering is total:
         // this is the one column of the table with no failure mode. It is also
         // the §14 spelling, so `V as string` and printing `V` agree.
-        TypeName::String => Ok(Value::String(match &value {
+        TypeName::String => Ok(Value::string(&match &value {
             Value::String(_) => return Ok(value),
             // A temporal value renders **without** its `@` (§8): the sigil is a
             // delimiter the printer adds, exactly as a string's quotes are, and
@@ -2178,7 +2179,7 @@ pub(super) fn apply_cast(value: Value, ty: TypeName) -> Result<Value> {
         })),
         TypeName::Date => match &value {
             Value::Date(_) => Ok(value),
-            Value::String(s) => Ok(read_temporal(temporal::parse_date(s), Value::Date)),
+            Value::String(s) => Ok(read_temporal(temporal::parse_date(s.as_str()), Value::Date)),
             // Truncation is lossy, and `as` never truncates (§8) — so this is
             // the one refusal that names another construct as its fix, because
             // the thing the program wants does exist.
@@ -2198,22 +2199,25 @@ pub(super) fn apply_cast(value: Value, ty: TypeName) -> Result<Value> {
             // move midnight (§4).
             Value::Date(d) => Ok(Value::Timestamp(d.at_midnight())),
             Value::String(s) => Ok(read_temporal(
-                temporal::parse_timestamp(s),
+                temporal::parse_timestamp(s.as_str()),
                 Value::Timestamp,
             )),
             _ => undefined(),
         },
         TypeName::Duration => match &value {
             Value::Duration(_) => Ok(value),
-            Value::String(s) => Ok(read_temporal(temporal::parse_duration(s), Value::Duration)),
+            Value::String(s) => Ok(read_temporal(
+                temporal::parse_duration(s.as_str()),
+                Value::Duration,
+            )),
             _ => undefined(),
         },
         TypeName::Symbol => match &value {
             Value::Symbol(_) => Ok(value),
             // Not every string is a legal symbol — `"two words"` and `"Cap"`
             // are not identifiers — so this one can be unrepresentable.
-            Value::String(s) => Ok(match classify_symbol(s) {
-                Some(name) => Value::Symbol(name),
+            Value::String(s) => Ok(match classify_symbol(s.as_str()) {
+                Some(name) => Value::symbol(&name),
                 None => Value::Absent,
             }),
             _ => undefined(),
@@ -2532,7 +2536,7 @@ mod tests {
         );
         assert_eq!(apply_arith(ArithOp::Add, a.clone(), a.clone()).unwrap(), a);
         assert_eq!(
-            apply_arith(ArithOp::Mul, a.clone(), Value::String("x".into())).unwrap(),
+            apply_arith(ArithOp::Mul, a.clone(), Value::string("x")).unwrap(),
             a
         );
         assert_eq!(
@@ -2562,7 +2566,7 @@ mod tests {
             assert!(!apply_compare(op, &a, &Value::Int(5)).unwrap());
             assert!(!apply_compare(op, &Value::Int(5), &a).unwrap());
             // Against a cross-type operand: still false, not a type error.
-            assert!(!apply_compare(op, &a, &Value::String("s".into())).unwrap());
+            assert!(!apply_compare(op, &a, &Value::string("s")).unwrap());
             // Against another absent: still false (semantic absent ≠ absent).
             assert!(!apply_compare(op, &a, &a).unwrap());
         }
@@ -3050,10 +3054,10 @@ mod tests {
             Value::Float(F64::new(f).unwrap())
         }
         fn string(s: &str) -> Value {
-            Value::String(s.to_string())
+            Value::string(s)
         }
         fn symbol(s: &str) -> Value {
-            Value::Symbol(s.to_string())
+            Value::symbol(s)
         }
 
         // 2^53 + 1: the smallest positive integer with no exact `f64`.
@@ -3422,7 +3426,7 @@ mod tests {
                     kind: BodyLiteralKind::Compare {
                         op: CmpOp::Gt,
                         lhs: Expr::Term(Term::Var(Var(0))),
-                        rhs: Expr::Term(Term::Const(Value::String("a".to_string()))),
+                        rhs: Expr::Term(Term::Const(Value::string("a"))),
                     },
                     span: Span::DUMMY,
                 },
@@ -4956,7 +4960,7 @@ mod tests {
             };
             let fact = |name: &str, value: &str| Fact {
                 pred: pred(name),
-                tuple: Tuple(vec![Value::String(value.to_string())]),
+                tuple: Tuple(vec![Value::string(value)]),
             };
             let model = eval(&program).unwrap();
             let h = fact("h", "x");
@@ -5780,7 +5784,7 @@ mod tests {
                 let conflict = bad.intern_pred("conflict", 1);
                 bad.facts.push(Fact {
                     pred: conflict,
-                    tuple: Tuple(vec![Value::String("x".to_string())]),
+                    tuple: Tuple(vec![Value::string("x")]),
                 });
                 bad.facts.push(Fact {
                     pred: conflict,
@@ -6130,8 +6134,8 @@ mod tests {
                     .map(|(a, b)| Fact {
                         pred: parent,
                         tuple: Tuple(vec![
-                            Value::String(a.clone()),
-                            Value::String(b.clone()),
+                            Value::string(a),
+                            Value::string(b),
                         ]),
                     })
                     .collect();
@@ -6152,8 +6156,8 @@ mod tests {
                     }
                     for target in reachable {
                         expected.insert(Tuple(vec![
-                            Value::String(start.to_string()),
-                            Value::String(target.to_string()),
+                            Value::string(start),
+                            Value::string(target),
                         ]));
                     }
                 }
@@ -6228,13 +6232,13 @@ mod tests {
                     .iter()
                     .map(|p| Fact {
                         pred: person,
-                        tuple: Tuple(vec![Value::String(format!("n{p}"))]),
+                        tuple: Tuple(vec![Value::string(&format!("n{p}"))]),
                     })
                     .chain(edges.iter().map(|(a, b)| Fact {
                         pred: parent,
                         tuple: Tuple(vec![
-                            Value::String(a.clone()),
-                            Value::String(b.clone()),
+                            Value::string(a),
+                            Value::string(b),
                         ]),
                     }))
                     .collect();
@@ -6244,7 +6248,7 @@ mod tests {
                     .iter()
                     .map(|p| format!("n{p}"))
                     .filter(|p| edges.iter().all(|(_, child)| child != p))
-                    .map(|p| Tuple(vec![Value::String(p)]))
+                    .map(|p| Tuple(vec![Value::string(&p)]))
                     .collect();
                 prop_assert_eq!(model.relation(root), &expected);
             }
