@@ -345,6 +345,30 @@ Experiments on the tip:
   consequences 2026-09-14 (later ii)). From here, the performance gate includes
   `q_coh.dl`, `lib/cohesion.dl` and `lib/flow.dl`.
 
+### At merge factor 8 (`7ecfc33`, the user's call), the widened gate
+
+Against `efcda71`, medians of 2, runs interleaved:
+
+| program | `efcda71` | `7ecfc33` |
+|---|---|---|
+| `pointsto.dl` | 10.51 s, 525 MB | 9.98 s, 479 MB |
+| `pointsto.dl` `?why` | 9.20 s, 817 MB | 7.66 s, 654 MB |
+| `callreach.dl` `?why` | 1.46 s, 379 MB | 0.91 s, 206 MB |
+| `sparse_800` | 1.23 s | 0.94 s |
+| `q_coh.dl` | 6.49 s | 8.18 s |
+| `lib/cohesion.dl` | 7.84 s | 9.73 s |
+| `lib/flow.dl` | 23.38 s, 438 MB | 30.82 s, 499 MB; cache misses 246 → 621 M, instructions 285 → 256 G |
+
+**E9: the older rows always one run, beside the newest.** E9 merges every run at
+each apply, on `7ecfc33`, so a seek searches at most two runs.
+- `q_coh.dl`: 7.41 s.
+- `lib/cohesion.dl`: 8.88 s.
+
+That is the seek count a B-tree for the older rows would give, plus the merges a
+B-tree would not pay. It is still 14–15% slower than `efcda71`. So a B-tree alone
+is not expected to close the gap. `flow.dl`'s extra cost has a different shape:
+fewer instructions, and 2.5× the cache misses.
+
 ## Step 3 design: provenance by row reference (2026-09-14, for review)
 
 *Step 2 is accepted at `29378cd`, with `pointsto.dl`'s 2.6% (the user's call).
