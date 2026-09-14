@@ -27,7 +27,7 @@ raw transcripts (Claude Code auto-saves those under
 ## 2026-09-14 (night) — GitHub issue #1: a class static block crashed code-facts
 
 Asked to reproduce and fix issue #1. Planned; the user chose a fix and a
-regression test, with widening P1 deferred.
+regression test with widening P1 deferred, then asked for the widening too.
 
 **Done**
 - `31dd7d7`: reproduced with a new `test/structure.test.ts` case, failing on the
@@ -39,15 +39,22 @@ regression test, with widening P1 deferred.
   `npm test` and typecheck green.
 - `code-analysis/bugs/resolved/006` records it. The commit says `Fixes #1`, so the
   issue closes when `trunk` is pushed.
+- `5e72020`: **P1 widened.** Its statements also run as a class static block
+  (a `return` renders as a probe). The acceptance half: Node compiles each block
+  and one `static_block` fn is extracted. The in-block guard is sized from ten
+  runs; `continue` (fewest 2) and `catch` (7) stay unguarded there. The widening
+  found no CFG defect.
+  - *Mutations* redden it: `isOwner` skipping static blocks, and `extractFlow`
+    skipping them. `executorOf` skipping them stays green: `call_site.caller`
+    comes from `ownerOf`.
 
 **Decided** — nothing new: the issue's own "narrower predicate" alternative.
 
 **Removed** — `hasBodyOrSignature` (renamed); the oldest worklog entry.
 
 **Next up**
-- **Nothing in the tests contained a static block** before this, though flow,
-  dataflow and naming all special-case one. P1's generator emits no classes;
-  static blocks would give their CFG an execution oracle.
+- P3 and P5 still generate function bodies only; static blocks' cyclomatic
+  counts and points-to facts have no property.
 - Rebuild `dist/` (`./package.sh`) before re-running on the reporter's project.
 - Carried: code-analysis's `reference/datalog.md` lacks the datalog skill's
   additions; rerun the ablation control; measure the code-analysis playbook.
