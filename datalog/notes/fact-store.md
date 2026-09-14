@@ -379,6 +379,35 @@ Measured, it is not:
 
 The `memmove` is still unexplained, pending a call-graph profile.
 
+**Where `flow.dl`'s time goes.** The branch profile at `7ecfc33` puts 35% of its
+cycles, and 37% of its cache misses, in `memmove`. The baseline has 7.5%. DWARF
+unwinding rarely got past glibc. In the 14 samples that did, the caller was
+`_int_realloc`. `heaptrack` settles what the join does, running each binary on
+the same query:
+
+| allocation site | `efcda71` | `7ecfc33` |
+|---|---|---|
+| `String::clone` from the join (`try_match` binding a value) | 121,241,530 | 121,241,530 |
+| `String::clone` from `bound_prefix` | 36,969,700 + 15,505,065 | the same |
+| `Vec<Value>::clone` from the join (fact premises) | 123,500,089 | none |
+| an allocation in `Relation::seek` (its boxed iterator) | none | 122,856,421 |
+| all allocation calls | 823 M | 660 M |
+
+**What it says.**
+- **The join does the same work on both binaries,** and it copies the same strings.
+  So the branch's `flow.dl` is slower per operation, not in operations. Its
+  instructions are fewer (256 against 285 G) and its cache misses higher (621
+  against 246 M).
+- **The likely cause is locality.** The store keeps each row's values contiguous,
+  but a value's `String` buffer stays where the loader or a head's grounding first
+  allocated it. Every binding copy and every comparison reads string bytes from
+  cold memory. `q_coh.dl`'s and `cohesion.dl`'s comparison-bound searches pay the
+  same price.
+- **Not fixed by the planned step 4.** A B-tree for the older rows, or fewer runs,
+  would not change where the strings live. Interning, which § Beyond this design
+  names, would: values as integers, so rows compare and bind without touching a
+  string.
+
 ## Step 3 design: provenance by row reference (2026-09-14, for review)
 
 *Step 2 is accepted at `29378cd`, with `pointsto.dl`'s 2.6% (the user's call).
