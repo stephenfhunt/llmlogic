@@ -305,6 +305,46 @@ at 10.69 and 10.59 s.
   store. This is review answer 2's condition for a content-to-row hash, taken up
   after the load-time holes are gone and re-measured.
 
+## Seek-heavy queries, measured (2026-09-14): the gate's blind spot
+
+**The four gate programs missed a regression.** None of them is seek-heavy.
+`@grafana/ui`'s library queries run in the harness, which checks output, not time,
+and three of them are slower on the branch. These are quiet reruns, asking for
+every relation the file defines by rule:
+
+| query | `efcda71` | `2950331` (step 3) |
+|---|---|---|
+| `lib/flow.dl` | 23.5 s, 450 MB | 32.1 s, 502 MB |
+| `lib/cohesion.dl` | 7.8 s | 12.5 s |
+| `q_coh.dl` | 6.5 s | 10.8 s |
+
+- **Bisected to `d9a4c5e`, the sorted runs.** `q_coh.dl` went 6.45 s at `09ec372` →
+  12.55 s at `d9a4c5e`, and later commits recover about 15%.
+- **Profile, at step 3:** 53% of `q_coh.dl`'s cycles are the per-run binary search
+  (`memcmp` 21.8%, `Value::partial_cmp` 18.8%, `partition_point` 12.5%). The merge
+  across runs is 1.1%.
+- **Runs:** `within_top` has 82 K rows in 8 runs, `module_reach` 7, `module_link`
+  5. Its first stratum is 16 rounds.
+
+Experiments on the tip:
+
+| variant | `q_coh.dl` | `cohesion.dl` |
+|---|---|---|
+| `efcda71` | 6.47 s | 7.81 s |
+| step 3 | 10.91 s | 12.46 s |
+| E8a: merge while the older run is at most 8× the newer | **8.10 s** | **9.64 s** |
+| E8b: E8a with `Ord::cmp` in the search and merge | 8.21 s | 9.80 s |
+| E8d: E8b with every relation compacted to one run at each stratum's end | 8.29 s | 9.82 s |
+
+**What it says.**
+- **Fewer runs recover about two thirds.** Comparison style and the runs of
+  finished strata are not the cost, since the seeks happen mid-stratum.
+- **The rest, about 25%, is binary-searching through the store on every seek.**
+  Only a different index for the older rows removes it.
+- **Step 2 was accepted on an incomplete gate** (§17 2026-09-13 (later iv),
+  consequences 2026-09-14 (later ii)). From here, the performance gate includes
+  `q_coh.dl`, `lib/cohesion.dl` and `lib/flow.dl`.
+
 ## Step 3 design: provenance by row reference (2026-09-14, for review)
 
 *Step 2 is accepted at `29378cd`, with `pointsto.dl`'s 2.6% (the user's call).
