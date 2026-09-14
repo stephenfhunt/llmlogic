@@ -53,7 +53,7 @@ each; detail in §17 and `docs/worklog.md`.
 > (the user's) — which does not currently finish on a 30 GB machine (`bugs/015`), and
 > waits on the recorder design session (§ Provenance surface).
 >
-> **Open defects live in [`bugs/`](bugs/)** — `015` opened 2026-09-13; `009`, `013` and `014` were resolved the same day.
+> **Open defects live in [`bugs/`](bugs/)** — `015` opened 2026-09-13 and `016` 2026-09-14; `009`, `013` and `014` were resolved the same day.
 > **No design session blocks anything** either: §6's extension, the last one,
 > shipped 2026-08-18.
 >
@@ -461,7 +461,9 @@ deferred until a consumer needs them (§8's *Not covered*). — §13,
 - **`--no-default-features` builds and tests green — ✅ 2026-08-24.** The two
   `system.rs` temporal tests import date columns from a file, so they carry
   `#[cfg(feature = "duckdb")]` like every other import-dependent test. 557 green
-  there against 585 with defaults, and nothing else failed. _shipped._ — §13/§15.
+  there against 585 with defaults, and nothing else failed. **Regressed by
+  `694a6ff`:** three import tests added without the gate fail there (`bugs/016`).
+  _shipped._ — §13/§15.
 - **TSV** — an easy format add, deferred with database loading. _queued — **post-v1**._ — §13.
 - **Filter pushdown for large sources** — v1 eagerly materializes every import;
   push selections into SQL when a consumer hits the wall (the path/`table`
