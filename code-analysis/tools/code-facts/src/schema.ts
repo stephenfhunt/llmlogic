@@ -157,7 +157,7 @@ export const RELATIONS: readonly Relation[] = [
       opt("python_version", "string", "the Python that read the Python sources, if any were read"),
       col("node_version", "string", "the Node.js that ran the extractor"),
       col("root", "string", "absolute path every `file` column is relative to"),
-      col("targets", "string", "what was extracted — tsconfigs and Python roots — comma-separated, repo-relative"),
+      col("targets", "string", "what was extracted — tsconfigs, go.mod or go.work files, Python roots — comma-separated, repo-relative"),
       col("layers", "string", "the layers extracted, comma-separated"),
       col("time", "timestamp", "when the extraction ran (UTC)"),
       opt("git_head", "string", "HEAD commit of the repository, if it is one"),
@@ -179,10 +179,10 @@ export const RELATIONS: readonly Relation[] = [
   {
     name: "project",
     layer: "structure",
-    doc: "A tsconfig project loaded — given on the command line or reached through `references`.",
+    doc: "A project loaded: a tsconfig (given on the command line or reached through `references`), a Python root, or a Go module.",
     columns: [
-      col("id", "string", "repo-relative path of the tsconfig file"),
-      col("dir", "string", "repo-relative directory of the tsconfig"),
+      col("id", "string", "repo-relative path of the tsconfig, the Python root (or its pyproject.toml), or the go.mod"),
+      col("dir", "string", "repo-relative directory of the project"),
       col("files", "int", "source files the project compiles that are under the root"),
       col("strict", "bool", "whether `strict` is on"),
       opt("module", "string", "the `module` option, lowercased"),

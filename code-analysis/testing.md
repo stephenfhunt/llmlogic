@@ -110,6 +110,17 @@ run: size its default run count from the measured per-run rate, not by eye.
   pattern's `case_test` → red — the frontend's first version, which P1-py found.
 - [x] **P3-py** Cyclomatic two ways for Python, on exception-free programs.
   *Mutation:* a `match` guard's decision uncounted → red.
+- [x] **P2-go** Module-graph fidelity for Go, over P2's model rendered as one package
+  per directory: `imports` and `import_name` equal the graph — a row per file of
+  another package the importer references, an `implicit` row per other file of
+  its own package, at the first reference. References between packages keep one
+  direction (Go forbids import cycles). Guards: imports across packages (276 of
+  400 runs), within one (204), and an import naming two files of its package
+  (73 — so 40 runs by default). *Mutations:* no `implicit` rows → red; one row
+  per import spec rather than per file referenced → red.
+- [x] **P6-go** Determinism for Go: permuting a go.work's `use` order changes no
+  output byte, over P2-go's module and three more whose two `init`s collide.
+  Guard: most runs reorder. *Mutation:* sources left in load order → red.
 - [x] `lib/checks.dl` finds no violation on every fixture, on code-facts itself,
   on `~/code/tsdl` when present, and on sqlparse when the experiments harness has
   cached it. On sqlparse the four `static_analysis` answers computed from the
