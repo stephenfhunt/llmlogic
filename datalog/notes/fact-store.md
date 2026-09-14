@@ -271,6 +271,11 @@ cost the time. Three follow-ups separate them. Each row below is measured agains
 The first cost below is fixed. The second is what remains, and `sparse_800` has
 no imports.
 
+It passes the deep gate: seeds 2 and 3 pass 515 of 515. A looser merge policy
+does not close `sparse_800`'s gap. Merging while the older run is at most 4× or
+8× the newer, not 2×, measured `sparse_800` at 1.59 and 1.62 s, and `pointsto.dl`
+at 10.69 and 10.59 s.
+
 **What E6 said.** Two costs, and they are separate.
 - **Load-time holes (`pointsto.dl`, about 1.5 s).** `RawTable` holds one
   `Vec<RawValue>` per row, which `finalize` consumes and `arrange`'s reorder
