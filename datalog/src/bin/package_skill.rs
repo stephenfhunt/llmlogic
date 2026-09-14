@@ -160,24 +160,21 @@ fn install_md() -> &'static str {
     "\
 # Installing the datalog skill
 
-This bundle is a self-contained Claude Code skill: `SKILL.md`, the compiled
-`datalog` binary, example programs, and per-use-case recipes.
+This bundle is a self-contained agent skill: `SKILL.md`, the compiled `datalog`
+binary beside it, example programs, and per-use-case recipes.
 
 ## Install
 
-Drop the `datalog-skill/` directory into a Claude Code skills directory as
-`datalog`:
+Copy the `datalog-skill/` directory, named `datalog`, to wherever your agent
+harness loads skills from. The skill runs the binary from its own directory, so
+there is no build step and no `PATH` entry. For Claude Code:
 
 ```sh
-# user-level (all projects)
-cp -r datalog-skill ~/.claude/skills/datalog
-
-# or project-level
-cp -r datalog-skill <project>/.claude/skills/datalog
+cp -r datalog-skill ~/.claude/skills/datalog            # every project
+cp -r datalog-skill <project>/.claude/skills/datalog    # one project
 ```
 
-Start a new Claude Code session so the skill is discovered. The skill invokes the
-co-located `./datalog` binary — no build step, no PATH entry needed.
+Start a new session so the skill is discovered.
 
 ## Verify
 
@@ -186,9 +183,7 @@ cd ~/.claude/skills/datalog
 ./datalog examples/houses_puzzle.dl        # → solution(3, 1, 2).
 ```
 
-The binary is built for the platform it was packaged on; rebuild from the
-`datalog` source project to target a different platform. Full docs and the
-example corpus live in that project.
+The binary runs on the platform this bundle was packaged for.
 "
 }
 
