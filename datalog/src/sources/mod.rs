@@ -13,8 +13,8 @@
 //! the feature, loading any data import is a structured [`Error::Source`]
 //! naming the feature.
 //!
-//! A loaded table is materialized whole and becomes ordinary base facts
-//! (`ir::Program.facts`): the evaluator never touches a source, and imported
+//! A loaded table is materialized whole and becomes ordinary base facts, one
+//! flat block per import (`ir::Program.imported`): the evaluator never touches a source, and imported
 //! tuples anchor provenance leaves (§11). *Which* tables are loaded is the
 //! caller's: [`load_imports_where`] reads only the ones a program's goals reach
 //! and checks the rest without reading them (`api.rs`, §17 2026-09-12).

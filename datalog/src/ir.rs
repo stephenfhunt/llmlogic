@@ -289,6 +289,44 @@ pub struct Fact {
     pub tuple: Tuple,
 }
 
+/// One data import's rows (§13): `rows` rows of `arity` values laid end to end,
+/// sorted and deduplicated, so no row is its own allocation
+/// (`notes/fact-store.md`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImportedRows {
+    pub pred: PredId,
+    pub arity: usize,
+    pub rows: usize,
+    pub values: Vec<Value>,
+    /// How many facts written in the program text precede the import statement:
+    /// [`Program::base_facts`] yields the block at this position among them.
+    pub at: usize,
+}
+
+/// Sorts and deduplicates `rows` rows of `arity` values laid end to end. A row's
+/// values move to their place, never copied, and no row becomes its own
+/// allocation. Returns the rows kept and their count.
+pub(crate) fn sort_dedup_rows(
+    mut values: Vec<Value>,
+    rows: usize,
+    arity: usize,
+) -> (Vec<Value>, usize) {
+    debug_assert_eq!(values.len(), rows * arity, "rows are rectangular");
+    let mut order: Vec<usize> = (0..rows).collect();
+    {
+        let row = |index: usize| &values[index * arity..(index + 1) * arity];
+        order.sort_unstable_by(|&a, &b| row(a).cmp(row(b)));
+        order.dedup_by(|a, b| row(*a) == row(*b));
+    }
+    let mut sorted = Vec::with_capacity(order.len() * arity);
+    for &index in &order {
+        for value in &mut values[index * arity..(index + 1) * arity] {
+            sorted.push(std::mem::replace(value, Value::Absent));
+        }
+    }
+    (sorted, order.len())
+}
+
 /// A term: variable slot or constant. Flat per §4 — no compound terms in v1.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Term {
@@ -512,7 +550,8 @@ pub struct ImportSpec {
 pub struct Program {
     /// Interning table: `PredId(i)` → `predicates[i]`.
     pub predicates: Vec<PredicateInfo>,
-    /// Ground facts from empty-body clauses (and later, imports).
+    /// Ground facts written in the program text: empty-body clauses. Imported
+    /// rows are [`Program::imported`]; [`Program::base_facts`] reads both.
     pub facts: Vec<Fact>,
     /// Where a fact written in the program text was written, for a diagnostic
     /// that has to point at it (`bugs/009`). A side table and not a field of
@@ -520,6 +559,8 @@ pub struct Program {
     /// fact (§17). Imported rows have no entry: their place is a source row,
     /// not a span of the program. A repeated fact keeps its first place.
     pub fact_spans: std::collections::HashMap<Fact, Span>,
+    /// Each data import's rows, one flat block per import, in source order.
+    pub imported: Vec<ImportedRows>,
     /// Rules in source order: `RuleId(i)` → `rules[i]`.
     pub rules: Vec<Rule>,
     pub queries: Vec<Query>,
@@ -553,6 +594,36 @@ impl Program {
             decl_span: None,
         });
         PredId((self.predicates.len() - 1) as u32)
+    }
+
+    /// Every base fact, written or imported, in source order: each import's rows
+    /// at its statement's place among the written facts. A written fact carries
+    /// itself, for the tables keyed by one ([`Program::fact_spans`]).
+    pub fn base_facts(&self) -> impl Iterator<Item = (PredId, &[Value], Option<&Fact>)> + '_ {
+        let (mut next_block, mut next_fact) = (0, 0);
+        let mut block: Option<(&ImportedRows, usize)> = None;
+        std::iter::from_fn(move || {
+            loop {
+                if let Some((rows, row)) = block {
+                    if row < rows.rows {
+                        block = Some((rows, row + 1));
+                        let start = row * rows.arity;
+                        return Some((rows.pred, &rows.values[start..start + rows.arity], None));
+                    }
+                    block = None;
+                }
+                if let Some(rows) = self.imported.get(next_block)
+                    && rows.at <= next_fact
+                {
+                    block = Some((rows, 0));
+                    next_block += 1;
+                    continue;
+                }
+                let fact = self.facts.get(next_fact)?;
+                next_fact += 1;
+                return Some((fact.pred, fact.tuple.0.as_slice(), Some(fact)));
+            }
+        })
     }
 
     /// Returns the interned info for `pred`.
@@ -596,6 +667,7 @@ pub(crate) mod fixtures {
         let ancestor = PredId(1);
         Program {
             fact_spans: Default::default(),
+            imported: Vec::new(),
             predicates: vec![
                 PredicateInfo {
                     name: "parent".to_string(),
@@ -697,6 +769,7 @@ pub(crate) mod fixtures {
         let root = PredId(2);
         Program {
             fact_spans: Default::default(),
+            imported: Vec::new(),
             predicates: vec![
                 PredicateInfo {
                     name: "person".to_string(),
@@ -777,6 +850,7 @@ pub(crate) mod fixtures {
         let adult = PredId(3);
         Program {
             fact_spans: Default::default(),
+            imported: Vec::new(),
             predicates: vec![
                 // Field names survive lowering: `employee` from the explicit
                 // import schema, `person` from its `declare`. The two rule

@@ -406,7 +406,8 @@ fn lower_and_load(
         .map(|table| {
             table.unwrap_or(LoadedTable {
                 fields: Vec::new(),
-                rows: Vec::new(),
+                row_count: 0,
+                values: Vec::new(),
             })
         })
         .collect();

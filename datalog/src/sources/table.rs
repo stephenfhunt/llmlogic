@@ -20,11 +20,24 @@ use crate::temporal;
 
 /// One loaded data import after every §13 rule has been applied: field names
 /// are valid and unique, rows are rectangular and column-uniform, and the row
-/// set is sorted and deduplicated (set semantics at import time).
+/// set is sorted and deduplicated (set semantics at import time). Rows are laid
+/// end to end, `fields.len()` values apiece, so no row is its own allocation
+/// (`notes/fact-store.md`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LoadedTable {
     pub fields: Vec<String>,
-    pub rows: Vec<Vec<Value>>,
+    /// How many rows the table holds.
+    pub row_count: usize,
+    /// Every row's values, row after row.
+    pub values: Vec<Value>,
+}
+
+impl LoadedTable {
+    /// Every row, in order.
+    pub fn rows(&self) -> impl Iterator<Item = &[Value]> + '_ {
+        let arity = self.fields.len();
+        (0..self.row_count).map(move |row| &self.values[row * arity..(row + 1) * arity])
+    }
 }
 
 /// A backend-produced table before typing.
@@ -125,9 +138,9 @@ pub(crate) fn finalize(
         }
     }
 
-    let mut rows: Vec<Vec<Value>> = Vec::with_capacity(data.len());
+    let row_count = data.len();
+    let mut values: Vec<Value> = Vec::with_capacity(row_count * arity);
     for (index, row) in data.into_iter().enumerate() {
-        let mut values = Vec::with_capacity(arity);
         for (col, cell) in row.into_iter().enumerate() {
             let Some(ty) = types[col] else { continue };
             match coerce(cell, ty) {
@@ -142,16 +155,18 @@ pub(crate) fn finalize(
                 )),
             }
         }
-        rows.push(values);
     }
     errors.extend(column_errors.into_iter().flatten());
     if !errors.is_empty() {
         return Err(errors);
     }
 
-    rows.sort();
-    rows.dedup();
-    Ok(LoadedTable { fields, rows })
+    let (values, row_count) = crate::ir::sort_dedup_rows(values, row_count, arity);
+    Ok(LoadedTable {
+        fields,
+        row_count,
+        values,
+    })
 }
 
 /// [`arrange`]'s result: the field names, the data rows (reordered to field
@@ -574,6 +589,11 @@ mod tests {
         }
     }
 
+    /// A loaded table's rows, one vector each, for comparing against literals.
+    fn table_rows(table: &LoadedTable) -> Vec<Vec<Value>> {
+        table.rows().map(<[Value]>::to_vec).collect()
+    }
+
     fn ok(table: RawTable, schema: Option<&[FieldDecl]>) -> LoadedTable {
         finalize(table, schema, "test.csv").expect("finalize succeeds")
     }
@@ -588,7 +608,7 @@ mod tests {
     fn all_int_column_infers_int() {
         let table = ok(csv(&[&["n"], &["1"], &["-42"], &["007"]]), None);
         assert_eq!(
-            table.rows,
+            table_rows(&table),
             vec![
                 vec![Value::Int(-42)],
                 vec![Value::Int(1)],
@@ -601,7 +621,7 @@ mod tests {
     fn int_float_mix_widens_to_float() {
         let table = ok(csv(&[&["x"], &["1"], &["2.5"]]), None);
         assert_eq!(
-            table.rows,
+            table_rows(&table),
             vec![
                 vec![Value::Float(F64::new(1.0).unwrap())],
                 vec![Value::Float(F64::new(2.5).unwrap())],
@@ -613,14 +633,14 @@ mod tests {
     fn bool_column_infers_bool_only_on_exact_literals() {
         let table = ok(csv(&[&["b"], &["true"], &["false"]]), None);
         assert_eq!(
-            table.rows,
+            table_rows(&table),
             vec![vec![Value::Bool(false)], vec![Value::Bool(true)]]
         );
 
         // `TRUE` is not the language's bool literal, so the column is strings.
         let table = ok(csv(&[&["b"], &["TRUE"], &["false"]]), None);
         assert_eq!(
-            table.rows,
+            table_rows(&table),
             vec![
                 vec![Value::String("TRUE".to_string())],
                 vec![Value::String("false".to_string())],
@@ -646,7 +666,7 @@ mod tests {
             None,
         );
         assert_eq!(
-            table.rows,
+            table_rows(&table),
             vec![
                 vec![Value::Absent],
                 vec![Value::Int(1)],
@@ -661,7 +681,7 @@ mod tests {
         // an empty string is a string, so the column is string.
         let table = ok(csv(&[&["n"], &["1"], &[""]]), None);
         assert_eq!(
-            table.rows,
+            table_rows(&table),
             vec![
                 vec![Value::String(String::new())],
                 vec![Value::String("1".to_string())],
@@ -684,14 +704,15 @@ mod tests {
             },
             None,
         );
-        assert_eq!(table.rows, vec![vec![Value::Absent]]);
+        assert_eq!(table_rows(&table), vec![vec![Value::Absent]]);
     }
 
     #[test]
     fn non_literal_spellings_stay_verbatim_strings() {
         // NaN/inf are not literals (§3 has no NaN token); nor is `1 2`.
         let table = ok(csv(&[&["x"], &["NaN"], &["inf"], &["1 2"]]), None);
-        let strings: Vec<&Value> = table.rows.iter().map(|r| &r[0]).collect();
+        let rows = table_rows(&table);
+        let strings: Vec<&Value> = rows.iter().map(|r| &r[0]).collect();
         assert_eq!(
             strings,
             [
@@ -709,7 +730,7 @@ mod tests {
         let cell = "1e5";
         let lexes_as_float = matches!(classify_cell(cell), CellClass::Float(_));
         let table = ok(csv(&[&["x"], &[cell]]), None);
-        match &table.rows[0][0] {
+        match &table_rows(&table)[0][0] {
             Value::Float(_) => assert!(lexes_as_float),
             Value::String(s) => {
                 assert!(!lexes_as_float);
@@ -724,7 +745,7 @@ mod tests {
         // The lexer skips whitespace around a token, so ` 42 ` is the int 42 —
         // one rulebook, no trimming pass of our own.
         let table = ok(csv(&[&["n"], &[" 42 "]]), None);
-        assert_eq!(table.rows, vec![vec![Value::Int(42)]]);
+        assert_eq!(table_rows(&table), vec![vec![Value::Int(42)]]);
     }
 
     // --- Explicit schemas ---
@@ -733,7 +754,10 @@ mod tests {
     fn explicit_string_keeps_a_numeric_cell_verbatim() {
         let schema = [field("code", Some(TypeName::String))];
         let table = ok(csv(&[&["42"]]), Some(&schema));
-        assert_eq!(table.rows, vec![vec![Value::String("42".to_string())]]);
+        assert_eq!(
+            table_rows(&table),
+            vec![vec![Value::String("42".to_string())]]
+        );
     }
 
     #[test]
@@ -741,7 +765,7 @@ mod tests {
         let schema = [field("color", Some(TypeName::Symbol))];
         let table = ok(csv(&[&["red"], &["blue"]]), Some(&schema));
         assert_eq!(
-            table.rows,
+            table_rows(&table),
             vec![
                 vec![Value::Symbol("blue".to_string())],
                 vec![Value::Symbol("red".to_string())],
@@ -767,7 +791,10 @@ mod tests {
             },
             Some(&schema),
         );
-        assert_eq!(table.rows, vec![vec![Value::Absent], vec![Value::Int(30)]]);
+        assert_eq!(
+            table_rows(&table),
+            vec![vec![Value::Absent], vec![Value::Int(30)]]
+        );
         // …but a genuinely non-int cell still fails.
         let errors = err(csv(&[&["30"], &["abc"]]), Some(&schema));
         assert!(
@@ -791,7 +818,7 @@ mod tests {
         let schema = [field("x", Some(TypeName::Float))];
         let table = ok(csv(&[&["1"], &["2.5"]]), Some(&schema));
         assert_eq!(
-            table.rows,
+            table_rows(&table),
             vec![
                 vec![Value::Float(F64::new(1.0).unwrap())],
                 vec![Value::Float(F64::new(2.5).unwrap())],
@@ -810,18 +837,21 @@ mod tests {
             csv(&[&["parent", "child"], &["alice", "bob"]]),
             Some(&schema),
         );
-        assert_eq!(table.rows.len(), 1);
+        assert_eq!(table_rows(&table).len(), 1);
 
         // Non-matching first row: data.
         let table = ok(csv(&[&["eve", "adam"], &["alice", "bob"]]), Some(&schema));
-        assert_eq!(table.rows.len(), 2);
+        assert_eq!(table_rows(&table).len(), 2);
     }
 
     #[test]
     fn untyped_schema_fields_still_infer() {
         let schema = [field("n", None)];
         let table = ok(csv(&[&["1"], &["2"]]), Some(&schema));
-        assert_eq!(table.rows, vec![vec![Value::Int(1)], vec![Value::Int(2)]]);
+        assert_eq!(
+            table_rows(&table),
+            vec![vec![Value::Int(1)], vec![Value::Int(2)]]
+        );
     }
 
     // --- Headers and field names ---
@@ -839,7 +869,7 @@ mod tests {
         // …but with an explicit schema an empty file is a legal empty table.
         let schema = [field("a", Some(TypeName::Int))];
         let table = ok(csv(&[]), Some(&schema));
-        assert!(table.rows.is_empty());
+        assert!(table_rows(&table).is_empty());
         assert_eq!(table.fields, ["a"]);
     }
 
@@ -856,14 +886,14 @@ mod tests {
         );
         let schema = [field("a", Some(TypeName::Int)), field("b", None)];
         let table = ok(empty(), Some(&schema));
-        assert!(table.rows.is_empty());
+        assert!(table_rows(&table).is_empty());
         assert_eq!(table.fields, ["a", "b"]);
     }
 
     #[test]
     fn a_header_only_file_is_a_legal_empty_table() {
         let table = ok(csv(&[&["a", "b"]]), None);
-        assert!(table.rows.is_empty());
+        assert!(table_rows(&table).is_empty());
         assert_eq!(table.fields, ["a", "b"]);
     }
 
@@ -901,7 +931,7 @@ mod tests {
         // Rows come back sorted, so compare the whole (small) table.
         let table = ok(csv(&[&["v"], &["9007199254740992"], &["2.5"]]), None);
         assert_eq!(
-            table.rows,
+            table_rows(&table),
             vec![
                 vec![Value::Float(F64::new(2.5).unwrap())],
                 vec![Value::Float(F64::new(9007199254740992.0).unwrap())],
@@ -914,7 +944,7 @@ mod tests {
     #[test]
     fn an_all_int_column_keeps_large_values_exactly() {
         let table = ok(csv(&[&["v"], &["9007199254740993"]]), None);
-        assert_eq!(table.rows[0][0], Value::Int(9007199254740993));
+        assert_eq!(table_rows(&table)[0][0], Value::Int(9007199254740993));
     }
 
     #[test]
@@ -959,7 +989,7 @@ mod tests {
             None,
         );
         assert_eq!(
-            table.rows,
+            table_rows(&table),
             vec![
                 vec![Value::String("42".to_string())],
                 vec![Value::String("true".to_string())],
@@ -977,7 +1007,7 @@ mod tests {
             None,
         );
         assert_eq!(
-            table.rows,
+            table_rows(&table),
             vec![
                 vec![Value::Float(F64::new(1.0).unwrap())],
                 vec![Value::Float(F64::new(2.5).unwrap())],
@@ -1008,7 +1038,7 @@ mod tests {
             Some(&schema),
         );
         assert_eq!(table.fields, ["b", "a"]);
-        assert_eq!(table.rows, vec![vec![Value::Int(2), Value::Int(1)]]);
+        assert_eq!(table_rows(&table), vec![vec![Value::Int(2), Value::Int(1)]]);
     }
 
     #[test]
@@ -1029,6 +1059,9 @@ mod tests {
     #[test]
     fn rows_are_sorted_and_deduplicated() {
         let table = ok(csv(&[&["n"], &["2"], &["1"], &["2"]]), None);
-        assert_eq!(table.rows, vec![vec![Value::Int(1)], vec![Value::Int(2)]]);
+        assert_eq!(
+            table_rows(&table),
+            vec![vec![Value::Int(1)], vec![Value::Int(2)]]
+        );
     }
 }

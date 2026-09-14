@@ -109,18 +109,18 @@ impl Relation {
         &self.values[start..start + self.arity]
     }
 
-    /// Writes the program-asserted facts, before the first round. A fact asserted
-    /// twice is one fact.
-    pub(crate) fn load_base(&mut self, mut rows: Vec<Tuple>) {
+    /// Writes the program-asserted facts, before the first round: `rows` rows of
+    /// `arity` values laid end to end. A fact asserted twice is one fact.
+    pub(crate) fn load_base(&mut self, values: Vec<Value>, rows: usize) {
         debug_assert!(
             self.rows == 0 && self.delta_round == 0,
             "base facts load once, before any round"
         );
-        rows.sort_unstable();
-        rows.dedup();
-        if !rows.is_empty() {
-            let run = self.append(rows);
-            self.runs.push(run);
+        let (values, rows) = crate::ir::sort_dedup_rows(values, rows, self.arity);
+        self.values = values;
+        self.rows = u32::try_from(rows).expect("a relation holds fewer than 2^32 facts");
+        if self.rows > 0 {
+            self.runs.push((0..self.rows).collect());
         }
     }
 
@@ -366,7 +366,7 @@ mod tests {
                 ledger.issued.push((id, relation.row(id).to_vec()));
             }
         };
-        relation.load_base(base.iter().cloned().map(Tuple).collect());
+        relation.load_base(base.concat(), base.len());
         ledger.held.extend(base.iter().cloned());
         issue(&relation, &mut ledger);
         let mut round = 0;
@@ -496,11 +496,7 @@ mod tests {
     #[test]
     fn an_empty_prefix_seeks_the_whole_relation() {
         let mut relation = Relation::new(1);
-        relation.load_base(vec![
-            Tuple(vec![symbol("b")]),
-            Tuple(vec![Value::Absent]),
-            Tuple(vec![symbol("a")]),
-        ]);
+        relation.load_base(vec![symbol("b"), Value::Absent, symbol("a")], 3);
         let all: Vec<&[Value]> = relation.seek(AtomView::Full, 0, &[]).collect();
         assert_eq!(
             all,
@@ -513,11 +509,17 @@ mod tests {
         // `absent < symbol < int` is the §14 cross-type order, so the `a` rows are
         // one block with rows on both sides of them, and here they sit in two runs.
         let mut relation = Relation::new(2);
-        relation.load_base(vec![
-            Tuple(vec![Value::Absent, symbol("z")]),
-            Tuple(vec![symbol("a"), Value::Int(2)]),
-            Tuple(vec![symbol("b"), Value::Int(1)]),
-        ]);
+        relation.load_base(
+            vec![
+                Value::Absent,
+                symbol("z"),
+                symbol("a"),
+                Value::Int(2),
+                symbol("b"),
+                Value::Int(1),
+            ],
+            3,
+        );
         relation.apply(BTreeSet::from([Tuple(vec![symbol("a"), Value::Int(1)])]), 1);
         let prefix = [symbol("a")];
         let sought: Vec<&[Value]> = relation.seek(AtomView::Full, 2, &prefix).collect();

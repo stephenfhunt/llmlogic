@@ -2934,6 +2934,7 @@ pub(crate) fn fold_ground_atom_args(program: &Program) -> Program {
 pub(crate) fn alpha_eq(a: &ir::Program, b: &ir::Program) -> bool {
     a.predicates == b.predicates
         && a.facts == b.facts
+        && a.imported == b.imported
         && a.imports == b.imports
         && a.strata == b.strata
         && a.rules.len() == b.rules.len()

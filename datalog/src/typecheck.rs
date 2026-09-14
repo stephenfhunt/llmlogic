@@ -429,11 +429,11 @@ impl<'a> TypeChecker<'a> {
     /// Gathers every constraint over the program.
     fn gather(&mut self) {
         // Facts pin their columns to concrete types.
-        for fact in &self.program.facts {
+        for (pred, row, written) in self.program.base_facts() {
             // An imported row has no span: its clash is located at one side.
-            self.at = self.program.fact_spans.get(fact).copied();
-            let base = self.col_base[fact.pred.0 as usize];
-            for (col, value) in fact.tuple.0.iter().enumerate() {
+            self.at = written.and_then(|fact| self.program.fact_spans.get(fact).copied());
+            let base = self.col_base[pred.0 as usize];
+            for (col, value) in row.iter().enumerate() {
                 // `absent` is type-neutral: it pins no column type (§4).
                 if let Some(ty) = type_of(value) {
                     self.set_type_from(base + col, ty, Some(print_value(value)));
@@ -1000,15 +1000,14 @@ fn contradiction(program: &ir::Program, pred: usize, col: usize, inferred: TypeN
 /// else — no unification, no rule constraints. `None` when the column holds no
 /// typed value, or when its values disagree.
 ///
-/// Imported rows are ordinary facts by this point (§13 materializes them during
-/// lowering), so an imported column's values are read here too.
+/// Imported rows are read here too ([`ir::Program::base_facts`]).
 fn column_type_from_facts(program: &ir::Program, pred: usize, col: usize) -> Option<TypeName> {
     let mut found: Option<TypeName> = None;
-    for fact in &program.facts {
-        if fact.pred.0 as usize != pred {
+    for (fact_pred, row, _) in program.base_facts() {
+        if fact_pred.0 as usize != pred {
             continue;
         }
-        let Some(ty) = fact.tuple.0.get(col).and_then(type_of) else {
+        let Some(ty) = row.get(col).and_then(type_of) else {
             continue;
         };
         match found {

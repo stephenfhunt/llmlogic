@@ -101,12 +101,18 @@ pub fn lower_with_sources(
                     // Imported rows are ordinary base facts (§13): the leaves
                     // of provenance, typed by the same facts-pin-columns rule
                     // as in-program facts.
-                    if let Some(table) = tables.get_mut(data_import) {
-                        let rows = std::mem::take(&mut table.rows);
-                        out.facts.extend(rows.into_iter().map(|row| ir::Fact {
+                    // The rows stay one flat block, placed among the written
+                    // facts where the statement stands (`ir::Program::base_facts`).
+                    if let Some(table) = tables.get_mut(data_import)
+                        && table.row_count > 0
+                    {
+                        out.imported.push(ir::ImportedRows {
                             pred,
-                            tuple: ir::Tuple(row),
-                        }));
+                            arity: table.fields.len(),
+                            rows: table.row_count,
+                            values: std::mem::take(&mut table.values),
+                            at: out.facts.len(),
+                        });
                     }
                     data_import += 1;
                 }
@@ -2234,6 +2240,51 @@ fn levenshtein(a: &str, b: &str) -> usize {
 
 #[cfg(test)]
 mod tests {
+
+    /// An import's rows are one flat block, and `base_facts` yields them where the
+    /// import statement stands among the written facts, a trailing import
+    /// included. Typechecking gathers in this order, and the order decides which
+    /// side of a column clash a diagnostic reports.
+    #[test]
+    fn imported_rows_keep_their_statement_place_among_written_facts() {
+        let program = crate::parser::parse(
+            "a(1).\nimport \"b.csv\" as b(n: int).\na(9).\nimport \"c.csv\" as c(n: int).\n",
+        )
+        .expect("parses");
+        let table = |values: Vec<ir::Value>| crate::sources::LoadedTable {
+            fields: vec!["n".to_string()],
+            row_count: values.len(),
+            values,
+        };
+        let lowered = lower_with_sources(
+            &program,
+            vec![
+                table(vec![ir::Value::Int(3), ir::Value::Int(5)]),
+                table(vec![ir::Value::Int(7)]),
+            ],
+        )
+        .expect("lowers");
+        let seen: Vec<(String, Vec<ir::Value>, bool)> = lowered
+            .base_facts()
+            .map(|(pred, row, written)| {
+                (
+                    lowered.pred_info(pred).name.clone(),
+                    row.to_vec(),
+                    written.is_some(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            seen,
+            vec![
+                ("a".to_string(), vec![ir::Value::Int(1)], true),
+                ("b".to_string(), vec![ir::Value::Int(3)], false),
+                ("b".to_string(), vec![ir::Value::Int(5)], false),
+                ("a".to_string(), vec![ir::Value::Int(9)], true),
+                ("c".to_string(), vec![ir::Value::Int(7)], false),
+            ]
+        );
+    }
     use super::*;
     use crate::ast::Span;
     use crate::ast::fixtures as ast_fix;

@@ -384,7 +384,10 @@ mod tests {
         };
         let prefix = closed_prefix(&pattern);
         let mut stored = Relation::new(1);
-        stored.load_base(set.iter().cloned().collect());
+        stored.load_base(
+            set.iter().flat_map(|tuple| tuple.0.clone()).collect(),
+            set.len(),
+        );
         assert!(
             stored
                 .seek(AtomView::Full, 0, &prefix.0)

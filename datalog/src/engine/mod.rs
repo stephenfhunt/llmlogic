@@ -53,8 +53,8 @@ use crate::Result;
 use crate::ast::{AggOp, ArithOp, BuiltinOp, CmpOp, TypeName};
 use crate::error::{Error, ErrorCode};
 use crate::ir::{
-    Atom, BodyLiteral, BodyLiteralKind, Expr, F64, Fact, PredId, PredicateInfo, Program, Query,
-    Rule, RuleId, Term, Tuple, Value, f64_as_exact_i64, i64_as_exact_f64,
+    Atom, BodyLiteral, BodyLiteralKind, Expr, F64, Fact, ImportedRows, PredId, PredicateInfo,
+    Program, Query, Rule, RuleId, Term, Tuple, Value, f64_as_exact_i64, i64_as_exact_f64,
 };
 use crate::lexer::{CellClass, classify_cell, classify_symbol};
 use crate::provenance::{
@@ -292,13 +292,24 @@ impl Model {
     /// ([`first_round`](Self::first_round)'s field), because each as a map of
     /// its own was a fact-keyed copy of the whole EDB — on an imported table,
     /// most of what a recorded run held.
-    fn load_base(&mut self, facts: impl IntoIterator<Item = Fact>) {
-        let mut rows: Vec<Vec<Tuple>> = vec![Vec::new(); self.relations.len()];
-        for fact in facts {
-            rows[fact.pred.0 as usize].push(fact.tuple);
+    fn load_base(&mut self, facts: impl IntoIterator<Item = Fact>, imported: Vec<ImportedRows>) {
+        let mut blocks: Vec<(Vec<Value>, usize)> = vec![(Vec::new(), 0); self.relations.len()];
+        for block in imported {
+            let (values, rows) = &mut blocks[block.pred.0 as usize];
+            if values.is_empty() {
+                *values = block.values;
+            } else {
+                values.extend(block.values);
+            }
+            *rows += block.rows;
         }
-        for (relation, rows) in self.relations.iter_mut().zip(rows) {
-            relation.load_base(rows);
+        for fact in facts {
+            let (values, rows) = &mut blocks[fact.pred.0 as usize];
+            values.extend(fact.tuple.0);
+            *rows += 1;
+        }
+        for (relation, (values, rows)) in self.relations.iter_mut().zip(blocks) {
+            relation.load_base(values, rows);
         }
     }
 
@@ -396,7 +407,7 @@ pub fn eval_pruned(
 }
 
 /// [`eval_pruned`], moving the program's facts into the model instead of copying
-/// them: `program.facts` is left empty.
+/// them: `program.facts` and `program.imported` are left empty.
 ///
 /// A large run's base is mostly imported rows, and a copy left two of them alive
 /// for the whole evaluation (`notes/memory-profile-2026-09-12.md`). A caller
@@ -408,9 +419,11 @@ pub fn eval_pruned_moving_facts(
     live: Option<&[bool]>,
 ) -> Result<Model> {
     let facts = std::mem::take(&mut program.facts);
+    let imported = std::mem::take(&mut program.imported);
     uncapped(eval_seeded(
         program,
         facts,
+        imported,
         u32::MAX,
         provenance,
         live,
@@ -456,6 +469,7 @@ pub(crate) fn eval_capped(
     eval_seeded(
         program,
         program.facts.iter().cloned(),
+        program.imported.clone(),
         max_rounds,
         provenance,
         live,
@@ -476,6 +490,7 @@ pub(crate) fn eval_observed(
     eval_seeded(
         program,
         program.facts.iter().cloned(),
+        program.imported.clone(),
         max_rounds,
         provenance,
         None,
@@ -483,11 +498,13 @@ pub(crate) fn eval_observed(
     )
 }
 
-/// [`eval_capped`] over base facts the caller supplies — `program.facts`, copied
+/// [`eval_capped`] over base facts the caller supplies — `program.facts` and
+/// `program.imported`, copied
 /// or moved out of it — calling `on_round` at the start of each delta pass.
 fn eval_seeded(
     program: &Program,
     facts: impl IntoIterator<Item = Fact>,
+    imported: Vec<ImportedRows>,
     max_rounds: u32,
     provenance: Provenance,
     live: Option<&[bool]>,
@@ -495,7 +512,7 @@ fn eval_seeded(
 ) -> std::result::Result<Model, Capped> {
     validate(program).map_err(Capped::Failed)?;
     let mut model = Model::new(&program.predicates, provenance);
-    model.load_base(facts);
+    model.load_base(facts, imported);
     let mut round = 0;
     for stratum in &program.strata {
         let stratum: Vec<RuleId> = match live {
@@ -515,8 +532,8 @@ fn eval_seeded(
 /// enforces the IR contract that `strata` covers every rule exactly once.
 fn validate(program: &Program) -> Result<()> {
     // Imported facts are ordinary base facts by the time the engine runs
-    // (§13): the source layer materialized them into `program.facts` before
-    // lowering, and `ImportSpec` survives only as provenance/definedness
+    // (§13): lowering placed each import's rows in `program.imported`, one flat
+    // block per import, and `ImportSpec` survives only as provenance/definedness
     // metadata. Nothing import-specific to reject here.
     for rule in &program.rules {
         validate_body(&rule.body, &rule.var_names)?;
@@ -2566,6 +2583,7 @@ mod tests {
         let path = PredId(1);
         let program = Program {
             fact_spans: Default::default(),
+            imported: Vec::new(),
             predicates: vec![
                 PredicateInfo {
                     name: "edge".to_string(),

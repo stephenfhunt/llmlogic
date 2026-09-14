@@ -14,7 +14,12 @@ use proptest::strategy::ValueTree;
 
 use datalog::ast::{FieldDecl, Ident, Span, TypeName};
 use datalog::ir::{F64, Value};
-use datalog::sources::load_table;
+use datalog::sources::{LoadedTable, load_table};
+
+/// A loaded table's rows, one vector each, for comparing against literals.
+fn table_rows(table: &LoadedTable) -> Vec<Vec<Value>> {
+    table.rows().map(<[Value]>::to_vec).collect()
+}
 
 /// A fresh scratch directory per call (hand-rolled; no `tempfile` dep —
 /// testing.md Phase F). Best-effort cleanup: the OS owns the temp dir.
@@ -231,7 +236,7 @@ proptest! {
                 .map(|row| row.iter().cloned().map(Value::String).collect())
                 .collect(),
         );
-        prop_assert_eq!(loaded.rows, expected);
+        prop_assert_eq!(table_rows(&loaded), expected);
     }
 
     /// F2 — inference oracle: over clean cell spellings, the imported column
@@ -280,7 +285,7 @@ proptest! {
             } else {
                 "string"
             };
-            for row in &loaded.rows {
+            for row in &table_rows(&loaded) {
                 let actual = match row[col] {
                     Value::Int(_) => "int",
                     Value::Float(_) => "float",
@@ -400,10 +405,10 @@ proptest! {
         // column generated as floats may contain int-valued floats printed
         // `1.0`, which read back as floats — the generator is uniform per
         // column, so plain equality holds after set semantics.
-        if !loaded.rows.is_empty() {
+        if !table_rows(&loaded).is_empty() {
             prop_assert_eq!(&loaded.fields, &keys);
         }
-        prop_assert_eq!(loaded.rows, as_set(rows));
+        prop_assert_eq!(table_rows(&loaded), as_set(rows));
     }
 }
 
@@ -430,7 +435,7 @@ fn f7_parquet_round_trip() {
     assert_eq!(loaded.fields, ["id", "name", "score", "active"]);
     let f = |x: f64| Value::Float(F64::new(x).unwrap());
     assert_eq!(
-        loaded.rows,
+        table_rows(&loaded),
         vec![
             vec![
                 Value::Int(1),
@@ -467,7 +472,7 @@ fn jsonl_missing_key_becomes_absent() {
     let loaded = load_table(path.to_str().unwrap(), None, None).expect("loads");
     assert_eq!(loaded.fields, ["a", "b"]);
     assert_eq!(
-        loaded.rows,
+        table_rows(&loaded),
         vec![
             vec![Value::Int(1), Value::Int(2)],
             vec![Value::Int(3), Value::Absent],
@@ -492,7 +497,7 @@ fn a_jsonl_file_with_no_records_is_empty_under_a_schema_and_an_error_without() {
         let loaded = load_table(path, None, Some(&schema))
             .unwrap_or_else(|e| panic!("{text:?} under a schema: {e:?}"));
         assert_eq!(loaded.fields, ["id", "n"], "{text:?}");
-        assert!(loaded.rows.is_empty(), "{text:?}");
+        assert!(table_rows(&loaded).is_empty(), "{text:?}");
         let errors = load_table(path, None, None).expect_err("no schema names no fields");
         assert!(
             errors[0].to_string().contains("explicit schema"),
@@ -504,7 +509,7 @@ fn a_jsonl_file_with_no_records_is_empty_under_a_schema_and_an_error_without() {
     std::fs::write(&path, "{\"json\": 1}\n").expect("write");
     let loaded = load_table(path.to_str().unwrap(), None, None).expect("loads");
     assert_eq!(loaded.fields, ["json"]);
-    assert_eq!(loaded.rows, vec![vec![Value::Int(1)]]);
+    assert_eq!(table_rows(&loaded), vec![vec![Value::Int(1)]]);
 }
 
 /// An explicit JSON `null` is absent too (§4/§13) — same as a missing key.
@@ -514,7 +519,7 @@ fn jsonl_explicit_null_becomes_absent() {
     std::fs::write(&path, "{\"a\": 1, \"b\": 2}\n{\"a\": 3, \"b\": null}\n").expect("write");
     let loaded = load_table(path.to_str().unwrap(), None, None).expect("loads");
     assert_eq!(
-        loaded.rows,
+        table_rows(&loaded),
         vec![
             vec![Value::Int(1), Value::Int(2)],
             vec![Value::Int(3), Value::Absent],
@@ -531,7 +536,7 @@ fn csv_empty_cell_is_absent_and_keeps_the_column_numeric() {
     let loaded = load_table(path.to_str().unwrap(), None, None).expect("loads");
     assert_eq!(loaded.fields, ["food", "amount"]);
     assert_eq!(
-        loaded.rows,
+        table_rows(&loaded),
         vec![
             vec![Value::String("apple".into()), Value::Int(5)],
             vec![Value::String("banana".into()), Value::Absent],
@@ -588,7 +593,7 @@ fn csv_quoted_empty_is_a_string_unquoted_empty_is_absent() {
     std::fs::write(&path, "k,note\napple,\"\"\nbanana,\n").expect("write");
     let loaded = load_table(path.to_str().unwrap(), None, None).expect("loads");
     assert_eq!(
-        loaded.rows,
+        table_rows(&loaded),
         vec![
             vec![Value::String("apple".into()), Value::String(String::new())],
             vec![Value::String("banana".into()), Value::Absent],
@@ -625,7 +630,7 @@ fn csv_header_fields_arrive_in_order() {
     // (§13, 2026-08-19): the `@` is a delimiter the reader supplies, exactly as
     // a string's quotes are, and this default path is the case S4 is about.
     assert_eq!(
-        loaded.rows[0][7],
+        table_rows(&loaded)[0][7],
         Value::Date(datalog::temporal::Date::from_ymd(2020, 1, 2).expect("a real day"))
     );
 }
@@ -646,7 +651,7 @@ fn url_csv_import_reads_over_httpfs() {
     let loaded = load_table(url, None, None).expect("url import over httpfs");
     assert_eq!(loaded.fields, ["year", "month", "passengers"]);
     // 12 years × 12 months in this well-known dataset.
-    assert_eq!(loaded.rows.len(), 144);
+    assert_eq!(table_rows(&loaded).len(), 144);
 }
 
 /// A schema-less import's header field names reach lowering, so named access
@@ -751,7 +756,7 @@ proptest! {
 
         // Import set semantics: compare as sets, as every other anchor check does.
         let imported: std::collections::BTreeSet<Value> =
-            loaded.rows.iter().map(|row| row[0].clone()).collect();
+            table_rows(&loaded).iter().map(|row| row[0].clone()).collect();
         let written: std::collections::BTreeSet<Value> = values.iter().cloned().collect();
         prop_assert_eq!(imported, written);
     }
@@ -792,7 +797,7 @@ fn a_declared_timestamp_reads_what_inference_leaves_alone() {
 
     let inferred = load_table(path.to_str().unwrap(), None, None).expect("loads");
     assert_eq!(
-        inferred.rows[0][0],
+        table_rows(&inferred)[0][0],
         Value::String("2026-08-19 10:30:00".to_string()),
         "inference is strict about the form"
     );
@@ -800,7 +805,7 @@ fn a_declared_timestamp_reads_what_inference_leaves_alone() {
     let schema = [field("at", Some(TypeName::Timestamp))];
     let declared = load_table(path.to_str().unwrap(), None, Some(&schema)).expect("loads");
     assert_eq!(
-        declared.rows[0][0],
+        table_rows(&declared)[0][0],
         Value::Timestamp(
             datalog::temporal::Timestamp::from_parts(2026, 8, 19, 10, 30, 0, 0).expect("in range")
         )
@@ -815,7 +820,7 @@ fn a_mixed_temporal_column_widens_to_timestamp() {
     std::fs::write(&path, "at\n2026-08-19\n2026-08-20T10:30:00\n").expect("write csv");
     let loaded = load_table(path.to_str().unwrap(), None, None).expect("loads");
     assert_eq!(
-        loaded.rows[0][0],
+        table_rows(&loaded)[0][0],
         Value::Timestamp(
             datalog::temporal::Timestamp::from_parts(2026, 8, 19, 0, 0, 0, 0).expect("in range")
         ),

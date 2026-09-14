@@ -40,7 +40,13 @@ use crate::ir::{
 /// appears. A runtime error in a comparison/arithmetic builtin (§8) aborts, so
 /// the oracle can be differenced against the engine on the error path too (B1).
 pub(crate) fn naive_eval(program: &Program) -> Result<BTreeSet<Fact>> {
-    let mut facts: BTreeSet<Fact> = program.facts.iter().cloned().collect();
+    let mut facts: BTreeSet<Fact> = program
+        .base_facts()
+        .map(|(pred, row, _)| Fact {
+            pred,
+            tuple: Tuple(row.to_vec()),
+        })
+        .collect();
     for stratum in &program.strata {
         loop {
             let mut derived: Vec<Fact> = Vec::new();
