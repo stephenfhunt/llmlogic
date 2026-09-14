@@ -272,6 +272,15 @@ impl Value {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Tuple(pub Vec<Value>);
 
+/// A tuple is looked up by its row. `Vec`'s `Eq`, `Ord` and `Hash` are its
+/// slice's, so a set of tuples orders and finds a row exactly as it does the
+/// tuple holding it.
+impl std::borrow::Borrow<[Value]> for Tuple {
+    fn borrow(&self) -> &[Value] {
+        &self.0
+    }
+}
+
 /// A ground fact — the set member of set semantics (§17): a fact derived
 /// multiple ways is one fact with multiple derivations.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]

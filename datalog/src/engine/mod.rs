@@ -41,7 +41,11 @@
 
 #[cfg(test)]
 pub(crate) mod naive;
+mod relation;
 mod seek;
+
+use relation::AtomView;
+pub use relation::Relation;
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -102,15 +106,18 @@ pub enum Provenance {
 
 /// The result of evaluation: every predicate's full extent, plus provenance.
 ///
-/// Relations are genuine sets ([`BTreeSet`]), so iteration is deterministic
-/// and already in the §14 canonical order ([`Value`]'s derived `Ord`).
+/// Each predicate's facts are a [`Relation`], which iterates in the §14
+/// canonical order ([`Value`]'s derived `Ord`).
 ///
 /// Whether the provenance is *there* is [`Model::provenance`]: a run provisions
 /// the recorder from its own goals (§17, 2026-08-21).
 #[derive(Debug, Clone)]
 pub struct Model {
     /// Indexed by `PredId`: the predicate's full extent (base ∪ derived).
-    relations: Vec<BTreeSet<Tuple>>,
+    relations: Vec<Relation>,
+    /// The relations holding a block from the most recent apply, whose blocks the
+    /// next apply retires ([`Relation::retire_delta`]).
+    delta_holders: Vec<PredId>,
     /// All derivations per derived fact, rule-instance-deduplicated.
     derivations: HashMap<Fact, BTreeSet<Derivation>>,
     /// Fixpoint round each *derived* fact first appeared in, from 1. Monotone
@@ -130,7 +137,8 @@ pub struct Model {
 impl Model {
     fn new(num_predicates: usize, provenance: Provenance) -> Model {
         Model {
-            relations: vec![BTreeSet::new(); num_predicates],
+            relations: vec![Relation::default(); num_predicates],
+            delta_holders: Vec::new(),
             derivations: HashMap::new(),
             first_round: HashMap::new(),
             provenance,
@@ -151,20 +159,20 @@ impl Model {
 
     /// Does `fact` hold in the model?
     pub fn contains(&self, fact: &Fact) -> bool {
-        self.relations[fact.pred.0 as usize].contains(&fact.tuple)
+        self.relations[fact.pred.0 as usize].contains(&fact.tuple.0)
     }
 
-    /// The full extent of `pred`, sorted in canonical order.
-    pub fn relation(&self, pred: PredId) -> &BTreeSet<Tuple> {
+    /// The full extent of `pred`, in canonical order.
+    pub fn relation(&self, pred: PredId) -> &Relation {
         &self.relations[pred.0 as usize]
     }
 
     /// All facts in the model, sorted by (`PredId`, tuple).
     pub fn facts(&self) -> impl Iterator<Item = Fact> + '_ {
         self.relations.iter().enumerate().flat_map(|(i, relation)| {
-            relation.iter().map(move |tuple| Fact {
+            relation.iter().map(move |row| Fact {
                 pred: PredId(i as u32),
-                tuple: tuple.clone(),
+                tuple: Tuple(row.to_vec()),
             })
         })
     }
@@ -243,7 +251,7 @@ impl Model {
         let views = vec![AtomView::Full; query.body.len()];
         let cx = JoinCx {
             model: self,
-            delta: &HashMap::new(),
+            round: 0,
             body: &query.body,
             views: &views,
             probe: None,
@@ -286,57 +294,67 @@ impl Model {
     /// its own was a fact-keyed copy of the whole EDB — on an imported table,
     /// most of what a recorded run held.
     fn insert_base(&mut self, fact: Fact) {
-        self.relations[fact.pred.0 as usize].insert(fact.tuple);
+        self.relations[fact.pred.0 as usize].insert_base(fact.tuple);
     }
 
-    /// Records one derivation, returning the fact's tuple if the fact itself is
-    /// new — the copy the round's delta holds. A rediscovered fact costs no copy.
+    /// Applies one round's matches, returning whether any fact was new.
     ///
-    /// The return value comes from the relation, never from the derivation
-    /// store, which is what lets the store be skipped without changing the
-    /// delta the fixpoint iterates on (`testing.md` E9).
-    fn insert_derived(&mut self, fact: Fact, derivation: Derivation, round: u32) -> Option<Tuple> {
-        let store = match self.provenance {
-            Provenance::Recorded => true,
-            // The reporting surfaces read `skipped` and `lost` off the premises
-            // and nothing else, so a derivation that reports neither is a
-            // derivation no warning will ever look at. The walk is a handful of
-            // discriminant checks: gating it on a per-rule "can this report at
-            // all", which is static, was built and **measured as noise**
-            // (9.4 s → 9.3 s on 1.33M facts) and removed — §17 2026-09-11, and
-            // the same call `notes/profile-2026-08-20.md` made about hoisting
-            // `literal_order`.
-            Provenance::Reports => derivation.reports(),
-            Provenance::Unrecorded => false,
-        };
-        if store {
-            self.derivations
-                .entry(fact.clone())
-                .or_default()
-                .insert(derivation);
+    /// Stores the derivations the run keeps, adds the facts the model does not
+    /// hold as one block per relation, and stamps them with `round` when the run
+    /// records. A fact is new when neither its relation nor this round's block
+    /// holds it, so a fact several matches reach is added and stamped once, and a
+    /// rediscovered fact stores its derivation and nothing else. The unkept facts
+    /// are new by construction: collection checked them against the frozen model.
+    ///
+    /// Whether a fact is new is read off the relation, never off the derivation
+    /// store, which is what lets the store be skipped without changing the delta
+    /// the fixpoint iterates on (`testing.md` E9).
+    fn apply_round(&mut self, pending: &mut Pending, round: u32) -> bool {
+        debug_assert!(pending.unkept.is_empty() || self.provenance != Provenance::Recorded);
+        let mut blocks = std::mem::take(&mut pending.unkept);
+        for (fact, derivation) in pending.kept.drain(..) {
+            let store = match self.provenance {
+                Provenance::Recorded => true,
+                // The reporting surfaces read `skipped` and `lost` off the premises
+                // and nothing else, so a derivation that reports neither is a
+                // derivation no warning will ever look at. The walk is a handful of
+                // discriminant checks: gating it on a per-rule "can this report at
+                // all", which is static, was built and **measured as noise**
+                // (9.4 s → 9.3 s on 1.33M facts) and removed — §17 2026-09-11, and
+                // the same call `notes/profile-2026-08-20.md` made about hoisting
+                // `literal_order`.
+                Provenance::Reports => derivation.reports(),
+                Provenance::Unrecorded => false,
+            };
+            if store {
+                self.derivations
+                    .entry(fact.clone())
+                    .or_default()
+                    .insert(derivation);
+            }
+            let held = self.relations[fact.pred.0 as usize].contains(&fact.tuple.0)
+                || blocks
+                    .get(&fact.pred)
+                    .is_some_and(|block| block.contains(&fact.tuple));
+            if held {
+                continue;
+            }
+            if self.provenance == Provenance::Recorded {
+                self.first_round.insert(fact.clone(), round);
+            }
+            blocks.entry(fact.pred).or_default().insert(fact.tuple);
         }
-        let relation = &mut self.relations[fact.pred.0 as usize];
-        if relation.contains(&fact.tuple) {
-            return None;
+        for pred in std::mem::take(&mut self.delta_holders) {
+            if !blocks.contains_key(&pred) {
+                self.relations[pred.0 as usize].retire_delta();
+            }
         }
-        relation.insert(fact.tuple.clone());
-        if self.provenance == Provenance::Recorded {
-            let tuple = fact.tuple.clone();
-            self.first_round.insert(fact, round);
-            Some(tuple)
-        } else {
-            Some(fact.tuple)
+        let grew = !blocks.is_empty();
+        for (pred, block) in blocks {
+            self.relations[pred.0 as usize].apply(block, round);
+            self.delta_holders.push(pred);
         }
-    }
-
-    /// Adds a round's facts that nothing is kept of: no derivation to store
-    /// and, since only a run that records stamps a round, nothing else either.
-    /// The caller keeps `facts` as the round's delta.
-    fn insert_unkept(&mut self, facts: &HashMap<PredId, BTreeSet<Tuple>>) {
-        debug_assert!(facts.is_empty() || self.provenance != Provenance::Recorded);
-        for (pred, tuples) in facts {
-            self.relations[pred.0 as usize].extend(tuples.iter().cloned());
-        }
+        grew
     }
 }
 
@@ -680,18 +698,17 @@ fn eval_stratum(
     // Seed pass: every rule against the full current relations. This finds
     // every instance derivable from base facts and earlier strata.
     round += 1;
-    let no_delta: HashMap<PredId, BTreeSet<Tuple>> = HashMap::new();
     let mut pending = Pending::default();
     for &rule_id in stratum {
         let rule = &program.rules[rule_id.0 as usize];
         let views = vec![AtomView::Full; rule.body.len()];
-        collect_rule_matches(model, &no_delta, rule, rule_id, &views, &mut pending)?;
+        collect_rule_matches(model, round, rule, rule_id, &views, &mut pending)?;
     }
 
     loop {
-        // Apply the round's matches. Every derivation is recorded (the
-        // all-derivations contract); only genuinely new facts enter the delta.
-        // The unkept facts are new by construction, so they *are* the delta.
+        // Apply the round's matches (`Model::apply_round`). Every derivation is
+        // recorded (the all-derivations contract); only genuinely new facts
+        // enter the delta.
         //
         // **Application is batched, and proof finiteness rests on it.** Nothing
         // inserted here is visible to the collection that produced `pending` —
@@ -703,15 +720,7 @@ fn eval_stratum(
         // Interleaving collection with insertion here would break that silently:
         // the test that fails is **E1** (`e1_derived_facts_have_derivations`),
         // and behind it E2.
-        let mut delta = std::mem::take(&mut pending.unkept);
-        model.insert_unkept(&delta);
-        for (fact, derivation) in pending.kept.drain(..) {
-            let pred = fact.pred;
-            if let Some(tuple) = model.insert_derived(fact, derivation, round) {
-                delta.entry(pred).or_default().insert(tuple);
-            }
-        }
-        if delta.is_empty() {
+        if !model.apply_round(&mut pending, round) {
             return Ok(round);
         }
         // The fixpoint is still growing. Test-only: `eval` passes `u32::MAX`.
@@ -741,27 +750,18 @@ fn eval_stratum(
                         std::cmp::Ordering::Greater => AtomView::Old,
                     })
                     .collect();
-                collect_rule_matches(model, &delta, rule, rule_id, &views, &mut pending)?;
+                collect_rule_matches(model, round, rule, rule_id, &views, &mut pending)?;
             }
         }
     }
 }
 
-/// Which slice of a predicate's extent a body position joins against.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AtomView {
-    /// The full current relation.
-    Full,
-    /// Only the last round's newly derived tuples.
-    Delta,
-    /// The full relation minus the delta (its state before the last round).
-    Old,
-}
-
 /// Everything the join loop reads; bundled so the recursion stays legible.
 struct JoinCx<'a> {
     model: &'a Model,
-    delta: &'a HashMap<PredId, BTreeSet<Tuple>>,
+    /// The round collecting, which selects each relation's delta
+    /// ([`Relation::seek`]). Only a view other than `Full` reads it.
+    round: u32,
     body: &'a [BodyLiteral],
     views: &'a [AtomView],
     /// Set only by [`near_misses`]: how far a *failing* body got (§11).
@@ -802,7 +802,7 @@ struct Pending {
 /// into `pending`.
 fn collect_rule_matches(
     model: &Model,
-    delta: &HashMap<PredId, BTreeSet<Tuple>>,
+    round: u32,
     rule: &Rule,
     rule_id: RuleId,
     views: &[AtomView],
@@ -810,7 +810,7 @@ fn collect_rule_matches(
 ) -> Result<()> {
     let cx = JoinCx {
         model,
-        delta,
+        round,
         body: &rule.body,
         views,
         probe: None,
@@ -844,7 +844,7 @@ fn collect_rule_matches(
         // and store nothing. In a recursive rule most matches are these
         // rediscoveries, and most of the rest reach one new fact many times.
         if !keep {
-            if !model.relation(rule.head.pred).contains(&tuple) {
+            if !model.relation(rule.head.pred).contains(&tuple.0) {
                 pending
                     .unkept
                     .entry(rule.head.pred)
@@ -969,8 +969,6 @@ fn enumerate_literal(
     let idx = order[depth];
     match &cx.body[idx].kind {
         BodyLiteralKind::Atom(atom) => {
-            let full = cx.model.relation(atom.pred);
-            let atom_delta = cx.delta.get(&atom.pred);
             // The atom's constants and already-bound variables are a prefix of
             // leading columns, and a relation is ordered by column — so the
             // tuples that can match are one contiguous range, not the whole
@@ -979,22 +977,15 @@ fn enumerate_literal(
             let Some(prefix) = seek::bound_prefix(atom, bindings) else {
                 return Ok(());
             };
-            let candidates: Box<dyn Iterator<Item = &Tuple>> =
-                match cx.views[idx] {
-                    AtomView::Full => Box::new(seek::tuples_with_prefix(full, &prefix)),
-                    AtomView::Delta => match atom_delta {
-                        Some(delta) => Box::new(seek::tuples_with_prefix(delta, &prefix)),
-                        None => return Ok(()),
-                    },
-                    AtomView::Old => Box::new(seek::tuples_with_prefix(full, &prefix).filter(
-                        move |tuple| atom_delta.is_none_or(|delta| !delta.contains(*tuple)),
-                    )),
-                };
-            for tuple in candidates {
-                if let Some(bound) = try_match(atom, tuple, bindings) {
+            let candidates = cx
+                .model
+                .relation(atom.pred)
+                .seek(cx.views[idx], cx.round, &prefix.0);
+            for row in candidates {
+                if let Some(bound) = try_match(atom, row, bindings) {
                     premises[idx] = Some(Premise::Fact(Fact {
                         pred: atom.pred,
-                        tuple: tuple.clone(),
+                        tuple: Tuple(row.to_vec()),
                     }));
                     let result = enumerate_from(cx, order, depth + 1, bindings, premises, on_match);
                     premises[idx] = None;
@@ -1032,8 +1023,11 @@ fn enumerate_literal(
             // does not). `absent` is a legal key here and an impossible one in
             // the join above; [`seek::closed_prefix`] carries the asymmetry.
             let prefix = seek::closed_prefix(&pattern);
-            if seek::tuples_with_prefix(cx.model.relation(atom.pred), &prefix)
-                .any(|tuple| pattern.matches(tuple))
+            if cx
+                .model
+                .relation(atom.pred)
+                .seek(AtomView::Full, cx.round, &prefix.0)
+                .any(|row| pattern.matches(row))
             {
                 return Ok(());
             }
@@ -1119,11 +1113,10 @@ fn enumerate_literal(
             // in `model`: every goal atom reads the Full relation and the delta is
             // irrelevant. The sub-join shares `bindings`, so the group keys stay
             // fixed while the goal-local variables are enumerated and backtracked.
-            let empty_delta: HashMap<PredId, BTreeSet<Tuple>> = HashMap::new();
             let goal_views = vec![AtomView::Full; goal.len()];
             let sub_cx = JoinCx {
                 model: cx.model,
-                delta: &empty_delta,
+                round: cx.round,
                 body: goal,
                 views: &goal_views,
                 // An aggregate's sub-join is not the outer body's progress, so
@@ -1185,7 +1178,6 @@ fn enumerate_literal(
 /// blocked is the one the run really failed, and an extractor that chose its own
 /// literal order (a second evaluator) is avoided by construction.
 pub fn trace_failure(program: &Program, model: &Model, goal: &Fact) -> Result<FailureTrace> {
-    let empty_delta: HashMap<PredId, BTreeSet<Tuple>> = HashMap::new();
     let mut near_misses = Vec::new();
     for (index, rule) in program.rules.iter().enumerate() {
         if rule.head.pred != goal.pred || rule.head.args.len() != goal.tuple.0.len() {
@@ -1200,7 +1192,7 @@ pub fn trace_failure(program: &Program, model: &Model, goal: &Fact) -> Result<Fa
         let probe = std::cell::RefCell::new(Probe::default());
         let cx = JoinCx {
             model,
-            delta: &empty_delta,
+            round: 0,
             body: &rule.body,
             views: &views,
             probe: Some(&probe),
@@ -1323,11 +1315,11 @@ fn repair_for(
             match model
                 .relation(atom.pred)
                 .iter()
-                .find(|tuple| pattern.matches(tuple))
+                .find(|row| pattern.matches(row))
             {
-                Some(tuple) => Repair::Refuted(Fact {
+                Some(row) => Repair::Refuted(Fact {
                     pred: atom.pred,
-                    tuple: tuple.clone(),
+                    tuple: Tuple(row.to_vec()),
                 }),
                 // An unrefuted negation cannot be what blocked the body.
                 None => Repair::Builtin,
@@ -1569,12 +1561,12 @@ fn extreme_value(present: &[&Value], want_max: bool) -> Result<Value> {
     Ok(acc.clone())
 }
 
-/// Unifies an atom against a ground tuple under the current bindings.
+/// Unifies an atom against a ground row under the current bindings.
 /// Returns the slots newly bound here (for backtracking), or `None` on
 /// mismatch (with any partial bindings already undone).
-fn try_match(atom: &Atom, tuple: &Tuple, bindings: &mut [Option<Value>]) -> Option<Vec<usize>> {
+fn try_match(atom: &Atom, row: &[Value], bindings: &mut [Option<Value>]) -> Option<Vec<usize>> {
     let mut bound: Vec<usize> = Vec::new();
-    for (term, value) in atom.args.iter().zip(&tuple.0) {
+    for (term, value) in atom.args.iter().zip(row) {
         let matches = match term {
             Term::Const(constant) => constant.unifies_with(value),
             Term::Var(var) => {
@@ -2471,7 +2463,7 @@ mod tests {
         };
         let tuple = Tuple(vec![Value::Absent]);
         let mut bindings = vec![None];
-        let bound = try_match(&atom, &tuple, &mut bindings).expect("binds");
+        let bound = try_match(&atom, &tuple.0, &mut bindings).expect("binds");
         assert_eq!(bindings[0], Some(Value::Absent));
         assert_eq!(bound, vec![0]);
 
@@ -2483,7 +2475,7 @@ mod tests {
         };
         let tuple_xx = Tuple(vec![Value::Absent, Value::Absent]);
         let mut bindings = vec![None];
-        assert!(try_match(&atom_xx, &tuple_xx, &mut bindings).is_none());
+        assert!(try_match(&atom_xx, &tuple_xx.0, &mut bindings).is_none());
         assert_eq!(bindings[0], None, "partial binding is undone on mismatch");
     }
 
@@ -5810,7 +5802,7 @@ mod tests {
                     let derived: BTreeSet<Vec<Value>> = variant_model
                         .relation(q_ans)
                         .iter()
-                        .map(|tuple| tuple.0.clone())
+                        .map(|row| row.to_vec())
                         .collect();
                     prop_assert_eq!(answers, derived);
                 }
@@ -5929,13 +5921,13 @@ mod tests {
                     let new = after.relation(pred);
                     match (even, odd) {
                         (true, false) => prop_assert!(
-                            old.is_subset(new),
+                            old.iter().all(|row| new.contains(row)),
                             "{} depends on {} evenly but shrank",
                             program.pred_info(pred).name,
                             program.pred_info(q).name
                         ),
                         (false, true) => prop_assert!(
-                            new.is_subset(old),
+                            new.iter().all(|row| old.contains(row)),
                             "{} depends on {} oddly but grew",
                             program.pred_info(pred).name,
                             program.pred_info(q).name

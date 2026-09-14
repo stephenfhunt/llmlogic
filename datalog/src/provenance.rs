@@ -17,7 +17,7 @@
 
 use crate::ast::{AggOp, CmpOp, TypeName};
 use crate::engine::{Model, Provenance};
-use crate::ir::{Fact, PredId, RuleId, Tuple, Value};
+use crate::ir::{Fact, PredId, RuleId, Value};
 
 /// A ground-but-for-wildcards pattern that **no fact matched**, which is what
 /// satisfied a negated body literal (§7): the negated atom under the rule's
@@ -48,12 +48,12 @@ impl NoMatchPattern {
     /// identifiable member. The `absent`-matches-nothing rule exists to stop a
     /// missing foreign key joining another into a cartesian blowup, and a
     /// membership test never brings in a binding to blow up.
-    pub fn matches(&self, tuple: &Tuple) -> bool {
-        self.args.len() == tuple.0.len()
+    pub fn matches(&self, row: &[Value]) -> bool {
+        self.args.len() == row.len()
             && self
                 .args
                 .iter()
-                .zip(&tuple.0)
+                .zip(row)
                 .all(|(pattern, value)| pattern.as_ref().is_none_or(|expected| expected == value))
     }
 }

@@ -63,10 +63,11 @@ use crate::provenance::NoMatchPattern;
 /// is the whole set, and `starts_with(&[])` holds everywhere.
 pub(crate) fn tuples_with_prefix<'a>(
     set: &'a BTreeSet<Tuple>,
-    prefix: &'a Tuple,
+    prefix: &'a [Value],
 ) -> impl Iterator<Item = &'a Tuple> + 'a {
-    set.range(prefix..)
-        .take_while(move |tuple| tuple.0.starts_with(&prefix.0))
+    use std::ops::Bound;
+    set.range::<[Value], _>((Bound::Included(prefix), Bound::Unbounded))
+        .take_while(move |tuple| tuple.0.starts_with(prefix))
 }
 
 /// The bound prefix of `atom` under `bindings` — its leading arguments whose
@@ -196,7 +197,7 @@ mod tests {
         /// *Mutation:* `set.range(prefix..)` → `set.range(prefix..).skip(1)`.
         #[test]
         fn b12a_the_seek_is_the_scan((set, prefix) in arb_set_and_prefix()) {
-            let sought: Vec<&Tuple> = tuples_with_prefix(&set, &prefix).collect();
+            let sought: Vec<&Tuple> = tuples_with_prefix(&set, &prefix.0).collect();
             prop_assert_eq!(sought, scan(&set, &prefix));
         }
     }
@@ -219,7 +220,7 @@ mod tests {
                 .new_tree(&mut runner)
                 .expect("strategy produces a value")
                 .current();
-            let kept = tuples_with_prefix(&set, &prefix).count();
+            let kept = tuples_with_prefix(&set, &prefix.0).count();
             if kept > 0 && kept < set.len() {
                 proper += 1;
             }
@@ -278,7 +279,7 @@ mod tests {
             (atom, bindings, candidate) in arb_match_case()
         ) {
             let mut scratch = bindings.clone();
-            let matched = super::super::try_match(&atom, &candidate, &mut scratch).is_some();
+            let matched = super::super::try_match(&atom, &candidate.0, &mut scratch).is_some();
             match bound_prefix(&atom, &bindings) {
                 Some(prefix) => prop_assert!(
                     !matched || candidate.0.starts_with(&prefix.0),
@@ -309,7 +310,7 @@ mod tests {
                 .expect("strategy produces a value")
                 .current();
             let mut scratch = bindings.clone();
-            let matched = super::super::try_match(&atom, &candidate, &mut scratch).is_some();
+            let matched = super::super::try_match(&atom, &candidate.0, &mut scratch).is_some();
             match bound_prefix(&atom, &bindings) {
                 Some(prefix) if matched && !prefix.0.is_empty() => matched_with_prefix += 1,
                 Some(_) => {}
@@ -376,7 +377,7 @@ mod tests {
         ) {
             let prefix = closed_prefix(&pattern);
             prop_assert!(
-                !pattern.matches(&candidate) || candidate.0.starts_with(&prefix.0),
+                !pattern.matches(&candidate.0) || candidate.0.starts_with(&prefix.0),
                 "refuted on a tuple outside the sought range"
             );
         }
@@ -400,7 +401,7 @@ mod tests {
                 .new_tree(&mut runner)
                 .expect("strategy produces a value")
                 .current();
-            if !pattern.matches(&candidate) {
+            if !pattern.matches(&candidate.0) {
                 continue;
             }
             let prefix = closed_prefix(&pattern);
@@ -423,7 +424,7 @@ mod tests {
     fn an_empty_prefix_yields_the_whole_relation() {
         let set = relation(&[&[sym("a")], &[sym("b")], &[Value::Absent]]);
         let everything = Tuple(Vec::new());
-        let all: Vec<&Tuple> = tuples_with_prefix(&set, &everything).collect();
+        let all: Vec<&Tuple> = tuples_with_prefix(&set, &everything.0).collect();
         assert_eq!(all, set.iter().collect::<Vec<_>>());
     }
 
@@ -438,7 +439,7 @@ mod tests {
             &[sym("b"), Value::Int(1)],
         ]);
         let prefix = Tuple(vec![sym("a")]);
-        let sought: Vec<&Tuple> = tuples_with_prefix(&set, &prefix).collect();
+        let sought: Vec<&Tuple> = tuples_with_prefix(&set, &prefix.0).collect();
         assert_eq!(
             sought,
             vec![
@@ -506,7 +507,7 @@ mod tests {
             args: vec![Some(Value::Absent)],
         };
         let prefix = closed_prefix(&pattern);
-        assert!(tuples_with_prefix(&set, &prefix).any(|tuple| pattern.matches(tuple)));
+        assert!(tuples_with_prefix(&set, &prefix.0).any(|tuple| pattern.matches(&tuple.0)));
 
         // The join's side of the same asymmetry, for contrast.
         let atom = Atom {

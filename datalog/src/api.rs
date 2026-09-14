@@ -754,19 +754,15 @@ impl Scan {
     /// the join's (`Value::unifies_with`), so a stored `absent` matches no
     /// constant and no repeated variable.
     fn matches<'m>(&'m self, model: &'m Model) -> impl Iterator<Item = &'m [ir::Value]> + 'm {
-        model
-            .relation(self.pred)
-            .iter()
-            .map(|tuple| tuple.0.as_slice())
-            .filter(move |tuple| {
-                self.constants
+        model.relation(self.pred).iter().filter(move |tuple| {
+            self.constants
+                .iter()
+                .all(|(position, value)| tuple[*position].unifies_with(value))
+                && self
+                    .repeats
                     .iter()
-                    .all(|(position, value)| tuple[*position].unifies_with(value))
-                    && self
-                        .repeats
-                        .iter()
-                        .all(|&(position, earlier)| tuple[position].unifies_with(&tuple[earlier]))
-            })
+                    .all(|&(position, earlier)| tuple[position].unifies_with(&tuple[earlier]))
+        })
     }
 }
 
@@ -1838,7 +1834,7 @@ parsed(K, V) :- raw(K, S), V = S as int.
         let walked: Vec<Vec<&ir::Value>> = model
             .relation(atom.pred)
             .iter()
-            .map(|tuple| columns.iter().map(|&position| &tuple.0[position]).collect())
+            .map(|row| columns.iter().map(|&position| &row[position]).collect())
             .collect();
         walked.windows(2).any(|pair| pair[0] > pair[1])
     }
