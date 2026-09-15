@@ -5,7 +5,9 @@
 // Go writes no `implements`: the extractor asks go/types. The oracle is the
 // running program instead. reflect says whether *T (and T) implement I, and each
 // method called through reflect prints the declaration that ran — the method
-// that satisfies an interface's, or that an embedded type's is hidden by.
+// that satisfies an interface's, or that an embedded type's is hidden by. Some
+// types are declared in the test file, which `go test` compiles into another
+// view of the package, and the oracle runs there.
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -29,6 +31,8 @@ interface Type {
   embeds: [number, boolean][];
   /** declared `T[X any]`, and used as `T[int]` */
   generic: boolean;
+  /** declared in the test file */
+  inTest: boolean;
 }
 interface Model {
   ifaces: Iface[];
@@ -63,8 +67,10 @@ function normalize(raw: Model): Model {
   });
   const types = raw.types.map((t, k) => ({
     declares: [...new Map(t.declares).entries()],
-    embeds: [...new Map(t.embeds.filter(([e]) => e < k)).entries()],
+    // The package's own file cannot name what only its test file declares.
+    embeds: [...new Map(t.embeds.filter(([e]) => e < k && (t.inTest || !raw.types[e]?.inTest))).entries()],
     generic: t.generic,
+    inTest: t.inTest,
   }));
   return { ifaces, types };
 }
@@ -77,44 +83,53 @@ const arbModel: fc.Arbitrary<Model> = fc
         declares: fc.array(fc.tuple(fc.constantFrom(...METHODS), fc.boolean()), { maxLength: 4 }),
         embeds: fc.array(fc.tuple(fc.nat(3), fc.boolean()), { maxLength: 2 }),
         generic: fc.boolean(),
+        inTest: fc.boolean(),
       }),
       { minLength: 2, maxLength: 4 },
     ),
   })
   .map(normalize);
 
-function render(m: Model): string {
-  const lines = ["package main", "", "import (", '\t"fmt"', '\t"reflect"', ")", ""];
+/**
+ * The package's file and its test file, which `go test` compiles into the
+ * package again. Interfaces are the package's; the oracle is a test, so it sees
+ * every type.
+ */
+function render(m: Model): { main: string; test: string } {
+  const main = ["package main", "", 'import "fmt"', "", "var _ = fmt.Println", ""];
+  const test = ["package main", "", "import (", '\t"fmt"', '\t"reflect"', '\t"testing"', ")", ""];
   m.ifaces.forEach((it, i) => {
-    lines.push(`type I${i} interface {`, ...it.embeds.map((e) => `\tI${e}`), ...it.own.map((x) => `\t${x}()`), "}", "");
+    main.push(`type I${i} interface {`, ...it.embeds.map((e) => `\tI${e}`), ...it.own.map((x) => `\t${x}()`), "}", "");
   });
   const use = (k: number) => `T${k}${m.types[k]?.generic ? "[int]" : ""}`;
   m.types.forEach((t, k) => {
+    const lines = t.inTest ? test : main;
     lines.push(`type T${k}${t.generic ? "[X any]" : ""} struct {`, ...t.embeds.map(([e, ptr]) => `\t${ptr ? "*" : ""}${use(e)}`), "}", "");
     const recv = `T${k}${t.generic ? "[X]" : ""}`;
     for (const [x, ptr] of t.declares) lines.push(`func (t ${ptr ? "*" : ""}${recv}) ${x}() { fmt.Println("ran T${k} ${x}") }`, "");
     const fields = t.embeds.map(([e, ptr]) => `T${e}: ${ptr ? "" : "*"}newT${e}()`).join(", ");
     lines.push(`func newT${k}() *${use(k)} { return &${use(k)}{${fields}} }`, "");
   });
-  lines.push(
-    "func main() {",
+  main.push("func main() {}");
+  test.push(
+    "func TestOracle(t *testing.T) {",
     `\tifaces := []reflect.Type{${m.ifaces.map((_, i) => `reflect.TypeOf((*I${i})(nil)).Elem()`).join(", ")}}`,
     `\tvalues := []any{${m.types.map((_, k) => `newT${k}()`).join(", ")}}`,
-    "\tfor t, v := range values {",
+    "\tfor k, v := range values {",
     "\t\trv := reflect.ValueOf(v)",
     "\t\tfor i, it := range ifaces {",
-    '\t\t\tfmt.Println("impl", t, i, rv.Type().Implements(it), rv.Elem().Type().Implements(it))',
+    '\t\t\tfmt.Println("impl", k, i, rv.Type().Implements(it), rv.Elem().Type().Implements(it))',
     "\t\t}",
     `\t\tfor _, name := range []string{${METHODS.map((x) => `"${x}"`).join(", ")}} {`,
     "\t\t\tif mv := rv.MethodByName(name); mv.IsValid() {",
-    '\t\t\t\tfmt.Println("call", t, name)',
+    '\t\t\t\tfmt.Println("call", k, name)',
     "\t\t\t\tmv.Call(nil)",
     "\t\t\t}",
     "\t\t}",
     "\t}",
     "}",
   );
-  return `${lines.join("\n")}\n`;
+  return { main: `${main.join("\n")}\n`, test: `${test.join("\n")}\n` };
 }
 
 interface Observed {
@@ -125,7 +140,7 @@ interface Observed {
 }
 
 function observe(dir: string): Observed {
-  const r = spawnSync("go", ["run", "."], { cwd: dir, encoding: "utf8" });
+  const r = spawnSync("go", ["test", "-count=1", "-v", "-run", "^TestOracle$"], { cwd: dir, encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
   const impl = new Map<string, boolean>();
   const ran = new Map<string, number>();
@@ -143,6 +158,7 @@ function observe(dir: string): Observed {
 }
 
 const id = (name: string) => `h.go#${name}`;
+const typeId = (m: Model, k: number, member = "") => `${m.types[k]?.inTest ? "h_test.go" : "h.go"}#T${k}${member}`;
 
 function sortedUnique(rows: unknown[][]): string[] {
   return [...new Set(rows.map((r) => JSON.stringify(r)))].sort();
@@ -156,10 +172,12 @@ test("P4-go: implements and overrides are what the program's method sets say; ex
   let embeddedIface = 0;
   let hidden = 0;
   let genericImplemented = 0;
+  let testImplemented = 0;
   fc.assert(
     fc.property(arbModel, (m) => {
       const dir = tempDir("p4-go");
-      writeFiles(dir, { "go.mod": "module example.com/p4\n\ngo 1.26\n", "h.go": render(m) });
+      const src = render(m);
+      writeFiles(dir, { "go.mod": "module example.com/p4\n\ngo 1.26\n", "h.go": src.main, "h_test.go": src.test });
       const seen = observe(dir);
       const { tables } = extractGo(dir, { layers: ["refs"] });
 
@@ -171,14 +189,15 @@ test("P4-go: implements and overrides are what the program's method sets say; ex
           pairs++;
           const byValue = seen.impl.get(`${t} ${i}`);
           if (byValue === undefined) return;
-          implements_.push([id(`T${t}`), id(`I${i}`), !byValue]);
+          implements_.push([typeId(m, t), id(`I${i}`), !byValue]);
           if (!byValue) pointerOnly++;
           if (m.types[t]?.generic) genericImplemented++;
+          if (m.types[t]?.inTest) testImplemented++;
           for (const [x, declarer] of methodsOf(m.ifaces, i)) {
             const r = seen.ran.get(`${t} ${x}`);
             assert.ok(r !== undefined, `*T${t} implements I${i} but has no ${x}`);
             if (r !== t) promoted++;
-            overrides.push([id(`T${r}.${x}`), id(`I${declarer}.${x}`)]);
+            overrides.push([typeId(m, r, `.${x}`), id(`I${declarer}.${x}`)]);
           }
         });
       });
@@ -187,7 +206,7 @@ test("P4-go: implements and overrides are what the program's method sets say; ex
           for (const [x] of t.declares) {
             const r = seen.ran.get(`${e} ${x}`);
             if (r === undefined) continue;
-            overrides.push([id(`T${k}.${x}`), id(`T${r}.${x}`)]);
+            overrides.push([typeId(m, k, `.${x}`), typeId(m, r, `.${x}`)]);
             hidden++;
           }
         }
@@ -204,7 +223,7 @@ test("P4-go: implements and overrides are what the program's method sets say; ex
       );
       assert.deepEqual(
         sortedUnique(tables.rows("embeds").map((r) => [r.outer, r.inner, r.pointer])),
-        sortedUnique(m.types.flatMap((t, k) => t.embeds.map(([e, ptr]) => [id(`T${k}`), id(`T${e}`), ptr]))),
+        sortedUnique(m.types.flatMap((t, k) => t.embeds.map(([e, ptr]) => [typeId(m, k), typeId(m, e), ptr]))),
       );
       fs.rmSync(dir, { recursive: true, force: true });
     }),
@@ -220,4 +239,6 @@ test("P4-go: implements and overrides are what the program's method sets say; ex
   assert.ok(hidden >= 1, "no declaration hid an embedded method");
   // Acceptance for the generic widening: generic types compiled, and implemented.
   assert.ok(genericImplemented >= 1, "no generic type implemented an interface");
+  // Acceptance for the test-file widening: a type only the test file declares implemented one.
+  assert.ok(testImplemented >= 1, "no test-file type implemented an interface");
 });

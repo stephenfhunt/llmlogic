@@ -156,7 +156,10 @@ run: size its default run count from the measured per-run rate, not by eye.
   (`T[X any]`, used as `T[int]`), with `implements.pointer` checked against
   reflect's answer for the value type; acceptance guard: a generic type implemented
   an interface. *Mutations:* generic types skipped → red; `pointer` always false →
-  red.
+  red. Widened to types declared in the test file, which `go test` compiles into
+  another view of the package (the oracle runs as a test); acceptance guard: a
+  test-file type implemented an interface. *Mutation:* matching by the first
+  view that holds both import paths, not the type's own → red at the first case.
 - [x] **P5-go** Points-to soundness against real Go executions, P5's method: the
   program (variables and fields of type `any`, objects `&O{s: N}`, stores and
   loads through a type assertion to `*O`, direct calls, function values, calls

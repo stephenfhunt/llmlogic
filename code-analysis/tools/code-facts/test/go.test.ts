@@ -341,6 +341,30 @@ test("call_site: unsafe's builtins are its package's; a function value computed 
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test("implements: a type declared in a test file satisfies its package's interfaces and other packages'", { skip: NO_GO }, () => {
+  // A test file is compiled into its package again, so its types live in another view of the package.
+  const dir = tempDir("go-test-variant");
+  writeFiles(dir, {
+    "go.mod": "module example.com/tv\n\ngo 1.26\n",
+    "p/p.go": "package p\n\ntype Info struct{ Name string }\n\ntype I interface{ M() Info }\n\ntype Real struct{}\n\nfunc (Real) M() Info { return Info{} }\n",
+    "p/p_test.go":
+      'package p\n\nimport "testing"\n\ntype mock struct{}\n\nfunc (mock) M() Info { return Info{} }\n\nfunc TestM(t *testing.T) { var _ I = mock{} }\n',
+    "q/q.go": 'package q\n\nimport "example.com/tv/p"\n\nfunc Use(i p.I) p.Info { return i.M() }\n',
+    "q/q_test.go":
+      'package q\n\nimport (\n\t"testing"\n\n\t"example.com/tv/p"\n)\n\ntype qmock struct{}\n\nfunc (qmock) M() p.Info { return p.Info{} }\n\nfunc TestQ(t *testing.T) { Use(qmock{}) }\n',
+  });
+  const { tables } = extractGo(dir, { layers: ["refs"] });
+  assert.deepEqual(
+    tables.rows("implements").map((r) => [r.class, r.interface, r.pointer]),
+    [
+      ["p/p.go#Real", "p/p.go#I", false],
+      ["p/p_test.go#mock", "p/p.go#I", false],
+      ["q/q_test.go#qmock", "p/p.go#I", false],
+    ],
+  );
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test("implements and overrides: the interfaces each type's method set satisfies, and the methods that satisfy them", { skip: NO_GO }, () => {
   assert.deepEqual(
     rows("implements").map((r) => [r.class, r.interface, r.pointer]),

@@ -926,8 +926,14 @@ func (x *extractor) emitImplementations() {
 				if in.obj.Pkg() != nil {
 					ipath = in.obj.Pkg().Path()
 				}
-				c := viewWith(tn.Pkg().Path(), ipath)
-				T, I = lookup(c, tn), lookup(c, in.obj)
+				// The type's own view first: a test file's type exists only in the
+				// view `go test` compiles, which has the package's import path.
+				own := closures[x.viewOf[tid]]
+				T, I = lookup(own, tn), lookup(own, in.obj)
+				if T == nil || I == nil {
+					c := viewWith(tn.Pkg().Path(), ipath)
+					T, I = lookup(c, tn), lookup(c, in.obj)
+				}
 			}
 			if T == nil || I == nil {
 				continue
