@@ -279,8 +279,9 @@ final class Extractor {
       } catch (RuntimeException | StackOverflowError | AssertionError e) {
         Model.warn("javac stopped analysing " + describe(u) + ": " + e + "; its references are partial");
       }
+      Names names = new Names(this, u);
       for (Source s : u.sources) {
-        if (s.cu != null) new References(this, u, s).run();
+        if (s.cu != null) new References(this, names, s).run();
       }
       u.task = null;
       u.fm.close();
