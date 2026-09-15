@@ -32,10 +32,14 @@ resolves its names — the TypeScript decision again. Compiled on first use with
 *Rejected:* JavaParser's symbol solver (a third-party jar with weaker resolution),
 JDT/jdtls (heavy, and a second compiler's opinion).
 
-**The Java project model is asked of the build, not guessed**: Maven's reactor,
-source roots and `dependency:build-classpath`; Gradle through an init script that
-prints each project's source sets and resolved classpaths as JSON; a plain
-directory as a fallback. A build tool that fails degrades to no classpath and says
+**The Java project model is asked of the build, not guessed**: Maven through a
+core extension, compiled on first use against the Maven that loads it
+(`-Dmaven.ext.class.path`), which writes the reactor — source roots, release
+level, declared dependencies, classpaths resolved with their scopes — once the
+projects are read, then stops the build so no plugin runs; Gradle through an init
+script that prints each project's source sets and resolved classpaths as JSON; a
+plain directory as a fallback. Why an extension rather than plugin goals:
+`../decisions.md` 2026-09-14, amended 2026-09-15. A build tool that fails degrades to no classpath and says
 so — library names then land in `unresolved_ref`, like a TypeScript checkout
 without `node_modules` — and never aborts extraction.
 
@@ -352,6 +356,47 @@ names), `ignored_error` 573. The bench: `checks.dl` 3.4 s, `flow.dl` 9.4 s,
   before reporting such a pair.
 
 Not exercised by caddy: go.work, cgo, `dot` imports.
+
+## The Java structure layer, as built
+
+- **One javac task per source set** (main, test). Its classpath is the build's;
+  its source path is its own roots, main's for a test set, and each sibling
+  module's, so a reactor needs no jar built. Every set is parsed before any is
+  analysed and ids are assigned over every file in path order, keyed by
+  declaration offset — a sibling's declaration read from the source path is the
+  same id. `-proc:none` for now (see *Not yet*).
+- **Kinds**: record and enum are `class`, an annotation type `interface`; enum
+  constants `enum_member`; record components `property` / `record_component`;
+  initializers `static_block` named `<static@L:C>` / `<instance@L:C>`;
+  constructors `constructor`; lambdas `function` `<lambda@L:C>`; anonymous
+  classes `<class@L:C>`. Visibility is written or implied — interface members,
+  enum constants and record components are public — and so is `is_static`
+  (nested enums, records and interfaces, interface members).
+- **`imports`** is a row per file each statement is *used* to reach. A
+  single-type or static import always names its type's file (unused: `runtime`
+  false); an on-demand import reaching nothing is a `target_dir` row. A name
+  imported by a single-type import is never its package's `*`. `runtime` is false
+  when every use is an inlined constant (its qualifier included) or a Javadoc
+  link. `implicit` covers same-package, fully qualified and Javadoc-only
+  references to a file no import of this file reaches, at the first reference by
+  the name's own offset.
+- **Outside the root**, `target_package` is the JDK module (`java.base`, and
+  `builtin`) or the coordinate the build resolved the jar as, else one read off an
+  `.m2` or Gradle-cache path; symbols are `ext:<package>#Outer.Inner`.
+- **`entry_point`**: `public static void main(String[])`, instance mains from
+  release 25, static initializers (`init`), and methods carrying a JUnit or
+  TestNG annotation *by simple name* (`test`), in any source set.
+- **Degradation**: when Maven cannot read the reactor its modules come from the
+  poms' `<modules>` with conventional roots; when Gradle cannot, every directory
+  holding a build script. Each says so on stderr, which code-facts now forwards
+  from every frontend (Go's warnings were dropped until then).
+- **Not yet**: annotation processors — the extractor-mirrors-its-build rule says
+  run the build's, and without them Lombok's members and generated sources are
+  absent, which the refs layer will make visible; `module-info.java` as symbols;
+  source roots a plugin adds (the extension runs before any plugin); files the
+  build's includes and excludes drop, as `excluded_file`.
+- Byte-comparing fixture output for the Java schema columns found Go's dataflow
+  allocation sites varying run to run (`../bugs/resolved/007`).
 
 ## Properties
 

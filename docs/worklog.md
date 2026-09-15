@@ -24,6 +24,52 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-15 (evening) — the Java frontend's structure layer
+
+Asked to get started on the Java extractor; planned first (Maven through a core
+extension, and structure + P2/P6 this session — the user's calls).
+
+**Done**
+- `1cb1351` schema columns for Java (`lang java`, forms, `static_import`,
+  `on_demand`, `other_language`, `decorator.text`, `java_version`); TS, Python
+  and Go fixture output byte-identical once the new absent columns are dropped.
+- `e020aed` that byte-compare found **Go dataflow allocation sites varying run to
+  run** (`bugs/resolved/007`): globals from maps, and an initializer tied with
+  its test variant's. P6-go now extracts every layer; red on the unfixed code.
+- `36ab69a` the Java frontend, structure layer (`notes/go-java-frontends.md` §
+  The Java structure layer):
+  - Maven's reactor from an extension compiled against the user's Maven, which
+    stops the build before any plugin; Gradle from an init script run by the
+    fixture's committed 9.7.1 wrapper; a plain directory; a failing build
+    degrades to conventional roots and says so;
+  - one javac task per source set, ids by declaration offset in path order;
+  - imports as a row per file each statement reaches, `implicit` rows, runtime
+    false for inlined constants and Javadoc links, coordinates from the build;
+  - fixtures: a Maven reactor resolving from a local repository the tests build,
+    a Gradle build, a plain directory; `checks.dl` clean on all three.
+  - Frontends' stderr now reaches the user (Go's warnings were dropped).
+- `686aca7` **P2-java** (the model rendered as packages and static imports,
+  plain sources; 40 runs, guards from 200) and **P6-java** (reactor order); four
+  mutations red, recorded in `testing.md`.
+- `65e3d8d` the gate went red once on **P4-go's promoted-method guard** (equalities
+  held): since its widenings it fires in 33 of 200 runs, so 25 runs missed it
+  about one suite in 90; 50 by default, rates in `testing.md`.
+
+**Decided** — `decisions.md` 2026-09-14 ***Amended 2026-09-15*** (the Maven
+extension); `-proc:none` until the refs layer shows what processors cost.
+
+**Removed** — the notes' `dependency:build-classpath` plan; the oldest worklog entry.
+
+**Next up**
+- Java refs layer and P4-java (the JVM as oracle): `ref`, `call_site`,
+  `extends`/`implements`/`overrides`, `throws_decl`, `member_access`.
+- Annotation processors: run the build's (Lombok, generated sources) — decide
+  in the refs session with a Spring/Lombok module in hand.
+- Carried: a Go subject with go.work and cgo; P3/P5 static blocks;
+  code-analysis's `reference/datalog.md` additions; the ablation control; push
+  `trunk` when asked.
+- **Open**: `datalog/bugs/015`, `016`.
+
 ## 2026-09-15 (afternoon) — `reference/go.md`, the Go bundle, and a caddy dogfood
 
 Asked to write the skill texts for Go, vendor it, then dogfood.
@@ -100,42 +146,6 @@ receivers, promotion through an embedded pointer).
   naming Go, `package.sh` vendoring the Go frontend's modules and INSTALL.md.
 - A Go dogfood on a real repository chosen for shape; calibration in `notes/`.
 - Java after; the Gradle choice pending with the user.
-- Carried: P3/P5 static blocks; rebuild `dist/`; code-analysis's
-  `reference/datalog.md` additions; the ablation control; push `trunk` when asked.
-- **Open**: `datalog/bugs/015`, `016`.
-
-## 2026-09-15 (late morning) — the Go frontend's quality layer
-
-Asked to go ahead with the Go quality layer.
-
-**Done**
-- `eb69d96` quality, over the TypeScript layer's semantics:
-  - `diagnostic`: go/packages' errors, once each across test variants;
-  - `lint_directive`: `//nolint`, `//lint:ignore`, `#nosec`;
-  - new `compiler_directive`: `//go:…`, `//export`, `//line`;
-  - `comment_marker`, and `literal` (no import paths, tags or array lengths);
-  - new `ignored_error`: discarded, blank, deferred, `go`;
-  - `any_site`: written, but not as a constraint; call results;
-  - `assertion`: `type_assert`, `type_switch`;
-  - `throw_site` for `panic`, `catch_site` for `recover`.
-- A probe caught two defects before the test was written. The go command's
-  echo of a failed compile (`# pkg`) duplicated the type error as a
-  file-less row; it is now dropped where type errors exist. And `catch_site.empty`
-  was true for any one-statement function; it is now true only for bare
-  `recover()`.
-- A quality test over a module exercising every relation; full suite green.
-
-**Decided** — `notes/go-java-frontends.md` § The Go quality layer: every dropped
-error is a fact (`fmt.Println` included); a conversion is no assertion.
-
-**Removed** — nothing; the oldest worklog entry.
-
-**Next up**
-- Go dataflow: three-address facts lowered from x/tools SSA (`var`,
-  `assign`, `alloc`, `load`/`store`, `formal`/`actual`, `receiver`,
-  `callee_var`), and P5-go (points-to soundness against execution).
-- Then `reference/go.md` with the traps in the notes, `package.sh`
-  vendoring, a dogfood; Java after (the Gradle choice pending with the user).
 - Carried: P3/P5 static blocks; rebuild `dist/`; code-analysis's
   `reference/datalog.md` additions; the ablation control; push `trunk` when asked.
 - **Open**: `datalog/bugs/015`, `016`.

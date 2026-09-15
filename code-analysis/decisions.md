@@ -36,6 +36,11 @@ with the long form in [`notes/code-facts.md`](notes/code-facts.md).
     lists one package's files — and namespace granularity answers it. Asked
     `implements` found every `caddy.Module` implementation once types in test
     files were matched in their own view, a case P4-go had not generated.
+  - ***Amended 2026-09-15*** — Maven's project model comes from a **core
+    extension** compiled against the user's own Maven, not `dependency:build-classpath`
+    (the user's choice). It is one `mvn validate` that stops once the reactor is
+    written, so it runs no plugin and downloads none. Its output has the Gradle init script's shape.
+    *Rejected:* plugin goals, whose output would be parsed per module, and which fetch two plugins on first use.
 
 - **2026-09-13 (night ii)** — **The skill's texts are written for a stranger's
   project, and the skill owns every one of them** (the user's ruling).
