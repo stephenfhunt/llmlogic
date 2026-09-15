@@ -93,7 +93,8 @@ run: size its default run count from the measured per-run rate, not by eye.
   `overrides` equal what **`python3` reports** — `__bases__`, and the class each
   direct base's `__mro__` finds a member on — an independent oracle; guard:
   overrides, multiple inheritance, and a lookup where C3 and breadth-first
-  disagree (the generator is shaped for it: 54 of 200 runs). *Mutations:*
+  disagree (the generator is shaped for it: 38 of 200 runs under Python 3.13,
+  so 50 runs by default; at 25 it missed about one suite in 200). *Mutations:*
   breadth-first MRO (the frontend's first version) → red; depth-first → red;
   overrides against the first base only → red; no attribute through a module
   (`mod.Base`) → red.

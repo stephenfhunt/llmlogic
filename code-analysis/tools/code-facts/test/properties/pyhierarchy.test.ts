@@ -16,7 +16,10 @@ import { test } from "node:test";
 import fc from "fast-check";
 import { extractPython, tempDir, writeFiles } from "../helpers.ts";
 
-const RUNS = Number.parseInt(process.env.CODE_FACTS_RUNS ?? "25", 10);
+// 50 for P4-py: its rarest guard, a lookup where C3 and breadth-first disagree,
+// fires in 38 of 200 runs, so 25 missed it about one suite in 200 and 50 misses
+// it about one in 38,000.
+const RUNS = Number.parseInt(process.env.CODE_FACTS_RUNS ?? "50", 10);
 const PYTHON = process.env.CODE_FACTS_PYTHON ?? "python3";
 
 interface ClassModel {
@@ -29,8 +32,8 @@ interface ClassModel {
 // (C3's local-precedence rule, so few hierarchies are rejected) except that
 // sometimes two unrelated ones are swapped, usually two or three of them, and
 // two member names at density 1/2 so lookups collide.
-// Measured over 200 runs: 54 had a lookup where C3 and breadth-first disagree,
-// and 8 drew a hierarchy Python rejects.
+// Measured over 200 runs under Python 3.13: 38 had a lookup where C3 and
+// breadth-first disagree, and 9 drew a hierarchy Python rejects.
 const arbHierarchy: fc.Arbitrary<ClassModel[]> = fc
   .array(
     fc.record({
