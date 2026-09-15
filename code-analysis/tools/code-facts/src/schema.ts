@@ -218,7 +218,7 @@ export const RELATIONS: readonly Relation[] = [
       col("sloc", "int", "lines carrying at least one token (not blank, not only comments)"),
       col("is_test", "bool", "a test file (`*.test.*`, `*.spec.*`, `__tests__/`, `test(s)/`, or only in a test tsconfig; Go's `_test.go`; a Java file in a test source set)"),
       col("is_decl", "bool", "a `.d.ts` file"),
-      col("is_generated", "bool", "a heuristic: the header says `@generated`, `auto-generated` or `DO NOT EDIT`, or the name is `*.gen.*`, `*.generated.*`, `*_pb.*`/`*_pb2.py`/`*.pb.*`, or under `__generated__/`"),
+      col("is_generated", "bool", "a heuristic: the header says `@generated`, `auto-generated` or `DO NOT EDIT`, or the name is `*.gen.*`, `*.generated.*`, `*_pb.*`/`*_pb2.py`/`*.pb.*`, or under `__generated__/`; or the build's own output — what an annotation processor or a source-generating plugin wrote under the build directory"),
       opt(
         "namespace",
         "string",

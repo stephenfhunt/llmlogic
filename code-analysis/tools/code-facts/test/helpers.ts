@@ -96,12 +96,18 @@ let builtRepo: string | undefined;
 export function mavenRepo(): string {
   if (builtRepo !== undefined) return builtRepo;
   const repo = tempDir("m2");
-  for (const artifact of ["units", "testkit"]) {
+  for (const artifact of ["units", "testkit", "gen"]) {
     const src = path.join(FIXTURES, "java-repo", artifact);
-    const sources = (fs.readdirSync(src, { recursive: true }) as string[]).filter((f) => f.endsWith(".java")).map((f) => path.join(src, f));
+    const files = (fs.readdirSync(src, { recursive: true }) as string[]).filter((f) => fs.statSync(path.join(src, f)).isFile());
+    const sources = files.filter((f) => f.endsWith(".java")).map((f) => path.join(src, f));
     const classes = tempDir(`classes-${artifact}`);
     const javac = spawnSync("javac", ["--release", "17", "-d", classes, ...sources], { encoding: "utf8" });
     if (javac.status !== 0) throw new Error(`javac ${artifact}: ${javac.stderr}`);
+    // Resources — a processor's META-INF/services registration — go in the jar beside the classes.
+    for (const f of files.filter((f) => !f.endsWith(".java"))) {
+      fs.mkdirSync(path.dirname(path.join(classes, f)), { recursive: true });
+      fs.copyFileSync(path.join(src, f), path.join(classes, f));
+    }
     const dir = path.join(repo, "com", "acme", artifact, "1.0");
     fs.mkdirSync(dir, { recursive: true });
     const jar = spawnSync("jar", ["--create", "--file", path.join(dir, `${artifact}-1.0.jar`), "-C", classes, "."], { encoding: "utf8" });

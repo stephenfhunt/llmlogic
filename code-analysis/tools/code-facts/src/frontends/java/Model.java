@@ -47,11 +47,20 @@ final class Model {
   /** A resolved classpath entry, with the coordinate it resolved as when the build says. */
   record Jar(Path file, String coord) {}
 
+  /**
+   * How the build runs javac for a source set: its processor path (null when the
+   * build names none), processors, `-proc` setting, source encoding, other
+   * compiler arguments, and where processors write generated sources.
+   */
+  record Compiler(List<Path> processorPath, List<String> processors, String proc, String encoding, List<String> args, Path generatedDir) {
+    static final Compiler NONE = new Compiler(null, List.of(), null, null, List.of(), null);
+  }
+
   /** A unit the compiler reads with one classpath: main or test. */
-  record SourceSet(String name, boolean test, List<Path> roots, List<Jar> classpath, List<String> modules) {}
+  record SourceSet(String name, boolean test, List<Path> roots, List<Jar> classpath, List<String> modules, Compiler compiler) {}
 
   /** A build module: a Maven module, a Gradle project, or a plain directory. */
-  record Module(Tool tool, Path buildFile, Path dir, String name, String version, String release, List<SourceSet> sets, List<Dep> deps) {
+  record Module(Tool tool, Path buildFile, Path dir, String name, String version, String release, List<SourceSet> sets, List<Dep> deps, Path buildDir, boolean codegen) {
     /** What the module's `project.id` names: its build file, or its directory. */
     Path idPath() {
       return buildFile != null ? buildFile : dir;
@@ -80,7 +89,7 @@ final class Model {
     } else {
       modules = List.of(conventional(Tool.PLAIN, null, dir, null, null, null, List.of(), true));
     }
-    List<Module> sorted = new ArrayList<>(modules);
+    List<Module> sorted = new ArrayList<>(modules.stream().map(Model::generatedRoots).toList());
     sorted.sort(Comparator.comparing((Module m) -> m.idPath().toString()));
     return sorted;
   }
@@ -101,12 +110,13 @@ final class Model {
     Path test = dir.resolve("src/test/java");
     List<SourceSet> sets = new ArrayList<>();
     if (!wholeDir || Files.isDirectory(main) || Files.isDirectory(test)) {
-      sets.add(new SourceSet("main", false, List.of(main), List.of(), List.of()));
-      sets.add(new SourceSet("test", true, List.of(test), List.of(), List.of()));
+      sets.add(new SourceSet("main", false, List.of(main), List.of(), List.of(), Compiler.NONE));
+      sets.add(new SourceSet("test", true, List.of(test), List.of(), List.of(), Compiler.NONE));
     } else {
-      sets.add(new SourceSet("main", false, List.of(dir), List.of(), List.of()));
+      sets.add(new SourceSet("main", false, List.of(dir), List.of(), List.of(), Compiler.NONE));
     }
-    return new Module(tool, buildFile, dir, name, version, release, sets, deps);
+    Path buildDir = tool == Tool.MAVEN ? dir.resolve("target") : tool == Tool.GRADLE ? dir.resolve("build") : null;
+    return new Module(tool, buildFile, dir, name, version, release, sets, deps, buildDir, false);
   }
 
   // ── running a build ────────────────────────────────────────────────────────
@@ -365,7 +375,7 @@ final class Model {
         }
         List<Path> roots = ((List<Object>) s.get("roots")).stream().map(r -> Path.of((String) r)).toList();
         List<String> modules = ((List<Object>) s.get("modules")).stream().map(String.class::cast).toList();
-        sets.add(new SourceSet((String) s.get("name"), Boolean.TRUE.equals(s.get("test")), roots, classpath, modules));
+        sets.add(new SourceSet((String) s.get("name"), Boolean.TRUE.equals(s.get("test")), roots, classpath, modules, compiler(s.get("compiler"))));
       }
       List<Dep> deps = new ArrayList<>();
       for (Object dobj : (List<Object>) m.get("deps")) {
@@ -373,9 +383,70 @@ final class Model {
         deps.add(new Dep((String) d.get("coord"), (String) d.get("version"), (String) d.get("scope"), Boolean.TRUE.equals(d.get("optional"))));
       }
       String build = (String) m.get("buildFile");
-      out.add(new Module(tool, build == null ? null : Path.of(build), Path.of((String) m.get("dir")), (String) m.get("name"), (String) m.get("version"), (String) m.get("release"), sets, deps));
+      String buildDir = (String) m.get("buildDir");
+      out.add(new Module(tool, build == null ? null : Path.of(build), Path.of((String) m.get("dir")), (String) m.get("name"), (String) m.get("version"), (String) m.get("release"),
+          sets, deps, buildDir == null ? null : Path.of(buildDir), Boolean.TRUE.equals(m.get("codegen"))));
     }
     return out;
+  }
+
+  @SuppressWarnings("unchecked")
+  static Compiler compiler(Object o) {
+    if (!(o instanceof Map<?, ?> raw)) return Compiler.NONE;
+    Map<String, Object> c = (Map<String, Object>) raw;
+    List<Path> path = c.get("processorPath") instanceof List<?> l ? l.stream().map(x -> Path.of((String) x)).toList() : null;
+    List<String> processors = c.get("processors") instanceof List<?> l ? l.stream().map(String::valueOf).toList() : List.of();
+    List<String> args = c.get("args") instanceof List<?> l ? l.stream().map(String::valueOf).toList() : List.of();
+    String generated = (String) c.get("generatedDir");
+    return new Compiler(path, processors, (String) c.get("proc"), (String) c.get("encoding"), args, generated == null ? null : Path.of(generated));
+  }
+
+  /**
+   * Sources a build plugin generated, as the last build left them. Maven: each
+   * directory under `generated-sources` (main) or `generated-test-sources` (test)
+   * but the annotation processors' own, which extraction writes itself. Gradle
+   * names its generated roots among a source set's directories; one missing is
+   * reported.
+   */
+  static Module generatedRoots(Module m) {
+    if (m.buildDir() == null) return m;
+    Path buildDir = m.buildDir().toAbsolutePath().normalize();
+    boolean found = false;
+    List<SourceSet> sets = new ArrayList<>();
+    for (SourceSet s : m.sets()) {
+      List<Path> roots = new ArrayList<>(s.roots());
+      if (m.tool() == Tool.MAVEN) {
+        Path parent = buildDir.resolve(s.test() ? "generated-test-sources" : "generated-sources");
+        Path own = s.compiler().generatedDir() == null ? null : s.compiler().generatedDir().toAbsolutePath().normalize();
+        if (Files.isDirectory(parent)) {
+          try (Stream<Path> dirs = Files.list(parent)) {
+            for (Path d : dirs.filter(Files::isDirectory).map(d -> d.toAbsolutePath().normalize()).sorted().toList()) {
+              if (d.equals(own) || roots.contains(d)) continue;
+              roots.add(d);
+              found = true;
+            }
+          } catch (IOException e) {
+            warn("cannot list " + parent + ": " + e.getMessage());
+          }
+        }
+      } else {
+        for (Path r : s.roots()) {
+          Path abs = r.toAbsolutePath().normalize();
+          if (!abs.startsWith(buildDir)) continue;
+          if (Files.isDirectory(abs)) found = true;
+          else warn("the build of " + describe(m) + " generates sources into " + abs + ", which is not on disk: build it first, or names from that code stay unresolved");
+        }
+      }
+      sets.add(new SourceSet(s.name(), s.test(), roots, s.classpath(), s.modules(), s.compiler()));
+    }
+    if (m.codegen() && !found) {
+      warn("the build of " + describe(m) + " generates sources, and none is on disk under " + buildDir + ": build it first, or names from generated code stay unresolved");
+    }
+    return new Module(m.tool(), m.buildFile(), m.dir(), m.name(), m.version(), m.release(), sets, m.deps(), m.buildDir(), m.codegen());
+  }
+
+  private static String describe(Module m) {
+    return m.name() != null ? m.name() : m.dir().toString();
   }
 
   static String sha256(byte[]... parts) {

@@ -42,7 +42,25 @@ allprojects { p ->
                         jars << [file: a.file.absolutePath, coord: id instanceof ModuleComponentIdentifier ? "${id.group}:${id.module}".toString() : null]
                     }
                 }
-                sets << [name: n, test: n == 'test', roots: ss.java.srcDirs.collect { it.absolutePath }, classpath: jars, modules: modules.unique()]
+                // How the build runs javac: Gradle passes its processor path, and -proc:none when it is empty.
+                def compiler = [processorPath: null, processors: [], proc: null, encoding: null, args: [], generatedDir: null]
+                def compileTask = p.tasks.findByName(ss.compileJavaTaskName)
+                if (compileTask != null) {
+                    def options = compileTask.options
+                    try {
+                        if (options.annotationProcessorPath != null) {
+                            compiler.processorPath = options.annotationProcessorPath.files.collect { it.absolutePath }
+                            if (compiler.processorPath.isEmpty()) compiler.proc = 'none'
+                        }
+                    } catch (Exception e) {
+                        System.err.println("code-facts: ${p.path} ${ss.name} annotation processor path did not resolve: ${e.message}")
+                    }
+                    compiler.encoding = options.encoding
+                    compiler.args = options.compilerArgs.collect { it.toString() }
+                    def generated = options.generatedSourceOutputDirectory.asFile.orNull
+                    compiler.generatedDir = generated?.absolutePath
+                }
+                sets << [name: n, test: n == 'test', roots: ss.java.srcDirs.collect { it.absolutePath }, classpath: jars, modules: modules.unique(), compiler: compiler]
             }
 
             String release = null
@@ -71,6 +89,8 @@ allprojects { p ->
                 name: p.path,
                 version: p.version == null || p.version.toString() == 'unspecified' ? null : p.version.toString(),
                 release: release,
+                buildDir: p.layout.buildDirectory.get().asFile.absolutePath,
+                codegen: false,
                 sets: sets,
                 deps: deps,
             ]

@@ -3,10 +3,11 @@
 // java-plain (a directory with no build), and on small builds written per test.
 
 import assert from "node:assert/strict";
+import * as fs from "node:fs";
 import * as path from "node:path";
 import { test } from "node:test";
 import type { Result } from "../src/main.ts";
-import { extractJava, fixture, gradleAvailable, javaAvailable, mavenAvailable, tempDir, withMavenRepo, writeFiles } from "./helpers.ts";
+import { extractJava, fixture, gradleAvailable, javaAvailable, mavenAvailable, mavenRepo, tempDir, withMavenRepo, writeFiles } from "./helpers.ts";
 
 const NO_JAVA = javaAvailable() ? false : "needs a JDK (`javac` and `java`)";
 const NO_MAVEN = NO_JAVA !== false ? NO_JAVA : mavenAvailable() ? false : "needs Maven (`mvn`)";
@@ -315,3 +316,93 @@ test("what javac knows, not what is written: implied modifiers, local classes, r
   ]);
   assert.deepEqual(rows("param", r).filter((p) => p.fn === "p/Tests.java#Tests.helper").map((p) => [p.name, p.rest]), [["names", true]]);
 });
+
+const WIDGET = {
+  "src/main/java/p/Widget.java": "package p;\n\nimport com.acme.gen.Factory;\n\n@Factory\npublic class Widget {\n  public Widget() {}\n}\n",
+  "src/main/java/p/Use.java": "package p;\n\npublic class Use {\n  Widget make() {\n    return WidgetFactory.create();\n  }\n}\n",
+};
+
+test("annotation processors run as the Maven build configures them; what they generate is extracted, as generated", { skip: NO_MAVEN }, () => {
+  const dir = tempDir("java-processors");
+  writeFiles(dir, {
+    "pom.xml": POM(
+      "  <groupId>g</groupId>\n  <artifactId>app</artifactId>\n  <version>1</version>\n  <properties><maven.compiler.release>17</maven.compiler.release></properties>\n" +
+        "  <dependencies>\n    <dependency><groupId>com.acme</groupId><artifactId>gen</artifactId><version>1.0</version><scope>provided</scope></dependency>\n  </dependencies>\n" +
+        "  <build><plugins><plugin>\n    <groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId>\n" +
+        "    <configuration><annotationProcessorPaths><path><groupId>com.acme</groupId><artifactId>gen</artifactId><version>1.0</version></path></annotationProcessorPaths></configuration>\n" +
+        "  </plugin></plugins></build>",
+    ),
+    ...WIDGET,
+    // An earlier build's output that the processors no longer write.
+    "target/generated-sources/annotations/p/Stale.java": "package p;\n\nclass Stale {}\n",
+  });
+  const stale = path.join(dir, "target/generated-sources/annotations/p/Stale.java");
+  fs.utimesSync(stale, new Date(2020, 0, 1), new Date(2020, 0, 1));
+  const r = withMavenRepo(() => extractJava(dir, { out: path.join(dir, "out"), layers: [] }));
+  assert.deepEqual(rows("file", r).map((f) => [f.path, f.is_generated]), [
+    ["src/main/java/p/Use.java", false],
+    ["src/main/java/p/Widget.java", false],
+    // Written where the build writes it.
+    ["target/generated-sources/annotations/p/WidgetFactory.java", true],
+  ]);
+  assert.ok(fs.existsSync(path.join(dir, "target/generated-sources/annotations/p/WidgetFactory.java")));
+  assert.deepEqual(rows("imports", r).map((i) => [i.file, i.kind, i.target_file, i.target_package]), [
+    ["src/main/java/p/Use.java", "implicit", "src/main/java/p/Widget.java", null],
+    ["src/main/java/p/Use.java", "implicit", "target/generated-sources/annotations/p/WidgetFactory.java", null],
+    ["src/main/java/p/Widget.java", "static", null, "com.acme:gen"],
+    ["target/generated-sources/annotations/p/WidgetFactory.java", "implicit", "src/main/java/p/Widget.java", null],
+  ]);
+});
+
+test("Gradle's annotation processor path runs too, into the build's generated sources directory", { skip: NO_GRADLE }, () => {
+  const dir = tempDir("java-gradle-processors");
+  const gen = path.join(mavenRepo(), "com/acme/gen/1.0/gen-1.0.jar");
+  for (const f of ["gradlew", "gradle/wrapper/gradle-wrapper.jar", "gradle/wrapper/gradle-wrapper.properties"]) {
+    fs.mkdirSync(path.dirname(path.join(dir, f)), { recursive: true });
+    fs.copyFileSync(path.join(fixture("java-gradle"), f), path.join(dir, f));
+  }
+  fs.chmodSync(path.join(dir, "gradlew"), 0o755);
+  writeFiles(dir, {
+    "settings.gradle": "rootProject.name = 'procs'\n",
+    "build.gradle": `plugins {\n    id 'java'\n}\n\ndependencies {\n    compileOnly files('${gen}')\n    annotationProcessor files('${gen}')\n}\n`,
+    ...WIDGET,
+  });
+  const r = extractJava(dir, { out: path.join(dir, "out"), layers: [] });
+  assert.deepEqual(rows("file", r).map((f) => [f.path, f.is_generated]), [
+    ["build/generated/sources/annotationProcessor/java/main/p/WidgetFactory.java", true],
+    ["src/main/java/p/Use.java", false],
+    ["src/main/java/p/Widget.java", false],
+  ]);
+  assert.deepEqual(rows("imports", r).filter((i) => i.kind === "implicit").map((i) => [i.file, i.target_file]), [
+    ["build/generated/sources/annotationProcessor/java/main/p/WidgetFactory.java", "src/main/java/p/Widget.java"],
+    ["src/main/java/p/Use.java", "src/main/java/p/Widget.java"],
+    ["src/main/java/p/Use.java", "build/generated/sources/annotationProcessor/java/main/p/WidgetFactory.java"],
+  ]);
+});
+
+test("sources are read in the encoding the build names", { skip: NO_MAVEN }, () => {
+  const dir = tempDir("java-encoding");
+  writeFiles(dir, {
+    "pom.xml": POM("  <groupId>g</groupId>\n  <artifactId>enc</artifactId>\n  <version>1</version>\n  <properties><project.build.sourceEncoding>ISO-8859-1</project.build.sourceEncoding></properties>"),
+  });
+  fs.mkdirSync(path.join(dir, "src/main/java/p"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "src/main/java/p/Menu.java"), Buffer.from("package p;\n\npublic class Menu {\n  int caf\u00e9;\n}\n", "latin1"));
+  const r = withMavenRepo(() => extractJava(dir, { out: path.join(dir, "out"), layers: [] }), tempDir("m2-empty"));
+  assert.ok(rows("symbol", r).some((s) => s.id === "src/main/java/p/Menu.java#Menu.caf\u00e9"), "the field's name, decoded as the build decodes it");
+});
+
+test("sources a build plugin generated are read where the last build left them, marked generated", { skip: NO_MAVEN }, () => {
+  const dir = tempDir("java-codegen");
+  writeFiles(dir, {
+    "pom.xml": POM("  <groupId>g</groupId>\n  <artifactId>client</artifactId>\n  <version>1</version>"),
+    "src/main/java/p/Client.java": "package p;\n\npublic class Client {\n  Proto proto;\n}\n",
+    "target/generated-sources/proto/p/Proto.java": "package p;\n\npublic class Proto {}\n",
+  });
+  const r = withMavenRepo(() => extractJava(dir, { out: path.join(dir, "out"), layers: [] }), tempDir("m2-empty"));
+  assert.deepEqual(rows("file", r).map((f) => [f.path, f.is_generated]), [
+    ["src/main/java/p/Client.java", false],
+    ["target/generated-sources/proto/p/Proto.java", true],
+  ]);
+  assert.deepEqual(rows("imports", r).map((i) => [i.file, i.kind, i.target_file]), [["src/main/java/p/Client.java", "implicit", "target/generated-sources/proto/p/Proto.java"]]);
+});
+

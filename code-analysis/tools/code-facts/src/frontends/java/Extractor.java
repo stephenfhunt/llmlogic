@@ -5,11 +5,14 @@ import com.sun.source.tree.ExpressionTree;
 import com.sun.source.util.JavacTask;
 import java.io.File;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.io.Writer;
+import java.nio.charset.Charset;
 import java.nio.charset.MalformedInputException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -23,6 +26,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
+import java.util.zip.ZipFile;
 import javax.lang.model.element.Modifier;
 import javax.tools.JavaCompiler;
 import javax.tools.StandardJavaFileManager;
@@ -56,6 +60,10 @@ final class Extractor {
     Integer release;
     JavacTask task;
     StandardJavaFileManager fm;
+    /** Where processors write while the set is analysed: thrown away, since the generate pass wrote the build's. */
+    Path scratch;
+    /** javac rejected the build's compiler arguments. */
+    boolean dropArgs;
 
     Unit(Model.Module module, Model.SourceSet set) {
       this.module = module;
@@ -71,6 +79,8 @@ final class Extractor {
     String text;
     String pkg = "";
     CompilationUnitTree cu;
+    /** Under the build's output directory: an annotation processor's, or a plugin's, output. */
+    boolean generated;
 
     Source(Path abs, String path, Unit unit) {
       this.abs = abs;
@@ -138,11 +148,13 @@ final class Extractor {
     for (Model.Module m : modules) {
       for (Model.SourceSet set : m.sets()) {
         Unit u = new Unit(m, set);
+        u.release = release(m.release());
         for (Path r : set.roots()) collect(u, r.toAbsolutePath().normalize());
-        u.sources.sort(Comparator.comparing((Source s) -> s.path));
         if (!u.sources.isEmpty()) units.add(u);
       }
     }
+    generate();
+    for (Unit u : units) u.sources.sort(Comparator.comparing((Source s) -> s.path));
     sources.sort(Comparator.comparing((Source s) -> s.path));
     parse();
   }
@@ -162,32 +174,159 @@ final class Extractor {
       if (excludedByUser(rel)) continue;
       String name = abs.getFileName().toString();
       if (name.endsWith(".java")) {
-        if (byAbs.containsKey(abs)) continue;
-        Source s = new Source(abs, rel, u);
-        u.sources.add(s);
-        sources.add(s);
-        byAbs.put(abs, s);
+        addSource(u, abs, rel);
       } else if (name.endsWith(".kt") || name.endsWith(".groovy") || name.endsWith(".scala")) {
         excluded.putIfAbsent(rel, "other_language");
       }
     }
   }
 
+  private void addSource(Unit u, Path abs, String rel) {
+    if (byAbs.containsKey(abs)) return;
+    Source s = new Source(abs, rel, u);
+    Path buildDir = u.module.buildDir();
+    s.generated = buildDir != null && abs.startsWith(buildDir.toAbsolutePath().normalize());
+    u.sources.add(s);
+    sources.add(s);
+    byAbs.put(abs, s);
+  }
+
+  /**
+   * Runs each source set's annotation processors as its build would, before any
+   * id is claimed: javac with `-proc:only`, writing where the build writes. What
+   * this pass wrote becomes the set's sources; an older file there is an earlier
+   * build's, and is left alone.
+   */
+  private void generate() {
+    JavaCompiler javac = ToolProvider.getSystemJavaCompiler();
+    if (javac == null) return;
+    for (Unit u : units) {
+      Model.Compiler c = u.set.compiler();
+      if (c.generatedDir() == null || !processing(u)) continue;
+      Path out = c.generatedDir().toAbsolutePath().normalize();
+      FileTime started = FileTime.fromMillis(System.currentTimeMillis() - 1000);
+      Path classes = null;
+      try (StandardJavaFileManager fm = javac.getStandardFileManager(d -> {}, Locale.ROOT, charset(u))) {
+        Files.createDirectories(out);
+        classes = Files.createTempDirectory("code-facts-classes");
+        fm.setLocation(StandardLocation.CLASS_PATH, classpath(u));
+        fm.setLocation(StandardLocation.SOURCE_PATH, sourcePath(u));
+        List<String> options = options(u);
+        options.addAll(List.of("-s", out.toString(), "-d", classes.toString(), "-proc:only"));
+        List<File> files = u.sources.stream().map(s -> s.abs.toFile()).toList();
+        ((JavacTask) javac.getTask(Writer.nullWriter(), fm, d -> {}, options, null, fm.getJavaFileObjectsFromFiles(files))).call();
+      } catch (IOException | RuntimeException e) {
+        Model.warn("the annotation processors of " + describe(u) + " did not run (" + e + "); what they generate is missing");
+      } finally {
+        if (classes != null) Model.deleteTree(classes);
+      }
+      if (!out.startsWith(root) || !Files.isDirectory(out)) continue;
+      try (Stream<Path> files = Files.walk(out)) {
+        for (Path f : files.filter(p -> p.toString().endsWith(".java")).sorted().toList()) {
+          Path abs = f.toAbsolutePath().normalize();
+          if (Files.getLastModifiedTime(abs).compareTo(started) >= 0 && !excludedByUser(rel(abs))) addSource(u, abs, rel(abs));
+        }
+      } catch (IOException e) {
+        Model.warn("cannot read what the annotation processors of " + describe(u) + " generated: " + e.getMessage());
+      }
+    }
+  }
+
+  /** Whether javac processes annotations for this source set, as the build runs it. */
+  private boolean processing(Unit u) {
+    Model.Compiler c = u.set.compiler();
+    List<String> args = u.dropArgs ? List.of() : c.args();
+    String proc = c.proc();
+    for (String a : args) if (a.startsWith("-proc:")) proc = a.substring("-proc:".length());
+    if ("none".equals(proc)) return false;
+    if ("full".equals(proc) || "only".equals(proc)) return true;
+    if (c.processorPath() != null && !c.processorPath().isEmpty() || !c.processors().isEmpty()) return true;
+    if (args.stream().anyMatch(a -> a.equals("-processor") || a.equals("-processorpath") || a.equals("--processor-path") || a.startsWith("--processor-path="))) return true;
+    // Before JDK 23, javac also runs the processors it discovers on the classpath.
+    return Runtime.version().feature() < 23 && c.processorPath() == null && discoversProcessors(u);
+  }
+
+  private static boolean discoversProcessors(Unit u) {
+    String service = "META-INF/services/javax.annotation.processing.Processor";
+    for (Model.Jar j : u.set.classpath()) {
+      Path f = j.file();
+      try {
+        if (Files.isDirectory(f) && Files.exists(f.resolve(service))) return true;
+        if (Files.isRegularFile(f)) {
+          try (ZipFile z = new ZipFile(f.toFile())) {
+            if (z.getEntry(service) != null) return true;
+          }
+        }
+      } catch (IOException e) {
+        // not a jar
+      }
+    }
+    return false;
+  }
+
+  /** Compiler options that choose what code-facts itself decides: output, paths, release, encoding. */
+  private static final Set<String> MANAGED = Set.of(
+      "-d", "-s", "-h", "-cp", "-classpath", "--class-path", "-sourcepath", "--source-path", "-processorpath", "--processor-path",
+      "--module-path", "-p", "--module-source-path", "--processor-module-path", "-source", "--source", "-target", "--target",
+      "--release", "-encoding", "--system", "--upgrade-module-path", "-bootclasspath", "--boot-class-path", "-extdirs", "-endorseddirs");
+
+  /** The options the build compiles a source set with, as far as they bear on reading it. */
+  private List<String> options(Unit u) {
+    Model.Compiler c = u.set.compiler();
+    List<String> options = new ArrayList<>(List.of("-implicit:none", "-nowarn", "-Xlint:none", "-encoding", charset(u).name()));
+    if (u.release != null) options.addAll(List.of("--release", u.release.toString()));
+    if (!u.dropArgs) {
+      List<String> args = c.args();
+      for (int i = 0; i < args.size(); i++) {
+        String a = args.get(i);
+        String name = a.contains("=") ? a.substring(0, a.indexOf('=')) : a;
+        if (MANAGED.contains(name)) {
+          if (!a.contains("=")) i++;
+          continue;
+        }
+        if (a.startsWith("-implicit:") || a.equals("--enable-preview") && u.release == null) continue;
+        options.add(a);
+      }
+    }
+    if (c.processorPath() != null && !c.processorPath().isEmpty()) {
+      options.addAll(List.of("--processor-path", String.join(File.pathSeparator, c.processorPath().stream().map(Path::toString).toList())));
+    }
+    if (!c.processors().isEmpty()) options.addAll(List.of("-processor", String.join(",", c.processors())));
+    // Without processing asked for, javac writes nothing, wherever it runs.
+    if (!processing(u)) options.add("-proc:none");
+    else if (c.proc() != null) options.add("-proc:" + c.proc());
+    return options;
+  }
+
+  private Charset charset(Unit u) {
+    String encoding = u.set.compiler().encoding();
+    if (encoding == null || encoding.isBlank()) return StandardCharsets.UTF_8;
+    try {
+      return Charset.forName(encoding.strip());
+    } catch (IllegalArgumentException e) {
+      Model.warn("the build of " + describe(u) + " names an encoding this JDK lacks, " + encoding + "; reading it as UTF-8");
+      return StandardCharsets.UTF_8;
+    }
+  }
+
+  private List<File> classpath(Unit u) {
+    List<File> classpath = new ArrayList<>();
+    for (Model.Jar j : u.set.classpath()) {
+      Path file = j.file().toAbsolutePath().normalize();
+      if (!Files.exists(file)) continue;
+      classpath.add(file.toFile());
+      if (j.coord() != null) u.coords.put(file, j.coord());
+    }
+    return classpath;
+  }
+
   private void parse() throws IOException {
     JavaCompiler javac = ToolProvider.getSystemJavaCompiler();
     if (javac == null) throw new IOException("reading Java needs a JDK: the `java` that runs code-facts has no compiler (the jdk.compiler module)");
     for (Unit u : units) {
-      u.fm = javac.getStandardFileManager(d -> {}, Locale.ROOT, StandardCharsets.UTF_8);
-      List<File> classpath = new ArrayList<>();
-      for (Model.Jar j : u.set.classpath()) {
-        Path file = j.file().toAbsolutePath().normalize();
-        if (!Files.exists(file)) continue;
-        classpath.add(file.toFile());
-        if (j.coord() != null) u.coords.put(file, j.coord());
-      }
-      u.fm.setLocation(StandardLocation.CLASS_PATH, classpath);
+      u.fm = javac.getStandardFileManager(d -> {}, Locale.ROOT, charset(u));
+      u.fm.setLocation(StandardLocation.CLASS_PATH, classpath(u));
       u.fm.setLocation(StandardLocation.SOURCE_PATH, sourcePath(u));
-      u.release = release(u.module.release());
       List<File> files = u.sources.stream().map(s -> s.abs.toFile()).toList();
       u.task = task(javac, u, files);
       Iterable<? extends CompilationUnitTree> units;
@@ -210,11 +349,24 @@ final class Extractor {
   }
 
   private JavacTask task(JavaCompiler javac, Unit u, List<File> files) {
-    List<String> options = new ArrayList<>(List.of("-proc:none", "-implicit:none", "-nowarn", "-Xlint:none", "-encoding", "UTF-8"));
-    if (u.release != null) options.addAll(List.of("--release", u.release.toString()));
+    List<String> options = options(u);
+    if (processing(u)) {
+      // Processors run again as the set is analysed — Lombok changes the trees there — writing nothing of the build's.
+      try {
+        if (u.scratch == null) u.scratch = Files.createTempDirectory("code-facts-generated");
+      } catch (IOException e) {
+        throw new UncheckedIOException(e);
+      }
+      options.addAll(List.of("-s", u.scratch.toString()));
+    }
     try {
       return (JavacTask) javac.getTask(Writer.nullWriter(), u.fm, d -> {}, options, null, u.fm.getJavaFileObjectsFromFiles(files));
     } catch (IllegalArgumentException e) {
+      if (!u.dropArgs && !u.set.compiler().args().isEmpty()) {
+        Model.warn("javac rejects the compiler arguments the build gives " + describe(u) + " (" + e.getMessage() + "); reading it without them");
+        u.dropArgs = true;
+        return task(javac, u, files);
+      }
       if (u.release == null) throw e;
       Model.warn("javac cannot read " + describe(u) + " at release " + u.release + " (" + e.getMessage() + "); reading it at its own");
       u.release = null;
@@ -238,19 +390,26 @@ final class Extractor {
   /** The source set's own roots, main's for a test set, and those of every sibling module it depends on. */
   private List<File> sourcePath(Unit u) {
     Set<Path> roots = new LinkedHashSet<>(u.set.roots());
+    if (u.set.compiler().generatedDir() != null) roots.add(u.set.compiler().generatedDir());
     if (u.set.test()) {
       for (Model.SourceSet s : u.module.sets()) {
-        if (!s.test()) roots.addAll(s.roots());
+        if (!s.test()) roots.addAll(withGenerated(s));
       }
     }
     for (String name : u.set.modules()) {
       Model.Module m = moduleByName.get(name);
       if (m == null) continue;
       for (Model.SourceSet s : m.sets()) {
-        if (!s.test()) roots.addAll(s.roots());
+        if (!s.test()) roots.addAll(withGenerated(s));
       }
     }
     return roots.stream().filter(Files::isDirectory).map(Path::toFile).toList();
+  }
+
+  private static List<Path> withGenerated(Model.SourceSet s) {
+    List<Path> roots = new ArrayList<>(s.roots());
+    if (s.compiler().generatedDir() != null) roots.add(s.compiler().generatedDir());
+    return roots;
   }
 
   String describe(Unit u) {
@@ -265,7 +424,7 @@ final class Extractor {
       em.emit("file", Main.row(
           "path", s.path, "dir", dirOf(s.path), "package", s.unit.module.name(), "lang", "java",
           "loc", Text.loc(s.text), "sloc", Text.sloc(s.text), "is_test", s.unit.set.test(), "is_decl", false,
-          "is_generated", Text.generated(s.path, s.text), "namespace", s.pkg));
+          "is_generated", s.generated || Text.generated(s.path, s.text), "namespace", s.pkg));
     }
     for (Map.Entry<String, String> e : excluded.entrySet()) {
       em.emit("excluded_file", Main.row("path", e.getKey(), "reason", e.getValue(), "detail", null));
@@ -292,6 +451,7 @@ final class Extractor {
       }
       u.task = null;
       u.fm.close();
+      if (u.scratch != null) Model.deleteTree(u.scratch);
       for (Source s : u.sources) s.cu = null;
     }
   }
