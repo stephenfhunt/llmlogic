@@ -293,13 +293,74 @@ TypeScript files have no namespace.
 - A `DebugRef`'s variable was first written without a `var` row; `checks.dl`
   caught it on the first extraction.
 
+## The Go dogfood: caddy
+
+Chosen for shape: interface-saturated (a module system matched structurally),
+goroutines, build-tagged platform files, deep history. It has no go.work and no
+cgo. 107.5k lines in 350 files (130 tests), 2,684 commits. Run from the packaged
+bundle, following `SKILL.md` from step 2.
+
+**Calibration.** Extraction with every layer and git: 23.4 s, 723 MB peak (22.0 s
+in the Go frontend), 737k facts — `implements` 976, `overrides` 1,045, `embeds`
+96, `extends` 8, `entry_point` 748, `excluded_file` 20 (`gofuzz` tags and platform
+names), `ignored_error` 573. The bench: `checks.dl` 3.4 s, `flow.dl` 9.4 s,
+`dominators.dl` 9.7 s, `pointsto.dl` 53.7 s at 840 MB, every other library under
+3 s.
+
+**Defects found, each fixed with a test:**
+- `GOOS`/`GOARCH` in the environment built the frontend for that platform, and
+  it could not run.
+- `unsafe`'s functions are `types.Builtin`s with a package, so `unsafe.Sizeof`
+  was an unresolved call in type-checked code.
+- `implements` missed types declared in `_test.go` files — 5 of 144
+  `caddy.Module` implementations. A test file's type exists only in the view
+  `go test` compiles, which shares its package's import path, and the view was
+  chosen by path. P4-go had never generated a test file; it does now.
+- `reference/go.md` was wrong three times where the verification module had no
+  case: interface embedding is `extends`; a `_windows.go` exclusion has no
+  detail; a function value computed in place (`wrap(r)(next)`) is unresolved in
+  type-checked code, and stays so, since `checks.dl` wants a callee on every
+  `indirect` call.
+
+**What held, and how it was checked:**
+- `in_cycle`: 71 files in 11 packages; no cycle edge crosses a package and none
+  is an explicit import; `in_namespace_cycle` is empty.
+- `implements` recall for `caddy.Module`: 144, against a source grep's 143 plus
+  one its regex missed.
+- A negative probe: of 504 unexported production functions, none is uncalled —
+  73 are reached only through `call_edge_pt` (handlers and callbacks passed as
+  values), 25 only through a non-call `ref`. The project lints with `unused`, so
+  zero is right; over `called` alone 98 would look dead.
+- `packages.dl`: `unused(_, _, prod)` is empty; `only_in_tests` names testify and
+  `prometheus/client_model`, which only `admin_test.go` imports.
+- `ignored_error` is mostly `Close` (63 through `io.Closer`), `strings.Builder`
+  writes and `fmt.Print*`; a deferred `countRequest(-1)` under
+  `//nolint:errcheck` is intended, so cross with `lint_directive` first.
+
+**What an analysis would report**, checked in the source:
+- `modules/caddyhttp` and `modules/caddypki` depend on `cmd` (an `sdp_violation`
+  at `-3`): modules register CLI subcommands from `init` through
+  `caddycmd.RegisterCommand` — a plugin pattern, not layering drift.
+- Hot spots, summed cyclomatic × revisions in production files:
+  `caddyconfig/httpcaddyfile/httptype.go` (444, 160),
+  `modules/caddyhttp/reverseproxy/caddyfile.go` (436, 98),
+  `modules/caddyhttp/matchers.go` (311, 126), `modules/caddyhttp/server.go`
+  (235, 179).
+- `hidden_coupling` from `admin.go` (12 commits with `caddyhttp.go` and with
+  `tls.go`) rests on API sweeps just under the 50-file bulk limit — the module
+  interface's early refactors, lint and licence passes. Narrow `--git-since`
+  before reporting such a pair.
+
+Not exercised by caddy: go.work, cgo, `dot` imports.
+
 ## Properties
 
 Each language gets P1 (CFG against real traces), P2 (module graph over modgen's
 model), P3 (cyclomatic = E − N + 2), P4 (hierarchies), P5 (points-to soundness
 against execution) and P6 (determinism). The independent oracles:
 
-- **P4-go** asks the compiler: every generated (type, interface) pair as
-  `var _ I = (*T)(nil)`, `go build`'s errors read per line.
+- **P4-go** asks the running program, as a test so types can live in the test
+  file: reflect says whether `*T` and `T` implement `I`, and each method called
+  through reflect prints the declaration that ran.
 - **P4-java** asks the JVM: each method called on an instance of each class,
   printing which implementation ran.

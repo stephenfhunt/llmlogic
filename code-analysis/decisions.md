@@ -30,6 +30,12 @@ with the long form in [`notes/code-facts.md`](notes/code-facts.md).
     impact closure.
   - Go's structural interfaces become `implements`/`overrides` rows via
     `types.Implements`, so CHA needs no change.
+  - ***Consequences 2026-09-15*** — on a real module (caddy, `notes/go-java-frontends.md`
+    § The Go dogfood) the kept vocabulary held: `checks.dl` clean, every library
+    run unchanged. The file-to-file graph cost what was predicted — `in_cycle`
+    lists one package's files — and namespace granularity answers it. Asked
+    `implements` found every `caddy.Module` implementation once types in test
+    files were matched in their own view, a case P4-go had not generated.
 
 - **2026-09-13 (night ii)** — **The skill's texts are written for a stranger's
   project, and the skill owns every one of them** (the user's ruling).

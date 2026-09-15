@@ -24,6 +24,44 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-15 (afternoon) — `reference/go.md`, the Go bundle, and a caddy dogfood
+
+Asked to write the skill texts for Go, vendor it, then dogfood.
+
+**Done**
+- `72090e4` `skill/reference/go.md` in `python.md`'s shape (the mapping, Go's
+  own facts, the library over Go, ten traps), each claim run on a small module
+  first. `SKILL.md`, `typescript.md` (granularity `-3`), `bring-your-own.md` and
+  the wrapper name Go. `package.sh` runs `go mod vendor`; the bundle built its
+  frontend with an empty module cache and `GOPROXY=off`.
+- `6179073` `GOOS`/`GOARCH` in the environment built a frontend that could not
+  run here; they are cleared for the build.
+- Dogfood on caddy (107k lines, 2,684 commits) from the bundle: extraction
+  23 s / 723 MB, `checks.dl` clean, `pointsto.dl` 54 s / 840 MB, the rest
+  ≤ 10 s. Probes: cycles all within packages, `Module` recall 144/144, 504
+  unexported functions with none dead (98 need points-to or value refs).
+- `88c1a7f` `unsafe.Sizeof`/`Add` resolve to `ext:unsafe#…`; go.md corrected
+  where caddy disagreed (interface embedding is `extends`; name-only
+  constraints carry no detail; computed function values stay `unresolved`,
+  since `checks.dl` wants a callee on `indirect`).
+- `3106935` `implements` for types in `_test.go` (5 of 144 were missing): matched
+  in the type's own view. **P4-go** widened to test-file types — red on the
+  unfixed code at its first case. `5bfe0af` gofmt.
+- `dist/` rebuilt.
+
+**Decided** — `notes/go-java-frontends.md` § The Go dogfood: caddy; a
+consequences note on `decisions.md` 2026-09-14.
+
+**Removed** — the notes' stale P4-go oracle line; the oldest worklog entry.
+
+**Next up**
+- Java frontend; the Gradle choice is pending with the user (SDKMAN, a Gradle
+  zip, or a wrapper-only fixture).
+- A Go subject with go.work and cgo, which caddy has neither of.
+- Carried: P3/P5 static blocks; code-analysis's `reference/datalog.md`
+  additions; the ablation control; push `trunk` when asked.
+- **Open**: `datalog/bugs/015`, `016`.
+
 ## 2026-09-15 (midday) — the Go frontend's dataflow layer
 
 Asked to keep going: the Go dataflow layer.
@@ -96,44 +134,6 @@ error is a fact (`fmt.Println` included); a conversion is no assertion.
   `callee_var`), and P5-go (points-to soundness against execution).
 - Then `reference/go.md` with the traps in the notes, `package.sh`
   vendoring, a dogfood; Java after (the Gradle choice pending with the user).
-- Carried: P3/P5 static blocks; rebuild `dist/`; code-analysis's
-  `reference/datalog.md` additions; the ablation control; push `trunk` when asked.
-- **Open**: `datalog/bugs/015`, `016`.
-
-## 2026-09-15 (morning) — Go's own facts, and namespaces in the library
-
-Asked how well language-specific considerations are covered ("TypeScript
-module ~= Go package?" — no: a module is a file, a package a directory), then to
-do the Go-specific pieces before building further.
-
-**Done**
-- `2e6268e` facts:
-  - `entry_point` by `go test`'s naming and signature rules;
-  - `field_tag` per `key:"value"`, and `typed_const` (value, `iota`);
-  - `module_directive` (go, toolchain, replace, exclude, retract, godebug);
-  - receiver forms, and `implements.pointer`;
-  - generic types in `implements` and embedding, via self-instantiation.
-- P4-go widened to generic types and `pointer`; mutations (generics skipped,
-  `pointer` always false) red. A TypeScript test pinned a whole `implements`
-  row and needed the new absent column.
-- `7e8f05c` library: granularity `-3` (namespace) in `units.dl`;
-  `namespace_dep` and namespace cycles in `modgraph.dl`; Go's basic types in
-  `coupling_kinds.dl`. Bench on fresh tsdl facts: five digests identical.
-
-**Decided** — `notes/go-java-frontends.md` § Go's own facts: `typed_const` is
-a shape, not an enum verdict; the traps for `reference/go.md` are listed there
-(uncalled entry points, intra-package file cycles, `dit`/`noc` zero for
-structs, promoted access, per-file `module_lcom4`).
-
-**Removed** — nothing; the oldest worklog entry.
-
-**Next up**
-- Go quality layer: `diagnostic`, `lint_directive` (`//nolint`,
-  `//lint:ignore`), `compiler_directive` (incl. `//go:embed`),
-  `comment_marker`, `literal`, `assertion` (`type_assert`), `any_site`,
-  `throw_site`/`catch_site`, `ignored_error`.
-- Then dataflow (P5-go), `reference/go.md` with the traps above, vendoring, a
-  dogfood; Java after (the Gradle choice pending with the user).
 - Carried: P3/P5 static blocks; rebuild `dist/`; code-analysis's
   `reference/datalog.md` additions; the ablation control; push `trunk` when asked.
 - **Open**: `datalog/bugs/015`, `016`.
