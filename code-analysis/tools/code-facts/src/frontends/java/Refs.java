@@ -244,10 +244,11 @@ final class Refs {
   private void memberAccess(TreePath path, Element e, String to, String kind, String from, long line) {
     Map<String, Object> target = x.symbols.get(to);
     if (target == null || !"project".equals(target.get("origin"))) return;
-    if (!"property".equals(target.get("kind")) && !"method".equals(target.get("kind"))) return;
-    String ownerId = (String) target.get("parent");
-    Map<String, Object> owner = ownerId == null ? null : x.symbols.get(ownerId);
-    if (owner == null || !("class".equals(owner.get("kind")) || "interface".equals(owner.get("kind")))) return;
+    // What the member is, javac says: a type's field or method, not an enum constant.
+    if (e.getKind() != ElementKind.FIELD && e.getKind() != ElementKind.METHOD) return;
+    if (!(e.getEnclosingElement() instanceof TypeElement ownerType)) return;
+    String ownerId = n.idOf(ownerType);
+    if (ownerId == null) return;
     String mode = kind.equals("call") ? "call" : kind.equals("value") ? "read" : kind;
     Tree leaf = path.getLeaf();
     boolean viaThis;

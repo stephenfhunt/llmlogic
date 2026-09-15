@@ -1,6 +1,6 @@
 package com.example.core;
 
-import com.acme.testkit.Test;
+import org.junit.jupiter.api.Test;
 
 class CircleTest {
   @Test

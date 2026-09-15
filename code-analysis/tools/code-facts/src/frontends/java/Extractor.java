@@ -286,6 +286,7 @@ final class Extractor {
       Names names = new Names(this, u);
       for (Source s : u.sources) {
         if (s.cu == null) continue;
+        new Declared(this, names, s).run();
         new References(this, names, s).run();
         if (layers.contains("refs")) new Refs(this, names, s).run();
       }

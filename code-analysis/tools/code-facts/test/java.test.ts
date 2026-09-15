@@ -90,7 +90,7 @@ test("imports: a row per file an import statement reaches, and an implicit row p
       [`${C}/Shape.java`, 10, "Kind", "implicit", false, `${C}/Kind.java`, C, null, false, true],
       [`${C}/Tag.java`, 3, "java.lang.annotation.Retention", "static", true, null, null, "java.base", true, true],
       [`${C}/Tag.java`, 4, "java.lang.annotation.RetentionPolicy", "static", true, null, null, "java.base", true, true],
-      [`${TEST}/CircleTest.java`, 3, "com.acme.testkit.Test", "static", true, null, null, "com.acme:testkit", false, true],
+      [`${TEST}/CircleTest.java`, 3, "org.junit.jupiter.api.Test", "static", true, null, null, "com.acme:testkit", false, true],
       [`${TEST}/CircleTest.java`, 8, "Circle", "implicit", true, `${C}/Circle.java`, C, null, false, true],
     ],
   );
@@ -192,7 +192,7 @@ test("exports are a file's public top-level type; decorators its annotations, re
     [`${C}/Shape.java#Shape.name`, "ext:java.lang#Deprecated", "Deprecated", 12, null],
     [`${C}/Tag.java#Tag`, "ext:java.lang.annotation#Retention", "Retention", 6, "RetentionPolicy.RUNTIME"],
     [`${C}/geom/Geom.java#Geom.TAU`, "ext:java.lang#Deprecated", "Deprecated", 4, null],
-    [`${TEST}/CircleTest.java#CircleTest.area`, "ext:com.acme.testkit#Test", "Test", 6, null],
+    [`${TEST}/CircleTest.java#CircleTest.area`, "ext:org.junit.jupiter.api#Test", "Test", 6, null],
   ]);
 });
 
@@ -277,4 +277,41 @@ test("a lambda and the parameter it starts with are two declarations", { skip: N
     ["p/L.java#L.f.<lambda@6:33>.s", "parameter"],
   ]);
   assert.deepEqual(rows("param", r).map((p) => [p.fn, p.symbol]), [["p/L.java#L.f.<lambda@6:33>", "p/L.java#L.f.<lambda@6:33>.s"]]);
+});
+
+test("what javac knows, not what is written: implied modifiers, local classes, record components, composed and unresolved test annotations", { skip: NO_JAVA }, () => {
+  const dir = tempDir("java-declared");
+  writeFiles(dir, {
+    "p/Api.java": "package p;\n\npublic interface Api {\n  int LIMIT = 3;\n\n  void run();\n\n  class Nested {}\n\n  enum Mode { ON, OFF }\n}\n",
+    "p/Holder.java":
+      "package p;\n\npublic class Holder {\n  Runnable task = new Runnable() {\n    /** Below local scope. */\n    public void run() {}\n  };\n\n  public record Pair(int left, int right) {}\n}\n",
+    "p/Tests.java":
+      "package p;\n\nimport java.lang.annotation.Retention;\nimport java.lang.annotation.RetentionPolicy;\nimport org.junit.platform.commons.annotation.Testable;\n\n" +
+      "class Tests {\n  @Retention(RetentionPolicy.RUNTIME)\n  @Testable\n  @interface Check {}\n\n  @Check\n  void composed() {}\n\n  @org.junit.Test\n  void unresolved() {}\n\n  void helper(String... names) {}\n}\n",
+    "org/junit/platform/commons/annotation/Testable.java":
+      "package org.junit.platform.commons.annotation;\n\nimport java.lang.annotation.Retention;\nimport java.lang.annotation.RetentionPolicy;\n\n@Retention(RetentionPolicy.RUNTIME)\npublic @interface Testable {}\n",
+  });
+  const r = extractJava(dir, { out: path.join(dir, "out"), layers: [] });
+  const flags = (id: string) => {
+    const s = symbol(id, r);
+    return [s.kind, s.form, s.visibility, s.exported, s.is_static, s.is_abstract, s.is_readonly];
+  };
+  // An interface's constants are public static final, its methods public abstract, its member types public static.
+  assert.deepEqual(flags("p/Api.java#Api.LIMIT"), ["property", null, "public", true, true, false, true]);
+  assert.deepEqual(flags("p/Api.java#Api.run"), ["method", null, "public", true, false, true, false]);
+  assert.deepEqual(flags("p/Api.java#Api.Nested"), ["class", null, "public", true, true, false, false]);
+  assert.deepEqual(flags("p/Api.java#Api.Mode"), ["class", "enum", "public", true, true, false, false]);
+  assert.deepEqual(flags("p/Api.java#Api.Mode.ON"), ["enum_member", null, "public", true, true, false, true]);
+  // An anonymous class in a field's initializer is below local scope: no visibility, no doc rows.
+  const anon = rows("symbol", r).find((s) => String(s.id).startsWith("p/Holder.java#Holder.task.<class@"));
+  assert.deepEqual([anon?.visibility, anon?.exported], [null, false]);
+  assert.ok(!rows("doc", r).some((d) => String(d.symbol).startsWith("p/Holder.java#Holder.task.")));
+  // A record component's field is private; the component is its public accessor.
+  assert.deepEqual(flags("p/Holder.java#Holder.Pair.left"), ["property", "record_component", "public", true, false, false, true]);
+  // A JUnit 5 composed annotation makes a test; an annotation type that did not resolve is judged by its name.
+  assert.deepEqual(rows("entry_point", r).map((e) => [e.symbol, e.kind]), [
+    ["p/Tests.java#Tests.composed", "test"],
+    ["p/Tests.java#Tests.unresolved", "test"],
+  ]);
+  assert.deepEqual(rows("param", r).filter((p) => p.fn === "p/Tests.java#Tests.helper").map((p) => [p.name, p.rest]), [["names", true]]);
 });
