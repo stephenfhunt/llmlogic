@@ -177,6 +177,24 @@ run: size its default run count from the measured per-run rate, not by eye.
   conversions not copied → red; no `callee_var` for a call through a function
   value → red (**green** before the forced indirect call: the random ops rarely
   put a function where a call used it).
+- [x] **P2-java** Module-graph fidelity for Java, over P2's model rendered as one
+  package per directory and one class of static methods per file: `imports` and
+  `import_name` equal the graph — a named import of one function is a static
+  import, of several (or a namespace import, or any other reference into a package
+  imported with `*`) an on-demand import with a row per file it reaches, an import
+  through a barrel a single-type import, and a reference within the package an
+  `implicit` row. References go both ways (Java allows cycles). Read as plain
+  sources, so no build is in the loop. Guards, at 200 runs: a static import (109),
+  a single-type import (46), an on-demand import (123), a reference within a
+  package (99), and an on-demand import reaching two files (40 — so 40 runs by
+  default). *Mutations:* no `implicit` rows → red at the first case; an on-demand
+  import as one row → red; static imports with no target file → red.
+- [x] **P6-java** Determinism for Java: permuting a Maven reactor's `<modules>`
+  order changes no output byte, over P2-java's sources in one module and three
+  more that each declare `x.T`, with overloads whose ids collide and a static
+  initializer. Four runs by default: each is two Maven extractions. Guard: a run
+  reorders. *Mutation:* modules left in the reactor's order → red (89 failing
+  cases while shrinking).
 - [x] **P6-go** Determinism for Go: permuting a go.work's `use` order changes no
   output byte in any layer, over P2-go's module and three more whose two `init`s
   collide and whose package-level variables are allocation sites.
