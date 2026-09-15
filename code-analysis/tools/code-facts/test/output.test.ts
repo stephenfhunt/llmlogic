@@ -5,9 +5,19 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { test } from "node:test";
+import { run } from "../src/main.ts";
 import { RELATIONS } from "../src/schema.ts";
 import { Tables } from "../src/writer.ts";
 import { datalog, engineAvailable, extract, fixture, tempDir } from "./helpers.ts";
+
+test("a target that does not exist is an error, not its parent directory read", () => {
+  const dir = tempDir("missing");
+  fs.writeFileSync(path.join(dir, "stray.py"), "x = 1\n");
+  const gone = path.join(dir, "gone");
+  assert.throws(() => run({ tsconfigs: [], python: [gone], root: dir }), /gone does not exist/);
+  assert.throws(() => run({ tsconfigs: [], java: [gone], root: dir }), /gone does not exist/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
 
 test("the writer rejects a row that does not match its relation", () => {
   const t = new Tables();

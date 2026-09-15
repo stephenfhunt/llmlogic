@@ -90,6 +90,10 @@ export function run(opts: Options): Result {
   const go = opts.go ?? [];
   const java = opts.java ?? [];
   const exclude = (opts.exclude ?? []).map(globToRegExp);
+  // A frontend reads a missing target's directory as its parent, so a missing target is an error here.
+  for (const p of [...python, ...go, ...java]) {
+    if (!fs.existsSync(p)) throw new Error(`code-facts: ${p} does not exist`);
+  }
   // A Python, Go or Java target may be a directory; findRoot reads each target's directory.
   const anchors = [...opts.tsconfigs, ...[...python, ...go, ...java].map((p) => (fs.existsSync(p) && fs.statSync(p).isDirectory() ? path.join(p, "__target__") : p))];
   const root = opts.root !== undefined ? path.resolve(opts.root) : findRoot(anchors);
