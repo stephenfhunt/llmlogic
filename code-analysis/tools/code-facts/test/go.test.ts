@@ -720,6 +720,127 @@ test("flow: statement-level graphs with defer, goto, fallthrough and select; def
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+const QUALITY_SOURCE = `package q
+
+import (
+	_ "embed"
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
+//go:generate stringer -type=Mode
+
+//go:embed data.txt
+var data string
+
+type Mode int
+
+// TODO: remove this
+func Load(path string) (map[string]any, error) {
+	f, err := os.Open(path) //nolint:gosec // trusted
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	var out map[string]any
+	_ = json.NewDecoder(f).Decode(&out) //lint:ignore SA9003 fine
+	fmt.Println("loaded", 3.5) // #nosec G104
+	return out, nil
+}
+
+func Guard(v interface{}) (n int) {
+	defer func() {
+		if r := recover(); r != nil {
+			panic(fmt.Errorf("again: %v", r))
+		}
+	}()
+	defer func() { recover() }()
+	s := v.(string)
+	switch t := v.(type) {
+	case int:
+		n = t
+	}
+	if s == "" {
+		panic(errBad)
+	}
+	var arr [4]int
+	_ = arr
+	go os.Remove("x")
+	return len(s)
+}
+
+var errBad = fmt.Errorf("bad")
+
+func Generic[T any](x T) any { return x }
+
+type Tagged struct {
+	A int \`json:"a"\`
+}
+
+func broken() { undefined() }
+`;
+
+test("quality: diagnostics, suppressions, directives, dropped errors, any, assertions, literals, panic and recover", { skip: NO_GO }, () => {
+  const dir = tempDir("go-quality");
+  writeFiles(dir, { "go.mod": "module example.com/q\n\ngo 1.26\n", "data.txt": "hello\n", "q.go": QUALITY_SOURCE });
+  const { tables } = extractGo(dir, { layers: ["refs", "quality"] });
+  const cols = (rel: string, ...names: string[]) => tables.rows(rel).map((r) => names.map((n) => r[n]));
+  // The go command's echo of the failed compile is the type error again: one row.
+  assert.deepEqual(cols("diagnostic", "file", "line", "code", "message"), [["q.go", 59, 0, "undefined: undefined"]]);
+  assert.deepEqual(cols("lint_directive", "line", "tool", "directive", "rules"), [
+    [19, "golangci", "nolint", "gosec"],
+    [25, "staticcheck", "ignore", "SA9003"],
+    [26, "gosec", "nosec", "G104"],
+  ]);
+  assert.deepEqual(cols("compiler_directive", "line", "name", "text"), [
+    [10, "generate", "stringer -type=Mode"],
+    [12, "embed", "data.txt"],
+  ]);
+  assert.deepEqual(cols("comment_marker", "line", "kind", "text"), [[17, "todo", "remove this"]]);
+  const callee = new Map(tables.rows("call_site").map((c) => [c.id, c.callee_name]));
+  assert.deepEqual(
+    tables.rows("ignored_error").map((r) => [r.fn, callee.get(r.call_site), r.how]),
+    [
+      ["q.go#Load", "Close", "deferred"],
+      ["q.go#Load", "Decode", "blank"],
+      ["q.go#Load", "Println", "discarded"],
+      ["q.go#Guard", "Remove", "go"],
+    ],
+  );
+  // `any` as a type parameter's constraint says nothing about a value; recover() returns one.
+  assert.deepEqual(cols("any_site", "fn", "line", "kind"), [
+    ["q.go#Load", 18, "explicit"],
+    ["q.go#Load", 24, "explicit"],
+    ["q.go#Guard", 30, "explicit"],
+    ["q.go#Guard.<function@31:8>", 32, "call_result"],
+    ["q.go#Guard.<function@36:8>", 36, "call_result"],
+    ["q.go#Generic", 53, "explicit"],
+  ]);
+  assert.deepEqual(cols("assertion", "line", "kind", "to_type", "from_any", "to_any"), [
+    [37, "type_assert", "string", true, false],
+    [38, "type_switch", null, true, false],
+  ]);
+  // Not literals: import paths, the array length, the struct tag.
+  assert.deepEqual(cols("literal", "fn", "kind", "value"), [
+    ["q.go#Load", "string", "loaded"],
+    ["q.go#Load", "number", "3.5"],
+    ["q.go#Guard.<function@31:8>", "string", "again: %v"],
+    ["q.go#Guard", "string", ""],
+    ["q.go#Guard", "string", "x"],
+    ["q.go#errBad", "string", "bad"],
+  ]);
+  assert.deepEqual(cols("throw_site", "fn", "line", "type"), [
+    ["q.go#Guard.<function@31:8>", 33, "lib#error"],
+    ["q.go#Guard", 43, "lib#error"],
+  ]);
+  assert.deepEqual(cols("catch_site", "fn", "binds", "empty", "rethrows"), [
+    ["q.go#Guard.<function@31:8>", true, false, true],
+    ["q.go#Guard.<function@36:8>", false, true, false],
+  ]);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test("checks.dl finds nothing wrong with the Go facts", { skip: NO_GO || !engineAvailable() }, () => {
   const r = datalog(path.join(out, "lib", "checks.dl"));
   assert.equal(r.code, 1, `expected a clean run, got exit ${r.code}:\n${r.stdout}${r.stderr}`);

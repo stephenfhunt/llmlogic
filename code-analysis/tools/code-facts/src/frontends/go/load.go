@@ -52,6 +52,7 @@ type extractor struct {
 	sources  []*source // in path order
 	byAbs    map[string]*source
 	meta     map[string]*packages.Package // import path → metadata (module, directory, files)
+	roots    []*packages.Package          // every package view loaded, test variants included
 	excluded []excludedFile
 
 	idByKey   map[string]string
@@ -215,6 +216,7 @@ func (x *extractor) loadPackages(dir string, patterns []string) error {
 		if strings.HasSuffix(p.ID, ".test") {
 			continue // the generated test main
 		}
+		x.roots = append(x.roots, p)
 		for _, ignored := range p.IgnoredFiles {
 			abs := filepath.Clean(ignored)
 			if !strings.HasSuffix(abs, ".go") || !x.underRoot(abs) || x.excludedByUser(abs) {

@@ -93,6 +93,9 @@ func main() {
 	if wanted["flow"] {
 		x.emitFlow()
 	}
+	if wanted["quality"] {
+		x.emitQuality()
+	}
 	x.flushSymbols()
 	x.em.emit("__counters__", row{"call_site": x.nextCallSite, "flow_node": x.nextFlowNode})
 	if err := out.Flush(); err != nil {

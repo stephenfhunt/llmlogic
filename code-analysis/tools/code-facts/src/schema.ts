@@ -863,11 +863,11 @@ export const RELATIONS: readonly Relation[] = [
   {
     name: "diagnostic",
     layer: "quality",
-    doc: "A compiler diagnostic (syntactic, semantic, or from the tsconfig).",
+    doc: "A compiler diagnostic (syntactic, semantic, or from the tsconfig; for Go, what loading and type-checking a package reported).",
     columns: [
       opt("file", "string", FILE),
       opt("line", "int", LINE),
-      col("code", "int", "TS error code (2322 = not assignable, …)"),
+      col("code", "int", "TS error code (2322 = not assignable, …); 0 where the compiler numbers none (Go)"),
       oneOf("category", ["error", "warning", "suggestion", "message"], "severity"),
       col("message", "string", "first line of the message, truncated to 300 characters"),
     ],
@@ -889,7 +889,7 @@ export const RELATIONS: readonly Relation[] = [
     columns: [
       col("file", "string", FILE),
       col("line", "int", LINE),
-      oneOf("tool", ["eslint", "biome", "prettier", "tslint", "istanbul", "c8", "noqa", "pylint", "mypy", "pyright", "coverage"], "which tool"),
+      oneOf("tool", ["eslint", "biome", "prettier", "tslint", "istanbul", "c8", "noqa", "pylint", "mypy", "pyright", "coverage", "golangci", "staticcheck", "gosec"], "which tool"),
       col("directive", "string", "e.g. `disable-next-line`, `ignore`"),
       opt("rules", "string", "the rules named, as written"),
     ],
@@ -924,7 +924,7 @@ export const RELATIONS: readonly Relation[] = [
       col("fn", "string", "enclosing declaration"),
       col("file", "string", FILE),
       col("line", "int", LINE),
-      oneOf("kind", ["cast", "angle_cast", "non_null", "satisfies", "as_const"], "`cast` is `x as T`, `angle_cast` is `<T>x`"),
+      oneOf("kind", ["cast", "angle_cast", "non_null", "satisfies", "as_const", "type_assert", "type_switch"], "`cast` is `x as T`, `angle_cast` is `<T>x`; Go's `type_assert` is `x.(T)`, `type_switch` a `switch x.(type)`"),
       opt("to_type", "string", "asserted type as written, truncated to 200 characters"),
       col("from_any", "bool", "the asserted expression was `any`"),
       col("to_any", "bool", "asserted to `any`"),
@@ -954,9 +954,32 @@ export const RELATIONS: readonly Relation[] = [
     ],
   },
   {
+    name: "ignored_error",
+    layer: "quality",
+    doc: "A call whose `error` result nothing reads — Go's unchecked error: the call made as a statement, the error assigned to `_`, or a deferred or `go` call's result.",
+    columns: [
+      col("call_site", "int", "`call_site.id`"),
+      col("fn", "string", "enclosing declaration (as `ref.from`)"),
+      col("file", "string", FILE),
+      col("line", "int", LINE),
+      oneOf("how", ["discarded", "blank", "deferred", "go"], "how the error is dropped"),
+    ],
+  },
+  {
+    name: "compiler_directive",
+    layer: "quality",
+    doc: "A Go directive comment: `//go:generate`, `//go:embed`, `//go:build`, `//go:linkname` and the rest, cgo's `//export`, and `//line`.",
+    columns: [
+      col("file", "string", FILE),
+      col("line", "int", LINE),
+      col("name", "string", "the directive without `//go:` (`generate`, `embed`), or `export`, `line`"),
+      opt("text", "string", "the rest of the line — the command, the patterns — truncated to 200 characters"),
+    ],
+  },
+  {
     name: "throw_site",
     layer: "quality",
-    doc: "A `throw` statement.",
+    doc: "A `throw` statement, or a Go `panic(…)` call.",
     columns: [
       col("fn", "string", "enclosing declaration"),
       col("file", "string", FILE),
@@ -967,14 +990,14 @@ export const RELATIONS: readonly Relation[] = [
   {
     name: "catch_site",
     layer: "quality",
-    doc: "A `catch` clause.",
+    doc: "A `catch` clause, or a Go `recover()` call.",
     columns: [
       col("fn", "string", "enclosing declaration"),
       col("file", "string", FILE),
       col("line", "int", LINE),
-      col("binds", "bool", "binds the error (`catch (e)`)"),
-      col("empty", "bool", "has no statements"),
-      col("rethrows", "bool", "contains a `throw`"),
+      col("binds", "bool", "binds the error (`catch (e)`; the value `recover()` returns is used)"),
+      col("empty", "bool", "has no statements (for `recover()`, the function calling it does nothing else)"),
+      col("rethrows", "bool", "contains a `throw` (for `recover()`, the function calling it panics)"),
     ],
   },
 

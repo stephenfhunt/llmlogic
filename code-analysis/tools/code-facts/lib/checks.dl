@@ -122,5 +122,8 @@ violation("throw_site.type", T) :- throw_site(type: T), T is not absent, not kno
 violation("catch_site.fn", F) :- catch_site(fn: F), not known(F).
 violation("floating_promise.call_site", S) :- extracted(refs), floating_promise(call_site: C), not call_site(id: C), S = C as string.
 violation("diagnostic.file", F) :- diagnostic(file: F), F is not absent, not known_file(F).
+violation("ignored_error.call_site", S) :- extracted(refs), ignored_error(call_site: C), not call_site(id: C), S = C as string.
+violation("ignored_error.fn", F) :- ignored_error(fn: F), not known(F).
+violation("compiler_directive.file", F) :- compiler_directive(file: F), not known_file(F).
 
 ?- violation(Check, Subject).
