@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Invocation wrapper for the skill's extractor, `tools/code-facts`: point it at
-# a tsconfig or a Python source root and it writes Datalog fact tables about
+# a tsconfig, a Go module or a Python source root and it writes Datalog fact tables about
 # the project.
 #
 # The extractor is TypeScript run directly by Node (type stripping, no build

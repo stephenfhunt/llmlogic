@@ -2,7 +2,7 @@
 name: code-analysis
 description: >-
   Analyze a codebase's design with a logic engine instead of reading it file by
-  file. Extracts facts from TypeScript or Python source and git history, then
+  file. Extracts facts from TypeScript, Python or Go source and git history, then
   answers what depends on what, what a change affects, where the cycles and
   layering violations are, how modules are coupled and how cohesive they are,
   what is dead or untested, what changes together, and whether package manifests
@@ -40,17 +40,18 @@ wherever you are working.
 2. **Extract** into a directory outside the source tree — `/tmp/facts` below, or
    wherever this project keeps scratch output; the facts are large and are not
    the project's files. For TypeScript, give every tsconfig the project uses —
-   tests often have their own; for Python, the project's directory (or its
-   `pyproject.toml`); for a mixed repository, both:
+   tests often have their own; for Python or Go, the project's directory (or its
+   `pyproject.toml`, `go.mod` or `go.work`); for a mixed repository, each:
    ```sh
    <skill>/code-facts tsconfig.json tsconfig.test.json -o /tmp/facts
    <skill>/code-facts path/to/python-project -o /tmp/facts
+   <skill>/code-facts path/to/go-module -o /tmp/facts
    ```
    Git history comes along when the project is a repository.
 
-   Then read `reference/typescript.md` or `reference/python.md`
-   — what the facts can and cannot say differs by language, and most sharply
-   for Python, which has no type checker behind it. For another language, see
+   Then read `reference/typescript.md`, `reference/python.md` or
+   `reference/go.md` — what the facts can and cannot say differs by language,
+   and most sharply for Python, which has no type checker behind it. For another language, see
    `reference/bring-your-own.md`.
 3. **Check the facts.** `<skill>/datalog /tmp/facts/lib/checks.dl` exits **1**
    when the facts are consistent. Exit 0 prints violations — stop and read them
@@ -77,15 +78,15 @@ the ones no library reads.
 
 | concern | ask | where |
 |---|---|---|
-| **architecture** | import cycles that exist at run time; dependencies pointing up a layer; which rules your architecture should obey (below) | `modgraph.dl`: `runtime_dep`, `unit_dep`, `cycle_edge`, `in_cycle`; `coupling.dl`: `sdp_violation` |
+| **architecture** | import cycles that exist at run time; dependencies pointing up a layer; which rules your architecture should obey (below) | `modgraph.dl`: `runtime_dep`, `unit_dep`, `cycle_edge`, `in_cycle`, `in_namespace_cycle`; `coupling.dl`: `sdp_violation` |
 | **impact of a change** | files that import a changed file through any chain, and the tests among them; everything that calls a changed function | a closure grown from the change (below), over `modgraph.dl`'s `dep` and `callgraph.dl`'s `called_by` |
 | **what a change did** | any question below, asked at two commits, answers diffed | two extractions (below) |
-| **how much coupling** | afferent / efferent / instability / distance per file (`G = -1`), directory depth (`G = N`), package (`G = -2`); `uncounted_dependent` for the importers afferent leaves out (a re-export is no reference, and a shallower file has no component) | `coupling.dl` |
+| **how much coupling** | afferent / efferent / instability / distance per file (`G = -1`), directory depth (`G = N`), package (`G = -2`), namespace — a Go package, a Python module (`G = -3`); `uncounted_dependent` for the importers afferent leaves out (a re-export is no reference, and a shallower file has no component) | `coupling.dl` |
 | **how two modules are coupled** | the strongest kind per file pair — content, common, external, control, stamp, data — and the member, variable, literal or parameter that makes it so | `coupling_kinds.dl`: `worst_coupling`, then the per-kind relations |
 | **hidden coupling** | files that change together with no import or reference between them *today* — a link removed inside the history window looks the same, so check both files' `first_change` or narrow `--git-since` | `cochange.dl`: `hidden_coupling` |
 | **cohesion** | files that are several modules sharing a name; classes that want to split | `cohesion.dl`: `module_lcom4` first (much code has no classes), then `lcom4`, `tcc` |
 | **complexity and risk** | the most complex functions; hot spots where complexity meets churn | `fn` (`cyclomatic`, `cognitive`); `cochange.dl`: `revisions` |
-| **hazards in behaviour** | promises nothing awaits; what can throw past which callers; suppressed checks where the code churns; data from a source reaching a sink | facts: `floating_promise`, `throw_site` / `catch_site` over `call_edge_lexical`, `ts_directive` / `lint_directive` against `revisions`, `comment_marker`; `taint.dl` (supply `source/1`, `sink/1`) |
+| **hazards in behaviour** | promises nothing awaits; errors nothing checks; what can throw past which callers; suppressed checks where the code churns; data from a source reaching a sink | facts: `floating_promise`, `ignored_error`, `throw_site` / `catch_site` over `call_edge_lexical`, `ts_directive` / `lint_directive` against `revisions`, `comment_marker`; `taint.dl` (supply `source/1`, `sink/1`) |
 | **dead and unreached** | dead code, dead stores, exports nothing uses, exported functions no test reaches | `flow.dl`: `unreachable`, `dead_store`; `exports.dl`: `dead_export` (supply `entry/1`); `pointsto.dl`: `call_edge_pt_lexical` from test files |
 | **dependencies** | undeclared, unused, dev-only-in-production, types-only packages | `packages.dl` |
 | **change and people** | churn, ownership, files every change drags along, coupled code owned by different people | `cochange.dl`: `churn`, `main_author`, `cochange` |
@@ -260,6 +261,8 @@ toolkit makes easy.
   questions worth asking, and twelve traps.
 - `reference/python.md` — what differs for Python: what resolves without a type
   checker, what the library can and cannot compute, and seven traps.
+- `reference/go.md` — what differs for Go: how its constructs map onto the
+  shared relations, the facts only Go has, and ten traps.
 - `reference/datalog.md` — the Datalog language: syntax, negation, aggregation,
   imports, `?why` / `?whynot`, exit codes.
 - `reference/bring-your-own.md` — extracting facts for another language yourself.

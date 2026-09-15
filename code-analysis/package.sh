@@ -6,7 +6,8 @@
 # this skill's own (skill/SKILL.md, skill/reference/): the datalog skill's guide
 # and recipe are written for a different reader, so they are not reused.
 # The extractor ships without its tests, fixtures or dev packages, with its
-# TypeScript vendored by `npm ci --omit=dev`.
+# TypeScript vendored by `npm ci --omit=dev` and its Go frontend's modules by
+# `go mod vendor`.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -41,6 +42,11 @@ if (cd "$BUNDLE/tools/code-facts" && npm ci --omit=dev --no-audit --no-fund >&2)
 else
   VENDORED="npm unavailable — ./code-facts installs TypeScript on first use"
 fi
+if (cd "$BUNDLE/tools/code-facts/src/frontends/go" && go mod vendor >&2); then
+  GO_VENDORED="Go modules vendored (go mod vendor)"
+else
+  GO_VENDORED="go unavailable — reading Go downloads its modules on first use"
+fi
 
 cat > "$BUNDLE/INSTALL.md" <<'MD'
 # Installing the code-analysis skill
@@ -56,8 +62,8 @@ cp -r code-analysis-skill <project>/.claude/skills/code-analysis  # one project
 Start a new Claude Code session so the skill is discovered.
 
 `./code-facts` needs Node.js 22.18 or later on `PATH`; reading Python needs
-Python 3.11 or later too. The `datalog` binary is built for the platform the
-bundle was packaged on.
+Python 3.11 or later too, and reading Go needs Go 1.26 or later. The `datalog`
+binary is built for the platform the bundle was packaged on.
 
 ```sh
 ./code-facts path/to/tsconfig.json -o /tmp/facts
@@ -73,4 +79,5 @@ else
 fi
 echo "skill bundle: $BUNDLE"
 echo "code-facts:   $VENDORED"
+echo "go frontend:  $GO_VENDORED"
 echo "tarball:      $TARBALL"

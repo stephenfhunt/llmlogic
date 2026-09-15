@@ -72,7 +72,7 @@ Each library imports what it needs; import the one that answers the question.
 | `coupling.dl` | per component: `efferent`, `afferent`, `instability`, `abstractness`, `distance`, `sdp_violation`, `comp_edge_weight`; per type: `cbo` |
 | `cohesion.dl` | per class: `lcom4`, `tcc`, `lcom_hs`; per file: `module_lcom4`, `module_component`; per component: `relational_cohesion` |
 | `coupling_kinds.dl` | Myers' scale: `content_access`, `common_state`, `shared_literal`, `control_param`, `stamp_param`, `data_call`; per file pair `module_coupling`, `worst_coupling` |
-| `packages.dl` | against package.json: `undeclared`, `unused`, `dev_in_production`, `only_in_tests`, `types_only`, and `unresolved_bare` (a bare import that resolved to nothing — an alias or a missing package) |
+| `packages.dl` | against the manifest (package.json, pyproject.toml, go.mod): `undeclared`, `unused`, `dev_in_production`, `only_in_tests`, `types_only`, and `unresolved_bare` (a bare import that resolved to nothing — an alias or a missing package) |
 | `exports.dl` | `api_file`, `api_export` (what your entry points publish, through namespace re-exports), `lazy_module` (loaded by `import()`), `dead_export` — you supply `entry/1` |
 | `metrics.dl` | `dit`, `noc`, `wmc`, `rfc`, `fan_in`, `fan_out` |
 | `flow.dl` | `reachable`, `unreachable`, `reaches_def`, `def_use`, `undefined_use`, `live_out`, `dead_store` |
@@ -89,7 +89,8 @@ one file), `coupling_kinds.dl` classifies how two files are coupled, and
 `coupling.dl`'s component rules already work per file.
 
 **Components** (coupling, cohesion) are `(G, C)` pairs: `G = -1` files, `-2`
-packages, `N ≥ 0` directories at depth N. `instability(1, C, I)` is instability
+packages, `-3` namespaces (a Go package, a Python module; a TypeScript file has
+none), `N ≥ 0` directories at depth N. `instability(1, C, I)` is instability
 between top-level directories; `lib/units.dl` has the membership rule.
 
 ## 4. Questions worth asking

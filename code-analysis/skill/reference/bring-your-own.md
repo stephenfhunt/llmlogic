@@ -1,6 +1,6 @@
 # Extracting facts for another language
 
-`code-facts` reads TypeScript and Python. For anything else, write the extractor
+`code-facts` reads TypeScript, Python and Go. For anything else, write the extractor
 yourself — the engine, the method and most of the traps carry over unchanged.
 The shape is always the same:
 
@@ -11,7 +11,7 @@ real parser → fact tables (JSONL) → import → ask
 ## 1. Extract with a parser, not a regex
 
 Use the language's own parser and emit one JSONL file per relation: `syn` for
-Rust, `go/ast` for Go, `javaparser` or the compiler tree API for Java,
+Rust, `javaparser` or the compiler tree API for Java,
 `tree-sitter` for anything. A regex extractor produces false findings of its
 own: a function passed by name (`.map(parse)`) is no call, two methods with one
 name merge, a constructor that looks like a call is read as one.
