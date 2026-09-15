@@ -338,7 +338,9 @@ test("annotation processors run as the Maven build configures them; what they ge
   });
   const stale = path.join(dir, "target/generated-sources/annotations/p/Stale.java");
   fs.utimesSync(stale, new Date(2020, 0, 1), new Date(2020, 0, 1));
-  const r = withMavenRepo(() => extractJava(dir, { out: path.join(dir, "out"), layers: [] }));
+  const r = withMavenRepo(() => extractJava(dir, { out: path.join(dir, "out"), layers: ["quality"] }));
+  // Processors run twice, and the second pass finds what the first wrote: that is no diagnostic of the code's.
+  assert.deepEqual(rows("diagnostic", r), []);
   assert.deepEqual(rows("file", r).map((f) => [f.path, f.is_generated]), [
     ["src/main/java/p/Use.java", false],
     ["src/main/java/p/Widget.java", false],
@@ -367,7 +369,8 @@ test("Gradle's annotation processor path runs too, into the build's generated so
     "build.gradle": `plugins {\n    id 'java'\n}\n\ndependencies {\n    compileOnly files('${gen}')\n    annotationProcessor files('${gen}')\n}\n`,
     ...WIDGET,
   });
-  const r = extractJava(dir, { out: path.join(dir, "out"), layers: [] });
+  const r = extractJava(dir, { out: path.join(dir, "out"), layers: ["quality"] });
+  assert.deepEqual(rows("diagnostic", r), []);
   assert.deepEqual(rows("file", r).map((f) => [f.path, f.is_generated]), [
     ["build/generated/sources/annotationProcessor/java/main/p/WidgetFactory.java", true],
     ["src/main/java/p/Use.java", false],
@@ -377,6 +380,27 @@ test("Gradle's annotation processor path runs too, into the build's generated so
     ["build/generated/sources/annotationProcessor/java/main/p/WidgetFactory.java", "src/main/java/p/Widget.java"],
     ["src/main/java/p/Use.java", "src/main/java/p/Widget.java"],
     ["src/main/java/p/Use.java", "build/generated/sources/annotationProcessor/java/main/p/WidgetFactory.java"],
+  ]);
+});
+
+test("diagnostics are what javac reports with the build's lint options, by javac's key, once each", { skip: NO_MAVEN }, () => {
+  const dir = tempDir("java-diagnostics");
+  writeFiles(dir, {
+    "pom.xml": POM(
+      "  <groupId>g</groupId>\n  <artifactId>lint</artifactId>\n  <version>1</version>\n" +
+        "  <build><plugins><plugin>\n    <groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId>\n" +
+        "    <configuration><compilerArgs><arg>-Xlint:deprecation</arg></compilerArgs></configuration>\n  </plugin></plugins></build>",
+    ),
+    "src/main/java/p/Old.java": "package p;\n\npublic class Old {\n  @Deprecated\n  public static void run() {}\n}\n",
+    "src/main/java/p/Use.java": "package p;\n\nclass Use {\n  void go() {\n    new java.util.Date(2020, 1, 1);\n    missing();\n  }\n}\n",
+    // Reads main from its source path, and reports nothing of main's again.
+    "src/test/java/p/UseTest.java": "package p;\n\nclass UseTest {\n  Use use;\n}\n",
+  });
+  const r = withMavenRepo(() => extractJava(dir, { out: path.join(dir, "out"), layers: ["quality"] }), tempDir("m2-empty"));
+  // In the order javac reports them: deprecation after attribution.
+  assert.deepEqual(rows("diagnostic", r).map((d) => [d.file, d.line, d.code, d.category, d.key]), [
+    ["src/main/java/p/Use.java", 6, 0, "error", "compiler.err.cant.resolve.location.args"],
+    ["src/main/java/p/Use.java", 5, 0, "warning", "compiler.warn.has.been.deprecated"],
   ]);
 });
 

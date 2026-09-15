@@ -28,7 +28,9 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import java.util.zip.ZipFile;
 import javax.lang.model.element.Modifier;
+import javax.tools.Diagnostic;
 import javax.tools.JavaCompiler;
+import javax.tools.JavaFileObject;
 import javax.tools.StandardJavaFileManager;
 import javax.tools.StandardLocation;
 import javax.tools.ToolProvider;
@@ -64,6 +66,8 @@ final class Extractor {
     Path scratch;
     /** javac rejected the build's compiler arguments. */
     boolean dropArgs;
+    /** What javac reported as the set was parsed and analysed. */
+    final List<Diagnostic<? extends JavaFileObject>> diagnostics = new ArrayList<>();
 
     Unit(Model.Module module, Model.SourceSet set) {
       this.module = module;
@@ -266,16 +270,21 @@ final class Extractor {
     return false;
   }
 
-  /** Compiler options that choose what code-facts itself decides: output, paths, release, encoding. */
+  /** Compiler options that choose what code-facts itself decides: output, paths, release, encoding, how many diagnostics are reported. */
   private static final Set<String> MANAGED = Set.of(
       "-d", "-s", "-h", "-cp", "-classpath", "--class-path", "-sourcepath", "--source-path", "-processorpath", "--processor-path",
       "--module-path", "-p", "--module-source-path", "--processor-module-path", "-source", "--source", "-target", "--target",
-      "--release", "-encoding", "--system", "--upgrade-module-path", "-bootclasspath", "--boot-class-path", "-extdirs", "-endorseddirs");
+      "--release", "-encoding", "--system", "--upgrade-module-path", "-bootclasspath", "--boot-class-path", "-extdirs", "-endorseddirs",
+      "-Xmaxerrs", "-Xmaxwarns");
 
-  /** The options the build compiles a source set with, as far as they bear on reading it. */
+  /**
+   * The options the build compiles a source set with, as far as they bear on
+   * reading it. Lint is the build's: the diagnostics are what its javac reports.
+   */
   private List<String> options(Unit u) {
     Model.Compiler c = u.set.compiler();
-    List<String> options = new ArrayList<>(List.of("-implicit:none", "-nowarn", "-Xlint:none", "-encoding", charset(u).name()));
+    String all = String.valueOf(Integer.MAX_VALUE);
+    List<String> options = new ArrayList<>(List.of("-implicit:none", "-Xmaxerrs", all, "-Xmaxwarns", all, "-encoding", charset(u).name()));
     if (u.release != null) options.addAll(List.of("--release", u.release.toString()));
     if (!u.dropArgs) {
       List<String> args = c.args();
@@ -362,7 +371,7 @@ final class Extractor {
       options.addAll(List.of("-s", u.scratch.toString()));
     }
     try {
-      return (JavacTask) javac.getTask(Writer.nullWriter(), u.fm, d -> {}, options, null, u.fm.getJavaFileObjectsFromFiles(files));
+      return (JavacTask) javac.getTask(Writer.nullWriter(), u.fm, u.diagnostics::add, options, null, u.fm.getJavaFileObjectsFromFiles(files));
     } catch (IllegalArgumentException e) {
       if (!u.dropArgs && !u.set.compiler().args().isEmpty()) {
         Model.warn("javac rejects the compiler arguments the build gives " + describe(u) + " (" + e.getMessage() + "); reading it without them");
@@ -444,6 +453,8 @@ final class Extractor {
       } catch (RuntimeException | StackOverflowError | AssertionError e) {
         Model.warn("javac stopped analysing " + describe(u) + ": " + e + "; its references are partial");
       }
+      if (layers.contains("quality")) emitDiagnostics(u);
+      u.diagnostics.clear();
       Names names = new Names(this, u);
       for (Source s : u.sources) {
         if (s.cu == null) continue;
@@ -456,6 +467,30 @@ final class Extractor {
       u.fm.close();
       if (u.scratch != null) Model.deleteTree(u.scratch);
       for (Source s : u.sources) s.cu = null;
+    }
+  }
+
+  /** Diagnostics already written: a file on a sibling's source path is reported by every source set reading it. */
+  private final Set<String> diagnosed = new HashSet<>();
+
+  /** What javac reported for a source set, keyed by its own diagnostic names. */
+  private void emitDiagnostics(Unit u) {
+    for (Diagnostic<? extends JavaFileObject> d : u.diagnostics) {
+      String message = d.getMessage(Locale.ROOT);
+      // Processors run again as the set is analysed, and find what the generate pass wrote already there.
+      if (message.contains("Attempt to recreate a file for type")) continue;
+      int nl = message.indexOf('\n');
+      if (nl >= 0) message = message.substring(0, nl);
+      Source s = d.getSource() == null ? null : byAbs.get(Path.of(d.getSource().toUri()).toAbsolutePath().normalize());
+      Long line = s != null && d.getLineNumber() != Diagnostic.NOPOS ? d.getLineNumber() : null;
+      if (!diagnosed.add((s == null ? "" : s.path) + "\0" + line + "\0" + d.getCode() + "\0" + message)) continue;
+      String category = switch (d.getKind()) {
+        case ERROR -> "error";
+        case WARNING, MANDATORY_WARNING -> "warning";
+        default -> "message";
+      };
+      em.emit("diagnostic", Main.row(
+          "file", s == null ? null : s.path, "line", line, "code", 0, "category", category, "message", Text.truncate(message, 300), "key", d.getCode()));
     }
   }
 

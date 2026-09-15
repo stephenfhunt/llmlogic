@@ -123,6 +123,7 @@ violation("literal.fn", F) :- literal(fn: F), not known(F).
 violation("throw_site.type", T) :- throw_site(type: T), T is not absent, not known(T).
 violation("catch_site.fn", F) :- catch_site(fn: F), not known(F).
 violation("floating_promise.call_site", S) :- extracted(refs), floating_promise(call_site: C), not call_site(id: C), S = C as string.
+violation("floating_promise.fn", F) :- floating_promise(fn: F), not known(F).
 violation("diagnostic.file", F) :- diagnostic(file: F), F is not absent, not known_file(F).
 violation("ignored_error.call_site", S) :- extracted(refs), ignored_error(call_site: C), not call_site(id: C), S = C as string.
 violation("ignored_error.fn", F) :- ignored_error(fn: F), not known(F).
