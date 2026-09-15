@@ -266,6 +266,33 @@ TypeScript files have no namespace.
   the function is nothing but `recover()`, `rethrows` when that function panics.
 - **`literal`** excludes import paths, struct tags and array lengths in types.
 
+## The Go dataflow layer, as built
+
+- **Lowered from SSA**, built by x/tools over every loaded package: from syntax
+  where it type-checked, from type information for dependencies and ill-typed
+  packages. A package whose SSA build panics loses its dataflow facts, says so on
+  stderr, and the extraction goes on. `ssa.GlobalDebug` keeps `DebugRef`
+  instructions, which tie SSA registers (`<fn>$t3`) back to the variables they
+  are read or written through: a named variable's symbol id receives each.
+- **A pointer to a struct or array is that object**; any other pointer's content
+  is field `*`. A field or element address resolves to its object and field, and
+  an inline embedded struct's fields are the outer object's — which also makes a
+  promoted method's receiver, handed the outer object, read the right fields.
+- **Closures** are `function` allocations whose captured variables are fields
+  `free0`, …, loaded through the literal's `$this`; a call through a function
+  value names it both `callee_var` and `receiver`. A method's receiver parameter
+  is its `this_var`.
+- **Package-level variables are `cell` allocations** and every project function
+  a `function` allocation, both in their file's `<module>`; a package initializer
+  is attributed to the file of each instruction.
+- A multiple return is one `$ret` slot; `append` and `copy` move elements;
+  channels are field `<chan>`; `panic` stores `$thrown` and `recover()` reads it.
+- **Not modelled**: a field address escaping its function (`f(&s.x)`), the
+  address of a package-level variable passed along, a method value's receiver
+  (`g := x.M; g()`), a promoted method through an embedded pointer.
+- A `DebugRef`'s variable was first written without a `var` row; `checks.dl`
+  caught it on the first extraction.
+
 ## Properties
 
 Each language gets P1 (CFG against real traces), P2 (module graph over modgen's

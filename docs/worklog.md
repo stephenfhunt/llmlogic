@@ -24,6 +24,46 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-15 (midday) — the Go frontend's dataflow layer
+
+Asked to keep going: the Go dataflow layer.
+
+**Done**
+- `22bf679` dataflow, lowered from x/tools SSA built over every loaded package
+  (dependencies and ill-typed packages from types; a failed build loses only
+  that package's facts):
+  - registers `<fn>$tN`; `DebugRef` feeds each named variable's symbol id;
+  - a pointer to a struct or array is its object; others' content is `*`;
+    field and element addresses resolve to object and field, with inline
+    embedded structs flattened;
+  - closures allocate with captures as `free0…` through the literal's `$this`;
+    package variables are cells, functions function values, in `<module>`;
+  - `<chan>`, `$thrown`, `append`/`copy`; `alloc` gains slice, map, chan, cell.
+- `checks.dl` caught a `DebugRef`'s variable written without a `var` row
+  on the first extraction.
+- **P5-go**: generated programs compiled and run; every observed object or
+  function in `pts`. Guards at 200 runs 78–146. Mutations red: no field
+  loads, no formals, no function allocations, no interface copies, and no
+  `callee_var` through function values — **green** until each function was
+  made to call through a function value into a variable nothing else writes.
+- A dataflow test over the flow module: closures, cells, `<chan>`, `$thrown`,
+  `pts` of a captured variable; full suite green.
+
+**Decided** — `notes/go-java-frontends.md` § The Go dataflow layer, as built,
+including what is not modelled (escaping field addresses, method-value
+receivers, promotion through an embedded pointer).
+
+**Removed** — nothing; the oldest worklog entry.
+
+**Next up**
+- `reference/go.md` (traps in the notes), `SKILL.md` and `bring-your-own.md`
+  naming Go, `package.sh` vendoring the Go frontend's modules and INSTALL.md.
+- A Go dogfood on a real repository chosen for shape; calibration in `notes/`.
+- Java after; the Gradle choice pending with the user.
+- Carried: P3/P5 static blocks; rebuild `dist/`; code-analysis's
+  `reference/datalog.md` additions; the ablation control; push `trunk` when asked.
+- **Open**: `datalog/bugs/015`, `016`.
+
 ## 2026-09-15 (late morning) — the Go frontend's quality layer
 
 Asked to go ahead with the Go quality layer.
@@ -94,52 +134,6 @@ structs, promoted access, per-file `module_lcom4`).
   `throw_site`/`catch_site`, `ignored_error`.
 - Then dataflow (P5-go), `reference/go.md` with the traps above, vendoring, a
   dogfood; Java after (the Gradle choice pending with the user).
-- Carried: P3/P5 static blocks; rebuild `dist/`; code-analysis's
-  `reference/datalog.md` additions; the ablation control; push `trunk` when asked.
-- **Open**: `datalog/bugs/015`, `016`.
-
-## 2026-09-14 (dawn) — the Go frontend's flow layer
-
-Asked to carry on; the user installed Maven, and found no Gradle package.
-
-**Done**
-- `4110d3d` flow: a statement-level CFG per function over `go/ast`.
-  - `defer` is one `finally` node per deferring function. Returns, the body's
-    end and panics enter it; it loops when several calls may be deferred, and
-    resumes at `exit` when a deferred call may `recover`.
-  - Implicit panics only where a function defers. `goto`/`fallthrough` node and
-    edge kinds. `select` evaluates its operands on entry, its cases chained.
-  - A type switch's variable is defined at the switch; package initializers
-    run in `<module>`.
-  - def/use, `captures`, `closure`, `call_at` (a deferred call at `finally`),
-    decisions, `fn` metrics, and a new `concurrency_site`; `flow.dl` counts the
-    new statement kinds.
-- **P1-go** runs generated functions against their graphs. It found
-  `fallthrough` carried through an empty clause into the next. Two harness
-  rules were needed: a `finally` may run no deferred call, and a select's
-  operand probes share a node.
-- Guards were too rare at first (a labeled jump in 3% of runs, a recovery in
-  6.5%). Two generator shapes (`nest`, `risky`) and probes before labeled
-  jumps now observe them directly. Rarest guard ~10% → 100 runs.
-- The mutation "no resume after recover" stayed **green**: the edge is
-  redundant wherever a function can end normally. A doomed last function (a
-  recovering defer, then `panic(0)`) made it red. The other six mutations are
-  red; **P3-go** red on `range` uncounted.
-- A flow test over a module with every construct, whose edge multisets were
-  checked by hand; `flow.dl` finds exactly its one dead store.
-
-**Decided** — `notes/go-java-frontends.md` § The Go flow layer, as built.
-
-**Removed** — nothing in code; the oldest worklog entry.
-
-**Next up**
-- Go quality: `diagnostic` (go/types errors), `lint_directive` (`//nolint`,
-  `//lint:ignore`), `compiler_directive`, `comment_marker`, `literal`,
-  `assertion` (`type_assert`), `any_site`, `throw_site`/`catch_site`
-  (panic/recover), `ignored_error`.
-- Then dataflow (P5-go), the library pass, `reference/go.md`, vendoring, a
-  dogfood; Java after. Gradle: the user to choose SDKMAN, a Gradle zip, or a
-  Gradle-wrapper-only fixture before Java's project model.
 - Carried: P3/P5 static blocks; rebuild `dist/`; code-analysis's
   `reference/datalog.md` additions; the ablation control; push `trunk` when asked.
 - **Open**: `datalog/bugs/015`, `016`.

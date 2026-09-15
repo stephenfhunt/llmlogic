@@ -80,8 +80,8 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
   them from `package.json` (the `package` facts carry none yet) is what is left.
   _queued._
 - **Go frontend** — every layer, through x/tools (vendored). _building_ —
-  structure, refs, flow and quality layers, Go's own facts, namespace
-  granularity in the library, P1–P4-go and P6-go in; dataflow next.
+  every layer, Go's own facts, namespace granularity in the library, P1–P6-go
+  in; `reference/go.md`, vendoring and a dogfood next.
   `decisions.md` 2026-09-14,
   `notes/go-java-frontends.md`.
 - **Java frontend** — every layer, through the JDK compiler API; project model
