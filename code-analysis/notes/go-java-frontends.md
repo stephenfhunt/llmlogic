@@ -462,10 +462,45 @@ Not exercised by caddy: go.work, cgo, `dot` imports.
 - Found on the way: a lambda and its first implicitly typed parameter shared an
   id, so keys carry the tree kind now; and a field whose *type* did not resolve
   counted as unresolved itself.
-- **Not yet**: the compiler is not run as the build configures it — annotation
-  processors, source encoding, compiler arguments, the module path, and source
-  roots a plugin adds. (The structure layer's own reading of syntax, where
-  javac's elements answer, is gone; see *Ids from syntax, facts from javac*.)
+- **Not yet**: the module path. How javac runs otherwise is the build's; see
+  *Javac as the build runs it*.
+
+## Javac as the build runs it
+
+Why: `../decisions.md` 2026-09-15 (night ii).
+
+- **The model carries each source set's compiler settings**: processor path,
+  processors, `-proc`, encoding, compiler arguments, the processors' output
+  directory, and each module's build directory. Maven reads them from
+  maven-compiler-plugin — its configuration with the `default-compile` or
+  `default-testCompile` execution's over it — and resolves
+  `annotationProcessorPaths` through Maven's own `RepositorySystem`, with their
+  dependencies, as the plugin does. Gradle reads its compile task's options, and
+  passes `-proc:none` when the processor path is empty, as Gradle does.
+- **Processing runs when the build's javac would**: a processor path, named
+  processors, or `-proc:full`/`only`. From JDK 23 javac runs nothing it only
+  *discovers* on the classpath (checked on JDK 26); before it, discovery counts.
+- **Two passes.** Before any id is claimed, javac runs with `-proc:only` and
+  `-s` the build's directory. The `.java` files written there *by this pass*
+  join the source set; an older file is an earlier build's and is left alone.
+  Analysis then runs the processors again, since Lombok rewrites trees there,
+  with `-s` a throwaway directory. A generator's attempt to recreate a type
+  already among the sources is a Filer error, which is swallowed.
+- **Generated is where it lives**: every file under the module's build directory
+  is `is_generated`, whether a processor or a plugin wrote it. Maven's other
+  `generated-sources/*` directories join the roots; Gradle already lists its
+  generated roots among a source set's directories. A sibling module's
+  processor output is on the source path, as its sources are.
+- **Arguments** pass through, except those choosing output (`-d`, `-s`, `-h`),
+  paths, release and encoding; `--enable-preview` only with a release. If javac
+  rejects them, the set is read without them, and code-facts says so.
+- Tested with a processor built by the tests (`com.acme:gen`), run by a Maven
+  build through `annotationProcessorPaths` and by a Gradle build through its
+  `annotationProcessor` configuration; with a Latin-1 source under
+  `project.build.sourceEncoding`; and with sources a plugin left under
+  `target/generated-sources`.
+- **Not yet**: the module path (`module-info.java` projects read on the
+  classpath); a Lombok project on a real subject.
 
 ## Properties
 

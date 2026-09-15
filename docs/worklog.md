@@ -24,6 +24,43 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-15 (night ii) — javac runs as the build configures it
+
+Asked to keep going; the two choices with side effects were the user's —
+processors run and their output is extracted, plugin output is read as left.
+
+**Done**
+- `84c6a04` P4-java's test did not typecheck: `npm test` type-strips and
+  never checks, so the gate is now `npm run typecheck && npm test`.
+- `4bc2052` the model carries each source set's compiler settings (Maven's
+  compiler plugin, with `annotationProcessorPaths` resolved by Maven itself;
+  Gradle's compile task). Extraction runs a `-proc:only` pass into the build's
+  generated-sources directory before ids are claimed, extracts what it wrote as
+  `is_generated`, and analyses with processors on (Lombok). Plugin-generated
+  roots are read as the last build left them; encoding and compiler arguments
+  are the build's. Tested with a processor the tests build, through Maven and
+  Gradle, a Latin-1 source, and `target/generated-sources`.
+- JDK 26 javac, probed: runs no processor it only discovers on the classpath.
+- A memory kill mid-measurement: 2,264 test temp dirs (411 MB) in the RAM-backed
+  `/tmp` and a Gradle daemon; cleared. The suite leaks temp dirs — not fixed.
+
+**Decided** — `decisions.md` 2026-09-15 (night ii): processors run, output
+extracted; plugin output read as left. *Rejected:* resolve-only processing,
+running generate-sources, `-proc:none`.
+
+**Removed** — the frontend's fixed `-proc:none` and `-encoding UTF-8`; the
+oldest worklog entry.
+
+**Next up**
+- Java flow layer, P1-java and P3-java; then quality and dataflow.
+- A Java dogfood on a Spring/Lombok project (processors on a real subject).
+- The module path for `module-info.java` projects.
+- The test suite's leaked temp dirs.
+- Carried: a Go subject with go.work and cgo; P3/P5 static blocks;
+  code-analysis's `reference/datalog.md` additions; the ablation control; push
+  `trunk` when asked.
+- **Open**: `datalog/bugs/015`, `016`.
+
 ## 2026-09-15 (night) — the Java refs layer, P4-java, and facts from javac
 
 Asked to keep going with the next step (refs + P4-java); mid-way, asked whether
@@ -109,44 +146,4 @@ extension); `-proc:none` until the refs layer shows what processors cost.
 - Carried: a Go subject with go.work and cgo; P3/P5 static blocks;
   code-analysis's `reference/datalog.md` additions; the ablation control; push
   `trunk` when asked.
-- **Open**: `datalog/bugs/015`, `016`.
-
-## 2026-09-15 (afternoon) — `reference/go.md`, the Go bundle, and a caddy dogfood
-
-Asked to write the skill texts for Go, vendor it, then dogfood.
-
-**Done**
-- `72090e4` `skill/reference/go.md` in `python.md`'s shape (the mapping, Go's
-  own facts, the library over Go, ten traps), each claim run on a small module
-  first. `SKILL.md`, `typescript.md` (granularity `-3`), `bring-your-own.md` and
-  the wrapper name Go. `package.sh` runs `go mod vendor`; the bundle built its
-  frontend with an empty module cache and `GOPROXY=off`.
-- `6179073` `GOOS`/`GOARCH` in the environment built a frontend that could not
-  run here; they are cleared for the build.
-- Dogfood on caddy (107k lines, 2,684 commits) from the bundle: extraction
-  23 s / 723 MB, `checks.dl` clean, `pointsto.dl` 54 s / 840 MB, the rest
-  ≤ 10 s. Probes: cycles all within packages, `Module` recall 144/144, 504
-  unexported functions with none dead (98 need points-to or value refs).
-- `88c1a7f` `unsafe.Sizeof`/`Add` resolve to `ext:unsafe#…`; go.md corrected
-  where caddy disagreed (interface embedding is `extends`; name-only
-  constraints carry no detail; computed function values stay `unresolved`,
-  since `checks.dl` wants a callee on `indirect`).
-- `3106935` `implements` for types in `_test.go` (5 of 144 were missing): matched
-  in the type's own view. **P4-go** widened to test-file types — red on the
-  unfixed code at its first case. `5bfe0af` gofmt.
-- `dist/` rebuilt.
-
-**Decided** — `notes/go-java-frontends.md` § The Go dogfood: caddy; a
-consequences note on `decisions.md` 2026-09-14.
-
-**Removed** — the notes' stale P4-go oracle line; the oldest worklog entry.
-
-**Next up**
-- Java frontend, in its own session. Gradle comes from the wrapper (the user's
-  call): generate `gradlew` once from a downloaded distribution (9.4.0 or later
-  runs on JDK 26), and commit it with the fixture. JDK 26 has the compiler;
-  `java` must resolve to it too.
-- A Go subject with go.work and cgo, which caddy has neither of.
-- Carried: P3/P5 static blocks; code-analysis's `reference/datalog.md`
-  additions; the ablation control; push `trunk` when asked.
 - **Open**: `datalog/bugs/015`, `016`.

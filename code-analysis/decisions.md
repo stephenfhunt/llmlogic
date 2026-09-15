@@ -14,6 +14,22 @@ with the long form in [`notes/code-facts.md`](notes/code-facts.md).
 
 ## Decisions
 
+- **2026-09-15 (night ii)** — **Java extraction runs javac as the build
+  configures it** (the user's choices). Long form: `notes/go-java-frontends.md`
+  § Javac as the build runs it.
+  - **Annotation processors run** from the build's processor path, processors
+    and `-proc`. A generate-only pass writes into the build's own
+    generated-sources directory before ids are claimed, and what it wrote is
+    extracted, `is_generated`. Uses from generated code count: a generated
+    factory calling a constructor is a call.
+  - **Plugin-generated sources are read as the last build left them**, marked
+    generated; a build that generates and left nothing says so.
+  - Encoding and compiler arguments are the build's; options choosing output,
+    paths, release and encoding stay code-facts'.
+  - *Rejected:* running processors only to resolve names, which hides every use
+    from generated code; running the build's generate-sources step, which runs
+    plugins, may download, and writes build output; keeping `-proc:none`.
+
 - **2026-09-14** — **Go and Java frontends, in Python's shape, with the library's
   vocabulary kept** (the user's choices: Go first; x/tools vendored; Java's
   project model asked of Maven and Gradle; every layer including dataflow). Long
