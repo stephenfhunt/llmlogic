@@ -16,7 +16,6 @@ import (
 // collision suffix (`@line`) lands on the same declaration however the packages
 // were listed.
 
-//
 // Positions are read through `//line` directives: the type checker sees cgo's
 // rewrite of a file in the build cache, and the directives point back to the
 // file on disk.

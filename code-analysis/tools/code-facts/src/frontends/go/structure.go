@@ -32,7 +32,7 @@ func (x *extractor) emitStructure() {
 			"path": s.path, "dir": parentDir(s.path), "package": nullable(modulePath(s)), "lang": "go",
 			"loc": lineCount(s.text), "sloc": sloc(s.text), "is_test": s.test, "is_decl": false,
 			"is_generated": generatedHeader.Match(head) || generatedPath.MatchString(s.path),
-			"namespace": s.pkg.Types.Path(),
+			"namespace":    s.pkg.Types.Path(),
 		})
 	}
 	for _, e := range x.excluded {
