@@ -93,6 +93,9 @@ func main() {
 	if wanted["flow"] {
 		x.emitFlow()
 	}
+	if wanted["dataflow"] {
+		x.emitDataflow()
+	}
 	if wanted["quality"] {
 		x.emitQuality()
 	}

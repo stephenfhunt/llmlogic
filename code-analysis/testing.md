@@ -157,6 +157,20 @@ run: size its default run count from the measured per-run rate, not by eye.
   reflect's answer for the value type; acceptance guard: a generic type implemented
   an interface. *Mutations:* generic types skipped → red; `pointer` always false →
   red.
+- [x] **P5-go** Points-to soundness against real Go executions, P5's method: the
+  program (variables and fields of type `any`, objects `&O{s: N}`, stores and
+  loads through a type assertion to `*O`, direct calls, function values, calls
+  through a type assertion to the function type) is compiled and run, and every
+  object or function a probed variable holds is in `pts`. As P5 forces a heap
+  round trip, every function after the first forces a call through a function
+  value into `k`, which nothing else writes. Guards, at 200 runs: an object
+  observed outside the function allocating it (131), a function value (146), a
+  value only a field can have carried (131), an object returned through a call
+  of a function value (78). *Mutations:* field loads not emitted → red; formals
+  not emitted → red; functions not allocated in `<module>` → red; interface
+  conversions not copied → red; no `callee_var` for a call through a function
+  value → red (**green** before the forced indirect call: the random ops rarely
+  put a function where a call used it).
 - [x] **P6-go** Determinism for Go: permuting a go.work's `use` order changes no
   output byte, over P2-go's module and three more whose two `init`s collide.
   Guard: most runs reorder. *Mutation:* sources left in load order → red.

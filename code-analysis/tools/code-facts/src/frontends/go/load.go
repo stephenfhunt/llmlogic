@@ -71,6 +71,7 @@ type extractor struct {
 	ownersIndexed map[*types.Package]bool
 
 	nextCallSite, nextFlowNode int
+	allocSites                 int // the last allocation-site id handed out
 }
 
 func newExtractor(root string, layers map[string]bool, exclude []*regexp.Regexp, em *emitter) *extractor {

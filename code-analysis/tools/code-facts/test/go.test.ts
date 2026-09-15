@@ -720,6 +720,44 @@ test("flow: statement-level graphs with defer, goto, fallthrough and select; def
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test("dataflow: closures capture through cells, channels, recover, package variables, and points-to over them", { skip: NO_GO }, () => {
+  const dir = tempDir("go-dataflow");
+  const out = path.join(dir, "out");
+  writeFiles(dir, { "go.mod": "module example.com/f\n\ngo 1.26\n", "f.go": FLOW_SOURCE });
+  const { tables } = extractGo(dir, { out, layers: ["refs", "flow", "dataflow"] });
+  const allocOf = new Map(tables.rows("alloc").map((a) => [a.var as string, a]));
+  // Package-level variables are cells; every project function is a function value.
+  assert.deepEqual([allocOf.get("f.go#initial")?.kind, allocOf.get("f.go#other")?.kind], ["cell", "cell"]);
+  assert.deepEqual([allocOf.get("f.go#compute")?.kind, allocOf.get("f.go#compute")?.fn_target], ["function", "f.go#compute"]);
+  // `f := func() { x++ }` captures x: the closure object's `free0` is x's cell,
+  // which the literal loads through its own `this`.
+  const closure = tables.rows("alloc").find((a) => a.kind === "function" && a.fn_target === "f.go#Defers.f" && a.var !== "f.go#Defers.f");
+  assert.ok(closure !== undefined, "no closure allocation for Defers.f");
+  const captured = tables.rows("store").find((s) => s.base === closure.var && s.field === "free0");
+  assert.equal(allocOf.get(String(captured?.from))?.kind, "cell");
+  assert.deepEqual(
+    tables.rows("this_var").filter((t) => t.fn === "f.go#Defers.f").map((t) => t.var),
+    ["f.go#Defers.f$this"],
+  );
+  assert.ok(tables.rows("load").some((l) => l.fn === "f.go#Defers.f" && l.base === "f.go#Defers.f$this" && l.field === "free0"));
+  // recover() reads what panicked; a receive loads a channel's elements.
+  assert.ok(tables.rows("assign").some((a) => a.fn === "f.go#Defers.<function@62:8>" && a.from === "$thrown"));
+  assert.ok(tables.rows("load").some((l) => l.fn === "f.go#Selects" && l.field === "<chan>"));
+  // A named result a deferred literal writes is read back into the return slot.
+  assert.ok(tables.rows("formal_ret").some((r) => r.fn === "f.go#Defers"));
+
+  if (engineAvailable()) {
+    const r = datalog(path.join(out, "lib", "pointsto.dl"), ['c(O) :- pts("f.go#Defers.f$free0", O)', `x(O) :- pts("${captured?.from}", O)`]);
+    assert.equal(r.code, 0, r.stderr);
+    const site = (rel: string) => r.stdout.split("\n").filter((l) => l.startsWith(`${rel}(`)).map((l) => l.slice(rel.length));
+    assert.deepEqual(site("c"), site("x"));
+    assert.equal(site("c").length, 1);
+    const checks = datalog(path.join(out, "lib", "checks.dl"));
+    assert.equal(checks.code, 1, `expected a clean run, got exit ${checks.code}:\n${checks.stdout}${checks.stderr}`);
+  }
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 const QUALITY_SOURCE = `package q
 
 import (

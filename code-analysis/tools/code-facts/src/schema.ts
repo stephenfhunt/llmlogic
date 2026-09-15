@@ -783,11 +783,11 @@ export const RELATIONS: readonly Relation[] = [
   {
     name: "alloc",
     layer: "dataflow",
-    doc: "A heap object is created and held by `var`: an object/array literal, a `new`, a function or class value.",
+    doc: "A heap object is created and held by `var`: an object/array literal, a `new`, a function or class value — for Go also a slice, map or channel made, and a `cell`: an address-taken or captured variable, or a package-level one.",
     columns: [
       col("var", "string", "`var.id` receiving it"),
       col("site", "int", "allocation-site id, unique"),
-      oneOf("kind", ["object", "array", "instance", "function", "class"], "what is allocated"),
+      oneOf("kind", ["object", "array", "instance", "function", "class", "slice", "map", "chan", "cell"], "what is allocated"),
       opt("type", "string", "the class instantiated, for `instance`"),
       opt("fn_target", "string", "the function the value is, for `function`/`class`"),
       col("file", "string", FILE),
@@ -797,7 +797,7 @@ export const RELATIONS: readonly Relation[] = [
   {
     name: "load",
     layer: "dataflow",
-    doc: "`to = base.field`. Element and computed accesses use field `[]`.",
+    doc: "`to = base.field`. Element and computed accesses use field `[]`; for Go, a pointer's content is field `*`, a channel's elements `<chan>`, and a closure's captured variables `free0`, `free1`, … of the closure.",
     columns: [
       col("to", "string", "`var.id`"),
       col("base", "string", "`var.id`"),
@@ -808,7 +808,7 @@ export const RELATIONS: readonly Relation[] = [
   {
     name: "store",
     layer: "dataflow",
-    doc: "`base.field = from`. Array elements and computed keys use field `[]`.",
+    doc: "`base.field = from`. Array elements and computed keys use field `[]`; for Go, `*`, `<chan>` and `free0`… as for `load`.",
     columns: [
       col("base", "string", "`var.id`"),
       col("field", "string", "property name, or `[]`"),
