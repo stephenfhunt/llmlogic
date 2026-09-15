@@ -288,7 +288,7 @@ test("P4-java: extends, implements and overrides are what the JVM says; every me
 
       assert.deepEqual(sortedUnique(tables.rows("extends").filter((r) => inModel(r.child)).map((r) => [r.child, r.parent])), sortedUnique(seen.extends));
       assert.deepEqual(sortedUnique(tables.rows("implements").filter((r) => inModel(r.class)).map((r) => [r.class, r.interface])), sortedUnique(seen.implements));
-      const overrides = tables.rows("overrides").filter((r) => inModel(r.member)).map((r) => [String(r.member), String(r.base)]);
+      const overrides = tables.rows("overrides").filter((r) => inModel(r.member)).map((r): [string, string] => [String(r.member), String(r.base)]);
       assert.deepEqual(sortedUnique(overrides), sortedUnique(seen.overrides));
 
       // Class-hierarchy analysis is sound here: the declaration that ran is the
