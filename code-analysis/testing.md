@@ -190,6 +190,26 @@ run: size its default run count from the measured per-run rate, not by eye.
   package (99), and an on-demand import reaching two files (40 — so 40 runs by
   default). *Mutations:* no `implicit` rows → red at the first case; an on-demand
   import as one row → red; static imports with no target file → red.
+- [x] **P4-java** Hierarchies for Java: `extends`, `implements` and `overrides`
+  equal what **the JVM reports** of the compiled classes — each type's superclass
+  and interfaces, each direct supertype's `getMethod` declaring class, and the
+  superclass method a class's interface method resolves to — and every method
+  invoked through each supertype of each concrete class is reached from its
+  resolved declaration through `overrides`. Interfaces (abstract and default
+  methods, extending lower ones) and classes (abstract or not, a superclass,
+  interfaces); no type sees one name through two unrelated interfaces, and javac
+  names what a concrete class must still declare. Shaped so a subclass often
+  implements what its superclass already declares. Guards, at 200 runs: an
+  inherited implementation (46 — so 40 runs by default), a class override (50),
+  an interface extending another (65), a default method overridden (72), a call
+  running an override of what it resolved (115). Found three gaps, each now
+  covered: an inherited method implementing an interface's had no row; a
+  supertype's members included an interface method the type does not inherit;
+  javac's `Elements.overrides` does not count an inherited *abstract* method.
+  *Mutations:* no inherited implementations → red; overrides against superclasses
+  only → red; an interface's `extends` as `implements` → red; bases a supertype
+  does not inherit kept → red (these four before the generator was shaped); no
+  abstract inherited implementations → red.
 - [x] **P6-java** Determinism for Java: permuting a Maven reactor's `<modules>`
   order changes no output byte, over P2-java's sources in one module and three
   more that each declare `x.T`, with overloads whose ids collide and a static

@@ -341,6 +341,7 @@ final class Refs {
     for (Tree i : t.getImplementsClause()) supertype(path, i, self, iface ? "extends" : "implements");
 
     List<? extends TypeMirror> supers = n.types.directSupertypes(type.asType());
+    if (!iface) inheritedImplementations(type, supers);
     for (Tree member : t.getMembers()) {
       if (!(member instanceof MethodTree mt)) continue;
       if (!(trees.getElement(new TreePath(path, mt)) instanceof ExecutableElement m) || m.getKind() != ElementKind.METHOD || m.getModifiers().contains(Modifier.STATIC)) continue;
@@ -349,15 +350,72 @@ final class Refs {
       for (TypeMirror sup : supers) {
         if (!(n.types.asElement(sup) instanceof TypeElement st)) continue;
         if (iface && st.getQualifiedName().contentEquals("java.lang.Object")) continue;
-        for (Element base : n.elements.getAllMembers(st)) {
-          if (base instanceof ExecutableElement b && b.getKind() == ElementKind.METHOD && b.getSimpleName().equals(m.getSimpleName())
-              && !b.getModifiers().contains(Modifier.STATIC) && n.elements.overrides(m, b, type)) {
+        for (ExecutableElement b : inherited(st, m.getSimpleName())) {
+          if (!n.elements.overrides(m, b, type)) continue;
+          String baseId = n.idOf(b);
+          if (baseId != null && !baseId.equals(memberId)) x.em.emit("overrides", Main.row("member", memberId, "base", baseId));
+        }
+      }
+    }
+  }
+
+  /**
+   * A class implementing an interface's method with one it inherits: that method
+   * overrides the interface's here, where it is not declared (`class T1 extends
+   * T0 implements I0`, with the method declared only in `T0`).
+   */
+  private void inheritedImplementations(TypeElement type, List<? extends TypeMirror> supers) {
+    for (TypeMirror sup : supers) {
+      if (!(n.types.asElement(sup) instanceof TypeElement st) || !st.getKind().isInterface()) continue;
+      for (Element base : n.elements.getAllMembers(st)) {
+        if (!(base instanceof ExecutableElement b) || b.getKind() != ElementKind.METHOD || b.getModifiers().contains(Modifier.STATIC)) continue;
+        if (!inherited(st, b.getSimpleName()).contains(b)) continue;
+        for (Element candidate : n.elements.getAllMembers(type)) {
+          if (candidate instanceof ExecutableElement m && m.getKind() == ElementKind.METHOD && m.getSimpleName().equals(b.getSimpleName())
+              && !m.getEnclosingElement().equals(type) && !m.getEnclosingElement().getKind().isInterface() && overridesFrom(m, b, type)) {
+            String memberId = n.idOf(m);
             String baseId = n.idOf(b);
-            if (baseId != null && !baseId.equals(memberId)) x.em.emit("overrides", Main.row("member", memberId, "base", baseId));
+            if (memberId != null && baseId != null && !memberId.equals(baseId)) x.em.emit("overrides", Main.row("member", memberId, "base", baseId));
           }
         }
       }
     }
+  }
+
+  /**
+   * A type's instance methods of one name, as it inherits them: javac lists an
+   * interface's method beside the inherited one that overrides it from the type
+   * (`class T1 extends T0 implements I0`, `T0.m` over `I0.m`), which the type
+   * does not inherit.
+   */
+  private List<ExecutableElement> inherited(TypeElement st, javax.lang.model.element.Name name) {
+    List<ExecutableElement> all = new java.util.ArrayList<>();
+    for (Element e : n.elements.getAllMembers(st)) {
+      if (e instanceof ExecutableElement b && b.getKind() == ElementKind.METHOD && b.getSimpleName().equals(name) && !b.getModifiers().contains(Modifier.STATIC)) all.add(b);
+    }
+    List<ExecutableElement> kept = new java.util.ArrayList<>();
+    for (ExecutableElement b : all) {
+      boolean overridden = false;
+      for (ExecutableElement other : all) {
+        if (other != b && overridesFrom(other, b, st)) overridden = true;
+      }
+      if (!overridden) kept.add(b);
+    }
+    return kept;
+  }
+
+  /**
+   * Whether `m` overrides `b` as members of `type`: javac's answer, except that
+   * javac counts an inherited method as implementing an interface's only when it
+   * is concrete. An abstract method a class inherits from its superclass is what
+   * a call through the interface resolves to — the JVM's `getMethod` says so, and
+   * so does the language — so it overrides the interface's method there too.
+   */
+  private boolean overridesFrom(ExecutableElement m, ExecutableElement b, TypeElement type) {
+    if (n.elements.overrides(m, b, type)) return true;
+    if (!m.getModifiers().contains(Modifier.ABSTRACT) || m.getEnclosingElement().getKind().isInterface() || !b.getEnclosingElement().getKind().isInterface()) return false;
+    if (m.getEnclosingElement().equals(type) || !m.getSimpleName().equals(b.getSimpleName()) || !(type.asType() instanceof DeclaredType t)) return false;
+    return n.types.isSubsignature((javax.lang.model.type.ExecutableType) n.types.asMemberOf(t, m), (javax.lang.model.type.ExecutableType) n.types.asMemberOf(t, b));
   }
 
   private void supertype(TreePath path, Tree written, String self, String relation) {
