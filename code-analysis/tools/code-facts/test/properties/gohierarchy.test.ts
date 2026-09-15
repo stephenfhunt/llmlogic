@@ -16,7 +16,10 @@ import { test } from "node:test";
 import fc from "fast-check";
 import { extractGo, goAvailable, tempDir, writeFiles } from "../helpers.ts";
 
-const RUNS = Number.parseInt(process.env.CODE_FACTS_RUNS ?? "25", 10);
+// 50 for P4-go: its rarest guard, an interface satisfied by a promoted method,
+// fires in 33 of 200 runs since the generic and test-file widenings, so 25 missed
+// it about one suite in 90 and 50 misses it about one in 8,000.
+const RUNS = Number.parseInt(process.env.CODE_FACTS_RUNS ?? "50", 10);
 const NO_GO = goAvailable() ? false : "needs the `go` command";
 const METHODS = ["M0", "M1", "M2", "M3"];
 

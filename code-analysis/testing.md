@@ -160,6 +160,9 @@ run: size its default run count from the measured per-run rate, not by eye.
   another view of the package (the oracle runs as a test); acceptance guard: a
   test-file type implemented an interface. *Mutation:* matching by the first
   view that holds both import paths, not the type's own → red at the first case.
+  The widenings diluted the promoted guard: runs with each guard, at 200, are
+  promoted 33, pointer-only 84, hidden 49, generic 71, test-file 77 — so 50 runs
+  by default; at 25 the promoted guard missed about one suite in 90.
 - [x] **P5-go** Points-to soundness against real Go executions, P5's method: the
   program (variables and fields of type `any`, objects `&O{s: N}`, stores and
   loads through a type assertion to `*O`, direct calls, function values, calls
