@@ -98,6 +98,8 @@ final class Extractor {
 
   /** The next free call-site id, and each call's id by its position. */
   int nextCallSite = 1;
+  /** The next free flow-node id. */
+  int nextFlowNode = 1;
   private final Map<String, Integer> callSites = new HashMap<>();
 
   final Map<String, String> idByKey = new HashMap<>();
@@ -448,6 +450,7 @@ final class Extractor {
         new Declared(this, names, s).run();
         new References(this, names, s).run();
         if (layers.contains("refs")) new Refs(this, names, s).run();
+        if (layers.contains("flow")) new Flow(this, names, s).run();
       }
       u.task = null;
       u.fm.close();

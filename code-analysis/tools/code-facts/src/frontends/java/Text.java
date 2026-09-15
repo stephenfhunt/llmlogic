@@ -2,6 +2,8 @@ package codefacts;
 
 import java.util.ArrayList;
 import java.util.BitSet;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.List;
 import java.util.regex.Pattern;
 
@@ -142,6 +144,94 @@ final class Text {
   private static Tag tag(String name, StringBuilder text) {
     String s = text.toString().strip();
     return new Tag(name, s.isEmpty() ? null : truncate(s, 200));
+  }
+
+  record Halstead(int operators, int operands, int distinctOperators, int distinctOperands) {}
+
+  private static final Set<String> KEYWORDS = Set.of(
+      "abstract", "assert", "boolean", "break", "byte", "case", "catch", "char", "class", "const", "continue", "default", "do", "double",
+      "else", "enum", "extends", "final", "finally", "float", "for", "goto", "if", "implements", "import", "instanceof", "int", "interface",
+      "long", "native", "new", "package", "private", "protected", "public", "return", "short", "static", "strictfp", "super", "switch",
+      "synchronized", "throw", "throws", "transient", "try", "void", "volatile", "while");
+  private static final List<String> OPERATORS = List.of(
+      ">>>=", "<<=", ">>=", ">>>", "...", "->", "::", "++", "--", "&&", "||", "==", "!=", "<=", ">=", "+=", "-=", "*=", "/=", "&=", "|=",
+      "^=", "%=", "<<", ">>");
+
+  /**
+   * Halstead's counts over `[start, end)` of a Java source, `skip` ranges left out:
+   * identifiers, literals, `true`, `false`, `null` and `this` are operands; keywords,
+   * operators and punctuation operators. javac's own tokenizer is not public API,
+   * so this reads the text, as `sloc` does.
+   */
+  static Halstead halstead(String t, int start, int end, List<int[]> skip) {
+    int operators = 0;
+    int operands = 0;
+    Set<String> distinctOperators = new HashSet<>();
+    Set<String> distinctOperands = new HashSet<>();
+    int i = start;
+    outer:
+    while (i < end) {
+      for (int[] r : skip) {
+        if (i >= r[0] && i < r[1]) {
+          i = r[1];
+          continue outer;
+        }
+      }
+      char c = t.charAt(i);
+      if (Character.isWhitespace(c)) {
+        i++;
+      } else if (c == '/' && i + 1 < end && t.charAt(i + 1) == '/') {
+        while (i < end && t.charAt(i) != '\n') i++;
+      } else if (c == '/' && i + 1 < end && t.charAt(i + 1) == '*') {
+        int close = t.indexOf("*/", i + 2);
+        i = close < 0 ? end : close + 2;
+      } else if (t.startsWith("\"\"\"", i)) {
+        int close = t.indexOf("\"\"\"", i + 3);
+        int stop = close < 0 ? end : close + 3;
+        operands++;
+        distinctOperands.add(t.substring(i, Math.min(stop, end)));
+        i = stop;
+      } else if (c == '"' || c == '\'') {
+        int j = i + 1;
+        while (j < end && t.charAt(j) != c && t.charAt(j) != '\n') {
+          if (t.charAt(j) == '\\') j++;
+          j++;
+        }
+        operands++;
+        distinctOperands.add(t.substring(i, Math.min(j + 1, end)));
+        i = j + 1;
+      } else if (Character.isDigit(c) || c == '.' && i + 1 < end && Character.isDigit(t.charAt(i + 1))) {
+        int j = i;
+        while (j < end && (Character.isLetterOrDigit(t.charAt(j)) || t.charAt(j) == '.' || t.charAt(j) == '_')) j++;
+        operands++;
+        distinctOperands.add(t.substring(i, j));
+        i = j;
+      } else if (Character.isJavaIdentifierStart(c)) {
+        int j = i;
+        while (j < end && Character.isJavaIdentifierPart(t.charAt(j))) j++;
+        String word = t.substring(i, j);
+        if (KEYWORDS.contains(word)) {
+          operators++;
+          distinctOperators.add(word);
+        } else {
+          operands++;
+          distinctOperands.add(word);
+        }
+        i = j;
+      } else {
+        String op = String.valueOf(c);
+        for (String o : OPERATORS) {
+          if (t.startsWith(o, i)) {
+            op = o;
+            break;
+          }
+        }
+        operators++;
+        distinctOperators.add(op);
+        i += op.length();
+      }
+    }
+    return new Halstead(operators, operands, distinctOperators.size(), distinctOperands.size());
   }
 
   static String truncate(String s, int n) {
