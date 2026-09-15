@@ -241,6 +241,31 @@ TypeScript files have no namespace.
 - `imports` rows within a package are `implicit`; `kind != implicit` is what the
   source wrote.
 
+## The Go quality layer, as built
+
+- **`diagnostic`** is what go/packages reported — the go command's listing
+  errors, parse errors, type errors — once each, though a test variant
+  type-checks its package again. The go command echoes a failed compile as
+  `# <package>` and the compiler's lines; where the type checker has reported
+  errors for that package the echo is dropped, since it only repeats them (a
+  probe found both rows). Go numbers no diagnostics: `code` is 0.
+- **Comments are read from the file as written**: `//nolint[:rules]`
+  (golangci), `//lint:ignore` / `//lint:file-ignore` (staticcheck), `#nosec`
+  (gosec), directives in a new `compiler_directive` (`//go:…`, cgo's
+  `//export`, `//line` — a `//` with no space, as the toolchain requires), and
+  markers.
+- **`ignored_error`** (new): a call with a result implementing `error`, made as a
+  statement, assigned to `_`, deferred, or started with `go`. `fmt.Println` is
+  in it — the facts do not decide which dropped errors matter.
+- **`any_site`** is `any` or `interface{}` written, except as a type-parameter
+  constraint, and a call returning an empty interface (`recover()` among them).
+- **`assertion`** is `x.(T)` (`type_assert`) and a type switch (`type_switch`);
+  a conversion is no assertion — it cannot fail at run time.
+- **`throw_site` is `panic(…)`**, typed by the panicked value's named type;
+  **`catch_site` is `recover()`**: `binds` when its value is used, `empty` when
+  the function is nothing but `recover()`, `rethrows` when that function panics.
+- **`literal`** excludes import paths, struct tags and array lengths in types.
+
 ## Properties
 
 Each language gets P1 (CFG against real traces), P2 (module graph over modgen's
