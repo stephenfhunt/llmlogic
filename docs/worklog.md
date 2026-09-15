@@ -55,8 +55,10 @@ consequences note on `decisions.md` 2026-09-14.
 **Removed** — the notes' stale P4-go oracle line; the oldest worklog entry.
 
 **Next up**
-- Java frontend; the Gradle choice is pending with the user (SDKMAN, a Gradle
-  zip, or a wrapper-only fixture).
+- Java frontend, in its own session. Gradle comes from the wrapper (the user's
+  call): generate `gradlew` once from a downloaded distribution (9.4.0 or later
+  runs on JDK 26), and commit it with the fixture. JDK 26 has the compiler;
+  `java` must resolve to it too.
 - A Go subject with go.work and cgo, which caddy has neither of.
 - Carried: P3/P5 static blocks; code-analysis's `reference/datalog.md`
   additions; the ablation control; push `trunk` when asked.
