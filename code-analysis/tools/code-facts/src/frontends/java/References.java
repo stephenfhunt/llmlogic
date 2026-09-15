@@ -309,7 +309,7 @@ final class References {
 
   private void decorators(TreePath path, ModifiersTree mods) {
     if (mods == null || mods.getAnnotations().isEmpty()) return;
-    String target = x.idByKey.get(s.abs + ":" + pos.getStartPosition(cu, path.getLeaf()));
+    String target = x.idByKey.get(Extractor.key(s.abs, pos.getStartPosition(cu, path.getLeaf()), path.getLeaf()));
     if (target == null) return;
     TreePath modsPath = new TreePath(path, mods);
     for (AnnotationTree a : mods.getAnnotations()) {

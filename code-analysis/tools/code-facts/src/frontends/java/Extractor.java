@@ -356,6 +356,14 @@ final class Extractor {
     return id;
   }
 
+  /**
+   * A declaration's key: its file, offset and tree kind. The kind separates
+   * trees that start together — a lambda and its first parameter (`s -> …`).
+   */
+  static String key(Path abs, long start, com.sun.source.tree.Tree t) {
+    return abs + ":" + start + ":" + t.getKind();
+  }
+
   /** `path#Name` under a file's module, `Container.name` under anything else. */
   static String member(String container, String segment) {
     if (container.endsWith("#<module>")) return container.substring(0, container.length() - "<module>".length()) + segment;

@@ -64,7 +64,7 @@ final class Names {
     CompilationUnitTree c = p.getCompilationUnit();
     Extractor.Source src = x.byAbs.get(abs(c));
     if (src == null) return null;
-    String id = x.idByKey.get(src.abs + ":" + trees.getSourcePositions().getStartPosition(c, p.getLeaf()));
+    String id = x.idByKey.get(Extractor.key(src.abs, trees.getSourcePositions().getStartPosition(c, p.getLeaf()), p.getLeaf()));
     if (id == null) return null;
     Element declared = trees.getElement(p);
     if (declared != null && !declared.equals(e) && declared.getKind() == ElementKind.RECORD) {

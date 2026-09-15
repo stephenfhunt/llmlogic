@@ -314,7 +314,7 @@ final class Declarations {
   }
 
   String key(Tree t) {
-    return s.abs + ":" + start(t);
+    return Extractor.key(s.abs, start(t), t);
   }
 
   private long start(Tree t) {

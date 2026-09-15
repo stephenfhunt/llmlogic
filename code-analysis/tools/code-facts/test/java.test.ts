@@ -267,3 +267,14 @@ test("when Maven cannot read the reactor, its modules come from the poms, with c
   assert.deepEqual(rows("project", r).map((p) => p.id), ["m/pom.xml"]);
   assert.deepEqual(rows("imports", r).map((i) => [i.file, i.kind, i.target_file]), [["m/src/test/java/p/BTest.java", "implicit", "m/src/main/java/p/B.java"]]);
 });
+
+test("a lambda and the parameter it starts with are two declarations", { skip: NO_JAVA }, () => {
+  const dir = tempDir("java-lambda");
+  writeFiles(dir, { "p/L.java": "package p;\n\nimport java.util.function.Function;\n\nclass L {\n  Function<String, Integer> f = s -> s.length();\n}\n" });
+  const r = extractJava(dir, { out: path.join(dir, "out"), layers: [] });
+  assert.deepEqual(rows("symbol", r).filter((s) => String(s.id).includes("<lambda")).map((s) => [s.id, s.kind]), [
+    ["p/L.java#L.f.<lambda@6:33>", "function"],
+    ["p/L.java#L.f.<lambda@6:33>.s", "parameter"],
+  ]);
+  assert.deepEqual(rows("param", r).map((p) => [p.fn, p.symbol]), [["p/L.java#L.f.<lambda@6:33>", "p/L.java#L.f.<lambda@6:33>.s"]]);
+});
