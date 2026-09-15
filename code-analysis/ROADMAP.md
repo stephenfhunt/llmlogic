@@ -85,8 +85,9 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
 - **Java frontend** — every layer, through the JDK compiler API; project model
   from Maven (a core extension) and Gradle (an init script). Structure and refs
   layers, P2/P4/P6-java built; javac runs as the build configures it
-  (processors, encoding, arguments, generated sources); next, flow. Its Spring dogfood is the decorator item's subject. _building_ — same
-  entry, `notes/go-java-frontends.md` § The Java structure and refs layers.
+  (processors, encoding, arguments, generated sources); the flow layer with
+  P1/P3-java; next, quality. Its Spring dogfood is the decorator item's subject.
+  _building_ — same entry, `notes/go-java-frontends.md` § The Java … layers.
 - **Python dataflow layer** (points-to and taint for Python). _parked_ until the
   first Python version has been used.
 - **A TypeScript 7 backend**, when its compiler API stabilizes. _parked._

@@ -190,6 +190,25 @@ run: size its default run count from the measured per-run rate, not by eye.
   package (99), and an on-demand import reaching two files (40 — so 40 runs by
   default). *Mutations:* no `implicit` rows → red at the first case; an on-demand
   import as one row → red; static imports with no target file → red.
+- [x] **P1-java** CFG soundness against real Java executions, P1's method with
+  Java's constructs: four loop forms, labelled nests with labelled `break` and
+  `continue`, colon and arrow `switch`, switch expressions with `yield`, `try`
+  with catches that match what is thrown and catches that do not, `finally`,
+  try-with-resources and `synchronized`. Three methods per run; only a normal
+  return is followed to `exit` (an exception outside a `try` has no edge, as in
+  P1). Guards, at 200 runs: back, break, continue, throw, case, default, finally
+  and catch edges used, and a catch's `on_false` (48); an elif (98), a default,
+  both labelled jumps (73), a switch expression, a finally, a resource body and
+  a synchronized block reached, and an exception caught (the rarest, 41 — so 50
+  runs by default). *Mutations:* an arrow case falling through → red; `yield`
+  finding no switch expression → red; the last catch passing nothing on → red
+  (**green** while every generated catch matched); a finally re-issuing no jump
+  → red; closing resources re-issuing no jump → red; implicit throws off → red;
+  a colon case not falling through → red; a labelled `continue` ignoring its
+  label → red.
+- [x] **P3-java** Cyclomatic two ways for Java, on programs without exceptions.
+  Guard: if, for, for_of, while, do and case decisions occur. *Mutation:*
+  enhanced-`for` decisions uncounted → red.
 - [x] **P4-java** Hierarchies for Java: `extends`, `implements` and `overrides`
   equal what **the JVM reports** of the compiled classes — each type's superclass
   and interfaces, each direct supertype's `getMethod` declaring class, and the

@@ -502,6 +502,35 @@ Why: `../decisions.md` 2026-09-15 (night ii).
 - **Not yet**: the module path (`module-info.java` projects read on the
   classpath); a Lombok project on a real subject.
 
+## The Java flow layer, as built
+
+- **A graph per method, constructor, lambda and initializer block**, in the
+  TypeScript layer's model: an entry, exit and throw_exit each; statement-level
+  nodes; implicit throws only inside a `try`; a `finally` entered by every jump
+  that crosses it, re-issuing each outward. There is no `<module>` function:
+  a Java file runs no code of its own, and a field initializer's calls have no
+  node yet.
+- **Catch clauses are tested in order**, as Python's `except`: `on_true` into a
+  body, `on_false` to the next, and past the last the exception goes on — a
+  catch's type is not compared with what was thrown.
+- **try-with-resources** closes in a `finally` of its own, inside the
+  statement's catches and finally: a resource's initializer throws straight to
+  the catches (a later one's to an earlier close), the body through the close.
+  **`synchronized`** releases its monitor in an implicit `finally`.
+- **Switches**: a colon case falls into the next; an arrow case leaves. A
+  **switch expression is lowered** before the statement holding it: its selector,
+  tests and case bodies are nodes of their own, a `yield` is a `break` node to
+  the statement, and the statement's node evaluates the rest of its expression.
+  Anything the statement evaluates *before* the switch lands after it in the
+  graph — a known imprecision.
+- Decisions: `if`, `for`, `for_of` (the enhanced `for`), `while`, `do`, `case`
+  per case, `catch` per clause, `conditional`, `and`, `or`. Cognitive complexity
+  follows the TypeScript layer's counting; Halstead counts come from a lexer over
+  the body text, since javac's tokenizer is not public API.
+- `def`/`use` cover locals, parameters, catch and resource variables and pattern
+  bindings, not fields (`member_access` has those); `captures` is a lambda's or a
+  local class's use of an enclosing function's variable.
+
 ## Properties
 
 Each language gets P1 (CFG against real traces), P2 (module graph over modgen's

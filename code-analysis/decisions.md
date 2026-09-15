@@ -64,6 +64,10 @@ with the long form in [`notes/code-facts.md`](notes/code-facts.md).
     question). Not yet held: javac runs with its own settings, not the build's
     (processors, encoding, arguments, module path). P4-java made an inherited
     method implementing an interface's an `overrides` row, as Go's promoted ones are.
+  - ***Consequences 2026-09-15 (night iii)*** — the flow plan (TypeScript's model;
+    catches tested in order as Python's; resources and `synchronized` as implicit
+    finallys) held: P1-java found no model defect, only its own harness and a
+    generator whose catches always matched, which hid a mutant.
 
 - **2026-09-13 (night ii)** — **The skill's texts are written for a stranger's
   project, and the skill owns every one of them** (the user's ruling).

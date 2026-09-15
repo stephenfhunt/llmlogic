@@ -24,6 +24,50 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-15 (night iii) — the Java flow layer, P1-java and P3-java
+
+Asked to continue: the Java flow layer, next on the worklog.
+
+**Done**
+- `0e63482` the flow layer (`notes/go-java-frontends.md` § The Java flow
+  layer): a graph per method, constructor, lambda and initializer block in the
+  TypeScript model; catches tested in order; try-with-resources and
+  `synchronized` as implicit finallys; colon cases fall through, arrow cases do
+  not; switch expressions lowered, `yield` a break. Decisions, cognitive
+  complexity, Halstead (a lexer: javac's tokenizer is not public), def/use,
+  captures, closures, `call_at` on the refs layer's ids. Fixture `java-flow`.
+- **P1-java**, the JVM running generated methods: guarded jumps, four loop
+  forms, both switch forms, switch expressions, try, resources, synchronized,
+  labelled nests. 50 runs; its rarest guard, an exception caught, 41 of 200.
+  **P3-java** (cyclomatic = E − N + 2) passed from its first run.
+- P1-java's first failure was the harness: it followed a throw to `throw_exit`,
+  which the model gives no edge outside a `try` — as P1 and P1-go do not.
+- P1-java's mutations, all red: an arrow case falling through; `yield` finding no
+  switch expression; the last catch passing nothing on (green until the
+  generator wrote catches that do not match); a finally, or closing resources,
+  re-issuing no jump; no implicit throws; a colon case not falling through; a
+  labelled `continue` ignoring its label.
+- `21f1c13` bugs/resolved/008: a Python or Java target that does not exist was
+  read as its parent directory; now an error. Found when a P1-java measurement
+  lost its temp project mid-run (the remover was not found).
+
+**Decided** — nothing new: the flow model is the notes' 2026-09-14 plan, and
+held (`decisions.md` 2026-09-14 ***Consequences 2026-09-15 (night iii)***).
+
+**Removed** — the oldest worklog entry.
+
+**Next up**
+- Java quality layer: diagnostics (javac's, keyed by name), suppressions
+  (`@SuppressWarnings`, `// NOSONAR`, checkstyle), markers, casts and raw types,
+  literals, throws and catches.
+- Then the dataflow layer and P5-java; `reference/java.md`; a Spring/Lombok
+  dogfood; the module path.
+- The test suite's leaked temp dirs.
+- Carried: a Go subject with go.work and cgo; P3/P5 static blocks;
+  code-analysis's `reference/datalog.md` additions; the ablation control; push
+  `trunk` when asked.
+- **Open**: `datalog/bugs/015`, `016`.
+
 ## 2026-09-15 (night ii) — javac runs as the build configures it
 
 Asked to keep going; the two choices with side effects were the user's —
@@ -97,52 +141,6 @@ scanner, name-matched tests and varargs regex; the oldest worklog entry.
   sources), encoding, compiler arguments, module path, plugin-added roots — the
   extension and init script report them.
 - Java flow layer, P1-java and P3-java; then quality and dataflow.
-- Carried: a Go subject with go.work and cgo; P3/P5 static blocks;
-  code-analysis's `reference/datalog.md` additions; the ablation control; push
-  `trunk` when asked.
-- **Open**: `datalog/bugs/015`, `016`.
-
-## 2026-09-15 (evening) — the Java frontend's structure layer
-
-Asked to get started on the Java extractor; planned first (Maven through a core
-extension, and structure + P2/P6 this session — the user's calls).
-
-**Done**
-- `1cb1351` schema columns for Java (`lang java`, forms, `static_import`,
-  `on_demand`, `other_language`, `decorator.text`, `java_version`); TS, Python
-  and Go fixture output byte-identical once the new absent columns are dropped.
-- `e020aed` that byte-compare found **Go dataflow allocation sites varying run to
-  run** (`bugs/resolved/007`): globals from maps, and an initializer tied with
-  its test variant's. P6-go now extracts every layer; red on the unfixed code.
-- `36ab69a` the Java frontend, structure layer (`notes/go-java-frontends.md` §
-  The Java structure layer):
-  - Maven's reactor from an extension compiled against the user's Maven, which
-    stops the build before any plugin; Gradle from an init script run by the
-    fixture's committed 9.7.1 wrapper; a plain directory; a failing build
-    degrades to conventional roots and says so;
-  - one javac task per source set, ids by declaration offset in path order;
-  - imports as a row per file each statement reaches, `implicit` rows, runtime
-    false for inlined constants and Javadoc links, coordinates from the build;
-  - fixtures: a Maven reactor resolving from a local repository the tests build,
-    a Gradle build, a plain directory; `checks.dl` clean on all three.
-  - Frontends' stderr now reaches the user (Go's warnings were dropped).
-- `686aca7` **P2-java** (the model rendered as packages and static imports,
-  plain sources; 40 runs, guards from 200) and **P6-java** (reactor order); four
-  mutations red, recorded in `testing.md`.
-- `65e3d8d` the gate went red once on **P4-go's promoted-method guard** (equalities
-  held): since its widenings it fires in 33 of 200 runs, so 25 runs missed it
-  about one suite in 90; 50 by default, rates in `testing.md`.
-
-**Decided** — `decisions.md` 2026-09-14 ***Amended 2026-09-15*** (the Maven
-extension); `-proc:none` until the refs layer shows what processors cost.
-
-**Removed** — the notes' `dependency:build-classpath` plan; the oldest worklog entry.
-
-**Next up**
-- Java refs layer and P4-java (the JVM as oracle): `ref`, `call_site`,
-  `extends`/`implements`/`overrides`, `throws_decl`, `member_access`.
-- Annotation processors: run the build's (Lombok, generated sources) — decide
-  in the refs session with a Spring/Lombok module in hand.
 - Carried: a Go subject with go.work and cgo; P3/P5 static blocks;
   code-analysis's `reference/datalog.md` additions; the ablation control; push
   `trunk` when asked.
