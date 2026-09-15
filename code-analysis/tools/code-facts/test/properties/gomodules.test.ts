@@ -137,7 +137,7 @@ test("P2-go: imports, implicit rows, imported names and calls are exactly the ge
   assert.ok(multiFileRuns >= 1, "no run imported a package through two of its files");
 });
 
-test("P6-go: the order a go.work lists its modules in changes no output byte", { skip: NO_GO }, () => {
+test("P6-go: the order a go.work lists its modules in changes no output byte, in any layer", { skip: NO_GO }, () => {
   let reordered = 0;
   fc.assert(
     fc.property(arbProject, fc.array(fc.double({ noNaN: true }), { minLength: 4, maxLength: 4 }), (raw, keys) => {
@@ -147,9 +147,12 @@ test("P6-go: the order a go.work lists its modules in changes no output byte", {
       for (const [p, text] of Object.entries(r.files)) files[`app/${p}`] = text;
       // Three more modules, each with two `init`s: ids that collide, whose
       // suffixes must land on the same declaration whatever the module order.
+      // Their package-level variables are allocation sites, handed out across
+      // packages and their members, both of which the Go frontend holds in maps.
       for (let n = 0; n < 3; n++) {
         files[`lib${n}/go.mod`] = `module example.com/lib${n}\n\ngo 1.26\n`;
-        files[`lib${n}/x.go`] = `package lib${n}\n\nfunc init() {}\n\nfunc init() {}\n\ntype T struct{ A int }\n`;
+        files[`lib${n}/x.go`] =
+          `package lib${n}\n\nfunc init() {}\n\nfunc init() {}\n\ntype T struct{ A int }\n\nvar a, b, c = map[int]int{}, []int{}, &T{}\n\nvar d, e = T{}, 1\n`;
       }
       const modules = ["./app", "./lib0", "./lib1", "./lib2"];
       const shuffled = modules
@@ -159,10 +162,10 @@ test("P6-go: the order a go.work lists its modules in changes no output byte", {
       const work = (order: string[]) => `go 1.26\n\nuse (\n${order.map((m) => `\t${m}`).join("\n")}\n)\n`;
       writeFiles(dir, { ...files, "go.work": work(modules) });
       const out1 = path.join(dir, "out1");
-      extractGo(dir, { out: out1, layers: [] });
+      extractGo(dir, { out: out1, layers: ["refs", "flow", "dataflow", "quality"] });
       fs.writeFileSync(path.join(dir, "go.work"), work(shuffled));
       const out2 = path.join(dir, "out2");
-      extractGo(dir, { out: out2, layers: [] });
+      extractGo(dir, { out: out2, layers: ["refs", "flow", "dataflow", "quality"] });
       assert.deepEqual(snapshotDir(out2), snapshotDir(out1));
       if (shuffled.join() !== modules.join()) reordered++;
       fs.rmSync(dir, { recursive: true, force: true });

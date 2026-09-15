@@ -70,6 +70,20 @@ func (x *extractor) emitDataflow() {
 	}
 
 	prog, built := x.buildSSA()
+	// A package and its test variant share a path, so their initializers share a
+	// name and a position; the variant's own id tells them apart.
+	variant := map[*types.Package]string{}
+	for _, p := range x.roots {
+		if p.Types != nil {
+			variant[p.Types] = p.ID
+		}
+	}
+	pkgID := func(p *ssa.Package) string {
+		if p == nil {
+			return ""
+		}
+		return variant[p.Pkg]
+	}
 	var fns []*ssa.Function
 	for f := range ssautil.AllFunctions(prog) {
 		if f.Blocks == nil || f.Origin() != nil || !built[f.Pkg] {
@@ -88,7 +102,10 @@ func (x *extractor) emitDataflow() {
 		if pi.Offset != pj.Offset {
 			return pi.Offset < pj.Offset
 		}
-		return fns[i].String() < fns[j].String()
+		if si, sj := fns[i].String(), fns[j].String(); si != sj {
+			return si < sj
+		}
+		return pkgID(fns[i].Pkg) < pkgID(fns[j].Pkg)
 	})
 
 	// Every project function and package-level variable is an allocation in
@@ -99,16 +116,33 @@ func (x *extractor) emitDataflow() {
 			df.alloc(id, f.Pos(), "function", "", id, df.homeOf(id))
 		}
 	}
+	// Packages and their members are maps: allocation sites are handed out in
+	// declaration order, so they do not change from run to run.
+	var globals []*ssa.Global
 	for sp := range built {
 		for _, m := range sp.Members {
-			g, ok := m.(*ssa.Global)
-			if !ok {
-				continue
+			if g, ok := m.(*ssa.Global); ok {
+				globals = append(globals, g)
 			}
-			if id, ok := x.targetID(g.Object()); ok && x.symbols[id]["origin"] == "project" {
-				df.declare(id, df.homeOf(id), "module")
-				df.alloc(id, g.Pos(), "cell", "", "", df.homeOf(id))
-			}
+		}
+	}
+	sort.Slice(globals, func(i, j int) bool {
+		pi, pj := x.fset.Position(globals[i].Pos()), x.fset.Position(globals[j].Pos())
+		if pi.Filename != pj.Filename {
+			return pi.Filename < pj.Filename
+		}
+		if pi.Offset != pj.Offset {
+			return pi.Offset < pj.Offset
+		}
+		if si, sj := globals[i].String(), globals[j].String(); si != sj {
+			return si < sj
+		}
+		return pkgID(globals[i].Pkg) < pkgID(globals[j].Pkg)
+	})
+	for _, g := range globals {
+		if id, ok := x.targetID(g.Object()); ok && x.symbols[id]["origin"] == "project" {
+			df.declare(id, df.homeOf(id), "module")
+			df.alloc(id, g.Pos(), "cell", "", "", df.homeOf(id))
 		}
 	}
 

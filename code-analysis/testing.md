@@ -175,8 +175,12 @@ run: size its default run count from the measured per-run rate, not by eye.
   value → red (**green** before the forced indirect call: the random ops rarely
   put a function where a call used it).
 - [x] **P6-go** Determinism for Go: permuting a go.work's `use` order changes no
-  output byte, over P2-go's module and three more whose two `init`s collide.
-  Guard: most runs reorder. *Mutation:* sources left in load order → red.
+  output byte in any layer, over P2-go's module and three more whose two `init`s
+  collide and whose package-level variables are allocation sites.
+  Guard: most runs reorder. *Mutations:* sources left in load order → red;
+  package-level variables allocated in map order → red at the first case — the
+  Go dataflow layer's first version, which the structure-only property missed
+  (`bugs/resolved/007`).
 - [x] `lib/checks.dl` finds no violation on every fixture, on code-facts itself,
   on `~/code/tsdl` when present, and on sqlparse when the experiments harness has
   cached it. On sqlparse the four `static_analysis` answers computed from the
