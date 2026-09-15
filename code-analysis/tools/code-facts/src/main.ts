@@ -40,6 +40,9 @@ const PY_FRONTEND = path.join(HERE, "frontends", "python", "py_facts.py");
 const GO_FRONTEND = path.join(HERE, "frontends", "go");
 /** Where the Go frontend is compiled to — outside `src/`, which is what ships. */
 const GO_BUILD = path.join(HERE, "..", "build", "go");
+const JAVA_FRONTEND = path.join(HERE, "frontends", "java");
+/** Where the Java frontend and its Maven extension are compiled to. */
+const JAVA_BUILD = path.join(HERE, "..", "build", "java");
 
 export interface Options {
   /** TypeScript: tsconfig files (or directories holding one). */
@@ -48,6 +51,8 @@ export interface Options {
   python?: string[] | undefined;
   /** Go: a go.mod or go.work, or a directory holding one. */
   go?: string[] | undefined;
+  /** Java: a pom.xml, build.gradle(.kts) or settings.gradle(.kts), or a directory. */
+  java?: string[] | undefined;
   out?: string | undefined;
   root?: string | undefined;
   layers?: ReadonlySet<Layer> | undefined;
@@ -83,9 +88,10 @@ export function run(opts: Options): Result {
 
   const python = opts.python ?? [];
   const go = opts.go ?? [];
+  const java = opts.java ?? [];
   const exclude = (opts.exclude ?? []).map(globToRegExp);
-  // A Python or Go target may be a directory; findRoot reads each target's directory.
-  const anchors = [...opts.tsconfigs, ...[...python, ...go].map((p) => (fs.existsSync(p) && fs.statSync(p).isDirectory() ? path.join(p, "__target__") : p))];
+  // A Python, Go or Java target may be a directory; findRoot reads each target's directory.
+  const anchors = [...opts.tsconfigs, ...[...python, ...go, ...java].map((p) => (fs.existsSync(p) && fs.statSync(p).isDirectory() ? path.join(p, "__target__") : p))];
   const root = opts.root !== undefined ? path.resolve(opts.root) : findRoot(anchors);
   const tables = new Tables();
   let ids: Counters = { callSite: 1, flowNode: 1 };
@@ -134,6 +140,14 @@ export function run(opts: Options): Result {
       return r.version;
     });
   }
+  let javaVersion: string | null = null;
+  if (java.length > 0) {
+    javaVersion = timed("java", () => {
+      const r = runJava(java, root, layers, exclude, ids, tables, log);
+      ids = r.ids;
+      return r.version;
+    });
+  }
   emitDirectories(tables);
   if (layers.has("git")) {
     timed("git", () => extractGit({ root, tables }, { since: opts.gitSince, maxCommits: opts.gitMaxCommits ?? 20000 }));
@@ -146,12 +160,12 @@ export function run(opts: Options): Result {
     python_version: pythonVersion,
     node_version: process.versions.node,
     root,
-    targets: [...opts.tsconfigs, ...python, ...go].map((c) => relTo(root, path.resolve(c))).join(","),
+    targets: [...opts.tsconfigs, ...python, ...go, ...java].map((c) => relTo(root, path.resolve(c))).join(","),
     layers: LAYERS.filter((l) => layers.has(l)).join(","),
     time,
     git_head: gitHead(root),
     go_version: goVersion,
-    java_version: null,
+    java_version: javaVersion,
   });
   tables.dedupe();
   if (opts.out !== undefined) timed("write", () => tables.write(opts.out as string, layers, LIB_DIR));
@@ -173,7 +187,7 @@ interface Counters {
  * Rows go to a file rather than a pipe: a large repository's facts outgrow any
  * buffer `spawnSync` could be given, and a file is read back in chunks.
  */
-function runFrontend(label: string, command: string, args: string[], env: NodeJS.ProcessEnv, ids: Counters, tables: Tables): Counters {
+function runFrontend(label: string, command: string, args: string[], env: NodeJS.ProcessEnv, ids: Counters, tables: Tables, log?: (line: string) => void): Counters {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "code-facts-rows-"));
   const rowsFile = path.join(dir, "rows.jsonl");
   try {
@@ -186,6 +200,8 @@ function runFrontend(label: string, command: string, args: string[], env: NodeJS
     }
     if (r.error !== undefined) throw new Error(`code-facts: cannot run ${command} for the ${label} frontend: ${r.error.message}`);
     if (r.status !== 0) throw new Error(`code-facts: the ${label} frontend failed (exit ${r.status}):\n${r.stderr}`);
+    // What a frontend could not read, it says on stderr and goes on.
+    if (log !== undefined) for (const line of String(r.stderr).split("\n")) if (line.trim() !== "") log(line);
     let next = ids;
     forEachLine(rowsFile, (line) => {
       const { relation, row } = JSON.parse(line) as { relation: string; row: Record<string, string | number | boolean | null> };
@@ -284,7 +300,7 @@ function runGo(
     ...exclude.flatMap((re) => ["--exclude", re.source]),
     ...targets.map((t) => path.resolve(t)),
   ];
-  const next = runFrontend("Go", binary, args, process.env, ids, tables);
+  const next = runFrontend("Go", binary, args, process.env, ids, tables, log);
   return { ids: next, version: toolchain.replace(/^go/, "") };
 }
 
@@ -313,35 +329,111 @@ function buildGoFrontend(toolchain: string, log: (line: string) => void): string
   return binary;
 }
 
-type Lang = "ts" | "python" | "go";
+/**
+ * The Java frontend, `frontends/java/`. It is Java source, compiled on first use
+ * by the JDK on PATH and cached by its source and that JDK. It asks each
+ * target's build for its source sets and classpaths, and reads them with that
+ * JDK's own compiler.
+ */
+function runJava(
+  targets: string[],
+  root: string,
+  layers: ReadonlySet<Layer>,
+  exclude: RegExp[],
+  ids: Counters,
+  tables: Tables,
+  log: (line: string) => void,
+): { ids: Counters; version: string } {
+  const javac = spawnSync("javac", ["-version"], { encoding: "utf8" });
+  if (javac.error !== undefined) throw new Error(`code-facts: reading Java needs a JDK — \`javac\` on PATH (${javac.error.message})`);
+  if (javac.status !== 0) throw new Error(`code-facts: \`javac -version\` failed:\n${javac.stderr}`);
+  const version = `${javac.stdout}${javac.stderr}`.trim().replace(/^javac\s+/, "");
+  const classes = buildJavaFrontend(version, log);
+  const args = [
+    "-cp",
+    classes,
+    "codefacts.Main",
+    "--root",
+    root,
+    "--resources",
+    JAVA_FRONTEND,
+    "--cache",
+    JAVA_BUILD,
+    "--layers",
+    [...layers].join(","),
+    "--first-call-site",
+    String(ids.callSite),
+    "--first-flow-node",
+    String(ids.flowNode),
+    ...exclude.flatMap((re) => ["--exclude", re.source]),
+    ...targets.map((t) => path.resolve(t)),
+  ];
+  const next = runFrontend("Java", "java", args, process.env, ids, tables, log);
+  return { ids: next, version };
+}
+
+function buildJavaFrontend(jdk: string, log: (line: string) => void): string {
+  const hash = createHash("sha256");
+  const sources = fs.readdirSync(JAVA_FRONTEND).filter((n) => n.endsWith(".java")).sort();
+  for (const f of sources) {
+    hash.update(`${f}\0`);
+    hash.update(fs.readFileSync(path.join(JAVA_FRONTEND, f)));
+  }
+  hash.update(jdk);
+  const classes = path.join(JAVA_BUILD, `java-facts-${hash.digest("hex").slice(0, 16)}`);
+  if (fs.existsSync(classes)) return classes;
+  log(`code-facts: building its Java frontend with javac ${jdk} (first use)…`);
+  fs.mkdirSync(JAVA_BUILD, { recursive: true });
+  const partial = `${classes}.${process.pid}.partial`;
+  const r = spawnSync("javac", ["--release", "17", "-proc:none", "-d", partial, ...sources.map((f) => path.join(JAVA_FRONTEND, f))], { encoding: "utf8" });
+  if (r.error !== undefined) throw new Error(`code-facts: reading Java needs a JDK — \`javac\` on PATH (${r.error.message})`);
+  if (r.status !== 0) throw new Error(`code-facts: building the Java frontend with javac ${jdk} failed; it needs JDK 17 or later:\n${r.stderr}`);
+  try {
+    fs.renameSync(partial, classes);
+  } catch (e) {
+    // Another run built it first.
+    fs.rmSync(partial, { recursive: true, force: true });
+    if (!fs.existsSync(classes)) throw e;
+  }
+  return classes;
+}
+
+type Lang = "ts" | "python" | "go" | "java";
+
+const JAVA_BUILD_FILES = ["pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"];
 
 /**
- * Which frontend reads a target: a tsconfig; a go.mod or go.work; a
- * pyproject.toml; a directory by what it holds — a tsconfig.json, then a go.work
- * or go.mod — and any other directory as Python.
+ * Which frontend reads a target: a tsconfig; a go.mod or go.work; a pom.xml or
+ * Gradle build or settings script; a pyproject.toml; a directory by what it
+ * holds — a tsconfig.json, then a go.work or go.mod, then a Maven or Gradle
+ * build — and any other directory as Python.
  */
 function detectLang(a: string): Lang {
   const base = path.basename(a);
   if (base === "go.mod" || base === "go.work") return "go";
+  if (JAVA_BUILD_FILES.includes(base)) return "java";
   if (base === "pyproject.toml") return "python";
   if (!(fs.existsSync(a) && fs.statSync(a).isDirectory())) return "ts";
   if (fs.existsSync(path.join(a, "tsconfig.json"))) return "ts";
   if (fs.existsSync(path.join(a, "go.work")) || fs.existsSync(path.join(a, "go.mod"))) return "go";
+  if (JAVA_BUILD_FILES.some((f) => fs.existsSync(path.join(a, f)))) return "java";
   return "python";
 }
 
 function usage(): string {
   return [
-    "usage: code-facts <tsconfig.json | go.mod | go.work | pyproject.toml | directory>... [options]",
+    "usage: code-facts <tsconfig.json | go.mod | go.work | pom.xml | build.gradle | pyproject.toml | directory>... [options]",
     "",
-    "  A tsconfig is read as TypeScript, a go.mod or go.work as Go, a pyproject.toml",
-    "  as Python. A directory is read by what it holds — a tsconfig.json, then a",
-    "  go.work or go.mod — and any other directory as a Python source root. Any",
-    "  mix may be given.",
+    "  A tsconfig is read as TypeScript, a go.mod or go.work as Go, a pom.xml or a",
+    "  Gradle build or settings script as Java, a pyproject.toml as Python. A",
+    "  directory is read by what it holds — a tsconfig.json, then a go.work or",
+    "  go.mod, then a Maven or Gradle build — and any other directory as a Python",
+    "  source root (`--lang java` reads it as Java sources with no build). Any mix",
+    "  may be given.",
     "",
     "  -o, --out DIR          output directory (default ./code-facts-out)",
     "  --root DIR             root every path is relative to (default: the git top-level)",
-    "  --lang ts|python|go    read the next target as this language, whatever it holds",
+    "  --lang ts|python|go|java  read the next target as this language, whatever it holds",
     `  --layers L,...         layers to extract (default all: ${OPTIONAL_LAYERS.join(",")}); structure always runs`,
     "  --no-git               skip the git history layer",
     "  --git-since DATE       only commits after DATE (anything `git log --since` takes)",
@@ -356,6 +448,7 @@ function parseArgs(argv: string[]): Options {
   const tsconfigs: string[] = [];
   const python: string[] = [];
   const go: string[] = [];
+  const java: string[] = [];
   const exclude: string[] = [];
   let lang: Lang | undefined;
   let out = "code-facts-out";
@@ -377,7 +470,7 @@ function parseArgs(argv: string[]): Options {
     else if (a === "--root") root = value(++i, a);
     else if (a === "--lang") {
       const l = value(++i, a);
-      if (l !== "ts" && l !== "python" && l !== "go") throw new Error(`code-facts: unknown language \`${l}\` (languages: ts, python, go)`);
+      if (l !== "ts" && l !== "python" && l !== "go" && l !== "java") throw new Error(`code-facts: unknown language \`${l}\` (languages: ts, python, go, java)`);
       lang = l;
     }
     else if (a === "--exclude") exclude.push(value(++i, a));
@@ -400,12 +493,13 @@ function parseArgs(argv: string[]): Options {
       const which = lang ?? detectLang(a);
       lang = undefined;
       if (which === "go") go.push(a);
+      else if (which === "java") java.push(a);
       else if (which === "python") python.push(a);
       else tsconfigs.push(a);
     }
   }
-  if (tsconfigs.length + python.length + go.length === 0) throw new Error(`code-facts: give a tsconfig, a go.mod or a Python root\n\n${usage()}`);
-  return { tsconfigs, python, go, out, root, layers, exclude, gitSince, gitMaxCommits };
+  if (tsconfigs.length + python.length + go.length + java.length === 0) throw new Error(`code-facts: give a tsconfig, a go.mod, a Maven or Gradle build, or a Python root\n\n${usage()}`);
+  return { tsconfigs, python, go, java, out, root, layers, exclude, gitSince, gitMaxCommits };
 }
 
 function main(): void {

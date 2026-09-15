@@ -1,0 +1,11 @@
+plugins {
+    id 'java'
+}
+
+dependencies {
+    implementation project(':lib')
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.release = 17
+}

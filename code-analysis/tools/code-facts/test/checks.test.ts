@@ -9,11 +9,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
 import { run } from "../src/main.ts";
-import { datalog, engineAvailable, FIXED_TIME, FIXTURES, TOOL_DIR, tempDir } from "./helpers.ts";
+import { datalog, engineAvailable, FIXED_TIME, FIXTURES, gradleAvailable, javaAvailable, mavenAvailable, TOOL_DIR, tempDir, withMavenRepo } from "./helpers.ts";
 
-function checkClean(label: string, tsconfigs: string[], root: string, python: string[] = []): void {
+function checkClean(label: string, tsconfigs: string[], root: string, python: string[] = [], java: string[] = []): void {
   const out = tempDir(`checks-${label}`);
-  run({ tsconfigs, python, root, out, time: FIXED_TIME });
+  run({ tsconfigs, python, java, root, out, time: FIXED_TIME });
   const r = datalog(path.join(out, "lib", "checks.dl"));
   assert.equal(r.code, 1, `${label}: violations (exit ${r.code}):\n${r.stdout}${r.stderr}`);
   fs.rmSync(out, { recursive: true, force: true });
@@ -27,8 +27,18 @@ for (const name of fs.readdirSync(FIXTURES).sort()) {
     test(`checks.dl is clean on fixture ${name}`, { skip }, () => checkClean(name, [path.join(dir, "tsconfig.json")], dir));
   } else if (fs.existsSync(path.join(dir, "pyproject.toml"))) {
     test(`checks.dl is clean on Python fixture ${name}`, { skip }, () => checkClean(name, [], dir, [dir]));
+  } else if (fs.existsSync(path.join(dir, "pom.xml"))) {
+    const noMaven = skip || !javaAvailable() || !mavenAvailable() ? "no engine, JDK or Maven" : false;
+    test(`checks.dl is clean on Java fixture ${name}`, { skip: noMaven }, () => withMavenRepo(() => checkClean(name, [], dir, [], [dir])));
+  } else if (fs.existsSync(path.join(dir, "settings.gradle"))) {
+    const noGradle = skip || !javaAvailable() || !gradleAvailable(dir) ? "no engine or JDK, or the Gradle wrapper cannot run" : false;
+    test(`checks.dl is clean on Java fixture ${name}`, { skip: noGradle }, () => checkClean(name, [], dir, [], [dir]));
   }
 }
+
+test("checks.dl is clean on Java fixture java-plain", { skip: skip || !javaAvailable() ? "no engine or JDK" : false }, () =>
+  checkClean("java-plain", [], path.join(FIXTURES, "java-plain"), [], [path.join(FIXTURES, "java-plain")]),
+);
 
 test("checks.dl is clean on code-facts itself", { skip }, () => checkClean("self", [path.join(TOOL_DIR, "tsconfig.json")], TOOL_DIR));
 

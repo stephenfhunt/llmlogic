@@ -1,0 +1,81 @@
+// code-facts' view of a Gradle build, run as an init script with
+// -Pcodefacts.model=DIR: the `codeFactsModel` task writes one JSON file per Java
+// project into DIR — its source sets' roots, resolved compile classpaths and
+// sibling projects, its release level, and its declared dependencies.
+
+import groovy.json.JsonOutput
+import org.gradle.api.artifacts.ExternalModuleDependency
+import org.gradle.api.artifacts.ProjectDependency
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.artifacts.component.ProjectComponentIdentifier
+
+def declaredIn = ['api', 'implementation', 'compileOnly', 'runtimeOnly', 'annotationProcessor',
+                  'testImplementation', 'testCompileOnly', 'testRuntimeOnly', 'testAnnotationProcessor']
+
+allprojects { p ->
+    p.tasks.register('codeFactsModel') {
+        doLast {
+            def outDir = p.findProperty('codefacts.model')
+            if (outDir == null || !p.plugins.hasPlugin('java')) return
+
+            def sets = []
+            ['main', 'test'].each { n ->
+                def ss = p.sourceSets.findByName(n)
+                if (ss == null) return
+                def jars = []
+                def modules = []
+                def conf = p.configurations.findByName(ss.compileClasspathConfigurationName)
+                if (conf != null) {
+                    try {
+                        conf.incoming.resolutionResult.allComponents.each { c ->
+                            if (c.id instanceof ProjectComponentIdentifier && c.id.projectPath != p.path) modules << c.id.projectPath
+                        }
+                    } catch (Exception e) {
+                        System.err.println("code-facts: ${p.path} ${conf.name} did not resolve: ${e.message}")
+                    }
+                    def view = conf.incoming.artifactView {
+                        lenient = true
+                        componentFilter { !(it instanceof ProjectComponentIdentifier) }
+                    }
+                    view.artifacts.each { a ->
+                        def id = a.id.componentIdentifier
+                        jars << [file: a.file.absolutePath, coord: id instanceof ModuleComponentIdentifier ? "${id.group}:${id.module}".toString() : null]
+                    }
+                }
+                sets << [name: n, test: n == 'test', roots: ss.java.srcDirs.collect { it.absolutePath }, classpath: jars, modules: modules.unique()]
+            }
+
+            String release = null
+            def compile = p.tasks.findByName('compileJava')
+            if (compile != null && compile.options.release.isPresent()) release = compile.options.release.get().toString()
+            if (release == null && p.java.toolchain.languageVersion.isPresent()) release = p.java.toolchain.languageVersion.get().asInt().toString()
+            if (release == null) release = p.java.sourceCompatibility?.majorVersion
+
+            def deps = []
+            declaredIn.each { cn ->
+                def c = p.configurations.findByName(cn)
+                if (c == null) return
+                c.dependencies.each { d ->
+                    if (d instanceof ProjectDependency) {
+                        def path = d.metaClass.respondsTo(d, 'getPath') ? d.path : d.dependencyProject.path
+                        deps << [coord: path, version: null, scope: cn, optional: false]
+                    } else if (d instanceof ExternalModuleDependency) {
+                        deps << [coord: "${d.group}:${d.name}".toString(), version: d.version, scope: cn, optional: false]
+                    }
+                }
+            }
+
+            def model = [
+                buildFile: p.buildFile.exists() ? p.buildFile.absolutePath : null,
+                dir: p.projectDir.absolutePath,
+                name: p.path,
+                version: p.version == null || p.version.toString() == 'unspecified' ? null : p.version.toString(),
+                release: release,
+                sets: sets,
+                deps: deps,
+            ]
+            def file = new File(outDir.toString(), (p.path == ':' ? '_' : p.path.replace('_', '__').replace(':', '_')) + '.json')
+            file.text = JsonOutput.toJson(model)
+        }
+    }
+}

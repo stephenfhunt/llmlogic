@@ -61,6 +61,77 @@ export function goAvailable(): boolean {
   return spawnSync("go", ["version"], { encoding: "utf8" }).status === 0;
 }
 
+export function extractJava(dir: string, opts: { out?: string; layers?: Layer[] } = {}): Result {
+  return run({
+    tsconfigs: [],
+    java: [dir],
+    root: dir,
+    out: opts.out,
+    layers: opts.layers !== undefined ? new Set<Layer>(["meta", "structure", ...opts.layers]) : undefined,
+    time: FIXED_TIME,
+  });
+}
+
+/** Whether Maven is on PATH — the Maven fixture is extracted with it. */
+export function mavenAvailable(): boolean {
+  return spawnSync("mvn", ["--version"], { encoding: "utf8" }).status === 0;
+}
+
+const gradleRuns = new Map<string, boolean>();
+/** Whether a build's Gradle wrapper runs here; it downloads its distribution on first use. */
+export function gradleAvailable(dir: string): boolean {
+  let ok = gradleRuns.get(dir);
+  if (ok === undefined) {
+    ok = spawnSync(path.join(dir, "gradlew"), ["-q", "--version"], { cwd: dir, encoding: "utf8" }).status === 0;
+    gradleRuns.set(dir, ok);
+  }
+  return ok;
+}
+
+let builtRepo: string | undefined;
+/**
+ * A local Maven repository holding the jars `java-maven` depends on, built once
+ * per test process from `fixtures/java-repo` — so the fixture resolves offline.
+ */
+export function mavenRepo(): string {
+  if (builtRepo !== undefined) return builtRepo;
+  const repo = tempDir("m2");
+  for (const artifact of ["units", "testkit"]) {
+    const src = path.join(FIXTURES, "java-repo", artifact);
+    const sources = (fs.readdirSync(src, { recursive: true }) as string[]).filter((f) => f.endsWith(".java")).map((f) => path.join(src, f));
+    const classes = tempDir(`classes-${artifact}`);
+    const javac = spawnSync("javac", ["--release", "17", "-d", classes, ...sources], { encoding: "utf8" });
+    if (javac.status !== 0) throw new Error(`javac ${artifact}: ${javac.stderr}`);
+    const dir = path.join(repo, "com", "acme", artifact, "1.0");
+    fs.mkdirSync(dir, { recursive: true });
+    const jar = spawnSync("jar", ["--create", "--file", path.join(dir, `${artifact}-1.0.jar`), "-C", classes, "."], { encoding: "utf8" });
+    if (jar.status !== 0) throw new Error(`jar ${artifact}: ${jar.stderr}`);
+    fs.writeFileSync(
+      path.join(dir, `${artifact}-1.0.pom`),
+      `<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion><groupId>com.acme</groupId><artifactId>${artifact}</artifactId><version>1.0</version></project>\n`,
+    );
+  }
+  builtRepo = repo;
+  return repo;
+}
+
+/** Runs `f` with Maven offline, resolving from `repo` (by default {@link mavenRepo}). */
+export function withMavenRepo<T>(f: () => T, repo: string = mavenRepo()): T {
+  const saved = process.env.MAVEN_ARGS;
+  process.env.MAVEN_ARGS = `-o -Dmaven.repo.local=${repo}`;
+  try {
+    return f();
+  } finally {
+    if (saved === undefined) delete process.env.MAVEN_ARGS;
+    else process.env.MAVEN_ARGS = saved;
+  }
+}
+
+/** Whether a JDK is on PATH — `javac` and the `java` beside it — which the Java frontend's tests need. */
+export function javaAvailable(): boolean {
+  return spawnSync("javac", ["-version"], { encoding: "utf8" }).status === 0 && spawnSync("java", ["-version"], { encoding: "utf8" }).status === 0;
+}
+
 /** Write files under `dir`: `files` maps relative paths to contents. */
 export function writeFiles(dir: string, files: Record<string, string>): void {
   for (const [rel, text] of Object.entries(files)) {

@@ -192,7 +192,7 @@ export const RELATIONS: readonly Relation[] = [
       col("files", "int", "source files the project compiles that are under the root"),
       col("strict", "bool", "whether `strict` is on"),
       opt("module", "string", "the `module` option, lowercased"),
-      opt("target", "string", "the `target` option, lowercased"),
+      opt("target", "string", "the `target` option, lowercased; Java: the release level the build compiles for"),
     ],
   },
   {
@@ -449,7 +449,7 @@ export const RELATIONS: readonly Relation[] = [
     doc:
       "A function the runtime or a test runner calls and no code does — reach from these before calling anything unused. " +
       "Go: `main` in package main, every `init`, and in test files `TestMain` and the `Test`, `Benchmark`, `Fuzz` and `Example` functions `go test` runs. " +
-      "Java: a `main` method the launcher accepts, every static initializer (`init`), and each method in a test source set annotated for a test framework to run — `@Test`, `@ParameterizedTest`, `@BeforeEach` and the like (`test`).",
+      "Java: a `main` method the launcher accepts, every static initializer (`init`), and each method annotated for a test framework to run or to call around a test — `@Test`, `@ParameterizedTest`, `@BeforeEach` and the like (`test`).",
     columns: [
       col("symbol", "string", ID),
       oneOf("kind", ["main", "init", "test_main", "test", "benchmark", "fuzz", "example"], "who calls it"),
