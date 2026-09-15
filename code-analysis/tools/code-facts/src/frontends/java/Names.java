@@ -1,6 +1,12 @@
 package codefacts;
 
+import com.sun.source.tree.BlockTree;
+import com.sun.source.tree.ClassTree;
 import com.sun.source.tree.CompilationUnitTree;
+import com.sun.source.tree.LambdaExpressionTree;
+import com.sun.source.tree.MethodTree;
+import com.sun.source.tree.Tree;
+import com.sun.source.tree.VariableTree;
 import com.sun.source.util.DocTrees;
 import com.sun.source.util.TreePath;
 import java.io.IOException;
@@ -19,6 +25,7 @@ import javax.lang.model.element.PackageElement;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.element.VariableElement;
 import javax.lang.model.type.TypeKind;
+import javax.lang.model.type.TypeMirror;
 import javax.lang.model.util.Elements;
 import javax.lang.model.util.Types;
 import javax.tools.JavaFileObject;
@@ -192,6 +199,34 @@ final class Names {
 
   Set<Element> membersOf(TypeElement t) {
     return members.computeIfAbsent(t, k -> new HashSet<>(elements.getAllMembers(k)));
+  }
+
+  /**
+   * The innermost enclosing declaration with a name — what a reference is from:
+   * a method, constructor, lambda, class, field (for its initializer) or
+   * initializer block, else the file's `<module>`.
+   */
+  String owner(Extractor.Source s, TreePath path) {
+    for (TreePath p = path.getParentPath(); p != null; p = p.getParentPath()) {
+      Tree t = p.getLeaf();
+      Tree parent = p.getParentPath() == null ? null : p.getParentPath().getLeaf();
+      boolean named = t instanceof MethodTree || t instanceof LambdaExpressionTree || t instanceof ClassTree
+          || (t instanceof VariableTree || t instanceof BlockTree) && parent instanceof ClassTree;
+      if (!named) continue;
+      String id = x.idByKey.get(Extractor.key(s.abs, trees.getSourcePositions().getStartPosition(s.cu, t), t));
+      if (id != null) return id;
+    }
+    return s.path + "#<module>";
+  }
+
+  /** A `Future` or a `CompletionStage`. */
+  boolean promise(TypeMirror t) {
+    if (t.getKind() != TypeKind.DECLARED) return false;
+    for (String name : List.of("java.util.concurrent.Future", "java.util.concurrent.CompletionStage")) {
+      TypeElement te = elements.getTypeElement(name);
+      if (te != null && types.isAssignable(types.erasure(t), types.erasure(te.asType()))) return true;
+    }
+    return false;
   }
 
   static Path abs(CompilationUnitTree c) {

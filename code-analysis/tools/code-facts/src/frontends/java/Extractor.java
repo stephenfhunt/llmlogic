@@ -462,6 +462,7 @@ final class Extractor {
         new References(this, names, s).run();
         if (layers.contains("refs")) new Refs(this, names, s).run();
         if (layers.contains("flow")) new Flow(this, names, s).run();
+        if (layers.contains("quality")) new Quality(this, names, s).run();
       }
       u.task = null;
       u.fm.close();

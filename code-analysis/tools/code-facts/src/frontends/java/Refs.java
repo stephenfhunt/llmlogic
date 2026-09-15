@@ -155,7 +155,7 @@ final class Refs {
     String to = n.idOf(e);
     if (to == null) return;
     String kind = kind(path, e);
-    String from = owner(path);
+    String from = n.owner(s, path);
     long line = line(start(leaf));
     x.em.emit("ref", Main.row("from", from, "to", to, "kind", kind, "file", s.path, "line", line));
     if (kind.equals("type")) x.em.emit("type_ref", Main.row("from", from, "to", to, "position", position(path), "file", s.path, "line", line));
@@ -275,7 +275,7 @@ final class Refs {
     String kind = parent instanceof MethodInvocationTree mi && mi.getMethodSelect() == leaf ? "call"
         : parent instanceof NewClassTree ? "call"
         : e != null && e.getKind() != ElementKind.OTHER || typePosition(path) ? "type" : "read";
-    x.em.emit("unresolved_ref", Main.row("from", owner(path), "name", Text.truncate(name, 100), "kind", kind, "file", s.path, "line", line(start(leaf))));
+    x.em.emit("unresolved_ref", Main.row("from", n.owner(s, path), "name", Text.truncate(name, 100), "kind", kind, "file", s.path, "line", line(start(leaf))));
   }
 
   private boolean typePosition(TreePath path) {
@@ -325,7 +325,7 @@ final class Refs {
       dispatch = callee == null ? "unresolved" : isStatic || superCall || !kind.equals("call") ? "static" : "virtual";
     }
     x.em.emit("call_site", Main.row(
-        "id", id, "caller", owner(path), "callee", callee, "callee_name", name == null ? null : Text.truncate(name, 100),
+        "id", id, "caller", n.owner(s, path), "callee", callee, "callee_name", name == null ? null : Text.truncate(name, 100),
         "dispatch", dispatch, "kind", kind, "file", s.path, "line", line(start), "col", lines.getColumnNumber(start),
         "args", args, "awaited", false, "optional", false, "spread", false));
   }
@@ -439,16 +439,7 @@ final class Refs {
     boolean method = e instanceof ExecutableElement;
     x.em.emit("symbol_type", Main.row(
         "symbol", id, "text", Text.truncate(t.toString(), 200), "is_any", false, "is_unknown", false,
-        "is_promise", !method && promise(t), "is_function", method || functional(t), "is_union", t.getKind() == TypeKind.UNION));
-  }
-
-  private boolean promise(TypeMirror t) {
-    if (t.getKind() != TypeKind.DECLARED) return false;
-    for (String name : List.of("java.util.concurrent.Future", "java.util.concurrent.CompletionStage")) {
-      TypeElement te = n.elements.getTypeElement(name);
-      if (te != null && n.types.isAssignable(n.types.erasure(t), n.types.erasure(te.asType()))) return true;
-    }
-    return false;
+        "is_promise", !method && n.promise(t), "is_function", method || functional(t), "is_union", t.getKind() == TypeKind.UNION));
   }
 
   /** A functional interface: exactly one abstract method that is not one of Object's. */
@@ -472,24 +463,6 @@ final class Refs {
   }
 
   // ── where ──────────────────────────────────────────────────────────────────
-
-  /**
-   * The innermost enclosing declaration with a name — what a reference is from:
-   * a method, constructor, lambda, class, field (for its initializer) or
-   * initializer block, else the file's `<module>`.
-   */
-  private String owner(TreePath path) {
-    for (TreePath p = path.getParentPath(); p != null; p = p.getParentPath()) {
-      Tree t = p.getLeaf();
-      Tree parent = p.getParentPath() == null ? null : p.getParentPath().getLeaf();
-      boolean named = t instanceof MethodTree || t instanceof LambdaExpressionTree || t instanceof ClassTree
-          || (t instanceof VariableTree || t instanceof BlockTree) && parent instanceof ClassTree;
-      if (!named) continue;
-      String id = idOf(t);
-      if (id != null) return id;
-    }
-    return s.path + "#<module>";
-  }
 
   private String idOf(Tree t) {
     return x.idByKey.get(Extractor.key(s.abs, start(t), t));

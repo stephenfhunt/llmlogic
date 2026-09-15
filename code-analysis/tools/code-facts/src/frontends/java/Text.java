@@ -105,6 +105,38 @@ final class Text {
     return i;
   }
 
+  /** Every comment, as {@code [begin, end)}: what a string, a character or a text block holds is none. */
+  static List<int[]> comments(String t) {
+    List<int[]> out = new ArrayList<>();
+    int n = t.length();
+    int i = 0;
+    while (i < n) {
+      char c = t.charAt(i);
+      if (c == '/' && i + 1 < n && t.charAt(i + 1) == '/') {
+        int j = i;
+        while (j < n && t.charAt(j) != '\n') j++;
+        out.add(new int[] {i, j});
+        i = j;
+      } else if (c == '/' && i + 1 < n && t.charAt(i + 1) == '*') {
+        int close = t.indexOf("*/", i + 2);
+        int j = close < 0 ? n : close + 2;
+        out.add(new int[] {i, j});
+        i = j;
+      } else if (t.startsWith("\"\"\"", i)) {
+        i += 3;
+        while (i < n && !t.startsWith("\"\"\"", i)) i += t.charAt(i) == '\\' ? 2 : 1;
+        i += 3;
+      } else if (c == '"' || c == '\'') {
+        i++;
+        while (i < n && t.charAt(i) != c && t.charAt(i) != '\n') i += t.charAt(i) == '\\' ? 2 : 1;
+        i++;
+      } else {
+        i++;
+      }
+    }
+    return out;
+  }
+
   /** The Javadoc comment just before offset {@code start}, as {@code [begin, end)}, or null. */
   static int[] docBefore(String t, int start) {
     int i = Math.min(start, t.length()) - 1;

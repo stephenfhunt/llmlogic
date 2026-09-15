@@ -36,7 +36,7 @@ for (const name of fs.readdirSync(FIXTURES).sort()) {
   }
 }
 
-for (const name of ["java-plain", "java-refs", "java-flow"]) {
+for (const name of ["java-plain", "java-refs", "java-flow", "java-quality"]) {
   const dir = path.join(FIXTURES, name);
   test(`checks.dl is clean on Java fixture ${name}`, { skip: skip || !javaAvailable() ? "no engine or JDK" : false }, () => checkClean(name, [], dir, [], [dir]));
 }
