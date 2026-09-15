@@ -204,6 +204,43 @@ method reference is an `alloc` of kind `function`.
   `module`. Cognitive complexity follows the TypeScript layer's counting, with
   `goto` and labeled jumps +1 each.
 
+## Go's own facts, and how the library reads them
+
+Added after the flow layer, on an audit of where a shared shape means something
+else in Go (the user's question: is a TypeScript module a Go package?). It is
+not — a TypeScript module is a file, a Go package a directory.
+
+**Facts.** `entry_point` (main, init, and what `go test` runs, by its naming and
+signature rules — `Testlower` and `TestWrong(x int)` are not tests);
+`field_tag`, a row per `key:"value"` pair, since tags couple code to encoders
+and databases by reflection, which no reference shows; `typed_const` with value
+and `iota` — the shape of an enum, not a verdict; `module_directive` for the
+rest of go.mod; `symbol.form` `pointer_receiver` / `value_receiver`;
+`implements.pointer` for a type only its pointer satisfies; and generic types in
+`implements` and embedding, instantiated with their own type parameters (the
+type a receiver `T[X]` sees — `types.Implements` is unspecified on an
+uninstantiated generic).
+
+**Library.** `units.dl` gains granularity `-3`, the namespace (`file.namespace`:
+a Go package, a Python module), so coupling and cohesion rules run per package;
+`modgraph.dl` gains `namespace_dep` and its cycles; `coupling_kinds.dl` knows
+Go's basic type names. Bench on tsdl, trunk against these: every digest of
+`orient`, `modgraph`, `coupling`, `cohesion` and `coupling_kinds` identical —
+TypeScript files have no namespace.
+
+**Traps for `reference/go.md`**, when it is written:
+
+- nothing calls an `entry_point` — reach from them before calling anything unused;
+- `in_cycle` finds cycles between files of one package, which Go allows; ask
+  `in_namespace_cycle` (always empty for Go packages — the compiler forbids it —
+  but the right question in Java);
+- `dit` and `noc` are 0 for every struct: embedding is `embeds`, not `extends`;
+- a promoted field read through the outer struct (`s.name` from `base`) is
+  `member_access` on the embedded type, so the outer struct's `lcom4` misses it;
+- `module_lcom4` is per file, and a package spans files: ask cohesion at `-3`;
+- `imports` rows within a package are `implicit`; `kind != implicit` is what the
+  source wrote.
+
 ## Properties
 
 Each language gets P1 (CFG against real traces), P2 (module graph over modgen's
