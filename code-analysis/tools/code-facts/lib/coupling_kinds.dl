@@ -31,8 +31,8 @@
 %   worst_coupling(FA, FB, Kind)    the strongest kind between them
 %
 % Heuristics, and where they bend: a parameter's type is judged from its
-% printed text (`symbol_type.text`), so "primitive" means exactly number,
-% string, boolean, bigint (optionally `| undefined`); stamp counts a member
+% printed text (`symbol_type.text`), so "primitive" means exactly the names
+% listed below — TypeScript's, Python's and Go's basic types; stamp counts a member
 % touched anywhere in the function, not only through that parameter; calls are
 % call_edge (CHA), so a call through a function value is not here.
 % Needs the refs, flow, dataflow and quality layers.
@@ -117,6 +117,11 @@ primitive_text("int | None"). primitive_text("float | None"). primitive_text("st
 primitive_text("bool | None"). primitive_text("bytes | None").
 primitive_text("Optional[int]"). primitive_text("Optional[float]"). primitive_text("Optional[str]").
 primitive_text("Optional[bool]"). primitive_text("Optional[bytes]").
+% Go: string and bool are spelled as above; int is Python's spelling too.
+primitive_text("int8"). primitive_text("int16"). primitive_text("int32"). primitive_text("int64").
+primitive_text("uint"). primitive_text("uint8"). primitive_text("uint16"). primitive_text("uint32").
+primitive_text("uint64"). primitive_text("uintptr"). primitive_text("float32"). primitive_text("float64").
+primitive_text("complex64"). primitive_text("complex128"). primitive_text("byte"). primitive_text("rune").
 primitive_param(P) :- symbol_type(symbol: P, text: T), primitive_text(T).
 structured_param(B) :- param(fn: B, symbol: P), not primitive_param(P).
 data_call(A, B) :- call_edge(A, B), symbol(id: B, origin: project), not structured_param(B).

@@ -1,6 +1,6 @@
 % Coupling, from symbol-level references rolled up to components (lib/units.dl
-% explains the (G, C) component ids — G = -1 files, -2 packages, N ≥ 0
-% directories at depth N).
+% explains the (G, C) component ids — G = -1 files, -2 packages, -3 namespaces
+% (a Go package, a Python module), N ≥ 0 directories at depth N).
 %
 %   file_ref(FA, FB, Kind)          a symbol in FA references one in FB
 %   comp_edge(G, A, B)              some file of A references some file of B

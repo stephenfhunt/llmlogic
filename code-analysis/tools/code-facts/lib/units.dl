@@ -3,6 +3,8 @@
 % A component is identified by (G, C), where the granularity G is
 %   -1   a file                      (C: the file path)
 %   -2   a package                   (C: the package name)
+%   -3   a namespace                 (C: `file.namespace` — a Go import path, a
+%                                    Python module; no component where a file has none)
 %    N   a directory at depth N      (C: the directory; 0 is the root)
 % So `instability(1, C, I)` is instability between top-level directories, and
 % `instability(-1, C, I)` between files. A file sitting directly in a shallower
@@ -20,6 +22,7 @@ import "../schema/structure.dl".
 
 member(-1, F, F) :- file(path: F).
 member(-2, P, F) :- file(path: F, package: P), P is not absent.
+member(-3, N, F) :- file(path: F, namespace: N), N is not absent.
 member(D, U, F) :- file_ancestor(file: F, dir: U, depth: D).
 comp(G, C) :- member(G, C, _).
 % `member` keyed by the file, for the rules that join on one — see keys.dl.

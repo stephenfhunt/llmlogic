@@ -16,11 +16,20 @@
 %   file_reaches(A, B)       a chain of dep leads from A to B
 %   in_cycle(F)              F is on an import cycle
 %   cycle_edge(A, B)         a dep edge that lies on a cycle
+%   namespace_dep(NA, NB)    some file of namespace NA depends on one of NB
+%                            (`file.namespace`: a Go package, a Python module)
+%   namespace_reaches(A, B), in_namespace_cycle(N), namespace_cycle_edge(A, B)
+%                            the same closure and cycles, between namespaces
 %
 % **The cycle relations follow `dep`, which is every import, type-only
 % included.** A cycle they report may not exist at run time; re-derive over
 % `runtime_dep` before calling one real (`reference/typescript.md`
 % §5, trap 1).
+%
+% **Where a language imports a namespace rather than a file, ask about cycles
+% between namespaces.** A Go package's files use one another with no import
+% (`imports.kind: implicit`), so `in_cycle` finds cycles inside a package that
+% the language allows and the design does not notice.
 
 import "../schema/structure.dl".
 
@@ -40,3 +49,9 @@ file_reaches(A, B) :- dep(A, B).
 file_reaches(A, C) :- dep(A, B), file_reaches(B, C).
 in_cycle(F) :- file_reaches(F, F).
 cycle_edge(A, B) :- dep(A, B), file_reaches(B, A).
+
+namespace_dep(NA, NB) :- dep(A, B), file(path: A, namespace: NA), file(path: B, namespace: NB), NA != NB.
+namespace_reaches(A, B) :- namespace_dep(A, B).
+namespace_reaches(A, C) :- namespace_dep(A, B), namespace_reaches(B, C).
+in_namespace_cycle(N) :- namespace_reaches(N, N).
+namespace_cycle_edge(A, B) :- namespace_dep(A, B), namespace_reaches(B, A).

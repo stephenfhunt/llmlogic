@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { test } from "node:test";
-import { datalog, engineAvailable, extract, fixture, tempDir, writeProject } from "./helpers.ts";
+import { datalog, engineAvailable, extract, extractGo, extractPython, fixture, goAvailable, tempDir, writeFiles, writeProject } from "./helpers.ts";
 
 const skip = !engineAvailable();
 
@@ -21,6 +21,36 @@ function ask(out: string, lib: string, query: string): string[] {
   assert.ok(r.code === 0 || r.code === 1, `${lib} ${query}: exit ${r.code}\n${r.stderr}`);
   return r.stdout.split("\n").filter((l) => l !== "");
 }
+
+test("namespaces: a Go package as a component, its dependencies, and Go's primitive types", { skip: skip || !goAvailable() }, () => {
+  const out = tempDir("lib-go");
+  extractGo(fixture("go-basic"), { out, layers: ["refs", "flow"] });
+  assert.deepEqual(ask(out, "units.dl", 'm(F) :- member(-3, "example.com/shapes", F)'), [
+    'm("base.go").',
+    'm("shapes.go").',
+    'm("shapes_test.go").',
+    'm("square.go").',
+  ]);
+  // The external test package is a namespace of its own, importing the package.
+  assert.deepEqual(ask(out, "modgraph.dl", "namespace_dep(A, B)"), [
+    'namespace_dep("example.com/shapes/cmd/app", "example.com/shapes").',
+    'namespace_dep("example.com/shapes/cmd/app", "example.com/shapes/internal/geom").',
+    'namespace_dep("example.com/shapes_test", "example.com/shapes").',
+  ]);
+  assert.deepEqual(ask(out, "modgraph.dl", "in_namespace_cycle(N)"), []);
+  assert.deepEqual(ask(out, "coupling.dl", 'a(C, N) :- afferent(-3, C, N), C = "example.com/shapes"'), ['a("example.com/shapes", 2).']);
+  assert.ok(ask(out, "coupling_kinds.dl", "primitive_param(P)").includes('primitive_param("internal/geom/geom.go#Hypot.a").'));
+});
+
+test("namespaces: modules importing each other are a namespace cycle", { skip }, () => {
+  const dir = tempDir("lib-py-cycle");
+  writeFiles(dir, { "a.py": "import b\n\n\ndef f():\n    return b.g()\n", "b.py": "import a\n\n\ndef g():\n    return a.f()\n" });
+  const out = path.join(dir, "out");
+  extractPython(dir, { out, layers: ["refs"] });
+  assert.deepEqual(ask(out, "modgraph.dl", "in_namespace_cycle(N)"), ['in_namespace_cycle("a").', 'in_namespace_cycle("b").']);
+  assert.deepEqual(ask(out, "modgraph.dl", "namespace_cycle_edge(A, B)"), ['namespace_cycle_edge("a", "b").', 'namespace_cycle_edge("b", "a").']);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
 
 test("callgraph: a virtual call reaches every override of its declared target", { skip }, () => {
   const out = outOf("refs");
