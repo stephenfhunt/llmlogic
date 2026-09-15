@@ -67,7 +67,7 @@ test("library calls resolve into the lib id-space", () => {
 
 test("inheritance: extends, implements, and each member's overrides", () => {
   assert.deepEqual(rows("extends"), [{ child: "src/shapes.ts#Circle", parent: "src/shapes.ts#Base" }]);
-  assert.deepEqual(rows("implements"), [{ class: "src/shapes.ts#Base", interface: "src/shapes.ts#Shape" }]);
+  assert.deepEqual(rows("implements"), [{ class: "src/shapes.ts#Base", interface: "src/shapes.ts#Shape", pointer: null }]);
   assert.deepEqual(
     rows("overrides").map((o) => [o.member, o.base]),
     [

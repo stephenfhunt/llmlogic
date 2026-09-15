@@ -26,6 +26,10 @@ violation("exports.symbol", S) :- exports(symbol: S), S is not absent, not known
 violation("doc.symbol", S) :- doc(symbol: S), not known(S).
 violation("jsdoc_tag.symbol", S) :- jsdoc_tag(symbol: S), not known(S).
 violation("decorator.target", S) :- decorator(target: S), not known(S).
+violation("entry_point.symbol", S) :- entry_point(symbol: S), not known(S).
+violation("field_tag.field", S) :- field_tag(field: S), not known(S).
+violation("typed_const.symbol", S) :- typed_const(symbol: S), not known(S).
+violation("typed_const.type", S) :- typed_const(type: S), not known(S).
 violation("decorator.decorator", S) :- decorator(decorator: S), S is not absent, not known(S).
 
 % ── every file-valued column names a file ────────────────────────────────

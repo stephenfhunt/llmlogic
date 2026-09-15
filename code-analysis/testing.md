@@ -152,7 +152,11 @@ run: size its default run count from the measured per-run rate, not by eye.
   (248) and not (388), satisfied by a promoted method (182), only through the
   pointer (321), an embedded interface (140), a hidden method (205). *Mutations:*
   no pointer method set → red; promoted methods skipped → red; no hiding
-  overrides → red; no interface `extends` → red.
+  overrides → red; no interface `extends` → red. Widened to generic types
+  (`T[X any]`, used as `T[int]`), with `implements.pointer` checked against
+  reflect's answer for the value type; acceptance guard: a generic type implemented
+  an interface. *Mutations:* generic types skipped → red; `pointer` always false →
+  red.
 - [x] **P6-go** Determinism for Go: permuting a go.work's `use` order changes no
   output byte, over P2-go's module and three more whose two `init`s collide.
   Guard: most runs reorder. *Mutation:* sources left in load order → red.

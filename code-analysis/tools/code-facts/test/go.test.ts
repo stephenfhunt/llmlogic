@@ -123,6 +123,145 @@ test("doc comments, and a `Deprecated:` paragraph as the deprecated tag", { skip
   assert.deepEqual(rows("jsdoc_tag"), [{ symbol: "shapes.go#Register", tag: "deprecated", text: "keep a map of your own." }]);
 });
 
+test("entry_point: main, and the functions go test runs", { skip: NO_GO }, () => {
+  assert.deepEqual(
+    rows("entry_point").map((e) => [e.symbol, e.kind]),
+    [
+      ["cmd/app/main.go#main", "main"],
+      ["example_test.go#ExampleSum", "example"],
+      ["shapes_test.go#TestArea", "test"],
+    ],
+  );
+});
+
+test("Go declarations: go test's naming rules, struct tags, typed constants, receivers, go.mod directives, generic types", { skip: NO_GO }, () => {
+  const dir = tempDir("go-decls");
+  writeFiles(dir, {
+    "go.mod": [
+      "module example.com/e",
+      "",
+      "go 1.26",
+      "",
+      "toolchain go1.26.1",
+      "",
+      "godebug default=go1.21",
+      "",
+      "require example.com/dep v1.0.0",
+      "",
+      "replace example.com/dep v1.0.0 => example.com/fork v1.0.1",
+      "",
+      "replace example.com/old => ../old",
+      "",
+      "exclude example.com/dep v0.9.0",
+      "",
+      "retract (\n\tv0.1.0\n\t[v0.2.0, v0.2.5]\n)",
+      "",
+    ].join("\n"),
+    "e.go": [
+      "package e",
+      "",
+      'import "fmt"',
+      "",
+      "type Color int",
+      "",
+      "const (\n\tRed Color = iota\n\tGreen\n\tBlue\n)",
+      "",
+      "const Answer Color = 42",
+      "",
+      "const Plain = 7",
+      "",
+      "type Point struct {\n\tX    int `json:\"x\" db:\"px\"`\n\tY, W int `json:\"y,omitempty\"`\n\tZ    int `weird`\n\tName string\n}",
+      "",
+      "func (p *Point) Move() {}",
+      "",
+      "func (p Point) Norm() int { return 0 }",
+      "",
+      "type Box[T any] struct{ v T }",
+      "",
+      "func (b *Box[T]) String() string { return fmt.Sprint(b.v) }",
+      "",
+      "var _ fmt.Stringer = (*Box[int])(nil)",
+      "",
+      "func init() {}",
+      "",
+      "func init() {}",
+      "",
+    ].join("\n"),
+    "e_test.go": [
+      "package e",
+      "",
+      'import "testing"',
+      "",
+      "func TestMain(m *testing.M) { m.Run() }",
+      "func TestX(t *testing.T)     {}",
+      "func Testlower(t *testing.T) {}",
+      "func Test_under(t *testing.T) {}",
+      "func BenchmarkX(b *testing.B) {}",
+      "func FuzzX(f *testing.F)     {}",
+      "func Example()               {}",
+      "func ExamplePoint_Move()     {}",
+      "func Examplebad()            {}",
+      "func TestWrong(x int)        {}",
+      "",
+    ].join("\n"),
+  });
+  const { tables } = extractGo(dir, { layers: ["refs"] });
+  // `Testlower` and `Examplebad` break the naming rule; `TestWrong` the signature.
+  assert.deepEqual(
+    tables.rows("entry_point").map((e) => [e.symbol, e.kind]),
+    [
+      ["e.go#init", "init"],
+      ["e.go#init@36", "init"],
+      ["e_test.go#TestMain", "test_main"],
+      ["e_test.go#TestX", "test"],
+      ["e_test.go#Test_under", "test"],
+      ["e_test.go#BenchmarkX", "benchmark"],
+      ["e_test.go#FuzzX", "fuzz"],
+      ["e_test.go#Example", "example"],
+      ["e_test.go#ExamplePoint_Move", "example"],
+    ],
+  );
+  assert.deepEqual(
+    tables.rows("field_tag").map((t) => [t.field, t.key, t.value, t.text]),
+    [
+      ["e.go#Point.X", "json", "x", 'json:"x" db:"px"'],
+      ["e.go#Point.X", "db", "px", 'json:"x" db:"px"'],
+      ["e.go#Point.Y", "json", "y,omitempty", 'json:"y,omitempty"'],
+      ["e.go#Point.W", "json", "y,omitempty", 'json:"y,omitempty"'],
+      ["e.go#Point.Z", null, null, "weird"],
+    ],
+  );
+  // `Plain` is untyped: no named type, no row.
+  assert.deepEqual(
+    tables.rows("typed_const").map((c) => [c.symbol, c.type, c.value, c.iota]),
+    [
+      ["e.go#Red", "e.go#Color", "0", true],
+      ["e.go#Green", "e.go#Color", "1", true],
+      ["e.go#Blue", "e.go#Color", "2", true],
+      ["e.go#Answer", "e.go#Color", "42", false],
+    ],
+  );
+  const form = (id: string) => tables.rows("symbol").find((s) => s.id === id)?.form;
+  assert.deepEqual([form("e.go#Point.Move"), form("e.go#Point.Norm"), form("e.go#Box.String")], ["pointer_receiver", "value_receiver", "pointer_receiver"]);
+  assert.deepEqual(
+    tables.rows("module_directive").map((d) => [d.directive, d.path, d.version, d.replacement, d.replacement_version]),
+    [
+      ["go", null, "1.26", null, null],
+      ["toolchain", null, "go1.26.1", null, null],
+      ["replace", "example.com/dep", "v1.0.0", "example.com/fork", "v1.0.1"],
+      ["replace", "example.com/old", null, "../old", null],
+      ["exclude", "example.com/dep", "v0.9.0", null, null],
+      ["retract", null, "v0.1.0", null, null],
+      ["retract", null, "[v0.2.0, v0.2.5]", null, null],
+      ["godebug", "default", "go1.21", null, null],
+    ],
+  );
+  // A generic type implements an interface as its own receiver `Box[T]` sees it.
+  assert.deepEqual(tables.rows("implements").map((r) => [r.class, r.interface, r.pointer]), [["e.go#Box", "ext:fmt#Stringer", true]]);
+  assert.deepEqual(tables.rows("overrides").map((r) => [r.member, r.base]), [["e.go#Box.String", "ext:fmt#Stringer.String"]]);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test("ref: each resolved name from its enclosing declaration, and how it is used", { skip: NO_GO }, () => {
   const refs = (from: string) => rows("ref").filter((r) => r.from === from).map((r) => [r.to, r.kind, r.line]);
   assert.deepEqual(refs("cmd/app/main.go#main"), [
@@ -180,13 +319,13 @@ test("call_site: functions and concrete methods are static, interface methods vi
 
 test("implements and overrides: the interfaces each type's method set satisfies, and the methods that satisfy them", { skip: NO_GO }, () => {
   assert.deepEqual(
-    rows("implements").map((r) => [r.class, r.interface]),
+    rows("implements").map((r) => [r.class, r.interface, r.pointer]),
     [
-      ["base.go#base", "lib#error"],
-      ["shapes.go#Circle", "shapes.go#Shape"],
-      // Area has a pointer receiver, and Error is promoted from base: both through *Square.
-      ["square.go#Square", "shapes.go#Shape"],
-      ["square.go#Square", "lib#error"],
+      ["base.go#base", "lib#error", true],
+      ["shapes.go#Circle", "shapes.go#Shape", false],
+      // Area has a pointer receiver, and Error is promoted from base: both only through *Square.
+      ["square.go#Square", "shapes.go#Shape", true],
+      ["square.go#Square", "lib#error", true],
     ],
   );
   assert.deepEqual(
@@ -275,6 +414,8 @@ test("refs outside the root: embedded interfaces, fields of outside structs, con
     ["r.go#Reader", "ext:io#Reader"],
     ["r.go#Temp", "ext:fmt#Stringer"],
   ]);
+  // Reader's Read has a pointer receiver; Temp's String a value receiver.
+  assert.deepEqual(tables.rows("implements").map((r) => r.pointer), [true, false]);
   // Reader's Read hides the embedded io.Reader's, and satisfies it.
   assert.deepEqual(pairs("overrides", "member", "base"), [
     ["r.go#Reader.Read", "ext:io#Reader.Read"],

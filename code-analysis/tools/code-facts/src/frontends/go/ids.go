@@ -98,6 +98,10 @@ func describe(obj types.Object, s *source) (declared, bool) {
 			d.kind = "method"
 			if _, isIface := sig.Recv().Type().Underlying().(*types.Interface); isIface {
 				d.abstract = true
+			} else if _, ptr := types.Unalias(sig.Recv().Type()).(*types.Pointer); ptr {
+				d.form = "pointer_receiver"
+			} else {
+				d.form = "value_receiver"
 			}
 			d.visibility = visibilityOf(o.Name())
 		} else {

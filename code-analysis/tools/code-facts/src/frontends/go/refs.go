@@ -675,7 +675,11 @@ func (w *refWalker) embedding(st *ast.StructType) {
 		if !ok {
 			continue
 		}
-		inner := types.NewMethodSet(types.NewPointer(tn.Type()))
+		innerType := selfInstance(tn)
+		if innerType == nil {
+			continue
+		}
+		inner := types.NewMethodSet(types.NewPointer(innerType))
 		for i := 0; i < named.NumMethods(); i++ {
 			m := named.Method(i)
 			sel := inner.Lookup(m.Pkg(), m.Name())
@@ -747,6 +751,25 @@ func (w *refWalker) unresolved(n *ast.Ident) {
 func typed(info *types.Info, e ast.Expr) bool {
 	tv, ok := info.Types[e]
 	return ok && tv.Type != nil && tv.Type != types.Typ[types.Invalid]
+}
+
+// selfInstance is a named type as its own methods see it: a generic type
+// instantiated with its own type parameters, which is what a receiver `T[X]` is.
+// Implements is unspecified for an uninstantiated generic type.
+func selfInstance(tn *types.TypeName) types.Type {
+	named, ok := types.Unalias(tn.Type()).(*types.Named)
+	if !ok || named.TypeParams().Len() == 0 {
+		return tn.Type()
+	}
+	args := make([]types.Type, named.TypeParams().Len())
+	for i := range args {
+		args[i] = named.TypeParams().At(i)
+	}
+	inst, err := types.Instantiate(nil, named, args, false)
+	if err != nil {
+		return nil
+	}
+	return inst
 }
 
 func isGeneric(tn *types.TypeName) bool {
@@ -856,11 +879,15 @@ func (x *extractor) emitImplementations() {
 			continue
 		}
 		tn, ok := x.objOf[tid].(*types.TypeName)
-		if !ok || isGeneric(tn) || tn.Type().Underlying() == types.Typ[types.Invalid] {
+		if !ok || tn.Type().Underlying() == types.Typ[types.Invalid] {
+			continue
+		}
+		self := selfInstance(tn)
+		if self == nil {
 			continue
 		}
 		has := map[string]bool{}
-		ptrSet := types.NewMethodSet(types.NewPointer(tn.Type()))
+		ptrSet := types.NewMethodSet(types.NewPointer(self))
 		for i := 0; i < ptrSet.Len(); i++ {
 			has[ptrSet.At(i).Obj().Name()] = true
 		}
@@ -901,11 +928,15 @@ func (x *extractor) emitImplementations() {
 			if !ok {
 				continue
 			}
-			t := T.Type()
-			if !types.Implements(t, it) && !types.Implements(types.NewPointer(t), it) {
+			t := selfInstance(T)
+			if t == nil {
 				continue
 			}
-			x.em.emit("implements", row{"class": tid, "interface": in.id})
+			byValue := types.Implements(t, it)
+			if !byValue && !types.Implements(types.NewPointer(t), it) {
+				continue
+			}
+			x.em.emit("implements", row{"class": tid, "interface": in.id, "pointer": !byValue})
 			ms := types.NewMethodSet(types.NewPointer(t))
 			for i := 0; i < it.NumMethods(); i++ {
 				m := it.Method(i)

@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"golang.org/x/tools/go/packages"
 )
@@ -75,6 +77,33 @@ func (x *extractor) emitPackages() {
 		}
 		for _, t := range m.file.Tool {
 			x.em.emit("package_dep", row{"package": m.path, "dep": t.Path, "kind": "dev", "range": "", "types_for": nil, "scope": "tool"})
+		}
+		directive := func(name, path, version, replacement, replacementVersion string) {
+			x.em.emit("module_directive", row{"package": m.path, "directive": name, "path": nullable(path), "version": nullable(version),
+				"replacement": nullable(replacement), "replacement_version": nullable(replacementVersion)})
+		}
+		f := m.file
+		if f.Go != nil {
+			directive("go", "", f.Go.Version, "", "")
+		}
+		if f.Toolchain != nil {
+			directive("toolchain", "", f.Toolchain.Name, "", "")
+		}
+		for _, r := range f.Replace {
+			directive("replace", r.Old.Path, r.Old.Version, r.New.Path, r.New.Version)
+		}
+		for _, e := range f.Exclude {
+			directive("exclude", e.Mod.Path, e.Mod.Version, "", "")
+		}
+		for _, r := range f.Retract {
+			version := r.Low
+			if r.High != r.Low {
+				version = "[" + r.Low + ", " + r.High + "]"
+			}
+			directive("retract", "", version, "", "")
+		}
+		for _, g := range f.Godebug {
+			directive("godebug", g.Key, g.Value, "", "")
 		}
 	}
 }
@@ -337,8 +366,13 @@ func (x *extractor) emitDeclarationDetail(s *source) {
 				if id, ok := x.idOf(obj); ok {
 					params(id, obj.Type())
 					x.emitDoc(id, n.Doc)
+					if n.Recv == nil {
+						x.emitEntryPoint(s, n, obj, id)
+					}
 				}
 			}
+		case *ast.StructType:
+			x.emitFieldTags(s, n)
 		case *ast.FuncLit:
 			if id, ok := x.idByKey[x.posKey(n.Pos())+":lit"]; ok {
 				if tv, ok := info.Types[n]; ok {
@@ -348,6 +382,9 @@ func (x *extractor) emitDeclarationDetail(s *source) {
 		case *ast.GenDecl:
 			if n.Tok == token.IMPORT {
 				return false
+			}
+			if n.Tok == token.CONST {
+				x.emitTypedConsts(s, n)
 			}
 			for _, spec := range n.Specs {
 				switch sp := spec.(type) {
@@ -387,6 +424,194 @@ func (x *extractor) emitDeclarationDetail(s *source) {
 		}
 		return true
 	})
+}
+
+// emitEntryPoint marks a function nothing in the code calls because the runtime
+// or `go test` does, by the rules those apply: the name, the package, the file,
+// and the signature.
+func (x *extractor) emitEntryPoint(s *source, fd *ast.FuncDecl, obj types.Object, id string) {
+	sig, ok := obj.Type().(*types.Signature)
+	if !ok {
+		return
+	}
+	name := fd.Name.Name
+	bare := sig.Params().Len() == 0 && sig.Results().Len() == 0
+	kind := ""
+	switch {
+	case name == "main" && s.pkg.Types.Name() == "main" && bare:
+		kind = "main"
+	case name == "init" && bare:
+		kind = "init"
+	case !s.test:
+	case name == "TestMain" && takesTesting(sig, "M"):
+		kind = "test_main"
+	case testName(name, "Test") && takesTesting(sig, "T"):
+		kind = "test"
+	case testName(name, "Benchmark") && takesTesting(sig, "B"):
+		kind = "benchmark"
+	case testName(name, "Fuzz") && takesTesting(sig, "F"):
+		kind = "fuzz"
+	case testName(name, "Example") && bare:
+		kind = "example"
+	}
+	if kind != "" {
+		x.em.emit("entry_point", row{"symbol": id, "kind": kind})
+	}
+}
+
+// testName is `go test`'s rule: the prefix alone, or the prefix followed by
+// anything but a lower-case letter (`TestX`, `Test_x`, not `Testx`).
+func testName(name, prefix string) bool {
+	if !strings.HasPrefix(name, prefix) {
+		return false
+	}
+	if len(name) == len(prefix) {
+		return true
+	}
+	r, _ := utf8.DecodeRuneInString(name[len(prefix):])
+	return !unicode.IsLower(r)
+}
+
+// takesTesting: a single `*testing.<name>` parameter and no result.
+func takesTesting(sig *types.Signature, name string) bool {
+	if sig.Params().Len() != 1 || sig.Results().Len() != 0 {
+		return false
+	}
+	p, ok := types.Unalias(sig.Params().At(0).Type()).(*types.Pointer)
+	if !ok {
+		return false
+	}
+	n, ok := types.Unalias(p.Elem()).(*types.Named)
+	return ok && n.Obj().Pkg() != nil && n.Obj().Pkg().Path() == "testing" && n.Obj().Name() == name
+}
+
+// emitFieldTags writes each tagged field's `key:"value"` pairs.
+func (x *extractor) emitFieldTags(s *source, st *ast.StructType) {
+	info := s.pkg.TypesInfo
+	for _, f := range st.Fields.List {
+		if f.Tag == nil {
+			continue
+		}
+		raw, err := strconv.Unquote(f.Tag.Value)
+		if err != nil {
+			raw = f.Tag.Value
+		}
+		idents := f.Names
+		if len(idents) == 0 {
+			if ident := embeddedIdent(f.Type); ident != nil {
+				idents = []*ast.Ident{ident}
+			}
+		}
+		pairs, conventional := parseTag(raw)
+		for _, name := range idents {
+			id, ok := x.idOf(info.Defs[name])
+			if !ok {
+				continue
+			}
+			if !conventional {
+				x.em.emit("field_tag", row{"field": id, "key": nil, "value": nil, "text": truncate(raw, 200)})
+				continue
+			}
+			for _, p := range pairs {
+				x.em.emit("field_tag", row{"field": id, "key": p[0], "value": truncate(p[1], 200), "text": truncate(raw, 200)})
+			}
+		}
+	}
+}
+
+// parseTag splits a tag by the convention reflect.StructTag reads; false when
+// the tag does not follow it.
+func parseTag(tag string) ([][2]string, bool) {
+	var out [][2]string
+	for {
+		i := 0
+		for i < len(tag) && tag[i] == ' ' {
+			i++
+		}
+		tag = tag[i:]
+		if tag == "" {
+			break
+		}
+		i = 0
+		for i < len(tag) && tag[i] > ' ' && tag[i] != ':' && tag[i] != '"' && tag[i] != 0x7f {
+			i++
+		}
+		if i == 0 || i+1 >= len(tag) || tag[i] != ':' || tag[i+1] != '"' {
+			return nil, false
+		}
+		name := tag[:i]
+		tag = tag[i+1:]
+		i = 1
+		for i < len(tag) && tag[i] != '"' {
+			if tag[i] == '\\' {
+				i++
+			}
+			i++
+		}
+		if i >= len(tag) {
+			return nil, false
+		}
+		value, err := strconv.Unquote(tag[:i+1])
+		if err != nil {
+			return nil, false
+		}
+		out = append(out, [2]string{name, value})
+		tag = tag[i+1:]
+	}
+	return out, len(out) > 0
+}
+
+// emitTypedConsts writes each constant of a named type, with its value and
+// whether `iota` made it — a spec with no values repeats the one above.
+func (x *extractor) emitTypedConsts(s *source, gd *ast.GenDecl) {
+	info := s.pkg.TypesInfo
+	var last []ast.Expr
+	for _, spec := range gd.Specs {
+		vs, ok := spec.(*ast.ValueSpec)
+		if !ok {
+			continue
+		}
+		values := vs.Values
+		if len(values) == 0 {
+			values = last
+		} else {
+			last = values
+		}
+		usesIota := false
+		for _, v := range values {
+			ast.Inspect(v, func(n ast.Node) bool {
+				if id, ok := n.(*ast.Ident); ok {
+					if c, ok := info.Uses[id].(*types.Const); ok && c.Pkg() == nil && c.Name() == "iota" {
+						usesIota = true
+					}
+				}
+				return !usesIota
+			})
+		}
+		for _, name := range vs.Names {
+			c, ok := info.Defs[name].(*types.Const)
+			if !ok {
+				continue
+			}
+			named, ok := types.Unalias(c.Type()).(*types.Named)
+			if !ok {
+				continue
+			}
+			id, ok := x.idOf(c)
+			if !ok {
+				continue
+			}
+			typeID, ok := x.targetID(named.Obj())
+			if !ok {
+				continue
+			}
+			value := ""
+			if c.Val() != nil {
+				value = truncate(c.Val().ExactString(), 100)
+			}
+			x.em.emit("typed_const", row{"symbol": id, "type": typeID, "value": nullable(value), "iota": usesIota})
+		}
+	}
 }
 
 func (x *extractor) isTopLevel(s *source, obj types.Object) bool {

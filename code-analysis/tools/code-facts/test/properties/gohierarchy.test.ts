@@ -27,6 +27,8 @@ interface Type {
   declares: [string, boolean][];
   /** [embedded type, embedded as a pointer] — lower indices only, so no cycle */
   embeds: [number, boolean][];
+  /** declared `T[X any]`, and used as `T[int]` */
+  generic: boolean;
 }
 interface Model {
   ifaces: Iface[];
@@ -62,6 +64,7 @@ function normalize(raw: Model): Model {
   const types = raw.types.map((t, k) => ({
     declares: [...new Map(t.declares).entries()],
     embeds: [...new Map(t.embeds.filter(([e]) => e < k)).entries()],
+    generic: t.generic,
   }));
   return { ifaces, types };
 }
@@ -73,6 +76,7 @@ const arbModel: fc.Arbitrary<Model> = fc
       fc.record({
         declares: fc.array(fc.tuple(fc.constantFrom(...METHODS), fc.boolean()), { maxLength: 4 }),
         embeds: fc.array(fc.tuple(fc.nat(3), fc.boolean()), { maxLength: 2 }),
+        generic: fc.boolean(),
       }),
       { minLength: 2, maxLength: 4 },
     ),
@@ -84,11 +88,13 @@ function render(m: Model): string {
   m.ifaces.forEach((it, i) => {
     lines.push(`type I${i} interface {`, ...it.embeds.map((e) => `\tI${e}`), ...it.own.map((x) => `\t${x}()`), "}", "");
   });
+  const use = (k: number) => `T${k}${m.types[k]?.generic ? "[int]" : ""}`;
   m.types.forEach((t, k) => {
-    lines.push(`type T${k} struct {`, ...t.embeds.map(([e, ptr]) => `\t${ptr ? "*" : ""}T${e}`), "}", "");
-    for (const [x, ptr] of t.declares) lines.push(`func (t ${ptr ? "*" : ""}T${k}) ${x}() { fmt.Println("ran T${k} ${x}") }`, "");
+    lines.push(`type T${k}${t.generic ? "[X any]" : ""} struct {`, ...t.embeds.map(([e, ptr]) => `\t${ptr ? "*" : ""}${use(e)}`), "}", "");
+    const recv = `T${k}${t.generic ? "[X]" : ""}`;
+    for (const [x, ptr] of t.declares) lines.push(`func (t ${ptr ? "*" : ""}${recv}) ${x}() { fmt.Println("ran T${k} ${x}") }`, "");
     const fields = t.embeds.map(([e, ptr]) => `T${e}: ${ptr ? "" : "*"}newT${e}()`).join(", ");
-    lines.push(`func newT${k}() *T${k} { return &T${k}{${fields}} }`, "");
+    lines.push(`func newT${k}() *${use(k)} { return &${use(k)}{${fields}} }`, "");
   });
   lines.push(
     "func main() {",
@@ -149,6 +155,7 @@ test("P4-go: implements and overrides are what the program's method sets say; ex
   let pointerOnly = 0;
   let embeddedIface = 0;
   let hidden = 0;
+  let genericImplemented = 0;
   fc.assert(
     fc.property(arbModel, (m) => {
       const dir = tempDir("p4-go");
@@ -164,8 +171,9 @@ test("P4-go: implements and overrides are what the program's method sets say; ex
           pairs++;
           const byValue = seen.impl.get(`${t} ${i}`);
           if (byValue === undefined) return;
-          implements_.push([id(`T${t}`), id(`I${i}`)]);
+          implements_.push([id(`T${t}`), id(`I${i}`), !byValue]);
           if (!byValue) pointerOnly++;
+          if (m.types[t]?.generic) genericImplemented++;
           for (const [x, declarer] of methodsOf(m.ifaces, i)) {
             const r = seen.ran.get(`${t} ${x}`);
             assert.ok(r !== undefined, `*T${t} implements I${i} but has no ${x}`);
@@ -188,7 +196,7 @@ test("P4-go: implements and overrides are what the program's method sets say; ex
       notImplemented += implements_.length < pairs ? 1 : 0;
       embeddedIface += m.ifaces.some((it) => it.embeds.length > 0) ? 1 : 0;
 
-      assert.deepEqual(sortedUnique(tables.rows("implements").map((r) => [r.class, r.interface])), sortedUnique(implements_));
+      assert.deepEqual(sortedUnique(tables.rows("implements").map((r) => [r.class, r.interface, r.pointer])), sortedUnique(implements_));
       assert.deepEqual(sortedUnique(tables.rows("overrides").map((r) => [r.member, r.base])), sortedUnique(overrides));
       assert.deepEqual(
         sortedUnique(tables.rows("extends").map((r) => [r.child, r.parent])),
@@ -210,4 +218,6 @@ test("P4-go: implements and overrides are what the program's method sets say; ex
   assert.ok(pointerOnly >= 1, "no interface was satisfied only through the pointer");
   assert.ok(embeddedIface >= 1, "no interface embedded another");
   assert.ok(hidden >= 1, "no declaration hid an embedded method");
+  // Acceptance for the generic widening: generic types compiled, and implemented.
+  assert.ok(genericImplemented >= 1, "no generic type implemented an interface");
 });

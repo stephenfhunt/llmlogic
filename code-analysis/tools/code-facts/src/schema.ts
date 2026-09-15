@@ -396,8 +396,8 @@ export const RELATIONS: readonly Relation[] = [
         name: "form",
         type: "symbol",
         doc:
-          "the language's own construct, where `kind` is the nearest shared one: a Go `struct` or `defined_type` (`type Celsius float64`) is kind `class`, an `embedded` field kind `property`",
-        values: ["struct", "defined_type", "embedded"],
+          "the language's own construct, where `kind` is the nearest shared one: a Go `struct` or `defined_type` (`type Celsius float64`) is kind `class`, an `embedded` field kind `property`; a Go method is a `pointer_receiver` or a `value_receiver`",
+        values: ["struct", "defined_type", "embedded", "pointer_receiver", "value_receiver"],
         nullable: true,
       },
     ],
@@ -434,6 +434,52 @@ export const RELATIONS: readonly Relation[] = [
       col("symbol", "string", ID),
       col("tag", "string", "tag name without `@`"),
       opt("text", "string", "tag text, truncated to 200 characters"),
+    ],
+  },
+  {
+    name: "entry_point",
+    layer: "structure",
+    doc:
+      "A function the runtime or a test runner calls and no code does — reach from these before calling anything unused. " +
+      "Go: `main` in package main, every `init`, and in test files `TestMain` and the `Test`, `Benchmark`, `Fuzz` and `Example` functions `go test` runs.",
+    columns: [
+      col("symbol", "string", ID),
+      oneOf("kind", ["main", "init", "test_main", "test", "benchmark", "fuzz", "example"], "who calls it"),
+    ],
+  },
+  {
+    name: "field_tag",
+    layer: "structure",
+    doc: "A Go struct field's tag, a row per `key:\"value\"` pair — how the field is named to encoding/json, a database, a validator, found by reflection and so by no reference.",
+    columns: [
+      col("field", "string", "the field's symbol id"),
+      opt("key", "string", "the key (`json`); absent when the tag does not follow the `key:\"value\"` convention"),
+      opt("value", "string", "the value between the quotes (`name,omitempty`), truncated to 200 characters"),
+      col("text", "string", "the whole tag, truncated to 200 characters"),
+    ],
+  },
+  {
+    name: "typed_const",
+    layer: "structure",
+    doc: "A constant of a named type — the shape of a Go enumeration (`const ( Red Color = iota; Green )`).",
+    columns: [
+      col("symbol", "string", ID),
+      col("type", "string", "the named type"),
+      opt("value", "string", "the value as the compiler computes it, truncated to 100 characters"),
+      col("iota", "bool", "its value comes from `iota`, written or repeated from a line above"),
+    ],
+  },
+  {
+    name: "module_directive",
+    layer: "structure",
+    doc: "A go.mod directive other than `require` and `tool`: the Go version and toolchain, and what is replaced, excluded, retracted or run with a changed GODEBUG default.",
+    columns: [
+      col("package", "string", "`package.name` of the module"),
+      oneOf("directive", ["go", "toolchain", "replace", "exclude", "retract", "godebug"], "which directive"),
+      opt("path", "string", "the module path it names (`replace`, `exclude`), or the GODEBUG setting (`godebug`)"),
+      opt("version", "string", "the version (a range for `retract`, the setting's value for `godebug`); for `replace`, absent when every version is replaced"),
+      opt("replacement", "string", "`replace`: the module path or directory put in its place"),
+      opt("replacement_version", "string", "`replace`: the replacement's version; absent for a directory"),
     ],
   },
   {
@@ -503,7 +549,11 @@ export const RELATIONS: readonly Relation[] = [
     layer: "refs",
     doc:
       "A class's `implements` clause, direct edges only. Go writes none: there a row is the type checker's answer — a named type whose method set (or its pointer's) satisfies a project interface, or an outside one the project names.",
-    columns: [col("class", "string", ID), col("interface", "string", ID)],
+    columns: [
+      col("class", "string", ID),
+      col("interface", "string", ID),
+      opt("pointer", "bool", "Go: only the pointer (`*T`) satisfies it — a `T` value does not, since a method it needs has a pointer receiver"),
+    ],
   },
   {
     name: "embeds",
