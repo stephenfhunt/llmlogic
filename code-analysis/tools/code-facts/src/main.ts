@@ -151,6 +151,7 @@ export function run(opts: Options): Result {
     time,
     git_head: gitHead(root),
     go_version: goVersion,
+    java_version: null,
   });
   tables.dedupe();
   if (opts.out !== undefined) timed("write", () => tables.write(opts.out as string, layers, LIB_DIR));

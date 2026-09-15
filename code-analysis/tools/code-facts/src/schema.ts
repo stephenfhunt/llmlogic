@@ -162,11 +162,12 @@ export const RELATIONS: readonly Relation[] = [
       opt("python_version", "string", "the Python that read the Python sources, if any were read"),
       col("node_version", "string", "the Node.js that ran the extractor"),
       col("root", "string", "absolute path every `file` column is relative to"),
-      col("targets", "string", "what was extracted — tsconfigs, go.mod or go.work files, Python roots — comma-separated, repo-relative"),
+      col("targets", "string", "what was extracted — tsconfigs, go.mod or go.work files, Maven or Gradle builds, Python and Java source directories — comma-separated, repo-relative"),
       col("layers", "string", "the layers extracted, comma-separated"),
       col("time", "timestamp", "when the extraction ran (UTC)"),
       opt("git_head", "string", "HEAD commit of the repository, if it is one"),
       opt("go_version", "string", "the Go toolchain that read the Go sources, if any were read"),
+      opt("java_version", "string", "the JDK whose compiler read the Java sources, if any were read"),
     ],
   },
   {
@@ -184,9 +185,9 @@ export const RELATIONS: readonly Relation[] = [
   {
     name: "project",
     layer: "structure",
-    doc: "A project loaded: a tsconfig (given on the command line or reached through `references`), a Python root, or a Go module.",
+    doc: "A project loaded: a tsconfig (given on the command line or reached through `references`), a Python root, a Go module, or a Java build module (a Maven module, a Gradle project, or a directory of sources with no build).",
     columns: [
-      col("id", "string", "repo-relative path of the tsconfig, the Python root (or its pyproject.toml), or the go.mod"),
+      col("id", "string", "repo-relative path of the tsconfig, the Python root (or its pyproject.toml), the go.mod, or the Java module's pom.xml, build.gradle(.kts) or source directory"),
       col("dir", "string", "repo-relative directory of the project"),
       col("files", "int", "source files the project compiles that are under the root"),
       col("strict", "bool", "whether `strict` is on"),
@@ -207,21 +208,21 @@ export const RELATIONS: readonly Relation[] = [
     columns: [
       col("path", "string", FILE),
       col("dir", "string", "its directory (`.` for the root)"),
-      opt("package", "string", "name in the nearest enclosing package.json"),
+      opt("package", "string", "`package.name` of the distribution unit it belongs to: the nearest enclosing package.json, a Go module, a Maven module or a Gradle project"),
       oneOf(
         "lang",
-        ["ts", "tsx", "mts", "cts", "dts", "js", "jsx", "mjs", "cjs", "py", "pyi", "go", "json"],
+        ["ts", "tsx", "mts", "cts", "dts", "js", "jsx", "mjs", "cjs", "py", "pyi", "go", "java", "json"],
         "file flavour. `json` is **data, not source** — a file a module imports rather than one that was compiled; exclude it wherever you mean code",
       ),
       col("loc", "int", "lines"),
       col("sloc", "int", "lines carrying at least one token (not blank, not only comments)"),
-      col("is_test", "bool", "a test file (`*.test.*`, `*.spec.*`, `__tests__/`, `test(s)/`, or only in a test tsconfig)"),
+      col("is_test", "bool", "a test file (`*.test.*`, `*.spec.*`, `__tests__/`, `test(s)/`, or only in a test tsconfig; Go's `_test.go`; a Java file in a test source set)"),
       col("is_decl", "bool", "a `.d.ts` file"),
       col("is_generated", "bool", "a heuristic: the header says `@generated`, `auto-generated` or `DO NOT EDIT`, or the name is `*.gen.*`, `*.generated.*`, `*_pb.*`/`*_pb2.py`/`*.pb.*`, or under `__generated__/`"),
       opt(
         "namespace",
         "string",
-        "the language's own name for the unit the file belongs to: a Go import path (`…_test` for an external test package), a Python dotted module; absent for TypeScript, where the file is the module",
+        "the language's own name for the unit the file belongs to: a Go import path (`…_test` for an external test package), a Java package (empty for the unnamed package), a Python dotted module; absent for TypeScript, where the file is the module",
       ),
     ],
   },
@@ -231,7 +232,11 @@ export const RELATIONS: readonly Relation[] = [
     doc: "A source file under a target that the build leaves out, so no other relation describes it — count these before a negative answer.",
     columns: [
       col("path", "string", FILE),
-      oneOf("reason", ["build_constraint"], "`build_constraint`: a Go build constraint or file-name suffix excludes it for this platform"),
+      oneOf(
+        "reason",
+        ["build_constraint", "other_language"],
+        "`build_constraint`: a Go build constraint or file-name suffix excludes it for this platform; `other_language`: a Kotlin, Groovy or Scala file under a Java source root, which the Java compiler does not read",
+      ),
       opt("detail", "string", "the constraint as written, when there is one"),
     ],
   },
@@ -259,7 +264,7 @@ export const RELATIONS: readonly Relation[] = [
   {
     name: "package",
     layer: "structure",
-    doc: "A package.json found at or above a project file, within the root.",
+    doc: "A distribution unit within the root: a package.json at or above a project file, a go.mod module, a Maven module (`groupId:artifactId`) or a Gradle project (its path, `:app`).",
     columns: [
       col("name", "string", "package name (the directory path if it has none)"),
       col("dir", "string", "repo-relative directory"),
@@ -270,14 +275,14 @@ export const RELATIONS: readonly Relation[] = [
   {
     name: "package_dep",
     layer: "structure",
-    doc: "A dependency declared in a package.json.",
+    doc: "A dependency declared by a package: in a package.json, a go.mod, a pom.xml or a Gradle build.",
     columns: [
       col("package", "string", "`package.name` declaring it"),
       col("dep", "string", "the dependency's package name"),
       oneOf("kind", ["prod", "dev", "peer", "optional"], "which dependency block"),
       col("range", "string", "the version range as written"),
       opt("types_for", "string", "for an `@types/` package, the package it types (`@types/node` → `node`)"),
-      opt("scope", "string", "the build's own word for the dependency, where `kind` summarises it: `require`, `indirect` or `tool` in a go.mod"),
+      opt("scope", "string", "the build's own word for the dependency, where `kind` summarises it: `require`, `indirect` or `tool` in a go.mod; the Maven scope (`compile`, `runtime`, `test`, `provided`, `system`); the Gradle configuration (`implementation`, `api`, `compileOnly`, `testImplementation`, …)"),
     ],
   },
   {
@@ -303,22 +308,24 @@ export const RELATIONS: readonly Relation[] = [
           "dot",
           "cgo",
           "implicit",
+          "static_import",
+          "on_demand",
         ],
-        "`type_only` is `import type`; `type_query` is `import(\"x\").T` in a type; `dot` is Go's `import . \"x\"`, `cgo` its `import \"C\"`; `implicit` is no statement at all — a reference to another file of the same package, which that language needs no import for (at the first reference, `specifier` the name referenced)",
+        "`type_only` is `import type`; `type_query` is `import(\"x\").T` in a type; `dot` is Go's `import . \"x\"`, `cgo` its `import \"C\"`; `static_import` is Java's `import static`, `on_demand` its `import p.*`; `implicit` is no statement at all — a reference to another file of the same package, which that language needs no import for (at the first reference, `specifier` the name referenced)",
       ),
       opt(
         "runtime",
         "bool",
-        "the statement survives into the emitted JavaScript — false when TypeScript elides it (its bindings are only used as types, or it is `import type`); a `.d.ts` never runs; absent if the emitter could not say",
+        "the statement survives into the emitted JavaScript — false when TypeScript elides it (its bindings are only used as types, or it is `import type`); a `.d.ts` never runs; absent if the emitter could not say. Java: false when the compiled class needs nothing of the target — every use is an inlined compile-time constant or a Javadoc link, or there is none",
       ),
       opt("target_file", "string", "the resolved file, when it is under the root"),
-      opt("target_package", "string", "package name, for a specifier resolving outside the root (`node:fs` for builtins)"),
+      opt("target_package", "string", "package name, for a specifier resolving outside the root (`node:fs` for builtins); Java: the Maven coordinate `groupId:artifactId` of the jar the class resolved from, the module name (`java.base`) for the JDK"),
       opt(
         "target_ambient",
         "string",
         'the pattern of the ambient `declare module` the specifier matched, when that is what resolved it — `"*.css"` for an asset import. Such a specifier names no file and no package, which is why `resolved` alone does not imply a target',
       ),
-      col("builtin", "bool", "the specifier names a Node.js builtin module (`fs`, `node:fs`)"),
+      col("builtin", "bool", "the specifier names a Node.js builtin module (`fs`, `node:fs`), a Go standard-library package, or a class of the JDK"),
       col("resolved", "bool", "the compiler resolved the specifier"),
       opt(
         "unresolved_package",
@@ -328,7 +335,7 @@ export const RELATIONS: readonly Relation[] = [
       opt(
         "target_dir",
         "string",
-        "Go: the directory of the package imported, when it is under the root. An import names a package, not a file, so one import statement is a row per file of that package it references — each with `target_file` — and a row with `target_dir` alone when it references none (a `_` import runs the package's `init`)",
+        "Go and Java: the directory of the package imported, when it is under the root. A Go import, and a Java on-demand or static import, names a package or a type's members rather than a file, so one statement is a row per file it references — each with `target_file` — and a Go import referencing none is a row with `target_dir` alone (a `_` import runs the package's `init`)",
       ),
     ],
   },
@@ -381,7 +388,7 @@ export const RELATIONS: readonly Relation[] = [
       {
         name: "visibility",
         type: "symbol",
-        doc: "class members only: `hash_private` is an ECMAScript `#name`; `package` is visible within its package only (a Go member with a lower-case name)",
+        doc: "class members, and Java types: `hash_private` is an ECMAScript `#name`; `package` is visible within its package only (a Go member with a lower-case name, a Java declaration with no access modifier)",
         values: ["public", "protected", "private", "hash_private", "package"],
         nullable: true,
       },
@@ -396,8 +403,8 @@ export const RELATIONS: readonly Relation[] = [
         name: "form",
         type: "symbol",
         doc:
-          "the language's own construct, where `kind` is the nearest shared one: a Go `struct` or `defined_type` (`type Celsius float64`) is kind `class`, an `embedded` field kind `property`; a Go method is a `pointer_receiver` or a `value_receiver`",
-        values: ["struct", "defined_type", "embedded", "pointer_receiver", "value_receiver"],
+          "the language's own construct, where `kind` is the nearest shared one: a Go `struct` or `defined_type` (`type Celsius float64`) is kind `class`, an `embedded` field kind `property`; a Go method is a `pointer_receiver` or a `value_receiver`. A Java `record` or `enum` is kind `class`, an `annotation` type kind `interface`, a `record_component` kind `property`, and a `static_init` or `instance_init` initializer kind `static_block`",
+        values: ["struct", "defined_type", "embedded", "pointer_receiver", "value_receiver", "record", "enum", "annotation", "record_component", "static_init", "instance_init"],
         nullable: true,
       },
     ],
@@ -441,7 +448,8 @@ export const RELATIONS: readonly Relation[] = [
     layer: "structure",
     doc:
       "A function the runtime or a test runner calls and no code does — reach from these before calling anything unused. " +
-      "Go: `main` in package main, every `init`, and in test files `TestMain` and the `Test`, `Benchmark`, `Fuzz` and `Example` functions `go test` runs.",
+      "Go: `main` in package main, every `init`, and in test files `TestMain` and the `Test`, `Benchmark`, `Fuzz` and `Example` functions `go test` runs. " +
+      "Java: a `main` method the launcher accepts, every static initializer (`init`), and each method in a test source set annotated for a test framework to run — `@Test`, `@ParameterizedTest`, `@BeforeEach` and the like (`test`).",
     columns: [
       col("symbol", "string", ID),
       oneOf("kind", ["main", "init", "test_main", "test", "benchmark", "fuzz", "example"], "who calls it"),
@@ -485,12 +493,13 @@ export const RELATIONS: readonly Relation[] = [
   {
     name: "decorator",
     layer: "structure",
-    doc: "A decorator applied to a declaration.",
+    doc: "A decorator applied to a declaration; in Java, an annotation.",
     columns: [
       col("target", "string", "the decorated symbol"),
-      opt("decorator", "string", "the decorator function's symbol, when resolved"),
+      opt("decorator", "string", "the decorator function's symbol, when resolved; a Java annotation's type"),
       col("name", "string", "the decorator expression's callee name as written"),
       col("line", "int", LINE),
+      opt("text", "string", "Java: the annotation's arguments as written, without parentheses, truncated to 200 characters; absent when it has none"),
     ],
   },
 
