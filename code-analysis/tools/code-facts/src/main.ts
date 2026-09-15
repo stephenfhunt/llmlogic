@@ -303,7 +303,8 @@ function buildGoFrontend(toolchain: string, log: (line: string) => void): string
   const r = spawnSync("go", ["build", ...(vendored ? ["-mod=vendor"] : []), "-o", partial, "."], {
     cwd: GO_FRONTEND,
     encoding: "utf8",
-    env: { ...process.env, GOTOOLCHAIN: toolchain, GOWORK: "off", GOFLAGS: "" },
+    // The binary runs here, whatever GOOS and GOARCH the environment sets for reading the project.
+    env: { ...process.env, GOTOOLCHAIN: toolchain, GOWORK: "off", GOFLAGS: "", GOOS: "", GOARCH: "" },
   });
   if (r.error !== undefined) throw new Error(`code-facts: reading Go needs the \`go\` command on PATH (${r.error.message})`);
   if (r.status !== 0) throw new Error(`code-facts: building the Go frontend with ${toolchain} failed; it needs Go 1.26 or later:\n${r.stderr}`);
