@@ -56,18 +56,21 @@ TypeScript; `--lang go` before it reads it as Go.
   literal `T{…}` is ref kind `new`, with no `call_site`. The basic types, `any`,
   `nil` and `iota` are no references; `error` and every builtin call are. A
   concrete method call is `dispatch: static`; a call through an interface or a
-  type parameter's constraint is `virtual`; a call through a function value is
-  `indirect`. A method promoted from an embedded type is named where it is
-  declared: `t.Fatal` in a test calls `ext:testing#common.Fatal`.
-  `unresolved_ref` and `dispatch: unresolved` occur only in code that does not
-  type-check, and `diagnostic` says why.
+  type parameter's constraint is `virtual`; a call through a variable holding a
+  function is `indirect`. A method promoted from an embedded type is named where
+  it is declared: `t.Fatal` in a test calls `ext:testing#common.Fatal`.
+  `dispatch: unresolved` is a call of a function value computed in place
+  (`wrap(r)(next)`, `handlers[i](w)`), which has no name — `pointsto.dl` still
+  follows it — or code that does not type-check, as is every `unresolved_ref`;
+  `diagnostic` says why.
 - **`implements` is computed**, since Go never writes it: every project named
   type (a generic one with its own type parameters) is checked against every
   interface the project declares or names from outside (`error`, `io.Reader`).
   `pointer: true` means only `*T` satisfies it. `overrides` follows, so
   `call_edge` expands an interface call to each implementation. Embedding is
   `embeds(outer, inner, pointer)`, not `extends`, and a method shadowing a
-  promoted one is an `overrides` row.
+  promoted one is an `overrides` row. An interface embedding another interface
+  `extends` it — the only `extends` Go has.
 - **Facts only Go has:**
   - `entry_point`: `main`, `init`, and what `go test` runs (`test`, `benchmark`,
     `fuzz`, `example`, `test_main`), by its naming and signature rules;
@@ -75,7 +78,8 @@ TypeScript; `--lang go` before it reads it as Go.
   - `typed_const`: a constant's named type, value, and whether it uses `iota`;
   - `module_directive`: the rest of go.mod (`go`, `toolchain`, `replace`,
     `exclude`, `retract`, `godebug`);
-  - `excluded_file`: the files the build context skipped, with the constraint;
+  - `excluded_file`: the files the build context skipped, with the `//go:build`
+    line when there is one (a `_windows.go` name has none);
   - `concurrency_site`: `go`, `defer`, channel send and receive, `select`;
   - `ignored_error`: a call returning an `error`, made as a statement
     (`discarded`), assigned to `_` (`blank`), `deferred`, or started with `go`;
@@ -120,7 +124,7 @@ TypeScript; `--lang go` before it reads it as Go.
     `free0`, …; a package-level variable is a `cell` allocation.
   - A channel's contents are field `<chan>`. `panic` stores `$thrown`, and
     `recover()` reads it.
-- **Not produced:** `extends`, `decorator`, `ts_directive`, `floating_promise`,
+- **Not produced:** `decorator`, `ts_directive`, `floating_promise`,
   `await_at`, `yield_at`.
 
 ## 3. The library over Go facts
@@ -153,8 +157,8 @@ what differs over Go facts.
    file-level `in_cycle` inside a package is not a finding. The `imports` rows
    between a package's files are `kind: implicit`; `kind != implicit` is what the
    source wrote.
-3. **`dit` and `noc` are 0 for every type**: embedding is `embeds`, which is
-   composition, not inheritance. Ask `embeds` for how types are built and
+3. **`dit` and `noc` are 0 for every type**: struct embedding is `embeds`,
+   which is composition, not inheritance. Ask `embeds` for how types are built and
    `implements` for what can stand in for what.
 4. **A promoted member is accessed on the type that declares it.** Where
    `Circle` embeds `base`, `c.name` is `member_access` with owner `base`, so
@@ -169,7 +173,8 @@ what differs over Go facts.
    variant, extract again with its `GOOS` or `GOFLAGS=-tags=…`.
 7. **`ignored_error` is every dropped error.** `fmt.Println`, a deferred
    `Close`, and `(*strings.Builder).WriteString`, which never fails, are all in
-   it. Filter by callee before ranking.
+   it. Filter by callee before ranking; `how: blank` (`_ = f()`) was written
+   on purpose, and `discarded` may not have been.
 8. **Reflection is invisible.** `field_tag` says which fields an encoder or a
    database reads by name; `reflect`, `//go:linkname` and code that
    `go generate` would write are not in the call graph.

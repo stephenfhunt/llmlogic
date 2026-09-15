@@ -79,6 +79,12 @@ func (x *extractor) targetID(obj types.Object) (string, bool) {
 		return "", false
 	}
 	obj = origin(obj)
+	if b, ok := obj.(*types.Builtin); ok && b.Pkg() != nil {
+		// unsafe's functions are builtins with a package: `unsafe.Sizeof`.
+		id := "ext:" + b.Pkg().Path() + "#" + b.Name()
+		x.addExternal(id, b.Name(), "function", "external", b.Pkg().Path(), "")
+		return id, true
+	}
 	if obj.Pkg() == nil {
 		return x.universeID(obj)
 	}
@@ -566,7 +572,9 @@ func calleeIdent(e ast.Expr) *ast.Ident {
 
 // call records a call: a function or concrete method is `static`, a method of
 // an interface (or of a type parameter's constraint) `virtual`, a project
-// variable holding a function `indirect`. A conversion `T(x)` is no call.
+// variable holding a function `indirect`. A function value computed in place
+// (`wrap(r)(next)`) names no callee, so it is `unresolved`; points-to follows
+// it through `callee_var`. A conversion `T(x)` is no call.
 func (w *refWalker) call(c *ast.CallExpr) {
 	x, info := w.x, w.info
 	if tv, ok := info.Types[c.Fun]; ok && tv.IsType() {

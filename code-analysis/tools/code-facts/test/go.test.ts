@@ -317,6 +317,30 @@ test("call_site: functions and concrete methods are static, interface methods vi
   assert.deepEqual(ids, ids.map((_, i) => i + 1));
 });
 
+test("call_site: unsafe's builtins are its package's; a function value computed in place names no callee", { skip: NO_GO }, () => {
+  const dir = tempDir("go-calls");
+  writeFiles(dir, {
+    "go.mod": "module example.com/c\n\ngo 1.26\n",
+    "c.go":
+      'package c\n\nimport "unsafe"\n\ntype H func() int\n\nfunc wrap(n int) func(int) int { return func(m int) int { return n + m } }\n\nfunc F(hs []H) int {\n\tsize := int(unsafe.Sizeof(uintptr(0)))\n\treturn wrap(size)(1) + hs[0]()\n}\n',
+  });
+  const { tables } = extractGo(dir, { layers: ["refs", "dataflow"] });
+  const sites = tables.rows("call_site");
+  assert.deepEqual(
+    sites.map((c) => [c.line, c.col, c.callee, c.callee_name, c.dispatch]),
+    [
+      [10, 14, "ext:unsafe#Sizeof", "Sizeof", "static"],
+      [11, 9, null, null, "unresolved"],
+      [11, 9, "c.go#wrap", "wrap", "static"],
+      [11, 25, null, null, "unresolved"],
+    ],
+  );
+  // Points-to follows each through the value it calls.
+  const viaVar = new Set(tables.rows("callee_var").map((v) => v.call_site));
+  assert.deepEqual(sites.filter((c) => c.dispatch === "unresolved").map((c) => viaVar.has(c.id)), [true, true]);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test("implements and overrides: the interfaces each type's method set satisfies, and the methods that satisfy them", { skip: NO_GO }, () => {
   assert.deepEqual(
     rows("implements").map((r) => [r.class, r.interface, r.pointer]),
