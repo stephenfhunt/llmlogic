@@ -29,6 +29,11 @@ with the long form in [`notes/code-facts.md`](notes/code-facts.md).
   - *Rejected:* running processors only to resolve names, which hides every use
     from generated code; running the build's generate-sources step, which runs
     plugins, may download, and writes build output; keeping `-proc:none`.
+  - ***Consequences 2026-09-15 (night iv)*** — "compiler arguments are the
+    build's" reached lint: the frontend's own `-nowarn -Xlint:none`, set before
+    diagnostics were recorded, went, so `diagnostic` is what the build's javac
+    reports. It cannot have the notes javac prints only as a compile ends. The
+    second processor pass's Filer error surfaced, and is dropped by its message.
 
 - **2026-09-14** — **Go and Java frontends, in Python's shape, with the library's
   vocabulary kept** (the user's choices: Go first; x/tools vendored; Java's
@@ -68,6 +73,11 @@ with the long form in [`notes/code-facts.md`](notes/code-facts.md).
     catches tested in order as Python's; resources and `synchronized` as implicit
     finallys) held: P1-java found no model defect, only its own harness and a
     generator whose catches always matched, which hid a mutant.
+  - ***Consequences 2026-09-15 (night iv)*** — the quality layer held to javac:
+    diagnostic keys, resolved annotation types, types for raw-ness and throws,
+    with javac's rawtypes lint as the test's oracle. Only comments come from a
+    lexer. A first reading of raw positions counted `var`'s inferred type and an
+    anonymous class's supertype twice; the oracle and a probe of javac found both.
 
 - **2026-09-13 (night ii)** — **The skill's texts are written for a stranger's
   project, and the skill owns every one of them** (the user's ruling).

@@ -531,6 +531,43 @@ Why: `../decisions.md` 2026-09-15 (night ii).
   bindings, not fields (`member_access` has those); `captures` is a lambda's or a
   local class's use of an enclosing function's variable.
 
+## The Java quality layer, as built
+
+- **`diagnostic`** is what javac reports as a source set is parsed and analysed,
+  with the lint options among the build's arguments and no report cap; `key` is
+  javac's name for it, `code` 0. A file on several sets' source paths is reported
+  once. Two differences from the build's own output: the notes javac prints only
+  when a compile ends ("uses deprecated APIs", unchecked) are absent, since
+  analysis never ends one; and the Filer error a processor meets when the
+  analysis pass runs it over what the generate pass wrote is dropped.
+- **Suppressions**: `@SuppressWarnings` by its resolved type, a row per tool its
+  rules name (`checkstyle:`; `java:` and `squid:` are sonar; `PMD` pmd; the rest
+  javac); `@SuppressFBWarnings` for spotbugs, by simple name when SpotBugs'
+  annotations are not on the classpath. Rules are the `value` strings, literal or
+  constants javac resolved. Comments: `NOSONAR`, `NOPMD`, `CHECKSTYLE:OFF|ON`,
+  `CHECKSTYLE.OFF|ON|SUPPRESS: rules`, `SUPPRESS CHECKSTYLE rule`,
+  `spotless:off|on`, and markers — a line at a time, from comments a lexer finds
+  (javac keeps none but Javadoc), so a string's text is none.
+- **`any_site` `raw`** is where javac's rawtypes lint warns: a generic class
+  javac resolved, named with no type arguments — not a qualifier (`Map.Entry`),
+  a class literal, a cast's or `instanceof`'s type, a method reference's
+  qualifier, or what javac infers for `var` (a type tree with no end). An
+  anonymous class's supertype counts at its `new`. `call_result` is a call javac
+  types raw. The test holds the rows to javac's own `-Xlint:rawtypes`. Two raw
+  types on one line are one row, as any identical facts are.
+- **`assertion`** is a cast, `from_any`/`to_any` a raw operand or target;
+  `instanceof` is `type_ref` at position `assertion`.
+- **`literal`**: strings, characters and text blocks as values; numbers as
+  written; not `true`, `false` or `null`, nor an annotation's arguments
+  (`decorator.text` has those).
+- **`throw_site.type`** is the thrown expression's static type, none for a
+  multi-catch parameter's union. **`catch_site`** is per clause: `binds` is false
+  for an unnamed `_`; `rethrows` is a `throw` in the block outside its lambdas
+  and classes.
+- **`floating_promise`** is a call made as a statement returning a `Future` or
+  `CompletionStage`, at the refs layer's call-site id.
+- Methods javac writes (a record's accessors) are no one's, as in refs.
+
 ## Properties
 
 Each language gets P1 (CFG against real traces), P2 (module graph over modgen's

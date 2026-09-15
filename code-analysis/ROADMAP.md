@@ -86,7 +86,8 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
   from Maven (a core extension) and Gradle (an init script). Structure and refs
   layers, P2/P4/P6-java built; javac runs as the build configures it
   (processors, encoding, arguments, generated sources); the flow layer with
-  P1/P3-java; next, quality. Its Spring dogfood is the decorator item's subject.
+  P1/P3-java; the quality layer; next, dataflow and P5-java. Its Spring dogfood
+  is the decorator item's subject.
   _building_ — same entry, `notes/go-java-frontends.md` § The Java … layers.
 - **Python dataflow layer** (points-to and taint for Python). _parked_ until the
   first Python version has been used.

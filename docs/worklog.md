@@ -24,6 +24,48 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-15 (night iv) — the Java quality layer
+
+Asked to pick back up on the Java quality layer; planned first. The user's calls:
+a discarded `Future` is a `floating_promise`; casts alone are `assertion`s.
+
+**Done**
+- `e4f5801` `diagnostic` from javac: every report as a set is parsed and
+  analysed, once each, keyed by javac's name in a new `diagnostic.key`. Lint is
+  the build's now — the frontend's own `-nowarn -Xlint:none` went — with no
+  report cap. The second processor pass's Filer error ("attempt to recreate") is
+  dropped; the Maven and Gradle processor tests show no diagnostic.
+- `0593867` the quality layer (`notes/go-java-frontends.md` § The Java quality
+  layer): `@SuppressWarnings` a row per tool its rules name, `@SuppressFBWarnings`,
+  NOSONAR/NOPMD/checkstyle/spotless comments and markers from a comment lexer;
+  raw types as `any_site` `raw` and `call_result`; casts; literals; typed throw
+  sites; catch sites (`_` binds nothing); futures as `floating_promise`.
+  Fixture `java-quality`, `checks.dl` clean on it.
+- **javac's `-Xlint:rawtypes` is the raw-type test's oracle.** It found `var`'s
+  inferred type counted (a type tree with no end) and an anonymous class's
+  supertype counted twice (its `extends` is the `new`'s own tree). A probe of
+  javac, not a third guess, showed the "missing" `new ArrayList()` row was there:
+  two raw types on one line are one fact.
+- Not reported, unlike the build: the notes javac prints only as a compile ends
+  (deprecation, unchecked summaries) — analysis never ends one.
+
+**Decided** — nothing new: facts from javac and compiler arguments from the
+build held (`decisions.md` 2026-09-14 and 2026-09-15 (night ii),
+***Consequences 2026-09-15 (night iv)***).
+
+**Removed** — the frontend's `-nowarn -Xlint:none`; `Refs`' private `owner` and
+`promise` (now `Names`', shared with `Quality`); the oldest worklog entry.
+
+**Next up**
+- Java dataflow layer and P5-java; then `reference/java.md` (the quality layer's
+  traps: raw rows are per line, no end-of-compile notes).
+- A Spring/Lombok dogfood; the module path.
+- The test suite's leaked temp dirs.
+- Carried: a Go subject with go.work and cgo; P3/P5 static blocks;
+  code-analysis's `reference/datalog.md` additions; the ablation control; push
+  `trunk` when asked.
+- **Open**: `datalog/bugs/015`, `016`.
+
 ## 2026-09-15 (night iii) — the Java flow layer, P1-java and P3-java
 
 Asked to continue: the Java flow layer, next on the worklog.
@@ -100,47 +142,6 @@ oldest worklog entry.
 - A Java dogfood on a Spring/Lombok project (processors on a real subject).
 - The module path for `module-info.java` projects.
 - The test suite's leaked temp dirs.
-- Carried: a Go subject with go.work and cgo; P3/P5 static blocks;
-  code-analysis's `reference/datalog.md` additions; the ablation control; push
-  `trunk` when asked.
-- **Open**: `datalog/bugs/015`, `016`.
-
-## 2026-09-15 (night) — the Java refs layer, P4-java, and facts from javac
-
-Asked to keep going with the next step (refs + P4-java); mid-way, asked whether
-the Java frontend really uses the language's tooling — it did not everywhere.
-
-**Done**
-- `5fd77da` `throws_decl`; `556b460` `Names`, one home for element ids;
-  `8d10949` a lambda and its first parameter shared an id — keys carry the tree kind.
-- `5ed9d8a` the refs layer (`notes/go-java-frontends.md` § The Java refs layer):
-  refs with kinds, call sites (static / virtual at javac's declaration),
-  written supertypes, overrides against direct supertypes (`Object` too),
-  implicit-`this` member access, type positions, types, unresolved names.
-- `ad6e82f` **P4-java**, the JVM as oracle (reflection's supertypes and
-  `getMethod`, and the method each call runs): found three `overrides` gaps —
-  an inherited method implementing an interface's had no row (CHA missed code
-  that runs), a supertype's members included an interface method it does not
-  inherit, and javac's `Elements.overrides` skips inherited *abstract* methods.
-  40 runs from 200-run guards; five mutations red.
-- `f180d21` the structure layer takes what javac knows from its elements
-  and `DocTrees` — implied modifiers, enum constants, record components,
-  varargs, Javadoc, `main`, test methods by resolved annotation — where it had
-  copied the language's rules off syntax. Fixture output unchanged.
-- `65e3d8d`-style fix for **P4-py** (`92981b1`): its C3 guard fires in 38 of 200
-  runs under Python 3.13, not 54; 50 runs by default.
-
-**Decided** — `decisions.md` 2026-09-14 ***Consequences 2026-09-15 (night)***:
-ids from syntax, facts from javac; inherited implementations are `overrides`.
-
-**Removed** — `Declarations`' copy of Java's modifier rules, its Javadoc
-scanner, name-matched tests and varargs regex; the oldest worklog entry.
-
-**Next up**
-- **Run javac as the build does**: annotation processors (Lombok, generated
-  sources), encoding, compiler arguments, module path, plugin-added roots — the
-  extension and init script report them.
-- Java flow layer, P1-java and P3-java; then quality and dataflow.
 - Carried: a Go subject with go.work and cgo; P3/P5 static blocks;
   code-analysis's `reference/datalog.md` additions; the ablation control; push
   `trunk` when asked.
