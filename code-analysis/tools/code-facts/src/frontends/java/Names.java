@@ -87,6 +87,9 @@ final class Names {
     }
     if (e.getEnclosingElement() instanceof TypeElement owner) {
       String parent = idOf(owner);
+      // A member the compiler writes into a project type — a default constructor, an enum's values() — is that type's.
+      Map<String, Object> ownerRow = x.symbols.get(parent);
+      if (ownerRow != null && "project".equals(ownerRow.get("origin"))) return parent;
       String segment = e.getKind() == ElementKind.CONSTRUCTOR ? "constructor" : e.getSimpleName().toString();
       String id = parent + "." + segment;
       x.addExternal(id, segment, kindOf(e), formOf(e), packageOf(owner), parent, e.getModifiers());
@@ -213,6 +216,8 @@ final class Names {
 
   boolean unresolved(Element e) {
     if (e instanceof PackageElement p) return p.getEnclosedElements().isEmpty() && !x.packageIds.containsKey(p.getQualifiedName().toString());
+    // A field or method that resolved is resolved, whatever its type.
+    if (e instanceof VariableElement || e instanceof javax.lang.model.element.ExecutableElement) return false;
     return e.asType().getKind() == TypeKind.ERROR;
   }
 

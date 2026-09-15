@@ -36,9 +36,10 @@ for (const name of fs.readdirSync(FIXTURES).sort()) {
   }
 }
 
-test("checks.dl is clean on Java fixture java-plain", { skip: skip || !javaAvailable() ? "no engine or JDK" : false }, () =>
-  checkClean("java-plain", [], path.join(FIXTURES, "java-plain"), [], [path.join(FIXTURES, "java-plain")]),
-);
+for (const name of ["java-plain", "java-refs"]) {
+  const dir = path.join(FIXTURES, name);
+  test(`checks.dl is clean on Java fixture ${name}`, { skip: skip || !javaAvailable() ? "no engine or JDK" : false }, () => checkClean(name, [], dir, [], [dir]));
+}
 
 test("checks.dl is clean on code-facts itself", { skip }, () => checkClean("self", [path.join(TOOL_DIR, "tsconfig.json")], TOOL_DIR));
 

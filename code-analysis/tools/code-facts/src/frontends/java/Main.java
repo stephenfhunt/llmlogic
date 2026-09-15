@@ -70,10 +70,11 @@ public final class Main {
 
     try (Emitter em = new Emitter()) {
       Extractor x = new Extractor(root.toAbsolutePath().normalize(), wanted, excludes, em, new Model(resources, cache));
+      x.nextCallSite = firstCallSite;
       x.load(targets);
       x.emitStructure();
       x.flushSymbols();
-      em.emit("__counters__", row("call_site", firstCallSite, "flow_node", firstFlowNode));
+      em.emit("__counters__", row("call_site", x.nextCallSite, "flow_node", firstFlowNode));
     }
   }
 

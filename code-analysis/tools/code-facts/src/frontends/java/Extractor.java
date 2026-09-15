@@ -86,6 +86,10 @@ final class Extractor {
   final Map<Path, Source> byAbs = new HashMap<>();
   final TreeMap<String, String> excluded = new TreeMap<>();
 
+  /** The next free call-site id, and each call's id by its position. */
+  int nextCallSite = 1;
+  private final Map<String, Integer> callSites = new HashMap<>();
+
   final Map<String, String> idByKey = new HashMap<>();
   final Map<String, String> keyById = new HashMap<>();
   final LinkedHashMap<String, Map<String, Object>> symbols = new LinkedHashMap<>();
@@ -281,7 +285,9 @@ final class Extractor {
       }
       Names names = new Names(this, u);
       for (Source s : u.sources) {
-        if (s.cu != null) new References(this, names, s).run();
+        if (s.cu == null) continue;
+        new References(this, names, s).run();
+        if (layers.contains("refs")) new Refs(this, names, s).run();
       }
       u.task = null;
       u.fm.close();
@@ -333,6 +339,11 @@ final class Extractor {
       case "provided" -> "peer";
       default -> "prod";
     };
+  }
+
+  /** One id per call, however many layers ask for it. */
+  int callSiteId(Source s, long start, long end) {
+    return callSites.computeIfAbsent(s.abs + ":" + start + ":" + end, k -> nextCallSite++);
   }
 
   // ── symbols ────────────────────────────────────────────────────────────────
