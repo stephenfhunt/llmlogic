@@ -41,6 +41,13 @@ with the long form in [`notes/code-facts.md`](notes/code-facts.md).
     (the user's choice). It is one `mvn validate` that stops once the reactor is
     written, so it runs no plugin and downloads none. Its output has the Gradle init script's shape.
     *Rejected:* plugin goals, whose output would be parsed per module, and which fetch two plugins on first use.
+  - ***Consequences 2026-09-15 (night)*** — "the checker resolves the names" held
+    for references but not at first for declarations: the structure layer copied
+    Java's modifier rules, Javadoc and test detection off syntax. It now claims
+    ids from syntax and takes every fact from javac's elements (the user's
+    question). Not yet held: javac runs with its own settings, not the build's
+    (processors, encoding, arguments, module path). P4-java made an inherited
+    method implementing an interface's an `overrides` row, as Go's promoted ones are.
 
 - **2026-09-13 (night ii)** — **The skill's texts are written for a stranger's
   project, and the skill owns every one of them** (the user's ruling).

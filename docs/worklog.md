@@ -24,6 +24,47 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-15 (night) — the Java refs layer, P4-java, and facts from javac
+
+Asked to keep going with the next step (refs + P4-java); mid-way, asked whether
+the Java frontend really uses the language's tooling — it did not everywhere.
+
+**Done**
+- `5fd77da` `throws_decl`; `556b460` `Names`, one home for element ids;
+  `8d10949` a lambda and its first parameter shared an id — keys carry the tree kind.
+- `5ed9d8a` the refs layer (`notes/go-java-frontends.md` § The Java refs layer):
+  refs with kinds, call sites (static / virtual at javac's declaration),
+  written supertypes, overrides against direct supertypes (`Object` too),
+  implicit-`this` member access, type positions, types, unresolved names.
+- `ad6e82f` **P4-java**, the JVM as oracle (reflection's supertypes and
+  `getMethod`, and the method each call runs): found three `overrides` gaps —
+  an inherited method implementing an interface's had no row (CHA missed code
+  that runs), a supertype's members included an interface method it does not
+  inherit, and javac's `Elements.overrides` skips inherited *abstract* methods.
+  40 runs from 200-run guards; five mutations red.
+- `f180d21` the structure layer takes what javac knows from its elements
+  and `DocTrees` — implied modifiers, enum constants, record components,
+  varargs, Javadoc, `main`, test methods by resolved annotation — where it had
+  copied the language's rules off syntax. Fixture output unchanged.
+- `65e3d8d`-style fix for **P4-py** (`92981b1`): its C3 guard fires in 38 of 200
+  runs under Python 3.13, not 54; 50 runs by default.
+
+**Decided** — `decisions.md` 2026-09-14 ***Consequences 2026-09-15 (night)***:
+ids from syntax, facts from javac; inherited implementations are `overrides`.
+
+**Removed** — `Declarations`' copy of Java's modifier rules, its Javadoc
+scanner, name-matched tests and varargs regex; the oldest worklog entry.
+
+**Next up**
+- **Run javac as the build does**: annotation processors (Lombok, generated
+  sources), encoding, compiler arguments, module path, plugin-added roots — the
+  extension and init script report them.
+- Java flow layer, P1-java and P3-java; then quality and dataflow.
+- Carried: a Go subject with go.work and cgo; P3/P5 static blocks;
+  code-analysis's `reference/datalog.md` additions; the ablation control; push
+  `trunk` when asked.
+- **Open**: `datalog/bugs/015`, `016`.
+
 ## 2026-09-15 (evening) — the Java frontend's structure layer
 
 Asked to get started on the Java extractor; planned first (Maven through a core
@@ -108,44 +149,4 @@ consequences note on `decisions.md` 2026-09-14.
 - A Go subject with go.work and cgo, which caddy has neither of.
 - Carried: P3/P5 static blocks; code-analysis's `reference/datalog.md`
   additions; the ablation control; push `trunk` when asked.
-- **Open**: `datalog/bugs/015`, `016`.
-
-## 2026-09-15 (midday) — the Go frontend's dataflow layer
-
-Asked to keep going: the Go dataflow layer.
-
-**Done**
-- `22bf679` dataflow, lowered from x/tools SSA built over every loaded package
-  (dependencies and ill-typed packages from types; a failed build loses only
-  that package's facts):
-  - registers `<fn>$tN`; `DebugRef` feeds each named variable's symbol id;
-  - a pointer to a struct or array is its object; others' content is `*`;
-    field and element addresses resolve to object and field, with inline
-    embedded structs flattened;
-  - closures allocate with captures as `free0…` through the literal's `$this`;
-    package variables are cells, functions function values, in `<module>`;
-  - `<chan>`, `$thrown`, `append`/`copy`; `alloc` gains slice, map, chan, cell.
-- `checks.dl` caught a `DebugRef`'s variable written without a `var` row
-  on the first extraction.
-- **P5-go**: generated programs compiled and run; every observed object or
-  function in `pts`. Guards at 200 runs 78–146. Mutations red: no field
-  loads, no formals, no function allocations, no interface copies, and no
-  `callee_var` through function values — **green** until each function was
-  made to call through a function value into a variable nothing else writes.
-- A dataflow test over the flow module: closures, cells, `<chan>`, `$thrown`,
-  `pts` of a captured variable; full suite green.
-
-**Decided** — `notes/go-java-frontends.md` § The Go dataflow layer, as built,
-including what is not modelled (escaping field addresses, method-value
-receivers, promotion through an embedded pointer).
-
-**Removed** — nothing; the oldest worklog entry.
-
-**Next up**
-- `reference/go.md` (traps in the notes), `SKILL.md` and `bring-your-own.md`
-  naming Go, `package.sh` vendoring the Go frontend's modules and INSTALL.md.
-- A Go dogfood on a real repository chosen for shape; calibration in `notes/`.
-- Java after; the Gradle choice pending with the user.
-- Carried: P3/P5 static blocks; rebuild `dist/`; code-analysis's
-  `reference/datalog.md` additions; the ablation control; push `trunk` when asked.
 - **Open**: `datalog/bugs/015`, `016`.

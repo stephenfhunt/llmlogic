@@ -365,13 +365,19 @@ Not exercised by caddy: go.work, cgo, `dot` imports.
   analysed and ids are assigned over every file in path order, keyed by
   declaration offset — a sibling's declaration read from the source path is the
   same id. `-proc:none` for now (see *Not yet*).
+- **Ids from syntax, facts from javac.** Ids are claimed from the parse, keyed by
+  file, offset and tree kind, before anything is analysed. Once a source set is
+  analysed its elements set what the compiler knows: modifiers written or
+  implied (an interface's members, an enum's constants, nested enums and
+  records), what a variable in an enum or a record is, varargs, Javadoc as
+  `DocTrees` reads it, `main` by its resolved signature, and test methods by
+  their annotations' resolved types. Where analysis fails, a row keeps what was
+  written.
 - **Kinds**: record and enum are `class`, an annotation type `interface`; enum
-  constants `enum_member`; record components `property` / `record_component`;
-  initializers `static_block` named `<static@L:C>` / `<instance@L:C>`;
-  constructors `constructor`; lambdas `function` `<lambda@L:C>`; anonymous
-  classes `<class@L:C>`. Visibility is written or implied — interface members,
-  enum constants and record components are public — and so is `is_static`
-  (nested enums, records and interfaces, interface members).
+  constants `enum_member`; record components `property` / `record_component`,
+  public as their accessor is; initializers `static_block` named
+  `<static@L:C>` / `<instance@L:C>`; constructors `constructor`; lambdas
+  `function` `<lambda@L:C>`; anonymous classes `<class@L:C>`.
 - **`imports`** is a row per file each statement is *used* to reach. A
   single-type or static import always names its type's file (unused: `runtime`
   false); an on-demand import reaching nothing is a `target_dir` row. A name
@@ -385,7 +391,9 @@ Not exercised by caddy: go.work, cgo, `dot` imports.
   `.m2` or Gradle-cache path; symbols are `ext:<package>#Outer.Inner`.
 - **`entry_point`**: `public static void main(String[])`, instance mains from
   release 25, static initializers (`init`), and methods carrying a JUnit or
-  TestNG annotation *by simple name* (`test`), in any source set.
+  TestNG annotation, or one JUnit 5 composes with `@Testable` (`test`). An
+  annotation whose type did not resolve — no test jar on the classpath — is
+  judged by its simple name, the one guess left.
 - **Degradation**: when Maven cannot read the reactor its modules come from the
   poms' `<modules>` with conventional roots; when Gradle cannot, every directory
   holding a build script. Each says so on stderr, which code-facts now forwards
@@ -397,6 +405,67 @@ Not exercised by caddy: go.work, cgo, `dot` imports.
   build's includes and excludes drop, as `excluded_file`.
 - Byte-comparing fixture output for the Java schema columns found Go's dataflow
   allocation sites varying run to run (`../bugs/resolved/007`).
+
+## The Java refs layer, as built
+
+- **`ref`** is from the innermost named declaration: a method, constructor,
+  lambda, class, a field (its initializer), an initializer block, else the
+  file's `<module>`. Kinds: `call` for a method name being invoked; `new`; `type`;
+  `extends` and `implements` for the written clause (an interface's `extends`
+  list is `extends`); `decorator` for an annotation; `value` for a method or
+  constructor reference and a class literal; `read`, `write` and `readwrite` by
+  assignment. A type naming a static member's owner (`Base.unit()`) is `type` at
+  position `other`.
+- **`call_site`**: constructors (`new`, `super(…)`, `this(…)`), static and private
+  methods and `super.m()` are `static`; any other method is `virtual` at the
+  declaration javac resolved. That includes a functional interface's method
+  (`f.apply(x)`): a lambda has no `overrides` row, so what it runs is
+  points-to's question. `new` of a class declaring no constructor names the
+  class; of an anonymous class, the anonymous class.
+- **What the compiler writes is no one's.** A default constructor or a record's
+  accessors (an element whose origin is not explicit) makes no call site, ref or
+  type, and a reference to one names its type.
+- **`overrides`**: for each method, the members of each *direct* supertype
+  (`Types.directSupertypes`, `Object` included for a class) that
+  `Elements.overrides` says it overrides. So `toString()` overrides
+  `ext:java.lang#Object.toString`, and a diamond gives a row per base. And a
+  method a class inherits overrides its interfaces' methods there: in `class T1
+  extends T0 implements I0`, `T0.m` overrides `I0.m` though `T0` never names
+  `I0`. Without that row, a call through `I0.m` expanded to nothing that runs —
+  P4-java's first case; Go's promoted methods are the same idea. A supertype's
+  members are the ones it *inherits*: `Elements.getAllMembers(T1)` also lists
+  `I0.m`, which `T0.m` overrides from `T1`, so a base another base overrides
+  there is dropped — else `T2 extends T1` redeclaring `m` overrode `I0.m` too
+  (P4-java's second finding, at case 27).
+  One exception to javac's `Elements.overrides`: it counts an inherited method
+  as implementing an interface's only when it is concrete, a rule for its own
+  "does not override abstract method" error. An *abstract* method a class
+  inherits is still what a call through the interface resolves to — the JVM's
+  `getMethod` and the language agree — so it overrides the interface's method
+  there, checked with `Types.isSubsignature` (P4-java's third finding).
+  **`extends`/`implements`** are the written clauses; an anonymous class
+  implements what it instantiates; `Object`, `Enum` and `Record` stay implicit.
+- **`member_access`** covers fields and methods of project classes and
+  interfaces. `via_this` is `this.x`, `super.x`, `Outer.this.x`, and an
+  unqualified instance member — Java's implicit `this`, which cohesion counts.
+- **`type_ref`** positions: `param` (method and lambda parameters), `return`,
+  `property`, `variable`, `extends`, `implements`, `type_arg` (explicit type
+  arguments of a call or `new`), `assertion` (a cast, `instanceof`), and `other`
+  (a throws clause, a qualifier, a class literal). A type argument inside a
+  declared type takes the declaration's position, as TypeScript's does.
+- **`symbol_type`** is javac's `TypeMirror` text; a method's is its signature,
+  `(int)java.lang.String`. `is_function` marks methods and values of a
+  functional interface, `is_promise` a `Future` or `CompletionStage`, and
+  `is_union` a multi-catch parameter. **`throws_decl`** is the written clause.
+- **`unresolved_ref`** is a name javac left an error symbol for — not a member
+  selected from an expression whose type is an error, and not a package segment.
+- Found on the way: a lambda and its first implicitly typed parameter shared an
+  id, so keys carry the tree kind now; and a field whose *type* did not resolve
+  counted as unresolved itself.
+- **Not yet**: the compiler is not run as the build configures it — annotation
+  processors, source encoding, compiler arguments, the module path, and source
+  roots a plugin adds. (The structure layer's own reading of syntax, where
+  javac's elements answer, is gone; see *Ids from syntax, facts from javac*.)
 
 ## Properties
 
