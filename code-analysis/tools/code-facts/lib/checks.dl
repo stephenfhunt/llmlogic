@@ -71,6 +71,8 @@ violation("embeds.outer", O) :- embeds(outer: O), not known(O).
 violation("embeds.inner", I) :- embeds(inner: I), not known(I).
 violation("overrides.member", M) :- overrides(member: M), not known(M).
 violation("overrides.base", B) :- overrides(base: B), not known(B).
+violation("throws_decl.fn", F) :- throws_decl(fn: F), not known(F).
+violation("throws_decl.type", T) :- throws_decl(type: T), not known(T).
 violation("member_access.member", M) :- member_access(member: M), not known(M).
 violation("member_access.owner", C) :- member_access(owner: C), not known(C).
 violation("type_ref.to", T) :- type_ref(to: T), not known(T).

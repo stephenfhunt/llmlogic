@@ -585,6 +585,12 @@ export const RELATIONS: readonly Relation[] = [
     ],
   },
   {
+    name: "throws_decl",
+    layer: "refs",
+    doc: "A type a method or constructor declares it throws — a Java `throws` clause, checked and unchecked exceptions alike, as written.",
+    columns: [col("fn", "string", "the declaring method or constructor"), col("type", "string", "the exception type")],
+  },
+  {
     name: "member_access",
     layer: "refs",
     doc:
@@ -622,12 +628,12 @@ export const RELATIONS: readonly Relation[] = [
     doc: "The checker's type for a value-carrying project symbol.",
     columns: [
       col("symbol", "string", ID),
-      col("text", "string", "the type as TypeScript prints it, truncated to 200 characters"),
-      col("is_any", "bool", "`any`"),
+      col("text", "string", "the type as the language's checker prints it, truncated to 200 characters; a Java method's is its signature, `(int)java.lang.String`"),
+      col("is_any", "bool", "`any`; Go: an empty interface"),
       col("is_unknown", "bool", "`unknown`"),
-      col("is_promise", "bool", "a Promise (or thenable)"),
-      col("is_function", "bool", "has call signatures"),
-      col("is_union", "bool", "a union type"),
+      col("is_promise", "bool", "a Promise (or thenable); Java: a `Future` or `CompletionStage`"),
+      col("is_function", "bool", "has call signatures; Java: a method, or a value of a functional interface type"),
+      col("is_union", "bool", "a union type; Java: a multi-catch parameter"),
     ],
   },
   {
