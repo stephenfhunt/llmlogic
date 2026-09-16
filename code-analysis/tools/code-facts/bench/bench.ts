@@ -34,10 +34,17 @@ export const DATALOG =
  * measure the writer; asking for `comp_edge_weight` forces exactly the same
  * fixpoint and prints a table a human could read.
  *
- * `checks.dl` and `orient.dl` carry their own `?-` goals and take none. */
+ * `checks.dl` and `orient.dl` carry their own `?-` goals and take none.
+ *
+ * A library whose question its *caller* states — `taint.dl` wants a `source` and
+ * a `sink` — carries a `driver`: a program the bench writes and runs in its
+ * place, with `{lib}` the library's own path. The seeds have to be the same on
+ * every base, so they are stated in the shared vocabulary rather than any
+ * project's own. */
 export interface Library {
   name: string;
   queries: string[];
+  driver?: string;
 }
 
 export const LIBRARIES: Library[] = [
@@ -91,6 +98,25 @@ export const LIBRARIES: Library[] = [
   { name: "flow", queries: ["unreachable(F, N, L)", "undefined_use(N, V)", "dead_store(D, V, L)"] },
   { name: "dominators", queries: ["back_edge(N, H)", "loop_header(F, H)"] },
   { name: "pointsto", queries: ["call_edge_pt(A, B)", "unresolved_call(S)"] },
+  // Last, because it is the one that may not finish: its heap step binds `pts`
+  // on both columns, which no ordering of a relation serves. Until the engine
+  // seeks a non-leading column, a large base reports a stop — which is the
+  // measurement.
+  {
+    name: "taint",
+    queries: ["tainted_sink(V)"],
+    driver: [
+      'import "{lib}".',
+      "",
+      "% Does a value the project got from outside reach another call out of it?",
+      "% Stated in the shared vocabulary so every base asks the same question, and",
+      "% populated wherever the dataflow layer is — a seed that can come out empty",
+      "% digests nothing.",
+      "source(V) :- actual_ret(call_site: CS, var: V), call_site(id: CS, callee: C), symbol(id: C, origin: external).",
+      "sink(V) :- actual(call_site: CS, var: V), call_site(id: CS, callee: C), symbol(id: C, origin: external).",
+      "",
+    ].join("\n"),
+  },
   {
     name: "packages",
     queries: [
@@ -137,17 +163,31 @@ function once(
 
   const rssFile = path.join(os.tmpdir(), `code-facts-bench-${process.pid}.rss`);
   const gnuTime = fs.existsSync("/usr/bin/time");
-  const command = gnuTime ? "/usr/bin/time" : DATALOG;
-  const argv = gnuTime ? ["-f", "%M", "-o", rssFile, DATALOG, ...args] : args;
+  // `timeout` stops the engine itself. Node's own `timeout` signals only the
+  // process it spawned, so under `/usr/bin/time` the engine would outlive the
+  // stop, hold the pipe open and go on burning a core through the next library.
+  const limiter = fs.existsSync("/usr/bin/timeout") ? "/usr/bin/timeout" : undefined;
+  const timed = gnuTime ? ["/usr/bin/time", "-f", "%M", "-o", rssFile, DATALOG, ...args] : [DATALOG, ...args];
+  const argv = limiter === undefined ? timed : ["-k", "5", `${Math.ceil(timeoutMs / 1000)}`, ...timed];
+  const command = limiter ?? timed[0]!;
 
   const start = performance.now();
   // A library whose closure does not fit takes the machine down rather than
   // taking a long time — `callreach.dl` on vs/base is past 4 GB in 15 s — so the
   // bench stops it and says so. A killed entry's seconds are when it was
   // stopped, not how long it takes.
-  const r = spawnSync(command, argv, { encoding: "utf8", maxBuffer: 1 << 30, timeout: timeoutMs });
+  // Node's timeout is the backstop for a `timeout` that is not there; it arrives
+  // as an ETIMEDOUT error rather than a return, which is a stop and not a crash.
+  const r = spawnSync(command, limiter === undefined ? argv.slice(1) : argv, {
+    encoding: "utf8",
+    maxBuffer: 1 << 30,
+    timeout: timeoutMs + 30_000,
+  });
   const seconds = (performance.now() - start) / 1000;
-  if (r.error !== undefined) throw r.error;
+  const errno = r.error === undefined ? undefined : (r.error as NodeJS.ErrnoException).code;
+  // `timeout` exits 124 when it stopped the command, 137 when it had to kill it.
+  const stopped = errno === "ETIMEDOUT" || r.status === 124 || r.status === 137 || (r.signal !== null && r.status === null);
+  if (r.error !== undefined && !stopped) throw r.error;
 
   let peakMb = 0;
   if (gnuTime && fs.existsSync(rssFile)) {
@@ -157,10 +197,10 @@ function once(
   return {
     seconds,
     peakMb,
-    stdout: r.stdout,
-    stderr: r.stderr,
-    code: r.status ?? -1,
-    timedOut: r.signal !== null && r.status === null,
+    stdout: stopped ? "" : (r.stdout ?? ""),
+    stderr: r.stderr ?? "",
+    code: stopped ? -1 : (r.status ?? -1),
+    timedOut: stopped,
   };
 }
 
@@ -171,13 +211,22 @@ export function measure(
   libDir = "lib",
   timeoutMs = 300_000,
 ): Measurement {
-  const file = path.join(factsDir, libDir, `${library.name}.dl`);
+  const lib = path.join(factsDir, libDir, `${library.name}.dl`);
+  // A driver runs in the library's place; it is the bench's, so it goes to a
+  // temporary file and imports the library by its own path.
+  const driverFile = library.driver === undefined ? undefined : path.join(os.tmpdir(), `code-facts-bench-${process.pid}-${library.name}.dl`);
+  if (driverFile !== undefined) fs.writeFileSync(driverFile, library.driver!.replace("{lib}", lib));
+  const file = driverFile ?? lib;
   let best: ReturnType<typeof once> | undefined;
   let peakMb = 0;
-  for (let i = 0; i < repeat; i++) {
-    const run = once(file, library.queries, timeoutMs);
-    peakMb = Math.max(peakMb, run.peakMb);
-    if (best === undefined || run.seconds < best.seconds) best = run;
+  try {
+    for (let i = 0; i < repeat; i++) {
+      const run = once(file, library.queries, timeoutMs);
+      peakMb = Math.max(peakMb, run.peakMb);
+      if (best === undefined || run.seconds < best.seconds) best = run;
+    }
+  } finally {
+    if (driverFile !== undefined) fs.rmSync(driverFile, { force: true });
   }
   const run = best!;
   const lines = run.stdout.split("\n").filter((l) => l.trim() !== "");
