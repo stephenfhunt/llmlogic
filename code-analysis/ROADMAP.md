@@ -30,10 +30,12 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
   `vs/base` (1.33M facts); `checks.dl` 199.6 s → 9.3 s. _shipped_ —
   `decisions.md` 2026-09-11 (later), `notes/code-facts.md` § At a million facts.
 - **`bench/`** — times each library over a fact directory and digests its
-  answers. _shipped_ — `npm run bench -- --facts <dir>`. **`taint.dl` is not in
-  it**, since it needs a source and a sink from its caller — and it is the one
-  library measured not to finish on a real subject. _queued_ —
-  `notes/go-java-frontends.md` § The Java dogfood.
+  answers, `taint.dl` included: a library whose question its caller states
+  carries a `driver` the bench runs in its place. _shipped_ —
+  `npm run bench -- --facts <dir>`.
+- **`taint.dl` costs two orders of magnitude more than `pointsto.dl`** and
+  nothing had measured it. _open_ — `notes/go-java-frontends.md` § The Java
+  dogfood; the engine side is `../datalog/ROADMAP.md` § Performance.
 - **`callreach_seeded.dl`** — the call closure grown from a seed you supply.
   _shipped_ — same decision.
 - **Asset imports** — `import './x.css'` resolves through a wildcard
@@ -90,8 +92,9 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
   _shipped_ — `decisions.md` 2026-09-14, `notes/go-java-frontends.md` § The Java
   dogfood.
 - **Java's module path** — `module-info.java`'s directives as `module_directive`
-  rows, and the build's own includes and excludes as `excluded_file`. _queued_ —
-  the gaps `reference/java.md` names.
+  rows (the relation was go.mod's), and the build's own includes and excludes as
+  `excluded_file`. _shipped_ — `reference/java.md` §2 and §4 trap 2; a service a
+  `provides` names is the one reflective edge that is a fact.
 - **Python dataflow layer** (points-to and taint for Python). _parked_ until the
   first Python version has been used.
 - **A TypeScript 7 backend**, when its compiler API stabilizes. _parked._

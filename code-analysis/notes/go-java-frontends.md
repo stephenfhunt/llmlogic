@@ -663,15 +663,21 @@ both now zero.
   `callee_var` on every receiver would resolve nothing either — measured. The 182
   rows the rule does emit are `close()` on `AutoCloseable`: functional by the
   letter, and no lambda implements it.
-- **`taint.dl` does not finish.** Stopped at 20 minutes on a request-parameter
-  source and a `parse`/`evaluate` sink, at a flat 1.2 GB. Its heap step alone —
-  `store, pts(B, O), load, pts(B2, O)` — times out at 7 minutes: `pts` is 2.07M
-  pairs over 28.4k variables, and `pts(B2, O)` binds the *second* column, which
-  the engine still answers by scanning. The known engine debt
-  (`../datalog/ROADMAP.md` § Performance, *a bound column that is not leading
-  still scans*) with a Java-sized vehicle. The bench does not cover `taint.dl` at
-  all, because it needs a source and a sink from its caller — which is why
-  nothing measured this.
+- **`taint.dl` does not finish.** The bench stops it at 30 minutes; a run watched
+  by hand sat at a flat 1.2 GB for its whole length, so it is not running out of
+  room. Its heap step alone — `store, pts(B, O), load, pts(B2, O)` — times out at 7
+  minutes: `pts` is 2.07M pairs over 28.4k variables, and `pts(B2, O)` binds the
+  *second* column, which the engine still answers by scanning. The rule needs
+  `pts` keyed both ways at once, which is the engine item's own stated reopening
+  case (`../datalog/ROADMAP.md` § Performance, *a bound column that is not
+  leading still scans*).
+  **It is not Java's doing, and not the size.** Putting `taint.dl` in the bench
+  said so immediately: on `@grafana/ui` — TypeScript, 1.17M facts, *larger* than
+  this subject's 968k — it finishes, but in **475 s against `pointsto.dl`'s
+  6.2 s**, two orders of magnitude for the same fact base. What varies is the
+  shape of the heap the two rules join over, not the language and not the count.
+  Nothing had measured any of this because the bench could not run a library
+  whose question its caller states; it can now (`bench/`'s `driver`).
 
 ## Properties
 

@@ -24,6 +24,58 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-16 (later ii) — the module path, and taint.dl measured at last
+
+Asked to knock out the two items the last entry left queued.
+
+**Done**
+- `806c06f` **Java's module path.** A `module-info.java` becomes
+  `module_directive` rows — the declaration, each `requires` with its modifier,
+  each `exports` and `opens` (a row per module a qualified one names), `uses` and
+  `provides`. The relation was go.mod's and is now what a module declares about
+  itself in either language; `package` is nullable, since plain sources have no
+  build module.
+  - The *types* a `uses` or `provides` names already resolved as `ref` rows —
+    the one reflective edge that is a fact. The module and package names around
+    them were not, and produced **a bogus `unresolved_ref` per directive**, five
+    on a nine-line declaration. Both scanners now walk a module tree for its
+    service names only.
+- `806c06f` **The build's own includes and excludes.** A file Maven's
+  `<excludes>` or Gradle's pattern set leaves out was being extracted *and
+  compiled* — code the product does not contain. It is an `excluded_file` with
+  reason `build_excluded` now, and in no other relation. Patterns are matched as
+  globs. Fixtures `java-module` and an exclusion in `java-maven-gen`; each of the
+  three fixes is red without it, and a real subject using neither is unchanged.
+- `a47d1c3` **`taint.dl` is in the bench.** A `Library` may carry a `driver` the
+  bench runs in its place, since taint's question comes from its caller. The
+  first seed pair tried came out empty on a fixture — a seed that can be empty
+  digests nothing — so the pair is now external-in to external-out, populated
+  wherever the dataflow layer is.
+- **The measurement corrected me.** I had called taint's cost a Java-and-size
+  problem; it is neither. On `@grafana/ui` — TypeScript, 1.17M facts, *larger*
+  than OpenRefine's 968k — it finishes in **475 s against `pointsto.dl`'s 6.2 s**,
+  while on OpenRefine it is stopped at 1800 s. `datalog/ROADMAP.md` and
+  `notes/code-facts.md` carry it.
+- **Being first to reach `--timeout` found two bench defects**: a stop arrived as
+  a thrown ETIMEDOUT and took the whole run down, and the engine outlived the
+  stop — Node signals only the process it spawned — keeping a core busy through
+  every library after it. Both fixed; a stop is reported as a stop.
+
+**Decided** — nothing new. ROADMAP: the module path is _shipped_; `taint.dl`'s
+cost is its own _open_ item.
+
+**Removed** — the "`module_directive` is empty for Java" line in
+`reference/java.md`; the oldest worklog entry.
+
+**Next up**
+- `taint.dl`'s cost: the engine item it belongs to is the non-leading-column
+  seek, and a program cannot re-key its way out of binding `pts` both ways.
+- The suite's leaked temp dirs (a RAM-backed `/tmp` stalled a full run once).
+- Carried: a Go subject with go.work and cgo; P3/P5 static blocks;
+  code-analysis's `reference/datalog.md` additions; the ablation control; push
+  `trunk` when asked.
+- **Open**: `datalog/bugs/015`, `016`.
+
 ## 2026-09-16 (later) — the Java frontend ships
 
 Asked to wrap the stage up. The outstanding piece was the skill, not the
@@ -120,58 +172,6 @@ worklog entry.
 - **`taint.dl` in the bench**, with a source and sink it supplies itself — the
   one library nothing measures, and the one that does not finish.
 - The suite's leaked temp dirs (a RAM-backed `/tmp` stalled a full run once).
-- Carried: a Go subject with go.work and cgo; P3/P5 static blocks;
-  code-analysis's `reference/datalog.md` additions; the ablation control; push
-  `trunk` when asked.
-- **Open**: `datalog/bugs/015`, `016`.
-
-## 2026-09-15 (night v) — the Java dataflow layer and P5-java
-
-Asked for the Java dataflow layer; planned first. The user's calls: a record is
-modelled at its use sites, allocation ids are fixed now rather than filed, and
-deconstruction patterns bind by component.
-
-**Done**
-- `e5a54bf` `bugs/resolved/009`: allocation-site ids chain across frontends
-  (`__counters__` carries `alloc_site`). A tsconfig and a Go module in one run
-  gave two variables one site; no test extracted two dataflow languages before.
-- `82da3d0` the dataflow layer (`notes/go-java-frontends.md` § The Java dataflow
-  layer): a field with no receiver loads off `this`, a static off its class,
-  which is a `cell` so statics have a home; lambdas and method references are
-  `function` allocations, and a functional interface's own call names its receiver
-  `callee_var` — the half the refs layer left to points-to; records modelled at
-  `new` and at the accessor; patterns by copy and by component. Fixture
-  `java-dataflow`, `checks.dl` clean, points-to resolving all four end to end.
-- **javac's own answers settled two guesses**: a record accessor's origin is
-  `EXPLICIT` and it has no declaration tree, so *a declaration of one's own* is
-  the test for what the compiler wrote; and the deconstruction pattern carries
-  two interface names across JDKs, both of which are tried.
-- `4d11e04` `bugs/resolved/010`: every declarator of `int a = 1, b = 2` shared
-  one symbol — javac gives them all the declaration's position and kind. Its
-  references, def/use and dataflow variable were all another variable's.
-- `26db1b0` **P5-java**: javac and the JVM as the oracle, with a marker a
-  functional value answers with its own name. Five forced shapes; six of seven
-  mutations red. It found `010`: its probes all reported their method's first
-  local, and four of those mutations survived until that was fixed.
-- **`this_var` is unfalsifiable and no shape would help**: `pointsto.dl` also
-  binds `this` from the allocation's type. Recorded as the library's question.
-
-**Decided** — `decisions.md` 2026-09-15 (night v): records at their use sites;
-allocation ids chained; deconstruction patterns by component; a class holding
-statics is a `cell`.
-
-**Removed** — `Refs`' private functional-interface test (now `Names`', shared);
-the oldest worklog entry.
-
-**Next up**
-- `reference/java.md` — the dataflow layer's traps: a bound method reference's
-  receiver is not modelled, an outside class's statics are opaque, the
-  compiler-written record rule.
-- A Spring/Lombok dogfood — the dataflow layer's first real subject, and the only
-  place its cost is known: there is no Java repository on this machine, so the
-  bench has never run over Java facts. The module path.
-- **The suite's leaked temp dirs** — 509 dirs / 1.5 GB in a RAM-backed `/tmp`
-  stalled a full run for 40 minutes. A gate problem now, not tidying.
 - Carried: a Go subject with go.work and cgo; P3/P5 static blocks;
   code-analysis's `reference/datalog.md` additions; the ablation control; push
   `trunk` when asked.

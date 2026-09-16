@@ -598,10 +598,13 @@ join is executed changes.
   binds one relation on two different columns is that case outright**, and
   `lib/taint.dl`'s heap step is one: `store(base: B, …), pts(B, O), load(base: B2,
   …), pts(B2, O)` needs `pts` keyed by its first column *and* by its second, which
-  no single order gives. On OpenRefine (968k facts, `pts` 2.07M pairs over 28.4k
-  variables) that one rule does not finish in 7 minutes, and `taint.dl` was stopped
-  at 20 — the first library measured not to finish for a reason a program cannot
-  answer. _queued — **post-v1**._ — §15/engine.
+  no single order gives. Measured over two fact bases of about the same size:
+  on a 968k-fact one that rule alone does not finish in 7 minutes and `taint.dl`
+  was stopped at 30, while on a *larger* 1.17M-fact one `taint.dl` finishes in
+  **475 s against `pointsto.dl`'s 6.2 s** — two orders of magnitude apart on the
+  same base, from the shape of the heap the rules join over rather than its size.
+  The first library measured not to finish for a reason a program cannot answer.
+  _queued — **post-v1**._ — §15/engine.
 - **Seeking makes body order matter more** — the same measurement, read the other
   way: good-vs-pessimal atom order cost **2.0×** before the seek and **29×** after.
   The scheduler runs positive atoms in strict source order with no cost model

@@ -262,6 +262,23 @@ So the playbook's own costs table has a ceiling in it now, and an agent working 
 repository this size should reach for the module and design libraries (all under
 30 s) before the flow ones.
 
+**A fourth was expensive and unmeasured.** `taint.dl` was not in this table at
+all: the bench ran a library file, and `taint.dl`'s question — its `source` and
+`sink` — comes from its caller. A `Library` may now carry a **`driver`**, a
+program the bench writes and runs in the library's place, seeded in the shared
+vocabulary so every base asks the same question. What that turned up is a cost
+nothing had seen: on a 1.17M-fact base `taint.dl` takes **475 s against
+`pointsto.dl`'s 6.2 s**, and on a 968k-fact one it does not finish in 30 minutes.
+Its heap step wants `pts` keyed by its first column *and* its second in the same
+rule, which no re-keying gives — `lib/keys.dl`'s trick does not reach it, and the
+engine item it belongs to is `../../datalog/ROADMAP.md` § Performance.
+
+Being the first library to actually reach the bench's `--timeout` also found a
+defect in the bench: a stop arrived as a thrown `ETIMEDOUT` rather than a
+reported stop, and the engine outlived it — Node signals only the process it
+spawned, so under `/usr/bin/time` the engine kept a core busy through the next
+library. The bench stops it with `timeout` now, and reports a stop as a stop.
+
 ## The Python frontend
 
 `src/frontends/python/` — `py_facts.py` (structure, refs) and `py_flow.py` (flow,
