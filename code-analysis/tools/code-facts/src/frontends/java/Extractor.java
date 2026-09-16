@@ -2,6 +2,7 @@ package codefacts;
 
 import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.tree.ExpressionTree;
+import com.sun.source.tree.VariableTree;
 import com.sun.source.util.JavacTask;
 import java.io.File;
 import java.io.IOException;
@@ -573,9 +574,13 @@ final class Extractor {
   /**
    * A declaration's key: its file, offset and tree kind. The kind separates
    * trees that start together — a lambda and its first parameter (`s -> …`).
+   * A variable's name separates the declarators of one declaration, which share
+   * a start position and a kind (`int a = 1, b = 2`).
    */
   static String key(Path abs, long start, com.sun.source.tree.Tree t) {
-    return abs + ":" + start + ":" + t.getKind();
+    String kind = t.getKind().toString();
+    if (t instanceof VariableTree v) kind = kind + ":" + v.getName();
+    return abs + ":" + start + ":" + kind;
   }
 
   /** `path#Name` under a file's module, `Container.name` under anything else. */
