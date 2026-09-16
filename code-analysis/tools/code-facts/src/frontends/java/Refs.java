@@ -4,6 +4,8 @@ import com.sun.source.tree.AnnotationTree;
 import com.sun.source.tree.AssignmentTree;
 import com.sun.source.tree.BlockTree;
 import com.sun.source.tree.ClassTree;
+import com.sun.source.tree.DirectiveTree;
+import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.tree.CompoundAssignmentTree;
 import com.sun.source.tree.IdentifierTree;
@@ -15,10 +17,13 @@ import com.sun.source.tree.MemberReferenceTree;
 import com.sun.source.tree.MemberSelectTree;
 import com.sun.source.tree.MethodInvocationTree;
 import com.sun.source.tree.MethodTree;
+import com.sun.source.tree.ModuleTree;
 import com.sun.source.tree.NewClassTree;
 import com.sun.source.tree.PackageTree;
+import com.sun.source.tree.ProvidesTree;
 import com.sun.source.tree.ParenthesizedTree;
 import com.sun.source.tree.Tree;
+import com.sun.source.tree.UsesTree;
 import com.sun.source.tree.TypeCastTree;
 import com.sun.source.tree.UnaryTree;
 import com.sun.source.tree.VariableTree;
@@ -78,6 +83,24 @@ final class Refs {
 
     @Override
     public Void visitPackage(PackageTree t, Void v) {
+      return null;
+    }
+
+    /**
+     * A module declaration names modules and packages, which are no references.
+     * The types a `uses` or `provides` names are — a service implementation that
+     * nothing calls is reached only through them.
+     */
+    @Override
+    public Void visitModule(ModuleTree t, Void v) {
+      for (DirectiveTree d : t.getDirectives()) {
+        if (d instanceof UsesTree u) {
+          scan(u.getServiceName(), v);
+        } else if (d instanceof ProvidesTree p) {
+          scan(p.getServiceName(), v);
+          scan(p.getImplementationNames(), v);
+        }
+      }
       return null;
     }
 

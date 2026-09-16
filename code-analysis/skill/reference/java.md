@@ -43,9 +43,9 @@ nothing else. `--exclude` drops more paths.
   (`com.example:core`). The Java package is `file.namespace`, and is also a
   `symbol(kind: namespace)` with id `<dir>#<package>`. `is_test` is the build's
   own test source set, which is exact. `is_generated` is anything under the build
-  output directory, plus the usual generated-code headers. `module_directive` is
-  empty: a `module-info.java` is read as a file, but its `requires` and `exports`
-  are not extracted, so the module graph is the build's, not the JPMS one.
+  output directory, plus the usual generated-code headers. A file the build's own
+  includes or excludes leave out is an `excluded_file` row with reason
+  `build_excluded` and nothing else — count those before a negative answer.
 - **Symbols take the shared kinds, and `symbol.form` keeps Java's word.** A class,
   enum and record are all `class`, with form `enum` or `record`; an interface and
   an annotation type are `interface`, with form `annotation`; a field and a record
@@ -75,6 +75,13 @@ nothing else. `--exclude` drops more paths.
 - **Annotations are `decorator` rows**, with `decorator.text` holding the
   arguments as written, and `throws_decl` carries each method's declared checked
   exceptions.
+- **A `module-info.java` becomes `module_directive` rows**: the declaration
+  itself (`modifier` `open`), each `requires` (`modifier` `transitive` or
+  `static`), each `exports` and `opens` — a row per module a qualified one names
+  — and each `uses` and `provides`. Names are as written; the *types* a `uses` or
+  `provides` names also resolve as ordinary `ref` rows, which is the one place a
+  service implementation nothing constructs is reachable (§4 trap 2). The module
+  and package names around them are no one's reference.
 - **Control flow** is a statement-level graph per method, constructor, lambda and
   initializer block. Catches are tested in order, each an `on_true` into its body
   and an `on_false` to the next; try-with-resources closes in a `finally` of its
@@ -126,7 +133,9 @@ what differs over Java facts.
    and a JSON library's binding all produce no call edge. A method reached only
    that way looks dead: `load`, `deserialize`, a no-argument constructor, an
    annotated handler. Check for the annotation, or for a reflective call in the
-   class that dispatches, before calling anything unused.
+   class that dispatches, before calling anything unused. The one reflective edge
+   that *is* a fact is a service: `module_directive(directive: provides)` names
+   the implementation, and it is a `ref` too.
 3. **Nothing calls an entry point.** `main`, a servlet's `doGet`, a test method,
    a lifecycle method a framework calls by annotation — all are called from
    outside the code. Reach from `entry_point` first, and treat an annotated

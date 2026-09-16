@@ -63,7 +63,8 @@ final class Model {
    * of — a Maven {@code <type>test-jar</type>} dependency, whose jar is no use
    * because the sibling is in the reactor and read from source.
    */
-  record SourceSet(String name, boolean test, List<Path> roots, List<Jar> classpath, List<String> modules, List<String> testModules, Compiler compiler) {}
+  record SourceSet(String name, boolean test, List<Path> roots, List<Jar> classpath, List<String> modules, List<String> testModules,
+      List<String> includes, List<String> excludes, Compiler compiler) {}
 
   /** A build module: a Maven module, a Gradle project, or a plain directory. */
   record Module(Tool tool, Path buildFile, Path dir, String name, String version, String release, List<SourceSet> sets, List<Dep> deps, Path buildDir, boolean codegen) {
@@ -116,10 +117,10 @@ final class Model {
     Path test = dir.resolve("src/test/java");
     List<SourceSet> sets = new ArrayList<>();
     if (!wholeDir || Files.isDirectory(main) || Files.isDirectory(test)) {
-      sets.add(new SourceSet("main", false, List.of(main), List.of(), List.of(), List.of(), Compiler.NONE));
-      sets.add(new SourceSet("test", true, List.of(test), List.of(), List.of(), List.of(), Compiler.NONE));
+      sets.add(new SourceSet("main", false, List.of(main), List.of(), List.of(), List.of(), List.of(), List.of(), Compiler.NONE));
+      sets.add(new SourceSet("test", true, List.of(test), List.of(), List.of(), List.of(), List.of(), List.of(), Compiler.NONE));
     } else {
-      sets.add(new SourceSet("main", false, List.of(dir), List.of(), List.of(), List.of(), Compiler.NONE));
+      sets.add(new SourceSet("main", false, List.of(dir), List.of(), List.of(), List.of(), List.of(), List.of(), Compiler.NONE));
     }
     Path buildDir = tool == Tool.MAVEN ? dir.resolve("target") : tool == Tool.GRADLE ? dir.resolve("build") : null;
     return new Module(tool, buildFile, dir, name, version, release, sets, deps, buildDir, false);
@@ -381,9 +382,9 @@ final class Model {
         }
         List<Path> roots = ((List<Object>) s.get("roots")).stream().map(r -> Path.of((String) r)).toList();
         List<String> modules = ((List<Object>) s.get("modules")).stream().map(String.class::cast).toList();
-        List<String> testModules = s.get("testModules") == null ? List.of()
-            : ((List<Object>) s.get("testModules")).stream().map(String::valueOf).toList();
-        sets.add(new SourceSet((String) s.get("name"), Boolean.TRUE.equals(s.get("test")), roots, classpath, modules, testModules, compiler(s.get("compiler"))));
+        List<String> testModules = strings(s.get("testModules"));
+        sets.add(new SourceSet((String) s.get("name"), Boolean.TRUE.equals(s.get("test")), roots, classpath, modules, testModules,
+            strings(s.get("includes")), strings(s.get("excludes")), compiler(s.get("compiler"))));
       }
       List<Dep> deps = new ArrayList<>();
       for (Object dobj : (List<Object>) m.get("deps")) {
@@ -439,7 +440,7 @@ final class Model {
           else warn("the build of " + describe(m) + " generates sources into " + abs + ", which is not on disk: build it first, or names from that code stay unresolved");
         }
       }
-      sets.add(new SourceSet(s.name(), s.test(), roots, s.classpath(), s.modules(), s.testModules(), s.compiler()));
+      sets.add(new SourceSet(s.name(), s.test(), roots, s.classpath(), s.modules(), s.testModules(), s.includes(), s.excludes(), s.compiler()));
     }
     if (m.codegen() && !found) {
       warn("the build of " + describe(m) + " generates sources, and none is on disk under " + buildDir + ": build it first, or names from generated code stay unresolved");
@@ -506,6 +507,11 @@ final class Model {
       n = in.readNBytes(all, 0, all.length);
     }
     return new String(all, 0, n, StandardCharsets.UTF_8);
+  }
+
+  @SuppressWarnings("unchecked")
+  private static List<String> strings(Object o) {
+    return o == null ? List.of() : ((List<Object>) o).stream().map(String::valueOf).toList();
   }
 
   private static String describe(Module m) {

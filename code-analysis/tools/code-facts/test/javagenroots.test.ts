@@ -10,7 +10,9 @@
 //     The jar is no use, since the sibling is in the reactor and read from
 //     source, so its test sources go on the source path.
 //
-// Both show up the same way: names that do not resolve.
+// Both show up the same way: names that do not resolve. The third is the
+// opposite — a file the build's own excludes leave out, which is in no relation
+// at all unless `excluded_file` says so.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
@@ -68,4 +70,14 @@ test("a sibling's test classes are read from its test sources, not from a jar", 
     rows("ref").some((r) => r.to === "lib/src/test/java/com/example/lib/LibTestSupport.java#LibTestSupport.fixture"),
     "the inherited method does not resolve",
   );
+});
+
+test("a file the build's own excludes leave out is an excluded_file and nothing else", { skip: NO_MAVEN }, () => {
+  assert.deepEqual(rows("excluded_file"), [
+    { path: "app/src/main/java/com/example/app/Legacy.java", reason: "build_excluded", detail: "**/Legacy*.java" },
+  ]);
+  // Nothing else describes it: no file row, no symbol, no reference.
+  for (const rel of ["file", "symbol", "ref"]) {
+    assert.deepEqual(rows(rel).filter((r) => String(r.path ?? r.file ?? "").includes("Legacy.java")), [], `${rel} still describes it`);
+  }
 });

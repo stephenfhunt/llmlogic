@@ -60,7 +60,9 @@ allprojects { p ->
                     def generated = options.generatedSourceOutputDirectory.asFile.orNull
                     compiler.generatedDir = generated?.absolutePath
                 }
-                sets << [name: n, test: n == 'test', roots: ss.java.srcDirs.collect { it.absolutePath }, classpath: jars, modules: modules.unique(), compiler: compiler]
+                sets << [name: n, test: n == 'test', roots: ss.java.srcDirs.collect { it.absolutePath }, classpath: jars,
+                         modules: modules.unique(), includes: ss.java.includes as List, excludes: ss.java.excludes as List,
+                         compiler: compiler]
             }
 
             String release = null

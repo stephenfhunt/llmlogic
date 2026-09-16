@@ -130,8 +130,10 @@ public final class ModelExtension extends AbstractMavenLifecycleParticipant {
       }
     }
     m.put("sets", List.of(
-        set("main", false, p.getCompileSourceRoots(), main, mainModules, mainTestModules, compiler(session, p, false)),
-        set("test", true, p.getTestCompileSourceRoots(), test, testModules, testTestModules, compiler(session, p, true))));
+        set("main", false, p.getCompileSourceRoots(), main, mainModules, mainTestModules, filters(session, p, false, "includes"),
+            filters(session, p, false, "excludes"), compiler(session, p, false)),
+        set("test", true, p.getTestCompileSourceRoots(), test, testModules, testTestModules, filters(session, p, true, "includes"),
+            filters(session, p, true, "excludes"), compiler(session, p, true))));
 
     List<Object> deps = new ArrayList<>();
     for (Dependency d : p.getDependencies()) {
@@ -162,7 +164,7 @@ public final class ModelExtension extends AbstractMavenLifecycleParticipant {
   }
 
   private static Map<String, Object> set(String name, boolean isTest, List<String> roots, List<Map<String, Object>> classpath, Set<String> modules,
-      Set<String> testModules, Map<String, Object> compiler) {
+      Set<String> testModules, List<String> includes, List<String> excludes, Map<String, Object> compiler) {
     Map<String, Object> s = new LinkedHashMap<>();
     s.put("name", name);
     s.put("test", isTest);
@@ -170,6 +172,8 @@ public final class ModelExtension extends AbstractMavenLifecycleParticipant {
     s.put("classpath", classpath);
     s.put("modules", new ArrayList<>(modules));
     s.put("testModules", new ArrayList<>(testModules));
+    s.put("includes", includes);
+    s.put("excludes", excludes);
     s.put("compiler", compiler);
     return s;
   }
@@ -178,6 +182,32 @@ public final class ModelExtension extends AbstractMavenLifecycleParticipant {
    * How maven-compiler-plugin runs javac for main or test: its configuration, with
    * the default-compile or default-testCompile execution's over it.
    */
+  /**
+   * The compiler plugin's own `includes` / `excludes`, which decide what it
+   * compiles under each source root. Empty means the plugin's default, every
+   * `.java` file.
+   */
+  private List<String> filters(MavenSession session, MavenProject p, boolean test, String which) {
+    List<Element> layers = new ArrayList<>();
+    Plugin plugin = p.getPlugin("org.apache.maven.plugins:maven-compiler-plugin");
+    if (plugin == null) return List.of();
+    for (PluginExecution e : plugin.getExecutions()) {
+      if (e.getId().equals(test ? "default-testCompile" : "default-compile")) addLayer(layers, e.getConfiguration());
+    }
+    addLayer(layers, plugin.getConfiguration());
+    List<String> out = new ArrayList<>();
+    // `testIncludes` / `testExcludes` name the test set; `includes` / `excludes` the main one.
+    String name = test ? "test" + Character.toUpperCase(which.charAt(0)) + which.substring(1) : which;
+    Element group = first(layers, name);
+    if (group != null) {
+      for (Element e : children(group, which.substring(0, which.length() - 1))) {
+        String pattern = e.getTextContent().trim();
+        if (!pattern.isEmpty()) out.add(pattern);
+      }
+    }
+    return out;
+  }
+
   private Map<String, Object> compiler(MavenSession session, MavenProject p, boolean test) {
     List<Element> layers = new ArrayList<>();
     Plugin plugin = p.getPlugin("org.apache.maven.plugins:maven-compiler-plugin");

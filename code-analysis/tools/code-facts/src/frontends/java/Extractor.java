@@ -11,8 +11,10 @@ import java.io.Writer;
 import java.nio.charset.Charset;
 import java.nio.charset.MalformedInputException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.PathMatcher;
 import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -100,6 +102,8 @@ final class Extractor {
   final List<Source> sources = new ArrayList<>();
   final Map<Path, Source> byAbs = new HashMap<>();
   final TreeMap<String, String> excluded = new TreeMap<>();
+  /** Why, when there is more to say than the reason: the pattern that excluded a file. */
+  final Map<String, String> detail = new HashMap<>();
 
   /** The next free call-site id, and each call's id by its position. */
   int nextCallSite = 1;
@@ -183,11 +187,58 @@ final class Extractor {
       if (excludedByUser(rel)) continue;
       String name = abs.getFileName().toString();
       if (name.endsWith(".java")) {
-        addSource(u, abs, rel);
+        String pattern = filtered(u, dir, abs);
+        if (pattern != null) {
+          excluded.putIfAbsent(rel, "build_excluded");
+          detail.putIfAbsent(rel, pattern);
+        } else {
+          addSource(u, abs, rel);
+        }
       } else if (name.endsWith(".kt") || name.endsWith(".groovy") || name.endsWith(".scala")) {
         excluded.putIfAbsent(rel, "other_language");
       }
     }
+  }
+
+  /**
+   * Whether the build's own includes and excludes leave a file out of the
+   * compilation, and which pattern did it. Patterns are matched as globs against
+   * the path below its source root, which is Ant's language for the shapes a
+   * build actually writes (`**\/*.java`, `**\/Legacy*.java`, `com/old/**`); a
+   * pattern relying on the rest of Ant's is not honoured.
+   */
+  private String filtered(Unit u, Path root, Path abs) {
+    List<String> includes = u.set.includes();
+    List<String> excludes = u.set.excludes();
+    if (includes.isEmpty() && excludes.isEmpty()) return null;
+    Path rel;
+    try {
+      rel = root.relativize(abs);
+    } catch (IllegalArgumentException e) {
+      return null;
+    }
+    for (String pattern : excludes) {
+      if (matches(pattern, rel)) return pattern;
+    }
+    if (includes.isEmpty()) return null;
+    for (String pattern : includes) {
+      if (matches(pattern, rel)) return null;
+    }
+    return "not included";
+  }
+
+  private final Map<String, PathMatcher> matchers = new HashMap<>();
+
+  private boolean matches(String pattern, Path rel) {
+    PathMatcher m = matchers.computeIfAbsent(pattern, k -> {
+      try {
+        return FileSystems.getDefault().getPathMatcher("glob:" + k);
+      } catch (IllegalArgumentException | UnsupportedOperationException e) {
+        Model.warn("the build names a source pattern this reader cannot match, " + k + "; ignoring it");
+        return null;
+      }
+    });
+    return m != null && m.matches(rel);
   }
 
   private void addSource(Unit u, Path abs, String rel) {
@@ -450,7 +501,7 @@ final class Extractor {
           "is_generated", s.generated || Text.generated(s.path, s.text), "namespace", s.pkg));
     }
     for (Map.Entry<String, String> e : excluded.entrySet()) {
-      em.emit("excluded_file", Main.row("path", e.getKey(), "reason", e.getValue(), "detail", null));
+      em.emit("excluded_file", Main.row("path", e.getKey(), "reason", e.getValue(), "detail", detail.get(e.getKey())));
     }
     emitProjects();
 

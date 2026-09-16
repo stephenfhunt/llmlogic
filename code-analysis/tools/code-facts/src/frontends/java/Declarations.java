@@ -2,10 +2,18 @@ package codefacts;
 
 import com.sun.source.tree.BlockTree;
 import com.sun.source.tree.ClassTree;
+import com.sun.source.tree.DirectiveTree;
+import com.sun.source.tree.ExportsTree;
+import com.sun.source.tree.ExpressionTree;
 import com.sun.source.tree.CompilationUnitTree;
 import com.sun.source.tree.LambdaExpressionTree;
 import com.sun.source.tree.LineMap;
 import com.sun.source.tree.MethodTree;
+import com.sun.source.tree.ModuleTree;
+import com.sun.source.tree.OpensTree;
+import com.sun.source.tree.ProvidesTree;
+import com.sun.source.tree.RequiresTree;
+import com.sun.source.tree.UsesTree;
 import com.sun.source.tree.ModifiersTree;
 import com.sun.source.tree.NewClassTree;
 import com.sun.source.tree.Tree;
@@ -14,6 +22,7 @@ import com.sun.source.tree.VariableTree;
 import com.sun.source.util.SourcePositions;
 import com.sun.source.util.TreeScanner;
 import com.sun.source.util.Trees;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import javax.lang.model.element.Modifier;
@@ -55,6 +64,7 @@ final class Declarations {
       x.packageIds.put(s.pkg, id);
       x.packageDirs.put(s.pkg, Extractor.dirOf(s.path));
     }
+    moduleDirectives();
     Owner top = new Owner(module, null, true, false);
     for (Tree t : cu.getTypeDecls()) {
       if (t instanceof ClassTree c) type(c, top);
@@ -150,6 +160,53 @@ final class Declarations {
       String id = x.claim(Extractor.member(parent, name), key(tp), line(start), col(start));
       x.addSymbol(id, name, "type_parameter", null, s, line(start), line(end(tp)), parent, false, null, false, false, false);
     }
+  }
+
+  /**
+   * What a `module-info.java` declares: the module itself, and a row per
+   * directive — a row per target where one names several. Names are as written;
+   * the types a `uses` or `provides` names resolve as `ref` rows too, which is
+   * where a service implementation nothing calls becomes visible.
+   */
+  private void moduleDirectives() {
+    ModuleTree m = cu.getModule();
+    if (m == null) return;
+    String pkg = s.unit.module.name();
+    emit(pkg, "module", null, m.getName().toString(), null, m.getModuleType() == ModuleTree.ModuleKind.OPEN ? "open" : null);
+    String declared = m.getName().toString();
+    for (DirectiveTree d : m.getDirectives()) {
+      if (d instanceof RequiresTree r) {
+        List<String> mods = new ArrayList<>();
+        if (r.isTransitive()) mods.add("transitive");
+        if (r.isStatic()) mods.add("static");
+        emit(pkg, "requires", r.getModuleName().toString(), declared, null, mods.isEmpty() ? null : String.join(" ", mods));
+      } else if (d instanceof ExportsTree e) {
+        targets(pkg, "exports", e.getPackageName().toString(), declared, e.getModuleNames());
+      } else if (d instanceof OpensTree o) {
+        targets(pkg, "opens", o.getPackageName().toString(), declared, o.getModuleNames());
+      } else if (d instanceof UsesTree u) {
+        emit(pkg, "uses", u.getServiceName().toString(), declared, null, null);
+      } else if (d instanceof ProvidesTree pr) {
+        for (ExpressionTree impl : pr.getImplementationNames()) {
+          emit(pkg, "provides", pr.getServiceName().toString(), declared, impl.toString(), null);
+        }
+      }
+    }
+  }
+
+  /** A qualified `exports` or `opens` is a row per module it names; an unqualified one, a row. */
+  private void targets(String pkg, String directive, String path, String declared, List<? extends ExpressionTree> to) {
+    if (to == null || to.isEmpty()) {
+      emit(pkg, directive, path, declared, null, null);
+      return;
+    }
+    for (ExpressionTree t : to) emit(pkg, directive, path, declared, t.toString(), null);
+  }
+
+  private void emit(String pkg, String directive, String path, String module, String target, String modifier) {
+    x.em.emit("module_directive", Main.row(
+        "package", pkg, "directive", directive, "path", path, "version", null, "replacement", null,
+        "replacement_version", null, "module", module, "target", target, "modifier", modifier));
   }
 
   /** Locals, lambdas, and local and anonymous classes, below a member. */

@@ -38,6 +38,11 @@ violation("imports.target_file", T) :- imports(target_file: T), T is not absent,
 violation("symbol.file", F) :- symbol(file: F), F is not absent, not known_file(F).
 violation("project_file.file", F) :- project_file(file: F), not known_file(F).
 violation("file_ancestor.dir", D) :- file_ancestor(dir: D), not dir(path: D).
+violation("module_directive.package", P) :- module_directive(package: P), P is not absent, not package(name: P).
+% A Java directive says which module declares it; a Go one has no such name.
+violation("java module_directive without a module", V) :-
+  module_directive(directive: D, module: M), M is absent, java_directive(D), V = D as string.
+java_directive(requires). java_directive(exports). java_directive(opens). java_directive(uses). java_directive(provides).
 
 % ── ids are keys ─────────────────────────────────────────────────────────
 violation("symbol.id is not a key", I) :- symbol(id: I, kind: K1), symbol(id: I, kind: K2), K1 != K2.

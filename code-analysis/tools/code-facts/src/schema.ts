@@ -234,10 +234,10 @@ export const RELATIONS: readonly Relation[] = [
       col("path", "string", FILE),
       oneOf(
         "reason",
-        ["build_constraint", "other_language"],
-        "`build_constraint`: a Go build constraint or file-name suffix excludes it for this platform; `other_language`: a Kotlin, Groovy or Scala file under a Java source root, which the Java compiler does not read",
+        ["build_constraint", "other_language", "build_excluded"],
+        "`build_constraint`: a Go build constraint or file-name suffix excludes it for this platform; `other_language`: a Kotlin, Groovy or Scala file under a Java source root, which the Java compiler does not read; `build_excluded`: the build's own includes or excludes leave it out of the compilation",
       ),
-      opt("detail", "string", "the constraint as written, when there is one"),
+      opt("detail", "string", "the constraint as written, or the pattern that excluded it, when there is one"),
     ],
   },
   {
@@ -480,14 +480,25 @@ export const RELATIONS: readonly Relation[] = [
   {
     name: "module_directive",
     layer: "structure",
-    doc: "A go.mod directive other than `require` and `tool`: the Go version and toolchain, and what is replaced, excluded, retracted or run with a changed GODEBUG default.",
+    doc:
+      "What a module declares about itself. Go: a go.mod directive other than `require` and `tool` — the Go version and " +
+      "toolchain, and what is replaced, excluded, retracted or run with a changed GODEBUG default. Java: a `module-info.java`'s " +
+      "own declaration and each of its directives. Names are as written; the types a `uses` or `provides` names also resolve " +
+      "as `ref` rows, which is where a service implementation nothing calls becomes visible.",
     columns: [
-      col("package", "string", "`package.name` of the module"),
-      oneOf("directive", ["go", "toolchain", "replace", "exclude", "retract", "godebug"], "which directive"),
-      opt("path", "string", "the module path it names (`replace`, `exclude`), or the GODEBUG setting (`godebug`)"),
+      opt("package", "string", "`package.name` of the module — for Java the build module the declaration is in, absent when sources were read with no build"),
+      oneOf(
+        "directive",
+        ["go", "toolchain", "replace", "exclude", "retract", "godebug", "module", "requires", "exports", "opens", "uses", "provides"],
+        "which directive; `module` is Java's declaration itself",
+      ),
+      opt("path", "string", "the module path it names (`replace`, `exclude`), or the GODEBUG setting (`godebug`); for Java the module required, the package exported or opened, or the service type"),
       opt("version", "string", "the version (a range for `retract`, the setting's value for `godebug`); for `replace`, absent when every version is replaced"),
       opt("replacement", "string", "`replace`: the module path or directory put in its place"),
       opt("replacement_version", "string", "`replace`: the replacement's version; absent for a directory"),
+      opt("module", "string", "Java: the module this file declares"),
+      opt("target", "string", "Java: one module a qualified `exports` or `opens` names, or one implementation a `provides` names — a row each"),
+      opt("modifier", "string", "Java: `open` on the declaration, and `transitive` or `static` on a `requires`"),
     ],
   },
   {
