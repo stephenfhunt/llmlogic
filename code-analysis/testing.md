@@ -229,6 +229,29 @@ run: size its default run count from the measured per-run rate, not by eye.
   only → red; an interface's `extends` as `implements` → red; bases a supertype
   does not inherit kept → red (these four before the generator was shaped); no
   abstract inherited implementations → red.
+- [x] **P5-java** Points-to soundness against real Java executions, P5's method:
+  the program (locals and fields of type `Object`, objects `new O(n, v)`, stores
+  and loads through `instanceof O`, direct calls, method references held as a
+  functional interface and called through it) is compiled by javac, run by the
+  JVM, and every object a probed variable holds is in `pts`. A functional value
+  has no run-time identity in Java, so each method answers with its own name when
+  called with a marker — the question a program can actually ask of a function it
+  holds. Five shapes are forced, each into a variable nothing else writes: `h`
+  through an instance field, `k` through a functional value's call, `q` through a
+  record component, `sh` through a static field, `c` through a constructor's
+  parameter. Guards, at 200 runs: a functional value observed (153), an object
+  observed outside the method allocating it (134), one through a record component
+  (134), through a static (128), through a field (119), through a constructor
+  (117), and the rarest, an object returned through a call of a functional value
+  (91) — so 40 runs by default. *Mutations:* field loads not emitted → red;
+  formals not emitted → red; no `callee_var` for a functional-interface call →
+  red; the record stores at a `new` not emitted → red; a record accessor's load
+  not emitted → red; a class holding statics not allocated a `cell` → red.
+  **`this_var` not emitted stays green**, and no generator shape can make it red:
+  `pointsto.dl` also binds `this` from the allocation's type, which covers every
+  class the project allocates. Found `bugs/resolved/010` — every declarator of
+  one Java declaration shared a symbol, so the probes all reported their method's
+  first local and four of these mutations survived until it was fixed.
 - [x] **P6-java** Determinism for Java: permuting a Maven reactor's `<modules>`
   order changes no output byte, over P2-java's sources in one module and three
   more that each declare `x.T`, with overloads whose ids collide and a static
