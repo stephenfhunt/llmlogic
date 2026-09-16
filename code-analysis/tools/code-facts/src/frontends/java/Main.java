@@ -21,8 +21,9 @@ import java.util.regex.Pattern;
  * <p>Run by code-facts (Node), never alone. It writes one JSON object per line,
  * {@code {"relation": ..., "row": {...}}}, and Node validates every row against
  * src/schema.ts — the one home of the schema for every language — before writing
- * anything. The last line is a {@code __counters__} row: the next free call-site
- * and flow-node ids, where another frontend continues.
+ * anything. The last line is a {@code __counters__} row: the next free
+ * call-site, flow-node and allocation-site ids, where another frontend
+ * continues.
  *
  * <p>The project model is asked of the build (Maven, Gradle), and every source
  * set is read by the JDK's own compiler with the classpath the build resolves,
@@ -48,6 +49,7 @@ public final class Main {
     String layers = "structure";
     int firstCallSite = 1;
     int firstFlowNode = 1;
+    int firstAllocSite = 1;
     List<Pattern> excludes = new ArrayList<>();
     List<String> targets = new ArrayList<>();
     for (int i = 0; i < args.length; i++) {
@@ -58,6 +60,7 @@ public final class Main {
         case "--layers" -> layers = value(args, ++i);
         case "--first-call-site" -> firstCallSite = Integer.parseInt(value(args, ++i));
         case "--first-flow-node" -> firstFlowNode = Integer.parseInt(value(args, ++i));
+        case "--first-alloc-site" -> firstAllocSite = Integer.parseInt(value(args, ++i));
         case "--exclude" -> excludes.add(Pattern.compile(value(args, ++i)));
         default -> targets.add(args[i]);
       }
@@ -72,10 +75,11 @@ public final class Main {
       Extractor x = new Extractor(root.toAbsolutePath().normalize(), wanted, excludes, em, new Model(resources, cache));
       x.nextCallSite = firstCallSite;
       x.nextFlowNode = firstFlowNode;
+      x.nextAllocSite = firstAllocSite;
       x.load(targets);
       x.emitStructure();
       x.flushSymbols();
-      em.emit("__counters__", row("call_site", x.nextCallSite, "flow_node", x.nextFlowNode));
+      em.emit("__counters__", row("call_site", x.nextCallSite, "flow_node", x.nextFlowNode, "alloc_site", x.nextAllocSite));
     }
   }
 

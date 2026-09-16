@@ -5,7 +5,8 @@
 // {"relation": ..., "row": {...}}, and Node validates every row against
 // src/schema.ts — the one home of the schema for every language — before
 // writing anything. The last line is a `__counters__` row: the next free
-// call-site and flow-node ids, where another frontend continues.
+// call-site, flow-node and allocation-site ids, where another frontend
+// continues.
 //
 // Packages are loaded the way `go build` loads them (go/packages: modules,
 // workspaces, build constraints, test variants) and type-checked by go/types,
@@ -59,6 +60,7 @@ func main() {
 	layers := flag.String("layers", "structure", "comma-separated layers to extract")
 	firstCallSite := flag.Int("first-call-site", 1, "first call-site id")
 	firstFlowNode := flag.Int("first-flow-node", 1, "first flow-node id")
+	firstAllocSite := flag.Int("first-alloc-site", 1, "first allocation-site id")
 	var exclude multiFlag
 	flag.Var(&exclude, "exclude", "a regular expression over repo-relative paths to skip (repeatable)")
 	flag.Parse()
@@ -82,6 +84,7 @@ func main() {
 	out := bufio.NewWriterSize(os.Stdout, 1<<20)
 	x := newExtractor(*root, wanted, excludes, newEmitter(out))
 	x.nextCallSite, x.nextFlowNode = *firstCallSite, *firstFlowNode
+	x.allocSites = *firstAllocSite - 1
 	if err := x.load(flag.Args()); err != nil {
 		fail(err)
 	}
@@ -100,7 +103,7 @@ func main() {
 		x.emitQuality()
 	}
 	x.flushSymbols()
-	x.em.emit("__counters__", row{"call_site": x.nextCallSite, "flow_node": x.nextFlowNode})
+	x.em.emit("__counters__", row{"call_site": x.nextCallSite, "flow_node": x.nextFlowNode, "alloc_site": x.allocSites + 1})
 	if err := out.Flush(); err != nil {
 		fail(err)
 	}

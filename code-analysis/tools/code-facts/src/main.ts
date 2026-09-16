@@ -98,7 +98,7 @@ export function run(opts: Options): Result {
   const anchors = [...opts.tsconfigs, ...[...python, ...go, ...java].map((p) => (fs.existsSync(p) && fs.statSync(p).isDirectory() ? path.join(p, "__target__") : p))];
   const root = opts.root !== undefined ? path.resolve(opts.root) : findRoot(anchors);
   const tables = new Tables();
-  let ids: Counters = { callSite: 1, flowNode: 1 };
+  let ids: Counters = { callSite: 1, flowNode: 1, allocSite: 1 };
 
   if (opts.tsconfigs.length > 0) {
     const loaded = timed("load", () => load(opts.tsconfigs, root, exclude, opts.shareSourceFiles ?? true));
@@ -126,7 +126,7 @@ export function run(opts: Options): Result {
     if (layers.has("dataflow")) timed("dataflow", () => extractDataflow(ctx));
     if (layers.has("quality")) timed("quality", () => extractQuality(ctx));
     ctx.flushSymbols();
-    ids = { callSite: ctx.callSitesUsed, flowNode: ctx.nextFlowNode };
+    ids = { callSite: ctx.callSitesUsed, flowNode: ctx.nextFlowNode, allocSite: ctx.nextAllocSite };
   }
   let pythonVersion: string | null = null;
   if (python.length > 0) {
@@ -176,10 +176,11 @@ export function run(opts: Options): Result {
   return { tables, root, layers, timings };
 }
 
-/** The next free call-site and flow-node ids: one id-space across every frontend. */
+/** The next free call-site, flow-node and allocation-site ids: one id-space across every frontend. */
 interface Counters {
   callSite: number;
   flowNode: number;
+  allocSite: number;
 }
 
 /**
@@ -209,7 +210,9 @@ function runFrontend(label: string, command: string, args: string[], env: NodeJS
     let next = ids;
     forEachLine(rowsFile, (line) => {
       const { relation, row } = JSON.parse(line) as { relation: string; row: Record<string, string | number | boolean | null> };
-      if (relation === "__counters__") next = { callSite: row.call_site as number, flowNode: row.flow_node as number };
+      if (relation === "__counters__") {
+        next = { callSite: row.call_site as number, flowNode: row.flow_node as number, allocSite: row.alloc_site as number };
+      }
       else tables.add(relation, row);
     });
     return next;
@@ -261,6 +264,8 @@ function runPython(
     String(ids.callSite),
     "--first-flow-node",
     String(ids.flowNode),
+    "--first-alloc-site",
+    String(ids.allocSite),
     ...exclude.flatMap((re) => ["--exclude", re.source]),
     ...targets.map((t) => path.resolve(t)),
   ];
@@ -301,6 +306,8 @@ function runGo(
     String(ids.callSite),
     "--first-flow-node",
     String(ids.flowNode),
+    "--first-alloc-site",
+    String(ids.allocSite),
     ...exclude.flatMap((re) => ["--exclude", re.source]),
     ...targets.map((t) => path.resolve(t)),
   ];
@@ -369,6 +376,8 @@ function runJava(
     String(ids.callSite),
     "--first-flow-node",
     String(ids.flowNode),
+    "--first-alloc-site",
+    String(ids.allocSite),
     ...exclude.flatMap((re) => ["--exclude", re.source]),
     ...targets.map((t) => path.resolve(t)),
   ];

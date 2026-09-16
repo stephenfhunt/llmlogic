@@ -1334,6 +1334,8 @@ def main() -> int:
     ap.add_argument("--exclude", action="append", default=[])
     ap.add_argument("--first-call-site", type=int, default=1)
     ap.add_argument("--first-flow-node", type=int, default=1)
+    # No dataflow layer here; the allocation-site id-space is passed on untouched.
+    ap.add_argument("--first-alloc-site", type=int, default=1)
     ap.add_argument("targets", nargs="+")
     a = ap.parse_args()
     layers = set(a.layers.split(","))
@@ -1352,7 +1354,15 @@ def main() -> int:
         emit_flow_and_quality(fe, layers, emit, sys.modules[__name__])
     fe.emit_symbols()
     flush()
-    sys.stdout.write(json.dumps({"relation": "__counters__", "row": {"call_site": fe.next_call_site, "flow_node": fe.next_flow_node}}) + "\n")
+    sys.stdout.write(
+        json.dumps(
+            {
+                "relation": "__counters__",
+                "row": {"call_site": fe.next_call_site, "flow_node": fe.next_flow_node, "alloc_site": a.first_alloc_site},
+            }
+        )
+        + "\n"
+    )
     return 0
 
 

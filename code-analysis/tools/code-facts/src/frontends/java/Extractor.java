@@ -104,6 +104,8 @@ final class Extractor {
   int nextCallSite = 1;
   /** The next free flow-node id. */
   int nextFlowNode = 1;
+  /** The next free allocation-site id. */
+  int nextAllocSite = 1;
   private final Map<String, Integer> callSites = new HashMap<>();
 
   final Map<String, String> idByKey = new HashMap<>();
