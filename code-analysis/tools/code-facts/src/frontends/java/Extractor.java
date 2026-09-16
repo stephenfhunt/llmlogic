@@ -417,6 +417,15 @@ final class Extractor {
         if (!s.test()) roots.addAll(withGenerated(s));
       }
     }
+    // A sibling depended on for its test classes is read from its test sources:
+    // the jar is filtered out of the classpath because the module is in the build.
+    for (String name : u.set.testModules()) {
+      Model.Module m = moduleByName.get(name);
+      if (m == null) continue;
+      for (Model.SourceSet s : m.sets()) {
+        if (s.test()) roots.addAll(withGenerated(s));
+      }
+    }
     return roots.stream().filter(Files::isDirectory).map(Path::toFile).toList();
   }
 

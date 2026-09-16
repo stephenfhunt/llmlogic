@@ -57,7 +57,13 @@ final class Model {
   }
 
   /** A unit the compiler reads with one classpath: main or test. */
-  record SourceSet(String name, boolean test, List<Path> roots, List<Jar> classpath, List<String> modules, Compiler compiler) {}
+  /**
+   * One compilation of a module. {@code modules} are the sibling modules it reads
+   * the *main* sources of; {@code testModules} those it reads the *test* sources
+   * of — a Maven {@code <type>test-jar</type>} dependency, whose jar is no use
+   * because the sibling is in the reactor and read from source.
+   */
+  record SourceSet(String name, boolean test, List<Path> roots, List<Jar> classpath, List<String> modules, List<String> testModules, Compiler compiler) {}
 
   /** A build module: a Maven module, a Gradle project, or a plain directory. */
   record Module(Tool tool, Path buildFile, Path dir, String name, String version, String release, List<SourceSet> sets, List<Dep> deps, Path buildDir, boolean codegen) {
@@ -110,10 +116,10 @@ final class Model {
     Path test = dir.resolve("src/test/java");
     List<SourceSet> sets = new ArrayList<>();
     if (!wholeDir || Files.isDirectory(main) || Files.isDirectory(test)) {
-      sets.add(new SourceSet("main", false, List.of(main), List.of(), List.of(), Compiler.NONE));
-      sets.add(new SourceSet("test", true, List.of(test), List.of(), List.of(), Compiler.NONE));
+      sets.add(new SourceSet("main", false, List.of(main), List.of(), List.of(), List.of(), Compiler.NONE));
+      sets.add(new SourceSet("test", true, List.of(test), List.of(), List.of(), List.of(), Compiler.NONE));
     } else {
-      sets.add(new SourceSet("main", false, List.of(dir), List.of(), List.of(), Compiler.NONE));
+      sets.add(new SourceSet("main", false, List.of(dir), List.of(), List.of(), List.of(), Compiler.NONE));
     }
     Path buildDir = tool == Tool.MAVEN ? dir.resolve("target") : tool == Tool.GRADLE ? dir.resolve("build") : null;
     return new Module(tool, buildFile, dir, name, version, release, sets, deps, buildDir, false);
@@ -375,7 +381,9 @@ final class Model {
         }
         List<Path> roots = ((List<Object>) s.get("roots")).stream().map(r -> Path.of((String) r)).toList();
         List<String> modules = ((List<Object>) s.get("modules")).stream().map(String.class::cast).toList();
-        sets.add(new SourceSet((String) s.get("name"), Boolean.TRUE.equals(s.get("test")), roots, classpath, modules, compiler(s.get("compiler"))));
+        List<String> testModules = s.get("testModules") == null ? List.of()
+            : ((List<Object>) s.get("testModules")).stream().map(String::valueOf).toList();
+        sets.add(new SourceSet((String) s.get("name"), Boolean.TRUE.equals(s.get("test")), roots, classpath, modules, testModules, compiler(s.get("compiler"))));
       }
       List<Dep> deps = new ArrayList<>();
       for (Object dobj : (List<Object>) m.get("deps")) {
@@ -402,8 +410,8 @@ final class Model {
   }
 
   /**
-   * Sources a build plugin generated, as the last build left them. Maven: each
-   * directory under `generated-sources` (main) or `generated-test-sources` (test)
+   * Sources a build plugin generated, as the last build left them. Maven: the
+   * roots under `generated-sources` (main) or `generated-test-sources` (test),
    * but the annotation processors' own, which extraction writes itself. Gradle
    * names its generated roots among a source set's directories; one missing is
    * reported.
@@ -418,16 +426,10 @@ final class Model {
       if (m.tool() == Tool.MAVEN) {
         Path parent = buildDir.resolve(s.test() ? "generated-test-sources" : "generated-sources");
         Path own = s.compiler().generatedDir() == null ? null : s.compiler().generatedDir().toAbsolutePath().normalize();
-        if (Files.isDirectory(parent)) {
-          try (Stream<Path> dirs = Files.list(parent)) {
-            for (Path d : dirs.filter(Files::isDirectory).map(d -> d.toAbsolutePath().normalize()).sorted().toList()) {
-              if (d.equals(own) || roots.contains(d)) continue;
-              roots.add(d);
-              found = true;
-            }
-          } catch (IOException e) {
-            warn("cannot list " + parent + ": " + e.getMessage());
-          }
+        for (Path d : generatedSourceRoots(parent, own)) {
+          if (roots.contains(d)) continue;
+          roots.add(d);
+          found = true;
         }
       } else {
         for (Path r : s.roots()) {
@@ -437,12 +439,73 @@ final class Model {
           else warn("the build of " + describe(m) + " generates sources into " + abs + ", which is not on disk: build it first, or names from that code stay unresolved");
         }
       }
-      sets.add(new SourceSet(s.name(), s.test(), roots, s.classpath(), s.modules(), s.compiler()));
+      sets.add(new SourceSet(s.name(), s.test(), roots, s.classpath(), s.modules(), s.testModules(), s.compiler()));
     }
     if (m.codegen() && !found) {
       warn("the build of " + describe(m) + " generates sources, and none is on disk under " + buildDir + ": build it first, or names from generated code stay unresolved");
     }
     return new Module(m.tool(), m.buildFile(), m.dir(), m.name(), m.version(), m.release(), sets, m.deps(), m.buildDir(), m.codegen());
+  }
+
+  /**
+   * The source roots under a Maven build's generated-sources directory. A plugin
+   * may write into a directory of its own (`generated-sources/antlr4/…`) or
+   * straight into the parent, which `build-helper` adding `generated-sources`
+   * itself does — so the directory names decide nothing. Each file says where its
+   * root is, by the package it declares; one whose path does not end in its
+   * package is left out rather than guessed at.
+   */
+  static List<Path> generatedSourceRoots(Path parent, Path own) {
+    if (!Files.isDirectory(parent)) return List.of();
+    Set<Path> roots = new java.util.TreeSet<>();
+    try (Stream<Path> files = Files.walk(parent)) {
+      for (Path f : files.filter(Files::isRegularFile).filter(x -> x.toString().endsWith(".java")).sorted().toList()) {
+        Path abs = f.toAbsolutePath().normalize();
+        if (own != null && abs.startsWith(own)) continue;
+        Path root = rootOf(abs);
+        if (root != null && root.startsWith(parent)) roots.add(root);
+      }
+    } catch (IOException e) {
+      warn("cannot read what the build generated under " + parent + ": " + e.getMessage());
+    }
+    return List.copyOf(roots);
+  }
+
+  /**
+   * The source root a file sits in: its own directory, less one level per segment
+   * of the package it declares. Read past comments, so a licence header naming a
+   * package counts for nothing.
+   */
+  private static Path rootOf(Path file) {
+    String head;
+    try {
+      head = head(file);
+    } catch (IOException e) {
+      return null;
+    }
+    int i = Text.nextToken(head, 0);
+    if (!head.startsWith("package", i)) return file.getParent();
+    int end = head.indexOf(';', i);
+    if (end < 0) return null;
+    String name = head.substring(i + "package".length(), end).replaceAll("\\s+", "");
+    if (name.isEmpty()) return file.getParent();
+    Path root = file.getParent();
+    for (int seg = name.split("\\.", -1).length - 1; seg >= 0; seg--) {
+      String segment = name.split("\\.", -1)[seg];
+      if (root == null || root.getFileName() == null || !root.getFileName().toString().equals(segment)) return null;
+      root = root.getParent();
+    }
+    return root;
+  }
+
+  /** A file's first 8 KiB: room for any licence header and the package declaration. */
+  private static String head(Path file) throws IOException {
+    byte[] all = new byte[8192];
+    int n;
+    try (java.io.InputStream in = Files.newInputStream(file)) {
+      n = in.readNBytes(all, 0, all.length);
+    }
+    return new String(all, 0, n, StandardCharsets.UTF_8);
   }
 
   private static String describe(Module m) {

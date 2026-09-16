@@ -102,6 +102,9 @@ public final class ModelExtension extends AbstractMavenLifecycleParticipant {
     List<Map<String, Object>> test = new ArrayList<>();
     Set<String> mainModules = new LinkedHashSet<>();
     Set<String> testModules = new LinkedHashSet<>();
+    // Siblings depended on for their *test* classes (`<type>test-jar</type>`).
+    Set<String> mainTestModules = new LinkedHashSet<>();
+    Set<String> testTestModules = new LinkedHashSet<>();
     DefaultDependencyResolutionRequest request = new DefaultDependencyResolutionRequest(p, session.getRepositorySession());
     // A sibling module is read from its sources, not a jar that may not be built.
     request.setResolutionFilter((node, parents) -> node.getArtifact() == null || !reactor.contains(coord(node.getArtifact())));
@@ -122,11 +125,13 @@ public final class ModelExtension extends AbstractMavenLifecycleParticipant {
         if (COMPILE_SCOPES.contains(d.getScope())) main.add(jar);
         test.add(jar);
       }
-      if (result.getDependencyGraph() != null) siblings(result.getDependencyGraph(), reactor, mainModules, testModules, new HashSet<>());
+      if (result.getDependencyGraph() != null) {
+        siblings(result.getDependencyGraph(), reactor, mainModules, testModules, mainTestModules, testTestModules, new HashSet<>());
+      }
     }
     m.put("sets", List.of(
-        set("main", false, p.getCompileSourceRoots(), main, mainModules, compiler(session, p, false)),
-        set("test", true, p.getTestCompileSourceRoots(), test, testModules, compiler(session, p, true))));
+        set("main", false, p.getCompileSourceRoots(), main, mainModules, mainTestModules, compiler(session, p, false)),
+        set("test", true, p.getTestCompileSourceRoots(), test, testModules, testTestModules, compiler(session, p, true))));
 
     List<Object> deps = new ArrayList<>();
     for (Dependency d : p.getDependencies()) {
@@ -141,25 +146,30 @@ public final class ModelExtension extends AbstractMavenLifecycleParticipant {
     return m;
   }
 
-  private static void siblings(DependencyNode node, Set<String> reactor, Set<String> main, Set<String> test, Set<DependencyNode> seen) {
+  private static void siblings(DependencyNode node, Set<String> reactor, Set<String> main, Set<String> test,
+      Set<String> mainTests, Set<String> testTests, Set<DependencyNode> seen) {
     for (DependencyNode child : node.getChildren()) {
       if (!seen.add(child)) continue;
       if (child.getArtifact() != null && child.getDependency() != null && reactor.contains(coord(child.getArtifact()))) {
         String name = coord(child.getArtifact());
-        if (COMPILE_SCOPES.contains(child.getDependency().getScope())) main.add(name);
-        test.add(name);
+        boolean tests = "tests".equals(child.getArtifact().getClassifier());
+        boolean compile = COMPILE_SCOPES.contains(child.getDependency().getScope());
+        if (compile) (tests ? mainTests : main).add(name);
+        (tests ? testTests : test).add(name);
       }
-      siblings(child, reactor, main, test, seen);
+      siblings(child, reactor, main, test, mainTests, testTests, seen);
     }
   }
 
-  private static Map<String, Object> set(String name, boolean isTest, List<String> roots, List<Map<String, Object>> classpath, Set<String> modules, Map<String, Object> compiler) {
+  private static Map<String, Object> set(String name, boolean isTest, List<String> roots, List<Map<String, Object>> classpath, Set<String> modules,
+      Set<String> testModules, Map<String, Object> compiler) {
     Map<String, Object> s = new LinkedHashMap<>();
     s.put("name", name);
     s.put("test", isTest);
     s.put("roots", new ArrayList<>(roots));
     s.put("classpath", classpath);
     s.put("modules", new ArrayList<>(modules));
+    s.put("testModules", new ArrayList<>(testModules));
     s.put("compiler", compiler);
     return s;
   }
