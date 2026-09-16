@@ -79,6 +79,7 @@ public final class Main {
       x.load(targets);
       x.emitStructure();
       x.flushSymbols();
+      x.flushVars();
       em.emit("__counters__", row("call_site", x.nextCallSite, "flow_node", x.nextFlowNode, "alloc_site", x.nextAllocSite));
     }
   }

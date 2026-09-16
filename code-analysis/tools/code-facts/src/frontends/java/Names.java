@@ -20,10 +20,13 @@ import java.util.Map;
 import java.util.Set;
 import javax.lang.model.element.Element;
 import javax.lang.model.element.ElementKind;
+import javax.lang.model.element.ExecutableElement;
+import javax.lang.model.element.Modifier;
 import javax.lang.model.element.ModuleElement;
 import javax.lang.model.element.PackageElement;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.element.VariableElement;
+import javax.lang.model.type.DeclaredType;
 import javax.lang.model.type.TypeKind;
 import javax.lang.model.type.TypeMirror;
 import javax.lang.model.util.Elements;
@@ -44,6 +47,7 @@ final class Names {
   final Types types;
 
   private final Map<TypeElement, Set<Element>> members = new HashMap<>();
+  private final Map<TypeElement, Boolean> functional = new HashMap<>();
   private final Map<TypeElement, Extractor.Source> declaredIn = new HashMap<>();
 
   Names(Extractor x, Extractor.Unit u) {
@@ -217,6 +221,26 @@ final class Names {
       if (id != null) return id;
     }
     return s.path + "#<module>";
+  }
+
+  /** A functional interface: exactly one abstract method that is not one of Object's. */
+  boolean functional(TypeMirror t) {
+    if (!(t instanceof DeclaredType dt) || !(dt.asElement() instanceof TypeElement te) || te.getKind() != ElementKind.INTERFACE) return false;
+    return functional.computeIfAbsent(te, k -> {
+      TypeElement object = elements.getTypeElement("java.lang.Object");
+      int abstracts = 0;
+      for (Element m : elements.getAllMembers(k)) {
+        if (!(m instanceof ExecutableElement ex) || !ex.getModifiers().contains(Modifier.ABSTRACT)) continue;
+        boolean objects = false;
+        if (object != null) {
+          for (Element om : object.getEnclosedElements()) {
+            if (om instanceof ExecutableElement o && o.getModifiers().contains(Modifier.PUBLIC) && elements.overrides(ex, o, k)) objects = true;
+          }
+        }
+        if (!objects) abstracts++;
+      }
+      return abstracts == 1;
+    });
   }
 
   /** A `Future` or a `CompletionStage`. */

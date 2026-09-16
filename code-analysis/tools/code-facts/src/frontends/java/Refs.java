@@ -26,7 +26,6 @@ import com.sun.source.util.DocTrees;
 import com.sun.source.util.SourcePositions;
 import com.sun.source.util.TreePath;
 import com.sun.source.util.TreePathScanner;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -56,7 +55,6 @@ final class Refs {
   private final SourcePositions pos;
   private final LineMap lines;
   private final Set<String> typed = new HashSet<>();
-  private final Map<TypeElement, Boolean> functional = new HashMap<>();
 
   Refs(Extractor x, Names n, Extractor.Source s) {
     this.x = x;
@@ -439,27 +437,7 @@ final class Refs {
     boolean method = e instanceof ExecutableElement;
     x.em.emit("symbol_type", Main.row(
         "symbol", id, "text", Text.truncate(t.toString(), 200), "is_any", false, "is_unknown", false,
-        "is_promise", !method && n.promise(t), "is_function", method || functional(t), "is_union", t.getKind() == TypeKind.UNION));
-  }
-
-  /** A functional interface: exactly one abstract method that is not one of Object's. */
-  private boolean functional(TypeMirror t) {
-    if (!(t instanceof DeclaredType dt) || !(dt.asElement() instanceof TypeElement te) || te.getKind() != ElementKind.INTERFACE) return false;
-    return functional.computeIfAbsent(te, k -> {
-      TypeElement object = n.elements.getTypeElement("java.lang.Object");
-      int abstracts = 0;
-      for (Element m : n.elements.getAllMembers(k)) {
-        if (!(m instanceof ExecutableElement ex) || !ex.getModifiers().contains(Modifier.ABSTRACT)) continue;
-        boolean objects = false;
-        if (object != null) {
-          for (Element om : object.getEnclosedElements()) {
-            if (om instanceof ExecutableElement o && o.getModifiers().contains(Modifier.PUBLIC) && n.elements.overrides(ex, o, k)) objects = true;
-          }
-        }
-        if (!objects) abstracts++;
-      }
-      return abstracts == 1;
-    });
+        "is_promise", !method && n.promise(t), "is_function", method || n.functional(t), "is_union", t.getKind() == TypeKind.UNION));
   }
 
   // ── where ──────────────────────────────────────────────────────────────────

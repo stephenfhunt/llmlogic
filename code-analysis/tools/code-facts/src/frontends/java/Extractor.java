@@ -464,6 +464,7 @@ final class Extractor {
         new References(this, names, s).run();
         if (layers.contains("refs")) new Refs(this, names, s).run();
         if (layers.contains("flow")) new Flow(this, names, s).run();
+        if (layers.contains("dataflow")) new Dataflow(this, names, s).run();
         if (layers.contains("quality")) new Quality(this, names, s).run();
       }
       u.task = null;
@@ -604,5 +605,18 @@ final class Extractor {
 
   void flushSymbols() {
     for (Map<String, Object> r : symbols.values()) em.emit("symbol", r);
+  }
+
+  // ── dataflow variables ─────────────────────────────────────────────────────
+
+  private final LinkedHashMap<String, Map<String, Object>> vars = new LinkedHashMap<>();
+
+  /** Registers a dataflow variable; the first registration's owner and kind stand. */
+  void declareVar(String id, String fn, String kind) {
+    vars.putIfAbsent(id, Main.row("id", id, "fn", fn, "kind", kind));
+  }
+
+  void flushVars() {
+    for (Map<String, Object> r : vars.values()) em.emit("var", r);
   }
 }

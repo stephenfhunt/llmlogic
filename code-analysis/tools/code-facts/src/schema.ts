@@ -777,7 +777,8 @@ export const RELATIONS: readonly Relation[] = [
     layer: "dataflow",
     doc:
       "A value-holder in the three-address normal form: named variables (their symbol id), plus temporaries, `this` and " +
-      "return slots. Flow-insensitive and field-based, in the style of Doop's input facts.",
+      "return slots. Flow-insensitive and field-based, in the style of Doop's input facts. A class is a variable where its " +
+      "static state lives: for Java, that is what a static field loads and stores through.",
     columns: [
       col("id", "string", "a symbol id, or `<fn>$tN` / `<fn>$ret` / `<class>$this` / `$thrown`"),
       col("fn", "string", "the function it belongs to (`<module>` for module-level variables)"),
@@ -798,7 +799,7 @@ export const RELATIONS: readonly Relation[] = [
   {
     name: "alloc",
     layer: "dataflow",
-    doc: "A heap object is created and held by `var`: an object/array literal, a `new`, a function or class value — for Go also a slice, map or channel made, and a `cell`: an address-taken or captured variable, or a package-level one.",
+    doc: "A heap object is created and held by `var`: an object/array literal, a `new`, a function or class value — for Go also a slice, map or channel made. A `cell` is where a variable that is not one function's lives: for Go an address-taken, captured or package-level variable, for Java a class holding static state. A Java lambda or method reference is a `function`.",
     columns: [
       col("var", "string", "`var.id` receiving it"),
       col("site", "int", "allocation-site id, unique"),
@@ -812,7 +813,7 @@ export const RELATIONS: readonly Relation[] = [
   {
     name: "load",
     layer: "dataflow",
-    doc: "`to = base.field`. Element and computed accesses use field `[]`; for Go, a pointer's content is field `*`, a channel's elements `<chan>`, and a closure's captured variables `free0`, `free1`, … of the closure.",
+    doc: "`to = base.field`. Element and computed accesses use field `[]`; for Go, a pointer's content is field `*`, a channel's elements `<chan>`, and a closure's captured variables `free0`, `free1`, … of the closure. For Java, a field written with no receiver reads off `this`, or off its class for a static, and a record component the compiler wrote an accessor for is loaded where that accessor is called.",
     columns: [
       col("to", "string", "`var.id`"),
       col("base", "string", "`var.id`"),
@@ -823,7 +824,7 @@ export const RELATIONS: readonly Relation[] = [
   {
     name: "store",
     layer: "dataflow",
-    doc: "`base.field = from`. Array elements and computed keys use field `[]`; for Go, `*`, `<chan>` and `free0`… as for `load`.",
+    doc: "`base.field = from`. Array elements and computed keys use field `[]`; for Go, `*`, `<chan>` and `free0`… as for `load`. For Java, `this` and the class are the bases as they are for `load`, and a `new` of a record whose canonical constructor the compiler wrote stores each argument into its component.",
     columns: [
       col("base", "string", "`var.id`"),
       col("field", "string", "property name, or `[]`"),
