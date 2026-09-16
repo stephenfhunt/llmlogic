@@ -91,10 +91,13 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
   init script), javac run as the build configures it; dogfooded on OpenRefine.
   _shipped_ — `decisions.md` 2026-09-14, `notes/go-java-frontends.md` § The Java
   dogfood.
-- **Java's module path** — `module-info.java`'s directives as `module_directive`
-  rows (the relation was go.mod's), and the build's own includes and excludes as
-  `excluded_file`. _shipped_ — `reference/java.md` §2 and §4 trap 2; a service a
-  `provides` names is the one reflective edge that is a fact.
+- **Java's module path** — the directives as `module_directive` rows, the build's
+  includes and excludes as `excluded_file`, and a modular source set read *as*
+  its module, dependencies on the module path. _shipped_ — `decisions.md`
+  2026-09-16; `reference/java.md` §2, §4 traps 2 and 11.
+- **A modular multi-module build** — a sibling module of the same reactor is read
+  from source, so it is not on the module path and a `requires` naming it is
+  reported not found. _queued_ — `reference/java.md` §4 trap 11.
 - **Python dataflow layer** (points-to and taint for Python). _parked_ until the
   first Python version has been used.
 - **A TypeScript 7 backend**, when its compiler API stabilizes. _parked._

@@ -14,6 +14,28 @@ with the long form in [`notes/code-facts.md`](notes/code-facts.md).
 
 ## Decisions
 
+- **2026-09-16** — **A Java source set that declares a module is read as that
+  module**: its dependencies go on the module path, not the class path. Long
+  form: `notes/go-java-frontends.md` § Javac as the build runs it.
+  - *Why it had to change:* on the class path a dependency is in the unnamed
+    module, which a named module cannot read, so every `requires` failed with
+    "module not found" and nothing a dependency held resolved. The first reading
+    of the gap — that module boundaries went unenforced — was wrong in the other
+    direction, and JDK boundaries were never affected at all.
+  - **Every dependency goes on the module path, and javac classifies them.**
+    Which entries are named modules, which are automatic, and what each exports
+    is the compiler's answer; the extractor chooses only the location. *Rejected:*
+    splitting the path ourselves by reading each jar for a `module-info.class` or
+    an `Automatic-Module-Name` — a second implementation of a rule the compiler
+    already owns (`facts from the language tooling`, 2026-09-14).
+  - *Consequence:* `symbol.package` now prefers a jar's coordinate over the
+    module name, since a modular project's dependency is both and the coordinate
+    is what the build declared and what `packages.dl` joins on. A module with no
+    jar — the JDK's — still reports its name.
+  - *Open:* a sibling module of the same build is read from source, so it is not
+    on the module path and `requires` naming it is reported not found. A modular
+    multi-module build is not read exactly.
+
 - **2026-09-15 (night v)** — **The Java dataflow layer**, lowered from javac's
   trees as `layers/dataflow.ts` lowers TypeScript's. Long form:
   `notes/go-java-frontends.md` § The Java dataflow layer. Three calls were the

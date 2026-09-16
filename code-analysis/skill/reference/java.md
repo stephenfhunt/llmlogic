@@ -55,8 +55,9 @@ nothing else. `--exclude` drops more paths.
   `src/main/java/com/example/Shape.java#Shape.area`, nested types under their
   outer (`Outer.Inner`), a constructor `Type.constructor`, a lambda
   `Owner.<lambda@line:col>`. Outside the project, ids are
-  `ext:<java.package>#Outer.member`, and `symbol.package` is the JDK module or the
-  jar's coordinate.
+  `ext:<java.package>#Outer.member`, and `symbol.package` is the coordinate of
+  the jar it came from, or the module it is in where there is no jar — which is
+  how the JDK's own appear (`java.base`).
 - **References.** Kinds are `call`, `new`, `type`, `extends`, `implements`,
   `decorator` for an annotation, `value` for a method reference or a class
   literal, and `read` / `write` / `readwrite` for field access. A type naming a
@@ -75,6 +76,11 @@ nothing else. `--exclude` drops more paths.
 - **Annotations are `decorator` rows**, with `decorator.text` holding the
   arguments as written, and `throws_decl` carries each method's declared checked
   exceptions.
+- **A source set declaring a module is read as that module.** Its dependencies go
+  on the module path, so `requires` resolves and the boundary holds: a package a
+  dependency does not export is not visible, and neither is a JDK module this one
+  does not require. Both come back as a `diagnostic` and an `unresolved_ref`,
+  which is what the build would say too.
 - **A `module-info.java` becomes `module_directive` rows**: the declaration
   itself (`modifier` `open`), each `requires` (`modifier` `transitive` or
   `static`), each `exports` and `opens` — a row per module a qualified one names
@@ -167,6 +173,11 @@ what differs over Java facts.
    Per-site deprecation warnings are there; the summary is not.
 10. **A multi-catch parameter has no `throw_site.type`**, because its type is a
     union. Catch clauses are per clause, not per type.
+11. **A module's *siblings in the same build* are still read from source, not as
+    modules.** Where a modular project's `requires` names another module of the
+    same reactor, that module is on the source path rather than the module path,
+    and javac reports it not found. A modular project whose dependencies are
+    published jars is read exactly; a modular *multi-module* build is not.
 
 ## 5. Verify before you believe
 

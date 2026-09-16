@@ -461,9 +461,8 @@ Not exercised by caddy: go.work, cgo, `dot` imports.
 - Found on the way: a lambda and its first implicitly typed parameter shared an
   id, so keys carry the tree kind now; and a field whose *type* did not resolve
   counted as unresolved itself.
-- **Not yet**: the module path. How javac runs otherwise is the build's; see
-  *Javac as the build runs it*. A `module-info.java`'s directives are extracted
-  (*The Java module path*), but they do not steer resolution.
+- **Not yet**: a sibling module of the same build on the module path. How javac
+  runs otherwise is the build's; see *Javac as the build runs it*.
 
 ## Javac as the build runs it
 
@@ -499,13 +498,24 @@ Why: `../decisions.md` 2026-09-15 (night ii).
   `annotationProcessor` configuration; with a Latin-1 source under
   `project.build.sourceEncoding`; and with sources a plugin left under
   `target/generated-sources`.
-- **Not yet**: **javac is never given a module path.** `--module-path` and
-  `--module-source-path` are among the arguments code-facts manages, and it adds
-  neither, so a `module-info.java` project is read on the classpath: every type
-  its dependencies hold is visible whether or not the module exports it. The
-  declaration is extracted (*The Java module path*) and could gate resolution;
-  nothing does yet. Also not yet: a Lombok project on a real subject — the
-  processor path is fixture-tested only.
+- **A source set declaring a module is read as that module**: its dependencies go
+  on `MODULE_PATH` rather than `CLASS_PATH`. On the class path they land in the
+  unnamed module, which a named module cannot read, so *every* `requires` failed
+  with "module not found" and nothing a dependency held resolved — not too much
+  visible, as first supposed, but almost nothing. Which entries are modules, and
+  what each exports, is javac's own answer; the extractor only chooses the
+  location.
+  - **JDK boundaries were already enforced**, since `module-info.java` has always
+    been in the file list: a JDK module a declaration does not `require` was
+    never visible. The gap was dependencies, not the platform.
+  - `symbol.package` prefers the **jar's coordinate** over the module name, which
+    matters only now: a dependency of a modular project is both, and the
+    coordinate is what the build declared and what `packages.dl` joins on. A
+    module with no jar behind it — the JDK's — still reports its name, and that
+    is also what `jdk` means now.
+  - **Not yet**: a sibling module of the same build, which is read from source and
+    so is not on the module path; `module-info.java` as a `symbol`; a Lombok
+    project on a real subject — the processor path is fixture-tested only.
 
 ## The Java flow layer, as built
 

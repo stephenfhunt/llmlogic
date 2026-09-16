@@ -24,6 +24,52 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-16 (later iii) — a modular Java project is read as its module
+
+Asked for the module path, after the completeness review named it the one place
+the facts could be quietly wrong rather than merely absent.
+
+**Done**
+- **The gap was the opposite of what I had written.** Probing javac first: a
+  `module-info.java` has always been in the file list, so *JDK* boundaries were
+  already enforced — a module a declaration does not `require` was never visible.
+  What failed was dependencies. On the class path they are in the unnamed module,
+  which a named module cannot read, so **every `requires` failed with "module not
+  found"** and nothing a dependency held resolved. Not too much visible: almost
+  nothing.
+- A source set declaring a module now has its dependencies on `MODULE_PATH`.
+  Which entries are modules and what each exports is javac's answer; the
+  extractor chooses only the location. Splitting the path ourselves — reading
+  each jar for a `module-info.class` — was rejected as a second implementation of
+  a rule the compiler owns.
+- **Two knock-ons the fixture caught**, both from a dependency now being a named
+  module as well as a jar: `symbol.package` returned the module name where
+  `packages.dl` joins on the build's coordinate, and `jdk` called every named
+  module the platform's. `packageOf` prefers the jar's coordinate now, and `jdk`
+  means *in a module with no jar behind it*. Byte-identical `symbol` and
+  `import_name` on a non-modular real subject, which is the whole blast radius.
+- Fixture `java-modular` with a modular dependency built into the test
+  repository: a `requires` that resolves, an exported package that does, and two
+  the boundary hides — a non-exported package and an unrequired JDK module. The
+  class-path mutation is red with exactly `compiler.err.module.not.found`.
+
+**Decided** — `decisions.md` 2026-09-16: a modular source set is read as its
+module; javac classifies the path; the coordinate wins over the module name.
+*Rejected:* splitting the module path ourselves.
+
+**Removed** — the "javac is never given a module path" note, written earlier the
+same day and wrong in both directions; the oldest worklog entry.
+
+**Next up**
+- **A modular multi-module build**: a sibling of the same reactor is read from
+  source, so it is not on the module path and a `requires` naming it is reported
+  not found. `--module-source-path` is the answer.
+- `module-info.java` as a `symbol`, so a package joins to the module exporting it.
+- A Lombok project on a real subject; a Gradle one — both fixture-tested only.
+- Go's own equal gap: a subject with `go.work` and cgo.
+- `taint.dl`'s cost; the suite's leaked temp dirs.
+- **Open**: `datalog/bugs/015`, `016`.
+
 ## 2026-09-16 (later ii) — the module path, and taint.dl measured at last
 
 Asked to knock out the two items the last entry left queued.
@@ -120,57 +166,6 @@ module-path item; the oldest worklog entry.
 - **`taint.dl` in the bench**, with a source and sink it supplies itself — the one
   library nothing measures, and the one that does not finish.
 - Java's module path; the build's includes/excludes as `excluded_file`.
-- The suite's leaked temp dirs (a RAM-backed `/tmp` stalled a full run once).
-- Carried: a Go subject with go.work and cgo; P3/P5 static blocks;
-  code-analysis's `reference/datalog.md` additions; the ablation control; push
-  `trunk` when asked.
-- **Open**: `datalog/bugs/015`, `016`.
-
-## 2026-09-16 — the Java dogfood: OpenRefine
-
-Asked to pull OpenRefine and use it as the test bed. Its default branch is
-`master`, not `main`; built with `mvn test-compile` first, since the extractor
-reads the build's output as the build left it.
-
-**Done**
-- `3c94e78` `bugs/resolved/011`, two model defects the subject found, together
-  **2,942 javac errors and 2,184 unresolved references over 320 files → zero**:
-  - a plugin writing generated sources into `target/generated-sources` itself
-    (build-helper's `add-source`) got `generated-sources/com` as its root. A
-    generated root is now the directory a file's own `package` declaration
-    implies — the language's rule, not a naming convention;
-  - a module depending on a sibling's `<type>test-jar</type>` saw neither the jar
-    (the reactor filter drops it, rightly) nor the sibling's test sources; the
-    model carries `testModules` beside `modules` now. Fixture `java-maven-gen`
-    covers both layouts and the test-jar, and is red without either fix.
-- **Calibration** (`notes/go-java-frontends.md` § The Java dogfood): 968k facts
-  in 27.7 s at 5.0 GB; `checks.dl` clean, `unresolved_name_count(0)`;
-  `pointsto.dl` 55.1 s at 1.2 GB, the only library over 30 s — caddy's profile.
-- **The dataflow layer held.** `ProjectManager.getLookupCacheManager()` points to
-  one site and nothing else — the field initializer's `new`, through the `this`
-  store and the getter's load. All 8,113 functions' parameters have `formal` rows;
-  `this_var` is on exactly the non-static methods and constructors.
-- **The functional-interface rule earned nothing here, and that is the subject.**
-  All 305 lambdas stay in the temporary they were allocated into: OpenRefine
-  hands them to the standard library. An ungated `callee_var` would resolve
-  nothing either — measured, not assumed.
-- **`taint.dl` does not finish**: stopped at 20 minutes, its heap step alone
-  timing out at 7. It binds `pts` on both columns in one rule, which no re-keying
-  answers — the engine item's own stated reopening case, now measured
-  (`datalog/ROADMAP.md`). Nothing benches `taint.dl`, which is why nothing knew.
-- The decorator layer met a real subject at last: 6,008 rows over 45 annotations.
-
-**Decided** — nothing new; `decisions.md` 2026-09-15 (night v) gains
-***Consequences 2026-09-16***.
-
-**Removed** — the directory-name heuristic for Maven generated roots; the oldest
-worklog entry.
-
-**Next up**
-- `reference/java.md` — the dataflow traps, and what this dogfood adds: build the
-  project first.
-- **`taint.dl` in the bench**, with a source and sink it supplies itself — the
-  one library nothing measures, and the one that does not finish.
 - The suite's leaked temp dirs (a RAM-backed `/tmp` stalled a full run once).
 - Carried: a Go subject with go.work and cgo; P3/P5 static blocks;
   code-analysis's `reference/datalog.md` additions; the ablation control; push
