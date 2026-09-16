@@ -624,6 +624,55 @@ methods, constructors and lambdas — the ids the flow layer gives `fn` rows —
   and refs layers' tests and surfaced only because P5-java names a variable and
   asks what it holds.
 
+## The Java dogfood: OpenRefine
+
+Chosen for shape: a Maven reactor of nine modules with generated sources, sibling
+test-jar dependencies, annotations everywhere and deep history — the decorator
+item's subject as well. `master` is its default branch. 1,093 files (387 tests),
+64.8k code lines, 9,189 commits. Built first (`mvn test-compile`), since the
+extractor reads the build's output as the build left it.
+
+**Calibration.** Every layer with git: 27.7 s, 5.0 GB peak (22.4 s in the Java
+frontend, 3.6 s git), 968k facts — `symbol` 34.4k, `ref` 116.6k, `call_site`
+46.1k, `decorator` 6,008, `implements` 354, `overrides` 2,170, `entry_point`
+2,224, `excluded_file` 0. Dataflow: `var` 87.6k, `alloc` 8,816 (5,824 instance,
+2,362 array, 325 cell, 305 function), `load` 21.5k, `store` 5,385.
+`checks.dl` clean, `unresolved_name_count(0)`. The bench: `pointsto.dl` 55.1 s at
+1.2 GB — the only library over 30 s, caddy's profile again — `dominators.dl` 9.1 s,
+`flow.dl` 6.6 s, everything else under 6 s.
+
+**Defects found, each fixed with a test** (`bugs/resolved/011`): a plugin writing
+generated sources into `target/generated-sources` itself got
+`generated-sources/com` as its root, and a module depending on a sibling's
+test-jar saw neither the jar nor the sibling's test sources. Together they were
+**2,942 javac errors and 2,184 unresolved references over 320 files**; both fixed,
+both now zero.
+
+**What held, and how it was checked:**
+- **Points-to on a real getter is exact.** `ProjectManager.getLookupCacheManager()`
+  returns site 6005 and nothing else — the `new LookupCacheManager()` in the field
+  initializer. Field initializer → `this` store → getter load, end to end.
+- Every function's parameters have `formal` rows (8,113 of 8,113); every
+  non-static method and constructor has a `this_var` and no other does; no
+  `actual` index is out of range or repeated.
+- **The functional-interface rule pays nothing here, and that is the codebase.**
+  305 function allocations, and *every one* stays in the temporary it was
+  allocated into: OpenRefine hands its lambdas to the standard library
+  (`stream().map`, `Comparator.comparing`), whose bodies are not extracted, so no
+  functional value ever reaches a receiver the project calls through. An ungated
+  `callee_var` on every receiver would resolve nothing either — measured. The 182
+  rows the rule does emit are `close()` on `AutoCloseable`: functional by the
+  letter, and no lambda implements it.
+- **`taint.dl` does not finish.** Stopped at 20 minutes on a request-parameter
+  source and a `parse`/`evaluate` sink, at a flat 1.2 GB. Its heap step alone —
+  `store, pts(B, O), load, pts(B2, O)` — times out at 7 minutes: `pts` is 2.07M
+  pairs over 28.4k variables, and `pts(B2, O)` binds the *second* column, which
+  the engine still answers by scanning. The known engine debt
+  (`../datalog/ROADMAP.md` § Performance, *a bound column that is not leading
+  still scans*) with a Java-sized vehicle. The bench does not cover `taint.dl` at
+  all, because it needs a source and a sink from its caller — which is why
+  nothing measured this.
+
 ## Properties
 
 Each language gets P1 (CFG against real traces), P2 (module graph over modgen's

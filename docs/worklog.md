@@ -24,6 +24,57 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-16 — the Java dogfood: OpenRefine
+
+Asked to pull OpenRefine and use it as the test bed. Its default branch is
+`master`, not `main`; built with `mvn test-compile` first, since the extractor
+reads the build's output as the build left it.
+
+**Done**
+- `3c94e78` `bugs/resolved/011`, two model defects the subject found, together
+  **2,942 javac errors and 2,184 unresolved references over 320 files → zero**:
+  - a plugin writing generated sources into `target/generated-sources` itself
+    (build-helper's `add-source`) got `generated-sources/com` as its root. A
+    generated root is now the directory a file's own `package` declaration
+    implies — the language's rule, not a naming convention;
+  - a module depending on a sibling's `<type>test-jar</type>` saw neither the jar
+    (the reactor filter drops it, rightly) nor the sibling's test sources; the
+    model carries `testModules` beside `modules` now. Fixture `java-maven-gen`
+    covers both layouts and the test-jar, and is red without either fix.
+- **Calibration** (`notes/go-java-frontends.md` § The Java dogfood): 968k facts
+  in 27.7 s at 5.0 GB; `checks.dl` clean, `unresolved_name_count(0)`;
+  `pointsto.dl` 55.1 s at 1.2 GB, the only library over 30 s — caddy's profile.
+- **The dataflow layer held.** `ProjectManager.getLookupCacheManager()` points to
+  one site and nothing else — the field initializer's `new`, through the `this`
+  store and the getter's load. All 8,113 functions' parameters have `formal` rows;
+  `this_var` is on exactly the non-static methods and constructors.
+- **The functional-interface rule earned nothing here, and that is the subject.**
+  All 305 lambdas stay in the temporary they were allocated into: OpenRefine
+  hands them to the standard library. An ungated `callee_var` would resolve
+  nothing either — measured, not assumed.
+- **`taint.dl` does not finish**: stopped at 20 minutes, its heap step alone
+  timing out at 7. It binds `pts` on both columns in one rule, which no re-keying
+  answers — the engine item's own stated reopening case, now measured
+  (`datalog/ROADMAP.md`). Nothing benches `taint.dl`, which is why nothing knew.
+- The decorator layer met a real subject at last: 6,008 rows over 45 annotations.
+
+**Decided** — nothing new; `decisions.md` 2026-09-15 (night v) gains
+***Consequences 2026-09-16***.
+
+**Removed** — the directory-name heuristic for Maven generated roots; the oldest
+worklog entry.
+
+**Next up**
+- `reference/java.md` — the dataflow traps, and what this dogfood adds: build the
+  project first.
+- **`taint.dl` in the bench**, with a source and sink it supplies itself — the
+  one library nothing measures, and the one that does not finish.
+- The suite's leaked temp dirs (a RAM-backed `/tmp` stalled a full run once).
+- Carried: a Go subject with go.work and cgo; P3/P5 static blocks;
+  code-analysis's `reference/datalog.md` additions; the ablation control; push
+  `trunk` when asked.
+- **Open**: `datalog/bugs/015`, `016`.
+
 ## 2026-09-15 (night v) — the Java dataflow layer and P5-java
 
 Asked for the Java dataflow layer; planned first. The user's calls: a record is
@@ -112,50 +163,6 @@ build held (`decisions.md` 2026-09-14 and 2026-09-15 (night ii),
 - Java dataflow layer and P5-java; then `reference/java.md` (the quality layer's
   traps: raw rows are per line, no end-of-compile notes).
 - A Spring/Lombok dogfood; the module path.
-- The test suite's leaked temp dirs.
-- Carried: a Go subject with go.work and cgo; P3/P5 static blocks;
-  code-analysis's `reference/datalog.md` additions; the ablation control; push
-  `trunk` when asked.
-- **Open**: `datalog/bugs/015`, `016`.
-
-## 2026-09-15 (night iii) — the Java flow layer, P1-java and P3-java
-
-Asked to continue: the Java flow layer, next on the worklog.
-
-**Done**
-- `0e63482` the flow layer (`notes/go-java-frontends.md` § The Java flow
-  layer): a graph per method, constructor, lambda and initializer block in the
-  TypeScript model; catches tested in order; try-with-resources and
-  `synchronized` as implicit finallys; colon cases fall through, arrow cases do
-  not; switch expressions lowered, `yield` a break. Decisions, cognitive
-  complexity, Halstead (a lexer: javac's tokenizer is not public), def/use,
-  captures, closures, `call_at` on the refs layer's ids. Fixture `java-flow`.
-- **P1-java**, the JVM running generated methods: guarded jumps, four loop
-  forms, both switch forms, switch expressions, try, resources, synchronized,
-  labelled nests. 50 runs; its rarest guard, an exception caught, 41 of 200.
-  **P3-java** (cyclomatic = E − N + 2) passed from its first run.
-- P1-java's first failure was the harness: it followed a throw to `throw_exit`,
-  which the model gives no edge outside a `try` — as P1 and P1-go do not.
-- P1-java's mutations, all red: an arrow case falling through; `yield` finding no
-  switch expression; the last catch passing nothing on (green until the
-  generator wrote catches that do not match); a finally, or closing resources,
-  re-issuing no jump; no implicit throws; a colon case not falling through; a
-  labelled `continue` ignoring its label.
-- `21f1c13` bugs/resolved/008: a Python or Java target that does not exist was
-  read as its parent directory; now an error. Found when a P1-java measurement
-  lost its temp project mid-run (the remover was not found).
-
-**Decided** — nothing new: the flow model is the notes' 2026-09-14 plan, and
-held (`decisions.md` 2026-09-14 ***Consequences 2026-09-15 (night iii)***).
-
-**Removed** — the oldest worklog entry.
-
-**Next up**
-- Java quality layer: diagnostics (javac's, keyed by name), suppressions
-  (`@SuppressWarnings`, `// NOSONAR`, checkstyle), markers, casts and raw types,
-  literals, throws and catches.
-- Then the dataflow layer and P5-java; `reference/java.md`; a Spring/Lombok
-  dogfood; the module path.
 - The test suite's leaked temp dirs.
 - Carried: a Go subject with go.work and cgo; P3/P5 static blocks;
   code-analysis's `reference/datalog.md` additions; the ablation control; push

@@ -594,8 +594,14 @@ join is executed changes.
   index stays rejected and the 29× is if anything low; what a program cannot
   re-key is the case that reopens this — and since 2026-09-12 the `code-analysis`
   skill no longer teaches re-keying (a library free of engine workarounds is the
-  user's direction), so every rule an agent writes is that case. _queued —
-  **post-v1**._ — §15/engine.
+  user's direction), so every rule an agent writes is that case. **A rule that
+  binds one relation on two different columns is that case outright**, and
+  `lib/taint.dl`'s heap step is one: `store(base: B, …), pts(B, O), load(base: B2,
+  …), pts(B2, O)` needs `pts` keyed by its first column *and* by its second, which
+  no single order gives. On OpenRefine (968k facts, `pts` 2.07M pairs over 28.4k
+  variables) that one rule does not finish in 7 minutes, and `taint.dl` was stopped
+  at 20 — the first library measured not to finish for a reason a program cannot
+  answer. _queued — **post-v1**._ — §15/engine.
 - **Seeking makes body order matter more** — the same measurement, read the other
   way: good-vs-pessimal atom order cost **2.0×** before the seek and **29×** after.
   The scheduler runs positive atoms in strict source order with no cost model

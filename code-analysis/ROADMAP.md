@@ -30,7 +30,10 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
   `vs/base` (1.33M facts); `checks.dl` 199.6 s → 9.3 s. _shipped_ —
   `decisions.md` 2026-09-11 (later), `notes/code-facts.md` § At a million facts.
 - **`bench/`** — times each library over a fact directory and digests its
-  answers. _shipped_ — `npm run bench -- --facts <dir>`.
+  answers. _shipped_ — `npm run bench -- --facts <dir>`. **`taint.dl` is not in
+  it**, since it needs a source and a sink from its caller — and it is the one
+  library measured not to finish on a real subject. _queued_ —
+  `notes/go-java-frontends.md` § The Java dogfood.
 - **`callreach_seeded.dl`** — the call closure grown from a seed you supply.
   _shipped_ — same decision.
 - **Asset imports** — `import './x.css'` resolves through a wildcard
@@ -64,11 +67,10 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
   2026-09-12. A 70% cut now finishes evaluating (6.8 GB); the full base does not,
   and `@grafana/ui` runs in 9 s. _open_ — `../datalog/ROADMAP.md` § Performance,
   whose profile note ranks what is left.
-- **The decorator layer has never met a real subject** — `decorator` is zero rows
-  in every fact base on disk, and `implements` is 2 rows on `@grafana/ui`. A
-  decorator-saturated, nominally-typed codebase (NestJS, TypeORM, Angular) is the
-  next dogfood subject on shape grounds, not size. _queued_ —
-  `notes/code-facts.md` § Subjects, which also lists what each candidate adds.
+- **The decorator layer has met a real subject** — OpenRefine: 6,008 rows over 45
+  annotations (Jackson, TestNG, `Override`), `implements` 354, `overrides` 2,170.
+  A decorator-saturated *TypeScript* subject (NestJS, Angular) is still unmet.
+  _shipped for Java_ — `notes/go-java-frontends.md` § The Java dogfood.
 - **`lib/exports.dl`** — what named entry points publish, through namespace
   re-exports; modules loaded by `import()`; `dead_export`. _shipped_ — `bugs/resolved/003`.
 - **A public-API-surface relation.** "Is this symbol reachable from a published
@@ -85,9 +87,9 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
 - **Java frontend** — every layer, through the JDK compiler API; project model
   from Maven (a core extension) and Gradle (an init script), javac run as the
   build configures it. Structure, refs, flow, quality and dataflow layers, with
-  P1–P6-java. What is left: `reference/java.md`, the module path, and its Spring
-  dogfood — the decorator item's subject, and the first real subject the dataflow
-  layer will meet.
+  P1–P6-java; dogfooded on OpenRefine, where two model defects were found and
+  fixed (`bugs/resolved/011`). What is left: `reference/java.md` and the module
+  path.
   _building_ — same entry, `notes/go-java-frontends.md` § The Java … layers.
 - **Python dataflow layer** (points-to and taint for Python). _parked_ until the
   first Python version has been used.

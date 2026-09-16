@@ -36,6 +36,15 @@ with the long form in [`notes/code-facts.md`](notes/code-facts.md).
     generate — `pointsto.dl` reaches `this` by the allocation's type as well.
     Whether the receiver rule earns its place is a question for the library, not
     the frontend.
+  - ***Consequences*** (2026-09-16, OpenRefine): the layer held — `checks.dl`
+    clean on 968k facts, and a real getter's points-to is exact. The record rule
+    earned its place; the **functional-interface rule earned nothing**, because
+    every one of the subject's 305 lambdas is handed to the standard library and
+    none is ever called through a value the project holds. Not wrong, and not a
+    reason to widen it: an ungated `callee_var` was measured to resolve nothing
+    either. What the dogfood cost was two *model* defects, not layer ones
+    (`bugs/resolved/011`), and what it exposed is that `taint.dl` cannot run on a
+    base this size.
 
 - **2026-09-15 (night ii)** — **Java extraction runs javac as the build
   configures it** (the user's choices). Long form: `notes/go-java-frontends.md`
