@@ -96,7 +96,7 @@ let builtRepo: string | undefined;
 export function mavenRepo(): string {
   if (builtRepo !== undefined) return builtRepo;
   const repo = tempDir("m2");
-  for (const artifact of ["units", "testkit", "gen"]) {
+  for (const artifact of ["units", "testkit", "gen", "modular"]) {
     const src = path.join(FIXTURES, "java-repo", artifact);
     const files = (fs.readdirSync(src, { recursive: true }) as string[]).filter((f) => fs.statSync(path.join(src, f)).isFile());
     const sources = files.filter((f) => f.endsWith(".java")).map((f) => path.join(src, f));

@@ -31,6 +31,7 @@ import javax.lang.model.type.TypeKind;
 import javax.lang.model.type.TypeMirror;
 import javax.lang.model.util.Elements;
 import javax.lang.model.util.Types;
+import javax.tools.JavaFileManager;
 import javax.tools.JavaFileObject;
 import javax.tools.StandardLocation;
 
@@ -138,19 +139,33 @@ final class Names {
     };
   }
 
-  /** The distribution unit an element outside the root comes from: a JDK module, or the coordinate of its jar. */
+  /**
+   * The distribution unit an element outside the root comes from: the coordinate
+   * of the jar holding it, else the module it is in. The jar comes first because
+   * a dependency of a modular project is a *named module* as well as a jar, and
+   * the coordinate is what the build declared and what `packages.dl` joins on.
+   */
   String packageOf(Element e) {
-    ModuleElement m = elements.getModuleOf(e);
-    if (m != null && !m.isUnnamed()) return m.getQualifiedName().toString();
     TypeElement t = e instanceof PackageElement p ? firstType(p) : topLevel(e);
-    if (t == null || declaredIn(t) != null) return null;
-    Path jar = jarOf(t);
-    return jar == null ? null : coordinate(jar);
+    if (t != null && declaredIn(t) != null) return null;
+    String coord = t == null ? null : coordinateOf(t);
+    if (coord != null) return coord;
+    ModuleElement m = elements.getModuleOf(e);
+    return m != null && !m.isUnnamed() ? m.getQualifiedName().toString() : null;
   }
 
+  /** From the JDK's own image: in a named module with no jar behind it. */
   boolean jdk(Element e) {
     ModuleElement m = elements.getModuleOf(e);
-    return m != null && !m.isUnnamed();
+    if (m == null || m.isUnnamed()) return false;
+    TypeElement t = e instanceof PackageElement p ? firstType(p) : topLevel(e);
+    if (t == null) return true;
+    return declaredIn(t) == null && jarOf(t) == null;
+  }
+
+  private String coordinateOf(TypeElement t) {
+    Path jar = jarOf(t);
+    return jar == null ? null : coordinate(jar);
   }
 
   private static TypeElement firstType(PackageElement p) {
@@ -160,9 +175,23 @@ final class Names {
     return null;
   }
 
+  /** The jar or directory a type is read from: the class path, else its own module on the module path. */
   private Path jarOf(TypeElement t) {
+    Path onClassPath = fileOf(StandardLocation.CLASS_PATH, t);
+    if (onClassPath != null) return onClassPath;
+    ModuleElement m = elements.getModuleOf(t);
+    if (m == null || m.isUnnamed()) return null;
     try {
-      JavaFileObject fo = u.fm.getJavaFileForInput(StandardLocation.CLASS_PATH, elements.getBinaryName(t).toString(), JavaFileObject.Kind.CLASS);
+      JavaFileManager.Location loc = u.fm.getLocationForModule(StandardLocation.MODULE_PATH, m.getQualifiedName().toString());
+      return loc == null ? null : fileOf(loc, t);
+    } catch (IOException | IllegalArgumentException e) {
+      return null;
+    }
+  }
+
+  private Path fileOf(JavaFileManager.Location where, TypeElement t) {
+    try {
+      JavaFileObject fo = u.fm.getJavaFileForInput(where, elements.getBinaryName(t).toString(), JavaFileObject.Kind.CLASS);
       if (fo == null) return null;
       URI uri = fo.toUri();
       String text = uri.toString();

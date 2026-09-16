@@ -269,8 +269,7 @@ final class Extractor {
       try (StandardJavaFileManager fm = javac.getStandardFileManager(d -> {}, Locale.ROOT, charset(u))) {
         Files.createDirectories(out);
         classes = Files.createTempDirectory("code-facts-classes");
-        fm.setLocation(StandardLocation.CLASS_PATH, classpath(u));
-        fm.setLocation(StandardLocation.SOURCE_PATH, sourcePath(u));
+        locations(fm, u);
         List<String> options = options(u);
         options.addAll(List.of("-s", out.toString(), "-d", classes.toString(), "-proc:only"));
         List<File> files = u.sources.stream().map(s -> s.abs.toFile()).toList();
@@ -374,6 +373,33 @@ final class Extractor {
     }
   }
 
+  /**
+   * Where javac looks for what the source set depends on. A set declaring a
+   * module is read <em>as</em> that module: its dependencies go on the module
+   * path, since a named module cannot read the unnamed one the class path is —
+   * on the class path every `requires` fails with "module not found" and nothing
+   * the dependencies hold resolves. Which of them is a module, and what each
+   * exports, is then javac's own answer.
+   */
+  private void locations(StandardJavaFileManager fm, Unit u) throws IOException {
+    List<File> dependencies = classpath(u);
+    if (modular(u)) {
+      fm.setLocation(StandardLocation.MODULE_PATH, dependencies);
+      fm.setLocation(StandardLocation.CLASS_PATH, List.of());
+    } else {
+      fm.setLocation(StandardLocation.CLASS_PATH, dependencies);
+    }
+    fm.setLocation(StandardLocation.SOURCE_PATH, sourcePath(u));
+  }
+
+  /** Whether the source set declares a module of its own. */
+  private static boolean modular(Unit u) {
+    for (Source s : u.sources) {
+      if (s.abs.getFileName().toString().equals("module-info.java")) return true;
+    }
+    return false;
+  }
+
   private List<File> classpath(Unit u) {
     List<File> classpath = new ArrayList<>();
     for (Model.Jar j : u.set.classpath()) {
@@ -390,8 +416,7 @@ final class Extractor {
     if (javac == null) throw new IOException("reading Java needs a JDK: the `java` that runs code-facts has no compiler (the jdk.compiler module)");
     for (Unit u : units) {
       u.fm = javac.getStandardFileManager(d -> {}, Locale.ROOT, charset(u));
-      u.fm.setLocation(StandardLocation.CLASS_PATH, classpath(u));
-      u.fm.setLocation(StandardLocation.SOURCE_PATH, sourcePath(u));
+      locations(u.fm, u);
       List<File> files = u.sources.stream().map(s -> s.abs.toFile()).toList();
       u.task = task(javac, u, files);
       Iterable<? extends CompilationUnitTree> units;
