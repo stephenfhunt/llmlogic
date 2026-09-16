@@ -364,7 +364,8 @@ Not exercised by caddy: go.work, cgo, `dot` imports.
   module's, so a reactor needs no jar built. Every set is parsed before any is
   analysed and ids are assigned over every file in path order, keyed by
   declaration offset — a sibling's declaration read from the source path is the
-  same id. `-proc:none` for now (see *Not yet*).
+  same id. Processors run as the build configures them (*Javac as the build runs
+  it*).
 - **Ids from syntax, facts from javac.** Ids are claimed from the parse, keyed by
   file, offset and tree kind, before anything is analysed. Once a source set is
   analysed its elements set what the compiler knows: modifiers written or
@@ -398,11 +399,9 @@ Not exercised by caddy: go.work, cgo, `dot` imports.
   poms' `<modules>` with conventional roots; when Gradle cannot, every directory
   holding a build script. Each says so on stderr, which code-facts now forwards
   from every frontend (Go's warnings were dropped until then).
-- **Not yet**: annotation processors — the extractor-mirrors-its-build rule says
-  run the build's, and without them Lombok's members and generated sources are
-  absent, which the refs layer will make visible; `module-info.java` as symbols;
-  source roots a plugin adds (the extension runs before any plugin); files the
-  build's includes and excludes drop, as `excluded_file`.
+- **Not yet**: `module-info.java` as *symbols*. Its directives are
+  `module_directive` rows, but the module itself is no `symbol`, so nothing joins
+  a package to the module exporting it.
 - Byte-comparing fixture output for the Java schema columns found Go's dataflow
   allocation sites varying run to run (`../bugs/resolved/007`).
 
@@ -463,7 +462,8 @@ Not exercised by caddy: go.work, cgo, `dot` imports.
   id, so keys carry the tree kind now; and a field whose *type* did not resolve
   counted as unresolved itself.
 - **Not yet**: the module path. How javac runs otherwise is the build's; see
-  *Javac as the build runs it*.
+  *Javac as the build runs it*. A `module-info.java`'s directives are extracted
+  (*The Java module path*), but they do not steer resolution.
 
 ## Javac as the build runs it
 
@@ -499,8 +499,13 @@ Why: `../decisions.md` 2026-09-15 (night ii).
   `annotationProcessor` configuration; with a Latin-1 source under
   `project.build.sourceEncoding`; and with sources a plugin left under
   `target/generated-sources`.
-- **Not yet**: the module path (`module-info.java` projects read on the
-  classpath); a Lombok project on a real subject.
+- **Not yet**: **javac is never given a module path.** `--module-path` and
+  `--module-source-path` are among the arguments code-facts manages, and it adds
+  neither, so a `module-info.java` project is read on the classpath: every type
+  its dependencies hold is visible whether or not the module exports it. The
+  declaration is extracted (*The Java module path*) and could gate resolution;
+  nothing does yet. Also not yet: a Lombok project on a real subject — the
+  processor path is fixture-tested only.
 
 ## The Java flow layer, as built
 
