@@ -14,6 +14,29 @@ with the long form in [`notes/code-facts.md`](notes/code-facts.md).
 
 ## Decisions
 
+- **2026-09-15 (night v)** — **The Java dataflow layer**, lowered from javac's
+  trees as `layers/dataflow.ts` lowers TypeScript's. Long form:
+  `notes/go-java-frontends.md` § The Java dataflow layer. Three calls were the
+  user's:
+  - **A record is modelled at its use sites** — `new R(a, b)` stores each
+    component, `r.x()` loads it back — rather than left opaque. No `fn`, `formal`
+    or `ref` row is invented, so *what the compiler writes is no one's*
+    (2026-09-14) still holds; only stores and loads at sites written in source.
+    *Rejected:* strict parity with refs, which costs a record-heavy codebase all
+    of its field flow.
+  - **Allocation-site ids chain across frontends** (`bugs/resolved/009`), fixed
+    before the layer rather than filed: a third dataflow emitter was about to
+    make a latent collision a real one.
+  - **Deconstruction patterns bind by a load per component**, not just type
+    patterns.
+  - **A class holding static state is a `cell`** — Go's package-level variable in
+    Java's spelling. Without it every static field carries nothing. A class
+    outside the project gets none, so `System.out` is opaque.
+  - *Open:* `this_var` is unfalsifiable by P5-java and by any shape it could
+    generate — `pointsto.dl` reaches `this` by the allocation's type as well.
+    Whether the receiver rule earns its place is a question for the library, not
+    the frontend.
+
 - **2026-09-15 (night ii)** — **Java extraction runs javac as the build
   configures it** (the user's choices). Long form: `notes/go-java-frontends.md`
   § Javac as the build runs it.

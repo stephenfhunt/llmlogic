@@ -568,6 +568,62 @@ Why: `../decisions.md` 2026-09-15 (night ii).
   `CompletionStage`, at the refs layer's call-site id.
 - Methods javac writes (a record's accessors) are no one's, as in refs.
 
+## The Java dataflow layer, as built
+
+Lowered from javac's trees as `layers/dataflow.ts` lowers TypeScript's, so the
+library reads either. Each member is its own owner, as on the refs layer
+(`Names.owner`): a method, a constructor, a lambda, a field for its initializer,
+an initializer block. `formal`, `formal_ret` and `this_var` are emitted only for
+methods, constructors and lambdas — the ids the flow layer gives `fn` rows — so
+`checks.dl` holds.
+
+- **A field written with no receiver loads off `this`**, or off its class for a
+  static; Java writes no receiver where TypeScript writes `this.`. `this` is
+  `<class>$this` with `var.fn` the *class*, which is the shape `pointsto.dl`
+  binds a receiver to. A constructor takes the object it constructs as its
+  receiver, so an instance's fields fill through the same rule.
+- **A class holding static state is a `cell`**, allocated once where the class is
+  declared — Go's package-level variable, in Java's spelling. Without it `C.f` is
+  a load off a variable pointing at nothing, and every static field carries
+  nothing. A class *outside* the project gets none, so `System.out` is opaque.
+- **A lambda and a method reference are `function` allocations.** The refs layer
+  records `f.apply(x)` as `virtual` at the functional interface's own method and
+  leaves what runs to points-to; this layer supplies the missing half, naming the
+  receiver `callee_var` when the resolved method is the single abstract method of
+  a functional interface. That gate keeps it to the calls that can reach a
+  lambda, rather than a row per instance call.
+- **A record is modelled at the sites written in source**: `new R(a, b)` stores
+  each argument into its component, and `r.x()` loads it back. No `fn`, `formal`
+  or `ref` row is invented, so the refs layer's rule — what the compiler writes
+  is no one's — still holds. **Origin does not find those members.** javac marks
+  a record's canonical constructor `MANDATED` and gives it a tree it made up, but
+  calls the accessors `EXPLICIT` and gives them no declaration at all; the test
+  that catches both is a declaration of one's own. A probe of javac said so, not
+  a third guess.
+- **Patterns**: `x instanceof Foo f` and `case Foo f` bind by copy; a
+  deconstruction pattern loads each component into its nested pattern, recursing.
+  The tree is reached reflectively, as the flow layer reaches `getLabels` — the
+  frontend compiles at release 17 — and under **either name**: it arrived as
+  `RecordPatternTree` / `RECORD_PATTERN` and is `DeconstructionPatternTree` /
+  `DECONSTRUCTION_PATTERN` on a current JDK.
+- **A void call gets no `actual_ret`**, as in Go: a result no expression can name
+  is a `var` row and a fact for nothing.
+- **Not modelled**: a bound method reference's receiver (`obj::m`) — Go's method
+  value, the same gap; reflection; generics' bridge methods; element flow through
+  streams and `Optional` beyond `[]`.
+- **`this_var` cannot be falsified by P5-java**, and no shape would: `pointsto.dl`
+  binds `this` from the allocation's *type* as well as from the receiver, and
+  that covers every class the project allocates. The row is still the schema's,
+  `checks.dl`'s and the second of `pointsto.dl`'s two routes; it is the receiver
+  rule that is redundant here, not the fact.
+- **Two defects the layer found in what was already there.** Allocation-site ids
+  were handed out per frontend, so a repository with a tsconfig and a Go module
+  gave two variables one site (`bugs/resolved/009`); and every declarator of one
+  Java declaration shared a symbol, since javac gives them all the declaration's
+  position and kind (`bugs/resolved/010`). The second was invisible to the flow
+  and refs layers' tests and surfaced only because P5-java names a variable and
+  asks what it holds.
+
 ## Properties
 
 Each language gets P1 (CFG against real traces), P2 (module graph over modgen's

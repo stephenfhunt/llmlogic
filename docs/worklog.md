@@ -24,6 +24,58 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-15 (night v) — the Java dataflow layer and P5-java
+
+Asked for the Java dataflow layer; planned first. The user's calls: a record is
+modelled at its use sites, allocation ids are fixed now rather than filed, and
+deconstruction patterns bind by component.
+
+**Done**
+- `e5a54bf` `bugs/resolved/009`: allocation-site ids chain across frontends
+  (`__counters__` carries `alloc_site`). A tsconfig and a Go module in one run
+  gave two variables one site; no test extracted two dataflow languages before.
+- `82da3d0` the dataflow layer (`notes/go-java-frontends.md` § The Java dataflow
+  layer): a field with no receiver loads off `this`, a static off its class,
+  which is a `cell` so statics have a home; lambdas and method references are
+  `function` allocations, and a functional interface's own call names its receiver
+  `callee_var` — the half the refs layer left to points-to; records modelled at
+  `new` and at the accessor; patterns by copy and by component. Fixture
+  `java-dataflow`, `checks.dl` clean, points-to resolving all four end to end.
+- **javac's own answers settled two guesses**: a record accessor's origin is
+  `EXPLICIT` and it has no declaration tree, so *a declaration of one's own* is
+  the test for what the compiler wrote; and the deconstruction pattern carries
+  two interface names across JDKs, both of which are tried.
+- `4d11e04` `bugs/resolved/010`: every declarator of `int a = 1, b = 2` shared
+  one symbol — javac gives them all the declaration's position and kind. Its
+  references, def/use and dataflow variable were all another variable's.
+- `26db1b0` **P5-java**: javac and the JVM as the oracle, with a marker a
+  functional value answers with its own name. Five forced shapes; six of seven
+  mutations red. It found `010`: its probes all reported their method's first
+  local, and four of those mutations survived until that was fixed.
+- **`this_var` is unfalsifiable and no shape would help**: `pointsto.dl` also
+  binds `this` from the allocation's type. Recorded as the library's question.
+
+**Decided** — `decisions.md` 2026-09-15 (night v): records at their use sites;
+allocation ids chained; deconstruction patterns by component; a class holding
+statics is a `cell`.
+
+**Removed** — `Refs`' private functional-interface test (now `Names`', shared);
+the oldest worklog entry.
+
+**Next up**
+- `reference/java.md` — the dataflow layer's traps: a bound method reference's
+  receiver is not modelled, an outside class's statics are opaque, the
+  compiler-written record rule.
+- A Spring/Lombok dogfood — the dataflow layer's first real subject, and the only
+  place its cost is known: there is no Java repository on this machine, so the
+  bench has never run over Java facts. The module path.
+- **The suite's leaked temp dirs** — 509 dirs / 1.5 GB in a RAM-backed `/tmp`
+  stalled a full run for 40 minutes. A gate problem now, not tidying.
+- Carried: a Go subject with go.work and cgo; P3/P5 static blocks;
+  code-analysis's `reference/datalog.md` additions; the ablation control; push
+  `trunk` when asked.
+- **Open**: `datalog/bugs/015`, `016`.
+
 ## 2026-09-15 (night iv) — the Java quality layer
 
 Asked to pick back up on the Java quality layer; planned first. The user's calls:
@@ -104,43 +156,6 @@ held (`decisions.md` 2026-09-14 ***Consequences 2026-09-15 (night iii)***).
   literals, throws and catches.
 - Then the dataflow layer and P5-java; `reference/java.md`; a Spring/Lombok
   dogfood; the module path.
-- The test suite's leaked temp dirs.
-- Carried: a Go subject with go.work and cgo; P3/P5 static blocks;
-  code-analysis's `reference/datalog.md` additions; the ablation control; push
-  `trunk` when asked.
-- **Open**: `datalog/bugs/015`, `016`.
-
-## 2026-09-15 (night ii) — javac runs as the build configures it
-
-Asked to keep going; the two choices with side effects were the user's —
-processors run and their output is extracted, plugin output is read as left.
-
-**Done**
-- `84c6a04` P4-java's test did not typecheck: `npm test` type-strips and
-  never checks, so the gate is now `npm run typecheck && npm test`.
-- `4bc2052` the model carries each source set's compiler settings (Maven's
-  compiler plugin, with `annotationProcessorPaths` resolved by Maven itself;
-  Gradle's compile task). Extraction runs a `-proc:only` pass into the build's
-  generated-sources directory before ids are claimed, extracts what it wrote as
-  `is_generated`, and analyses with processors on (Lombok). Plugin-generated
-  roots are read as the last build left them; encoding and compiler arguments
-  are the build's. Tested with a processor the tests build, through Maven and
-  Gradle, a Latin-1 source, and `target/generated-sources`.
-- JDK 26 javac, probed: runs no processor it only discovers on the classpath.
-- A memory kill mid-measurement: 2,264 test temp dirs (411 MB) in the RAM-backed
-  `/tmp` and a Gradle daemon; cleared. The suite leaks temp dirs — not fixed.
-
-**Decided** — `decisions.md` 2026-09-15 (night ii): processors run, output
-extracted; plugin output read as left. *Rejected:* resolve-only processing,
-running generate-sources, `-proc:none`.
-
-**Removed** — the frontend's fixed `-proc:none` and `-encoding UTF-8`; the
-oldest worklog entry.
-
-**Next up**
-- Java flow layer, P1-java and P3-java; then quality and dataflow.
-- A Java dogfood on a Spring/Lombok project (processors on a real subject).
-- The module path for `module-info.java` projects.
 - The test suite's leaked temp dirs.
 - Carried: a Go subject with go.work and cgo; P3/P5 static blocks;
   code-analysis's `reference/datalog.md` additions; the ablation control; push

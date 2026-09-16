@@ -83,11 +83,11 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
   `reference/go.md`; dogfooded on caddy. _shipped_ — `decisions.md` 2026-09-14,
   `notes/go-java-frontends.md` § The Go dogfood.
 - **Java frontend** — every layer, through the JDK compiler API; project model
-  from Maven (a core extension) and Gradle (an init script). Structure and refs
-  layers, P2/P4/P6-java built; javac runs as the build configures it
-  (processors, encoding, arguments, generated sources); the flow layer with
-  P1/P3-java; the quality layer; next, dataflow and P5-java. Its Spring dogfood
-  is the decorator item's subject.
+  from Maven (a core extension) and Gradle (an init script), javac run as the
+  build configures it. Structure, refs, flow, quality and dataflow layers, with
+  P1–P6-java. What is left: `reference/java.md`, the module path, and its Spring
+  dogfood — the decorator item's subject, and the first real subject the dataflow
+  layer will meet.
   _building_ — same entry, `notes/go-java-frontends.md` § The Java … layers.
 - **Python dataflow layer** (points-to and taint for Python). _parked_ until the
   first Python version has been used.
