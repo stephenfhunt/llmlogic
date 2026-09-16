@@ -40,19 +40,24 @@ wherever you are working.
 2. **Extract** into a directory outside the source tree — `/tmp/facts` below, or
    wherever this project keeps scratch output; the facts are large and are not
    the project's files. For TypeScript, give every tsconfig the project uses —
-   tests often have their own; for Python or Go, the project's directory (or its
-   `pyproject.toml`, `go.mod` or `go.work`); for a mixed repository, each:
+   tests often have their own; for Python, Go or Java, the project's directory
+   (or its `pyproject.toml`, `go.mod`, `go.work`, `pom.xml` or Gradle build);
+   for a mixed repository, each:
    ```sh
    <skill>/code-facts tsconfig.json tsconfig.test.json -o /tmp/facts
    <skill>/code-facts path/to/python-project -o /tmp/facts
    <skill>/code-facts path/to/go-module -o /tmp/facts
+   <skill>/code-facts path/to/java-project -o /tmp/facts
    ```
-   Git history comes along when the project is a repository.
+   Git history comes along when the project is a repository. **Build a Java
+   project first** (`mvn -DskipTests test-compile`, `./gradlew testClasses`):
+   generated sources and one module's use of another's test classes exist only
+   after a build, and without them names go unresolved.
 
-   Then read `reference/typescript.md`, `reference/python.md` or
-   `reference/go.md` — what the facts can and cannot say differs by language,
-   and most sharply for Python, which has no type checker behind it. For another language, see
-   `reference/bring-your-own.md`.
+   Then read `reference/typescript.md`, `reference/python.md`, `reference/go.md`
+   or `reference/java.md` — what the facts can and cannot say differs by
+   language, and most sharply for Python, which has no type checker behind it.
+   For another language, see `reference/bring-your-own.md`.
 3. **Check the facts.** `<skill>/datalog /tmp/facts/lib/checks.dl` exits **1**
    when the facts are consistent. Exit 0 prints violations — stop and read them
    before analysing anything.
@@ -263,6 +268,9 @@ toolkit makes easy.
   checker, what the library can and cannot compute, and seven traps.
 - `reference/go.md` — what differs for Go: how its constructs map onto the
   shared relations, the facts only Go has, and ten traps.
+- `reference/java.md` — what differs for Java: the build's part in what the
+  compiler sees, how its constructs map onto the shared relations, and ten
+  traps — reflection the widest of them.
 - `reference/datalog.md` — the Datalog language: syntax, negation, aggregation,
   imports, `?why` / `?whynot`, exit codes.
 - `reference/bring-your-own.md` — extracting facts for another language yourself.

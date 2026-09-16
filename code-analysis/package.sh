@@ -62,7 +62,9 @@ cp -r code-analysis-skill <project>/.claude/skills/code-analysis  # one project
 Start a new Claude Code session so the skill is discovered.
 
 `./code-facts` needs Node.js 22.18 or later on `PATH`; reading Python needs
-Python 3.11 or later too, and reading Go needs Go 1.26 or later. The `datalog`
+Python 3.11 or later too, reading Go needs Go 1.26 or later, and reading Java
+needs a JDK 17 or later (`javac` and `java`) — plus the project's own Maven or
+Gradle, and a build already run (`mvn -DskipTests test-compile`). The `datalog`
 binary is built for the platform the bundle was packaged on.
 
 ```sh

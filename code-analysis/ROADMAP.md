@@ -84,13 +84,14 @@ Status: **queued** · **building** · **parked** · **shipped**. Rationale lives
 - **Go frontend** — every layer through x/tools (vendored), P1–P6-go,
   `reference/go.md`; dogfooded on caddy. _shipped_ — `decisions.md` 2026-09-14,
   `notes/go-java-frontends.md` § The Go dogfood.
-- **Java frontend** — every layer, through the JDK compiler API; project model
-  from Maven (a core extension) and Gradle (an init script), javac run as the
-  build configures it. Structure, refs, flow, quality and dataflow layers, with
-  P1–P6-java; dogfooded on OpenRefine, where two model defects were found and
-  fixed (`bugs/resolved/011`). What is left: `reference/java.md` and the module
-  path.
-  _building_ — same entry, `notes/go-java-frontends.md` § The Java … layers.
+- **Java frontend** — every layer through the JDK compiler API, P1–P6-java,
+  `reference/java.md`; project model from Maven (a core extension) and Gradle (an
+  init script), javac run as the build configures it; dogfooded on OpenRefine.
+  _shipped_ — `decisions.md` 2026-09-14, `notes/go-java-frontends.md` § The Java
+  dogfood.
+- **Java's module path** — `module-info.java`'s directives as `module_directive`
+  rows, and the build's own includes and excludes as `excluded_file`. _queued_ —
+  the gaps `reference/java.md` names.
 - **Python dataflow layer** (points-to and taint for Python). _parked_ until the
   first Python version has been used.
 - **A TypeScript 7 backend**, when its compiler API stabilizes. _parked._

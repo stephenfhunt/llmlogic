@@ -24,6 +24,56 @@ raw transcripts (Claude Code auto-saves those under
 
 ---
 
+## 2026-09-16 (later) — the Java frontend ships
+
+Asked to wrap the stage up. The outstanding piece was the skill, not the
+extractor: the Java frontend has been in the bundle since it was written, and
+nothing the skill *says* mentioned Java.
+
+**Done**
+- `skill/reference/java.md` — the sibling of `go.md` and `python.md`: how Java's
+  constructs map onto the shared relations, the library over Java facts, and ten
+  traps. Every claim in it was run against a real fact base first, which changed
+  three of them:
+  - `extends` is the written clause, so implicit `Object` is not in it and a
+    class extending nothing has `dit` 0 — while `overrides` *does* name
+    `Object.equals`. The asymmetry is worth a trap of its own.
+  - `coupling_kinds.dl`'s `common` is empty over Java: it looks for module-level
+    variables, and Java's shared mutable state is `static` fields. The reference
+    says what to ask instead.
+  - `content` coupling does classify — as an outer class touching a nested
+    class's private member, which is the Java idiom for it.
+- **Reflection is trap 2**, ahead of everything else. A method reached only
+  through `getMethod(…).invoke(…)`, a `ServiceLoader` or a JSON binding looks
+  dead, and Java does that constantly.
+- `SKILL.md` names Java in the extract step and the reference list, with *build
+  the project first* stated where a reader meets it; `package.sh`'s INSTALL.md
+  names the JDK requirement.
+- **Verified as the bundle, not the checkout**: `./package.sh`, then the packaged
+  `./code-facts` and `./datalog` over a real Maven module — 273 files, zero
+  unresolved refs, zero diagnostics, `checks.dl` clean.
+- Exercised the libraries on a coverage question over the dogfood base. No defect
+  found; the useful part was that **static reach answers it only half-way** —
+  reflection bounds it below, CHA above — and the git view (98% of production
+  files have been changed in a commit that also touched a test) disagrees usefully
+  with the call-graph view (66% of functions reachable from a test).
+
+**Decided** — nothing new. ROADMAP: the Java frontend is _shipped_; the module
+path is its own _queued_ item.
+
+**Removed** — the "what is left" clause on the Java frontend item, split into the
+module-path item; the oldest worklog entry.
+
+**Next up**
+- **`taint.dl` in the bench**, with a source and sink it supplies itself — the one
+  library nothing measures, and the one that does not finish.
+- Java's module path; the build's includes/excludes as `excluded_file`.
+- The suite's leaked temp dirs (a RAM-backed `/tmp` stalled a full run once).
+- Carried: a Go subject with go.work and cgo; P3/P5 static blocks;
+  code-analysis's `reference/datalog.md` additions; the ablation control; push
+  `trunk` when asked.
+- **Open**: `datalog/bugs/015`, `016`.
+
 ## 2026-09-16 — the Java dogfood: OpenRefine
 
 Asked to pull OpenRefine and use it as the test bed. Its default branch is
@@ -122,48 +172,6 @@ the oldest worklog entry.
   bench has never run over Java facts. The module path.
 - **The suite's leaked temp dirs** — 509 dirs / 1.5 GB in a RAM-backed `/tmp`
   stalled a full run for 40 minutes. A gate problem now, not tidying.
-- Carried: a Go subject with go.work and cgo; P3/P5 static blocks;
-  code-analysis's `reference/datalog.md` additions; the ablation control; push
-  `trunk` when asked.
-- **Open**: `datalog/bugs/015`, `016`.
-
-## 2026-09-15 (night iv) — the Java quality layer
-
-Asked to pick back up on the Java quality layer; planned first. The user's calls:
-a discarded `Future` is a `floating_promise`; casts alone are `assertion`s.
-
-**Done**
-- `e4f5801` `diagnostic` from javac: every report as a set is parsed and
-  analysed, once each, keyed by javac's name in a new `diagnostic.key`. Lint is
-  the build's now — the frontend's own `-nowarn -Xlint:none` went — with no
-  report cap. The second processor pass's Filer error ("attempt to recreate") is
-  dropped; the Maven and Gradle processor tests show no diagnostic.
-- `0593867` the quality layer (`notes/go-java-frontends.md` § The Java quality
-  layer): `@SuppressWarnings` a row per tool its rules name, `@SuppressFBWarnings`,
-  NOSONAR/NOPMD/checkstyle/spotless comments and markers from a comment lexer;
-  raw types as `any_site` `raw` and `call_result`; casts; literals; typed throw
-  sites; catch sites (`_` binds nothing); futures as `floating_promise`.
-  Fixture `java-quality`, `checks.dl` clean on it.
-- **javac's `-Xlint:rawtypes` is the raw-type test's oracle.** It found `var`'s
-  inferred type counted (a type tree with no end) and an anonymous class's
-  supertype counted twice (its `extends` is the `new`'s own tree). A probe of
-  javac, not a third guess, showed the "missing" `new ArrayList()` row was there:
-  two raw types on one line are one fact.
-- Not reported, unlike the build: the notes javac prints only as a compile ends
-  (deprecation, unchecked summaries) — analysis never ends one.
-
-**Decided** — nothing new: facts from javac and compiler arguments from the
-build held (`decisions.md` 2026-09-14 and 2026-09-15 (night ii),
-***Consequences 2026-09-15 (night iv)***).
-
-**Removed** — the frontend's `-nowarn -Xlint:none`; `Refs`' private `owner` and
-`promise` (now `Names`', shared with `Quality`); the oldest worklog entry.
-
-**Next up**
-- Java dataflow layer and P5-java; then `reference/java.md` (the quality layer's
-  traps: raw rows are per line, no end-of-compile notes).
-- A Spring/Lombok dogfood; the module path.
-- The test suite's leaked temp dirs.
 - Carried: a Go subject with go.work and cgo; P3/P5 static blocks;
   code-analysis's `reference/datalog.md` additions; the ablation control; push
   `trunk` when asked.
